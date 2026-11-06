@@ -18,53 +18,52 @@ type AppExpireCommand = Extract<
   { readonly type: "runtime-request.app-expire" }
 >;
 
-export const expire = <E>(
+export const expire = Effect.fn("appToolApprovalExpiry.expire")(function* <E>(
   command: AppExpireCommand,
   projections: Pick<ProjectionStoreV2Shape, "getRuntimeResponseContext">,
   emit: (event: Omit<OrchestrationV2DomainEvent, "id">) => Effect.Effect<unknown, E>,
-) =>
-  Effect.gen(function* () {
-    const { request, node, item, session } = yield* projections.getRuntimeResponseContext(
-      command.threadId,
-      command.requestId,
+) {
+  const { request, node, item, session } = yield* projections.getRuntimeResponseContext(
+    command.threadId,
+    command.requestId,
+  );
+  if (request?.connectedAppTool === undefined) {
+    return yield* Effect.fail(
+      `Runtime request ${command.requestId} is not a connected-app approval.`,
     );
-    if (request?.connectedAppTool === undefined) {
-      return yield* Effect.fail(
-        `Runtime request ${command.requestId} is not a connected-app approval.`,
-      );
-    }
-    if (request.status !== "pending") {
-      return yield* Effect.fail(`Runtime request ${command.requestId} is ${request.status}.`);
-    }
-    const now = yield* DateTime.now;
-    const base = {
-      threadId: command.threadId,
-      ...(node?.runId == null ? {} : { runId: node.runId }),
-      ...(session === undefined
-        ? {}
-        : { driver: session.driver, providerInstanceId: session.providerInstanceId }),
-      occurredAt: now,
-    };
+  }
+  if (request.status !== "pending") {
+    return yield* Effect.fail(`Runtime request ${command.requestId} is ${request.status}.`);
+  }
+  const now = yield* DateTime.now;
+  const base = {
+    threadId: command.threadId,
+    ...(node?.runId == null ? {} : { runId: node.runId }),
+    ...(session === undefined
+      ? {}
+      : { driver: session.driver, providerInstanceId: session.providerInstanceId }),
+    occurredAt: now,
+  };
+  yield* emit({
+    ...base,
+    type: "runtime-request.updated",
+    nodeId: request.nodeId,
+    payload: { ...request, status: "expired", resolvedAt: now },
+  });
+  if (node !== undefined) {
     yield* emit({
       ...base,
-      type: "runtime-request.updated",
-      nodeId: request.nodeId,
-      payload: { ...request, status: "expired", resolvedAt: now },
+      type: "node.updated",
+      nodeId: node.id,
+      payload: { ...node, status: "cancelled", completedAt: now },
     });
-    if (node !== undefined) {
-      yield* emit({
-        ...base,
-        type: "node.updated",
-        nodeId: node.id,
-        payload: { ...node, status: "cancelled", completedAt: now },
-      });
-    }
-    if (item !== undefined) {
-      yield* emit({
-        ...base,
-        type: "turn-item.updated",
-        ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
-        payload: { ...item, status: "cancelled", completedAt: now, updatedAt: now },
-      });
-    }
-  });
+  }
+  if (item !== undefined) {
+    yield* emit({
+      ...base,
+      type: "turn-item.updated",
+      ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+      payload: { ...item, status: "cancelled", completedAt: now, updatedAt: now },
+    });
+  }
+});

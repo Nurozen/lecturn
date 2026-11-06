@@ -88,7 +88,7 @@ if (process.env.REPLAY_INTERRUPT_WRITE === "true") {
 }
 
 describe("ACP replay checkpoints", () => {
-  it.effect("commits each inbound frame before the parent can receive it", () =>
+  it.effect("commits each inbound batch before the parent can receive any of it", () =>
     Effect.gen(function* () {
       const result = yield* runReplay(
         [
@@ -119,7 +119,9 @@ describe("ACP replay checkpoints", () => {
       assert.equal(result.exitCode, 0, result.stderr);
       assert.deepEqual(
         result.observations.map((observation) => observation.status),
-        [1, 2, 5].map((cursor) => ({ scenario: "checkpoint", cursor, total: 5 })),
+        // Both frames of the first batch see its whole checkpoint, so a parent that
+        // stops the agent after any reply still finds every frame it received recorded.
+        [2, 2, 5].map((cursor) => ({ scenario: "checkpoint", cursor, total: 5 })),
       );
       assert.deepEqual(result.observations.at(-1)?.frame, {
         jsonrpc: "2.0",

@@ -328,78 +328,81 @@ export const make = Effect.gen(function* () {
       evidenceState: current._tag === "Failure" ? ("stale" as const) : ("unverified" as const),
     };
   });
-  const getSnapshot: SagaWorkbenchService["Service"]["getSnapshot"] = (input) =>
-    Effect.gen(function* () {
-      const identity = yield* identityFor(input.projectId, true);
-      const { info } = yield* validate(identity, true);
-      const workflow =
-        info.state === "archived"
-          ? yield* archivedWorkflow(identity)
-          : yield* workflowForDisplay(identity);
-      if (!workflow)
-        return yield* fail("Archived workflow history is unavailable or ambiguous.", "unavailable");
-      if (!info.isSaga || info.state === "archived") return { identity, workflow, members: [] };
-      const status = yield* runtime.sagaStatus(identity.workspaceRoot);
-      const shell = yield* projections.getShellSnapshot();
-      const members = yield* Effect.forEach(
-        status.members,
-        (member) =>
-          Effect.gen(function* () {
-            if (
-              !member.workspaceRoot ||
-              !member.createdAt ||
-              (member.state !== "live" && member.state !== "archived")
-            )
-              return { ...member, identity: null, workflow: null };
-            const projects = shell.projects.filter(
-              (project) =>
-                project.workspaceRoot === member.workspaceRoot &&
-                project.stave?.spaceId === member.id &&
-                project.stave?.createdAt === member.createdAt,
-            );
-            if (projects.length !== 1) return { ...member, identity: null, workflow: null };
-            const memberIdentity = {
-              projectId: projects[0]!.id,
-              workspaceRoot: member.workspaceRoot,
-              spaceId: member.id,
-              createdAt: member.createdAt,
-            };
-            const verified = yield* validate(memberIdentity, member.state === "archived").pipe(
-              Effect.option,
-            );
-            if (Option.isNone(verified) || verified.value.info.state !== member.state)
-              return { ...member, identity: null, workflow: null };
-            return {
-              id: member.id,
-              after: member.after,
-              state: member.state,
-              identity: memberIdentity,
-              workflow:
-                member.state === "archived"
-                  ? yield* archivedWorkflow(memberIdentity)
-                  : yield* workflowForDisplay(memberIdentity),
-            };
-          }),
-        { concurrency: 4 },
-      );
-      return { identity, workflow, members };
-    }).pipe(Effect.mapError(boundary));
-  const getEvidence: SagaWorkbenchService["Service"]["getEvidence"] = (input) =>
-    Effect.gen(function* () {
-      yield* validate(input.identity);
-      const workflow = yield* repo.get(input.identity);
-      return yield* evidenceReader.read({
-        ...input,
-        ...(workflow.accepted ? { acceptedRequirements: workflow.accepted.requirements } : {}),
-      });
-    }).pipe(Effect.mapError(boundary));
-  const getActivity: SagaWorkbenchService["Service"]["getActivity"] = (input) =>
-    Effect.gen(function* () {
-      const { info } = yield* validate(input.identity, true);
-      if (info.state !== "archived") return yield* repo.activity(input.identity);
-      const workflow = yield* archivedWorkflow(input.identity);
-      return workflow ? yield* repo.activity(workflow.identity) : [];
+  const getSnapshot: SagaWorkbenchService["Service"]["getSnapshot"] = Effect.fn(
+    "SagaWorkbenchService.getSnapshot",
+  )(function* (input) {
+    const identity = yield* identityFor(input.projectId, true);
+    const { info } = yield* validate(identity, true);
+    const workflow =
+      info.state === "archived"
+        ? yield* archivedWorkflow(identity)
+        : yield* workflowForDisplay(identity);
+    if (!workflow)
+      return yield* fail("Archived workflow history is unavailable or ambiguous.", "unavailable");
+    if (!info.isSaga || info.state === "archived") return { identity, workflow, members: [] };
+    const status = yield* runtime.sagaStatus(identity.workspaceRoot);
+    const shell = yield* projections.getShellSnapshot();
+    const members = yield* Effect.forEach(
+      status.members,
+      (member) =>
+        Effect.gen(function* () {
+          if (
+            !member.workspaceRoot ||
+            !member.createdAt ||
+            (member.state !== "live" && member.state !== "archived")
+          )
+            return { ...member, identity: null, workflow: null };
+          const projects = shell.projects.filter(
+            (project) =>
+              project.workspaceRoot === member.workspaceRoot &&
+              project.stave?.spaceId === member.id &&
+              project.stave?.createdAt === member.createdAt,
+          );
+          if (projects.length !== 1) return { ...member, identity: null, workflow: null };
+          const memberIdentity = {
+            projectId: projects[0]!.id,
+            workspaceRoot: member.workspaceRoot,
+            spaceId: member.id,
+            createdAt: member.createdAt,
+          };
+          const verified = yield* validate(memberIdentity, member.state === "archived").pipe(
+            Effect.option,
+          );
+          if (Option.isNone(verified) || verified.value.info.state !== member.state)
+            return { ...member, identity: null, workflow: null };
+          return {
+            id: member.id,
+            after: member.after,
+            state: member.state,
+            identity: memberIdentity,
+            workflow:
+              member.state === "archived"
+                ? yield* archivedWorkflow(memberIdentity)
+                : yield* workflowForDisplay(memberIdentity),
+          };
+        }),
+      { concurrency: 4 },
+    );
+    return { identity, workflow, members };
+  }, Effect.mapError(boundary));
+  const getEvidence: SagaWorkbenchService["Service"]["getEvidence"] = Effect.fn(
+    "SagaWorkbenchService.getEvidence",
+  )(function* (input) {
+    yield* validate(input.identity);
+    const workflow = yield* repo.get(input.identity);
+    return yield* evidenceReader.read({
+      ...input,
+      ...(workflow.accepted ? { acceptedRequirements: workflow.accepted.requirements } : {}),
     });
+  }, Effect.mapError(boundary));
+  const getActivity: SagaWorkbenchService["Service"]["getActivity"] = Effect.fn(
+    "SagaWorkbenchService.getActivity",
+  )(function* (input) {
+    const { info } = yield* validate(input.identity, true);
+    if (info.state !== "archived") return yield* repo.activity(input.identity);
+    const workflow = yield* archivedWorkflow(input.identity);
+    return workflow ? yield* repo.activity(workflow.identity) : [];
+  });
   // A board member must still appear in a live, verified saga roster. Stave
   // projects outside a saga do not acquire automatic background model calls.
   const verifyBoardIdentity = Effect.fn("SagaWorkbench.verifyBoardIdentity")(function* (

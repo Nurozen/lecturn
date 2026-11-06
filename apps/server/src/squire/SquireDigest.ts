@@ -95,222 +95,221 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const squireSection = (row: SquireRepository.SquireRow, since: string) =>
-    Effect.gen(function* () {
-      // The latest summary-bearing delivery per thread, in the window.
-      const latest = new Map<ThreadId, SquireRepository.SquireEventRow>();
-      for (const event of yield* repository.listEventsByStatus({
-        squireId: row.id,
-        statuses: ["batched", "delivered"],
-      })) {
-        if (
-          event.thread_id !== null &&
-          SUMMARY_KINDS.has(event.kind) &&
-          event.created_at >= since
-        ) {
-          latest.set(event.thread_id, event);
-        }
+  const squireSection = Effect.fn("SquireDigest.squireSection")(function* (
+    row: SquireRepository.SquireRow,
+    since: string,
+  ) {
+    // The latest summary-bearing delivery per thread, in the window.
+    const latest = new Map<ThreadId, SquireRepository.SquireEventRow>();
+    for (const event of yield* repository.listEventsByStatus({
+      squireId: row.id,
+      statuses: ["batched", "delivered"],
+    })) {
+      if (event.thread_id !== null && SUMMARY_KINDS.has(event.kind) && event.created_at >= since) {
+        latest.set(event.thread_id, event);
       }
-      const moved: Array<SquireDigestLine> = [];
-      const blocked: Array<SquireDigestLine> = [];
-      for (const [threadId, event] of latest) {
-        const runId = Option.getOrNull(decodePayload(event.payload_json ?? ""))?.runId ?? null;
-        if (runId === null) continue;
-        const rows = yield* repository.listRunSummaries({ thread_id: threadId, run_id: runId });
-        const stored = rows.find((entry) => entry.stage === "terminal") ?? rows.at(-1);
-        const summary = Option.getOrNull(decodeSummary(stored?.summary_json ?? ""));
-        if (summary === null) continue;
-        const firstBlock = summary.blocked[0];
-        if (firstBlock !== undefined || summary.outcome === "error") {
-          blocked.push(
-            line(
-              `${summary.threadTitle}: ${firstBlock ? `${firstBlock.item} (${firstBlock.reason})` : "the turn failed"}`,
-              threadId,
-            ),
-          );
-        } else {
-          moved.push(
-            line(
-              `${summary.threadTitle}: ${summary.completed[0] ?? (summary.goal || summary.outcome)}`,
-              threadId,
-            ),
-          );
-        }
+    }
+    const moved: Array<SquireDigestLine> = [];
+    const blocked: Array<SquireDigestLine> = [];
+    for (const [threadId, event] of latest) {
+      const runId = Option.getOrNull(decodePayload(event.payload_json ?? ""))?.runId ?? null;
+      if (runId === null) continue;
+      const rows = yield* repository.listRunSummaries({ thread_id: threadId, run_id: runId });
+      const stored = rows.find((entry) => entry.stage === "terminal") ?? rows.at(-1);
+      const summary = Option.getOrNull(decodeSummary(stored?.summary_json ?? ""));
+      if (summary === null) continue;
+      const firstBlock = summary.blocked[0];
+      if (firstBlock !== undefined || summary.outcome === "error") {
+        blocked.push(
+          line(
+            `${summary.threadTitle}: ${firstBlock ? `${firstBlock.item} (${firstBlock.reason})` : "the turn failed"}`,
+            threadId,
+          ),
+        );
+      } else {
+        moved.push(
+          line(
+            `${summary.threadTitle}: ${summary.completed[0] ?? (summary.goal || summary.outcome)}`,
+            threadId,
+          ),
+        );
       }
-      const waiting = (yield* repository.listCards({ ownerSquireId: row.id, statuses: ["open"] }))
-        .filter((card) => card.kind !== "fyi")
-        .map((card) => line(`${card.kind}: ${card.title}`, card.target_thread_id, card.id));
-      const onItsOwn: Array<SquireDigestLine> = [];
-      for (const entry of yield* repository.listActionLogAfter({
-        squireId: row.id,
-        kinds: ["action.executed"],
-        after: since,
-      })) {
-        const data = Option.getOrElse(decodeLogData(entry.data_json), () => ({}));
-        // `execute` is a held Auto action running out its undo window; `accept` was the user.
-        if (!("verb" in data) || data.verb !== "execute") continue;
-        const card =
-          entry.card_id === null ? Option.none() : yield* repository.getCard(entry.card_id);
-        const title = Option.match(card, {
-          onNone: () => String("action" in data ? data.action : "action"),
-          onSome: (found) => found.title,
-        });
-        onItsOwn.push(line(title, entry.thread_id, entry.card_id));
-      }
-      const budgets = Option.getOrElse(
-        decodeBudgets(row.budgets_json),
-        () => DEFAULT_SQUIRE_BUDGETS,
-      );
-      const usage = yield* repository.listBudgetUsage({ squireId: row.id, since });
-      const used = (kind: SquireRepository.SquireBudgetUsageRow["kind"]) =>
-        usage.filter((entry) => entry.kind === kind).length;
-      const cap = (lines: ReadonlyArray<SquireDigestLine>) => lines.slice(-SQUIRE_DIGEST_MAX_LINES);
-      return {
-        squireId: row.id,
-        name: row.name,
-        status: row.status,
-        moved: cap(moved),
-        blocked: cap(blocked),
-        waiting: waiting.slice(0, SQUIRE_DIGEST_MAX_LINES),
-        onItsOwn: cap(onItsOwn),
-        budget: {
-          steers: { used: used("steer"), limit: budgets.steersPerDay },
-          threads: { used: used("thread"), limit: budgets.threadsPerDay },
-        },
-      };
-    });
+    }
+    const waiting = (yield* repository.listCards({ ownerSquireId: row.id, statuses: ["open"] }))
+      .filter((card) => card.kind !== "fyi")
+      .map((card) => line(`${card.kind}: ${card.title}`, card.target_thread_id, card.id));
+    const onItsOwn: Array<SquireDigestLine> = [];
+    for (const entry of yield* repository.listActionLogAfter({
+      squireId: row.id,
+      kinds: ["action.executed"],
+      after: since,
+    })) {
+      const data = Option.getOrElse(decodeLogData(entry.data_json), () => ({}));
+      // `execute` is a held Auto action running out its undo window; `accept` was the user.
+      if (!("verb" in data) || data.verb !== "execute") continue;
+      const card =
+        entry.card_id === null ? Option.none() : yield* repository.getCard(entry.card_id);
+      const title = Option.match(card, {
+        onNone: () => String("action" in data ? data.action : "action"),
+        onSome: (found) => found.title,
+      });
+      onItsOwn.push(line(title, entry.thread_id, entry.card_id));
+    }
+    const budgets = Option.getOrElse(decodeBudgets(row.budgets_json), () => DEFAULT_SQUIRE_BUDGETS);
+    const usage = yield* repository.listBudgetUsage({ squireId: row.id, since });
+    const used = (kind: SquireRepository.SquireBudgetUsageRow["kind"]) =>
+      usage.filter((entry) => entry.kind === kind).length;
+    const cap = (lines: ReadonlyArray<SquireDigestLine>) => lines.slice(-SQUIRE_DIGEST_MAX_LINES);
+    return {
+      squireId: row.id,
+      name: row.name,
+      status: row.status,
+      moved: cap(moved),
+      blocked: cap(blocked),
+      waiting: waiting.slice(0, SQUIRE_DIGEST_MAX_LINES),
+      onItsOwn: cap(onItsOwn),
+      budget: {
+        steers: { used: used("steer"), limit: budgets.steersPerDay },
+        threads: { used: used("thread"), limit: budgets.threadsPerDay },
+      },
+    };
+  });
 
-  const buildInput = (lead: SquireRepository.SquireRow, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const since = DateTime.formatIso(DateTime.subtract(now, { milliseconds: DAY_MS }));
-      const squires = (yield* repository.listSquires)
-        .filter((row) => row.role === "squire" && row.lifecycle !== "deleting")
-        .slice(0, SQUIRE_DIGEST_MAX_SQUIRES);
-      return {
-        since,
-        squires: yield* Effect.forEach(squires, (row) => squireSection(row, since)),
-        sweep: yield* sweep.acceptanceRate(lead.id, now),
-      } satisfies SquireDigestInput;
-    });
+  const buildInput = Effect.fn("SquireDigest.buildInput")(function* (
+    lead: SquireRepository.SquireRow,
+    now: DateTime.Utc,
+  ) {
+    const since = DateTime.formatIso(DateTime.subtract(now, { milliseconds: DAY_MS }));
+    const squires = (yield* repository.listSquires)
+      .filter((row) => row.role === "squire" && row.lifecycle !== "deleting")
+      .slice(0, SQUIRE_DIGEST_MAX_SQUIRES);
+    return {
+      since,
+      squires: yield* Effect.forEach(squires, (row) => squireSection(row, since)),
+      sweep: yield* sweep.acceptanceRate(lead.id, now),
+    } satisfies SquireDigestInput;
+  });
 
   /** A pushed digest is an FYI on the Lead with its intent row, inside the enqueue. */
-  const pushDigest = (lead: SquireRepository.SquireRow, date: string, at: string) =>
-    Effect.gen(function* () {
-      const cardId = SquireCardId.make(`card:fyi:${lead.id}:digest:${date}`);
-      const text = `Your daily digest for ${date} is ready.`;
-      yield* repository.insertCard({
-        id: cardId,
+  const pushDigest = Effect.fn("SquireDigest.pushDigest")(function* (
+    lead: SquireRepository.SquireRow,
+    date: string,
+    at: string,
+  ) {
+    const cardId = SquireCardId.make(`card:fyi:${lead.id}:digest:${date}`);
+    const text = `Your daily digest for ${date} is ready.`;
+    yield* repository.insertCard({
+      id: cardId,
+      squire_id: lead.id,
+      owner_squire_id: lead.id,
+      kind: "fyi",
+      status: "open",
+      target_thread_id: null,
+      project_id: null,
+      title: text,
+      why: "",
+      payload_json: encodeCardPayload({ type: "fyi", source: "digest", text, threadId: null }),
+      evidence_json: "{}",
+      trigger_json: "{}",
+      intent_json: null,
+      origin: "event",
+      steer_kind: null,
+      routed_task_id: null,
+      rule_id: null,
+      finding_key: null,
+      escalate_at: null,
+      opened_at: null,
+      executes_at: null,
+      attempt: 0,
+      command_id: null,
+      execution_key: null,
+      dedupe_key: null,
+      replaced_count: 0,
+      ask_json: null,
+      resolution: null,
+      created_at: at,
+      updated_at: at,
+    });
+    const log = (kind: string, data: Record<string, unknown>) =>
+      repository.insertActionLog({
         squire_id: lead.id,
-        owner_squire_id: lead.id,
-        kind: "fyi",
-        status: "open",
-        target_thread_id: null,
-        project_id: null,
-        title: text,
-        why: "",
-        payload_json: encodeCardPayload({ type: "fyi", source: "digest", text, threadId: null }),
-        evidence_json: "{}",
-        trigger_json: "{}",
-        intent_json: null,
-        origin: "event",
-        steer_kind: null,
-        routed_task_id: null,
-        rule_id: null,
-        finding_key: null,
-        escalate_at: null,
-        opened_at: null,
-        executes_at: null,
-        attempt: 0,
-        command_id: null,
+        kind,
+        room_id: null,
+        post_id: null,
+        trigger_id: null,
+        task_id: null,
+        thread_id: null,
+        card_id: cardId,
+        event_id: null,
+        run_id: null,
+        invocation_key: null,
         execution_key: null,
-        dedupe_key: null,
-        replaced_count: 0,
-        ask_json: null,
-        resolution: null,
+        data_json: JSON.stringify(data),
         created_at: at,
-        updated_at: at,
       });
-      const log = (kind: string, data: Record<string, unknown>) =>
-        repository.insertActionLog({
+    yield* log("card.created", { kind: "fyi", origin: "event", source: "digest" });
+    yield* log("notification.pushed", { kind: "fyi", source: "digest" });
+    // SquireMobileAttention writes the mobile delivery row; a held FYI never gets one.
+    if (Option.isSome(presence)) {
+      yield* presence.value.holdIntent({
+        squireId: lead.id,
+        cardId,
+        kind: "fyi",
+        threadId: null,
+        runId: null,
+        now: at,
+      });
+    }
+  });
+
+  const due: SquireDigest["Service"]["due"] = Effect.fn("SquireDigest.due")(function* (now) {
+    if (!(yield* enabled)) return false;
+    const found = yield* repository.getLead;
+    if (Option.isNone(found)) return false;
+    const lead = found.value;
+    const date = dueDate(lead, now);
+    if (Option.isNone(date)) return false;
+    const settings = Option.getOrThrow(scheduleOf(lead));
+    const digest = yield* buildInput(lead, now);
+    const at = DateTime.formatIso(now);
+    const queued = yield* repository.transaction(
+      Effect.gen(function* () {
+        if (
+          !(yield* repository.claimDigestDate({
+            id: lead.id,
+            from: lead.digest_last_date,
+            to: date.value,
+          }))
+        ) {
+          return false;
+        }
+        const inserted = yield* repository.insertTriggerEvent({
           squire_id: lead.id,
-          kind,
-          room_id: null,
-          post_id: null,
-          trigger_id: null,
-          task_id: null,
           thread_id: null,
-          card_id: cardId,
-          event_id: null,
-          run_id: null,
-          invocation_key: null,
-          execution_key: null,
-          data_json: JSON.stringify(data),
+          kind: "digest-due",
+          state_key: date.value,
+          payload_json: encodeEvent({ type: "digest-due", date: date.value, digest }),
+          status: "pending",
+          defer_reason: null,
+          not_before: at,
+          batch_id: null,
           created_at: at,
         });
-      yield* log("card.created", { kind: "fyi", origin: "event", source: "digest" });
-      yield* log("notification.pushed", { kind: "fyi", source: "digest" });
-      // SquireMobileAttention writes the mobile delivery row; a held FYI never gets one.
-      if (Option.isSome(presence)) {
-        yield* presence.value.holdIntent({
-          squireId: lead.id,
-          cardId,
-          kind: "fyi",
-          threadId: null,
-          runId: null,
-          now: at,
-        });
-      }
-    });
+        if (Option.isNone(inserted)) return false;
+        const notifyOn = Option.exists(
+          decodePermissions(lead.permissions_json),
+          (permissions) => permissions.notify === "on",
+        );
+        if (settings.push && notifyOn) yield* pushDigest(lead, date.value, at);
+        return true;
+      }),
+    );
+    if (queued && Option.isSome(delivery)) yield* delivery.value.wake(lead.id);
+    return queued;
+  }, orSquireError("enqueue the daily digest"));
 
-  const due: SquireDigest["Service"]["due"] = (now) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled)) return false;
-      const found = yield* repository.getLead;
-      if (Option.isNone(found)) return false;
-      const lead = found.value;
-      const date = dueDate(lead, now);
-      if (Option.isNone(date)) return false;
-      const settings = Option.getOrThrow(scheduleOf(lead));
-      const digest = yield* buildInput(lead, now);
-      const at = DateTime.formatIso(now);
-      const queued = yield* repository.transaction(
-        Effect.gen(function* () {
-          if (
-            !(yield* repository.claimDigestDate({
-              id: lead.id,
-              from: lead.digest_last_date,
-              to: date.value,
-            }))
-          ) {
-            return false;
-          }
-          const inserted = yield* repository.insertTriggerEvent({
-            squire_id: lead.id,
-            thread_id: null,
-            kind: "digest-due",
-            state_key: date.value,
-            payload_json: encodeEvent({ type: "digest-due", date: date.value, digest }),
-            status: "pending",
-            defer_reason: null,
-            not_before: at,
-            batch_id: null,
-            created_at: at,
-          });
-          if (Option.isNone(inserted)) return false;
-          const notifyOn = Option.exists(
-            decodePermissions(lead.permissions_json),
-            (permissions) => permissions.notify === "on",
-          );
-          if (settings.push && notifyOn) yield* pushDigest(lead, date.value, at);
-          return true;
-        }),
-      );
-      if (queued && Option.isSome(delivery)) yield* delivery.value.wake(lead.id);
-      return queued;
-    }).pipe(orSquireError("enqueue the daily digest"));
-
-  const nextDueAt: SquireDigest["Service"]["nextDueAt"] = (now) =>
-    Effect.gen(function* () {
+  const nextDueAt: SquireDigest["Service"]["nextDueAt"] = Effect.fn("SquireDigest.nextDueAt")(
+    function* (now) {
       if (!(yield* enabled)) return Option.none();
       const found = yield* repository.getLead;
       if (Option.isNone(found)) return Option.none();
@@ -319,7 +318,9 @@ const make = Effect.gen(function* () {
       return Option.flatMap(scheduleOf(lead), (settings) =>
         SquireSweep.nextDailySlot(settings.time, SquireSweep.leadZoneOf(lead), now),
       );
-    }).pipe(orSquireError("read the next digest time"));
+    },
+    orSquireError("read the next digest time"),
+  );
 
   return SquireDigest.of({ due, nextDueAt });
 });

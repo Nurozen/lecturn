@@ -51,26 +51,24 @@ export const makeTeamBillingRepository = Effect.gen(function* () {
   const { $client: sql } = yield* RelayDb;
   const query = <A, E>(e: Effect.Effect<A, E>) => e.pipe(Effect.mapError(unavailable));
   return {
-    acquire: (org: string, time: number) =>
-      Effect.gen(function* () {
-        const rows = yield* query(
-          sql<
-            TeamDatabaseRow<BillingTeam>
-          >`UPDATE relay_team_accounts SET billing_lease_owner=${yield* operationId},billing_lease_expires_at=${time + 120},reconcile_after=${time + 300},generation=generation+1 WHERE organization_id=${org} AND billing_lease_expires_at<=${time} RETURNING *`,
+    acquire: Effect.fn("TeamBilling.acquire")(function* (org: string, time: number) {
+      const rows = yield* query(
+        sql<
+          TeamDatabaseRow<BillingTeam>
+        >`UPDATE relay_team_accounts SET billing_lease_owner=${yield* operationId},billing_lease_expires_at=${time + 120},reconcile_after=${time + 300},generation=generation+1 WHERE organization_id=${org} AND billing_lease_expires_at<=${time} RETURNING *`,
+      );
+      if (!rows[0])
+        return yield* fail(
+          "Another billing operation is running or the organization does not exist",
         );
-        if (!rows[0])
-          return yield* fail(
-            "Another billing operation is running or the organization does not exist",
-          );
-        return yield* decodeTeamDatabaseRowEffect<BillingTeam>(rows[0]);
-      }),
-    save: (a: BillingTeam, time: number) =>
-      Effect.gen(function* () {
-        const rows = yield* query(
-          sql`UPDATE relay_team_accounts SET customer_id=${a.customer_id},subscription_id=${a.subscription_id},purchased_seats=${a.purchased_seats},access_until=${a.access_until},access_window_start=${a.access_window_start},current_period_end=${a.current_period_end},interval=${a.interval},pending_seats=${a.pending_seats},billing_state=${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(a.billing_state).pipe(Effect.mapError(unavailable))}::jsonb,suspended=${a.suspended},status=${a.status},updated_at=${time} WHERE organization_id=${a.organization_id} AND generation=${a.generation} AND billing_lease_owner=${a.billing_lease_owner} AND billing_lease_expires_at>${time} RETURNING organization_id`,
-        );
-        if (!rows.length) return yield* fail("Team changed; refresh before continuing");
-      }),
+      return yield* decodeTeamDatabaseRowEffect<BillingTeam>(rows[0]);
+    }),
+    save: Effect.fn("TeamBilling.save")(function* (a: BillingTeam, time: number) {
+      const rows = yield* query(
+        sql`UPDATE relay_team_accounts SET customer_id=${a.customer_id},subscription_id=${a.subscription_id},purchased_seats=${a.purchased_seats},access_until=${a.access_until},access_window_start=${a.access_window_start},current_period_end=${a.current_period_end},interval=${a.interval},pending_seats=${a.pending_seats},billing_state=${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(a.billing_state).pipe(Effect.mapError(unavailable))}::jsonb,suspended=${a.suspended},status=${a.status},updated_at=${time} WHERE organization_id=${a.organization_id} AND generation=${a.generation} AND billing_lease_owner=${a.billing_lease_owner} AND billing_lease_expires_at>${time} RETURNING organization_id`,
+      );
+      if (!rows.length) return yield* fail("Team changed; refresh before continuing");
+    }),
     release: (a: BillingTeam) =>
       query(
         sql`UPDATE relay_team_accounts SET billing_lease_owner=NULL,billing_lease_expires_at=0 WHERE organization_id=${a.organization_id} AND billing_lease_owner=${a.billing_lease_owner}`,
@@ -93,12 +91,11 @@ export const makeTeamBillingRepository = Effect.gen(function* () {
           organization_id: string;
         }>`SELECT organization_id FROM relay_team_accounts WHERE customer_id=${customer}`,
       ).pipe(Effect.map((rows) => rows[0]?.organization_id ?? null)),
-    audit: (org: string, actor: string, action: string) =>
-      Effect.gen(function* () {
-        yield* query(
-          sql`INSERT INTO relay_team_audit(id,organization_id,actor_user_id,action,created_at) VALUES (${yield* operationId},${org},${actor},${action},${yield* now})`,
-        );
-      }),
+    audit: Effect.fn("TeamBilling.audit")(function* (org: string, actor: string, action: string) {
+      yield* query(
+        sql`INSERT INTO relay_team_audit(id,organization_id,actor_user_id,action,created_at) VALUES (${yield* operationId},${org},${actor},${action},${yield* now})`,
+      );
+    }),
   } satisfies TeamBillingRepository;
 });
 export function makeTeamBillingService(
@@ -110,14 +107,16 @@ export function makeTeamBillingService(
   const provider = <A>(call: () => Promise<A>) =>
     Effect.tryPromise({ try: call, catch: unavailable });
   const save = (a: BillingTeam) => now.pipe(Effect.flatMap((time) => store.save(a, time)));
-  const withAccount = <A>(org: string, run: (a: BillingTeam) => Effect.Effect<A, TeamError>) =>
-    Effect.gen(function* () {
-      const a = yield* store.acquire(org, yield* now);
-      return yield* run(a).pipe(
-        Effect.timeoutOrElse({ duration: "90 seconds", orElse: () => Effect.fail(unavailable()) }),
-        Effect.ensuring(store.release(a).pipe(Effect.ignore)),
-      );
-    });
+  const withAccount = Effect.fn("TeamBilling.withAccount")(function* <A>(
+    org: string,
+    run: (a: BillingTeam) => Effect.Effect<A, TeamError>,
+  ) {
+    const a = yield* store.acquire(org, yield* now);
+    return yield* run(a).pipe(
+      Effect.timeoutOrElse({ duration: "90 seconds", orElse: () => Effect.fail(unavailable()) }),
+      Effect.ensuring(store.release(a).pipe(Effect.ignore)),
+    );
+  });
   const owner = (a: BillingTeam, actor: string) =>
     a.owner_user_id === actor && a.status !== "deleted"
       ? Effect.void

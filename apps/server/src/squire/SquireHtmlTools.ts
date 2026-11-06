@@ -127,58 +127,62 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const { attachmentsDir } = yield* ServerConfig.ServerConfig;
 
-  const render = (ctx: SquireToolContext, kit: SquireToolKit) =>
-    Effect.gen(function* () {
-      const args = yield* kit.decodeArgs(RenderArgs, ctx.args);
-      if (!args.ok) {
-        return yield* kit.refuse(ctx, "invalid-arguments", `Invalid arguments: ${args.message}`);
-      }
-      const published = yield* htmlRender
-        .publish({ ...args.value, threadId: ctx.caller.threadId, locked: true })
-        .pipe(
-          Effect.map((reference) => ({ ok: true as const, reference })),
-          Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
-        );
-      if (!published.ok) return yield* kit.refuse(ctx, "invalid-page", published.message);
-      const output = { htmlRender: published.reference, message: RENDERED_MESSAGE };
-      const filePath = resolveAttachmentRelativePath({
-        attachmentsDir,
-        relativePath: `${published.reference.attachmentId}.html`,
-      });
-      return yield* kit
-        .commit(ctx, null, Effect.succeed({ result: kit.ok(toJson(output), output) }))
-        .pipe(
-          // Only the committed result names the page, so an unrecorded one is removed.
-          Effect.onError(() =>
-            filePath === null
-              ? Effect.void
-              : fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
-          ),
-        );
+  const render = Effect.fn("SquireHtmlTools.render")(function* (
+    ctx: SquireToolContext,
+    kit: SquireToolKit,
+  ) {
+    const args = yield* kit.decodeArgs(RenderArgs, ctx.args);
+    if (!args.ok) {
+      return yield* kit.refuse(ctx, "invalid-arguments", `Invalid arguments: ${args.message}`);
+    }
+    const published = yield* htmlRender
+      .publish({ ...args.value, threadId: ctx.caller.threadId, locked: true })
+      .pipe(
+        Effect.map((reference) => ({ ok: true as const, reference })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
+      );
+    if (!published.ok) return yield* kit.refuse(ctx, "invalid-page", published.message);
+    const output = { htmlRender: published.reference, message: RENDERED_MESSAGE };
+    const filePath = resolveAttachmentRelativePath({
+      attachmentsDir,
+      relativePath: `${published.reference.attachmentId}.html`,
     });
+    return yield* kit
+      .commit(ctx, null, Effect.succeed({ result: kit.ok(toJson(output), output) }))
+      .pipe(
+        // Only the committed result names the page, so an unrecorded one is removed.
+        Effect.onError(() =>
+          filePath === null
+            ? Effect.void
+            : fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
+        ),
+      );
+  });
 
   // A read: no lock and no stored result, so a screenshot never lands in the log.
-  const preview = (ctx: SquireToolContext, kit: SquireToolKit) =>
-    Effect.gen(function* () {
-      const args = yield* kit.decodeArgs(PreviewArgs, ctx.args);
-      const outcome = !args.ok
-        ? { ok: false as const, message: `Invalid arguments: ${args.message}` }
-        : yield* htmlRender.preview({ ...args.value, locked: true }).pipe(
-            Effect.map((preview) => ({ ok: true as const, preview })),
-            Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
-          );
-      if (!outcome.ok) {
-        yield* kit.logRow(ctx, "tool.called", { tool: ctx.tool, isError: true });
-        return kit.refused("invalid-page", outcome.message);
-      }
-      const { png, ...result } = outcome.preview;
-      yield* kit.logRow(ctx, "tool.called", {
-        tool: ctx.tool,
-        width: result.width,
-        contentHeight: result.contentHeight,
-      });
-      return { ...kit.ok(toJson(result)), image: { data: png, mimeType: "image/png" } };
+  const preview = Effect.fn("SquireHtmlTools.preview")(function* (
+    ctx: SquireToolContext,
+    kit: SquireToolKit,
+  ) {
+    const args = yield* kit.decodeArgs(PreviewArgs, ctx.args);
+    const outcome = !args.ok
+      ? { ok: false as const, message: `Invalid arguments: ${args.message}` }
+      : yield* htmlRender.preview({ ...args.value, locked: true }).pipe(
+          Effect.map((preview) => ({ ok: true as const, preview })),
+          Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
+        );
+    if (!outcome.ok) {
+      yield* kit.logRow(ctx, "tool.called", { tool: ctx.tool, isError: true });
+      return kit.refused("invalid-page", outcome.message);
+    }
+    const { png, ...result } = outcome.preview;
+    yield* kit.logRow(ctx, "tool.called", {
+      tool: ctx.tool,
+      width: result.width,
+      contentHeight: result.contentHeight,
     });
+    return { ...kit.ok(toJson(result)), image: { data: png, mimeType: "image/png" } };
+  });
 
   const handlers: ReadonlyArray<SquireToolHandler> = [
     { definition: RENDER_DEFINITION, roles: ["lead", "squire"], call: render },

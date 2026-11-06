@@ -350,13 +350,13 @@ function waitForAbortSignal(signal: AbortSignal): Promise<void> {
  * initialization IPC (returning account info and slash commands) but never starts an API
  * request to Anthropic.
  */
-const probeClaudeCapabilities = (
-  claudeSettings: ClaudeSettings,
-  environment?: NodeJS.ProcessEnv,
-  cwd?: string,
-  includeUsage = true,
-) => {
-  return Effect.gen(function* () {
+const probeClaudeCapabilities = Effect.fn("ClaudeProvider.probeClaudeCapabilities")(
+  function* (
+    claudeSettings: ClaudeSettings,
+    environment?: NodeJS.ProcessEnv,
+    cwd?: string,
+    includeUsage = true,
+  ) {
     const abort = new AbortController();
     return yield* Effect.gen(function* () {
       const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
@@ -432,12 +432,11 @@ const probeClaudeCapabilities = (
         }),
       ),
     );
-  }).pipe(
-    Effect.tapError((error) =>
-      Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
-    ),
-  );
-};
+  },
+  Effect.tapError((error) =>
+    Effect.logWarning("Claude capability probe failed.", { errorTag: error._tag }),
+  ),
+);
 
 type ClaudeCapabilitiesProbeError = Effect.Error<ReturnType<typeof probeClaudeCapabilities>>;
 
@@ -786,11 +785,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
-export const makePendingClaudeProvider = (
-  claudeSettings: ClaudeSettings,
-  modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
-): Effect.Effect<ServerProviderDraft> =>
-  Effect.gen(function* () {
+export const makePendingClaudeProvider = Effect.fn("ClaudeProvider.makePendingClaudeProvider")(
+  function* (
+    claudeSettings: ClaudeSettings,
+    modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
+  ): Effect.fn.Return<ServerProviderDraft> {
     const checkedAt = yield* nowIso;
     const models = providerModelsFromSettings(
       modelCatalog.models.map((entry) => entry.model),
@@ -827,6 +826,7 @@ export const makePendingClaudeProvider = (
         message: "Claude provider status has not been checked in this session yet.",
       },
     });
-  });
+  },
+);
 
 export { probeClaudeCapabilities };

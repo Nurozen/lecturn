@@ -77,7 +77,7 @@ export const cloudflareSuspensionProvider = (config: {
 };
 
 /** Each successful stage is durable; retries target the retired ID, never the current allocation. */
-export const runSuspensionJob = (
+export const runSuspensionJob = Effect.fn("ManagedSuspensions.runSuspensionJob")(function* (
   job: SuspensionJob,
   hooks: {
     readonly enabled: () => Effect.Effect<boolean, BillingError>;
@@ -85,33 +85,32 @@ export const runSuspensionJob = (
     readonly finish: () => Effect.Effect<void, BillingError>;
     readonly provider: SuspensionProvider;
   },
-) =>
-  Effect.gen(function* () {
-    const stages = ["rotating", "rotated", "disconnected", "deleted"];
-    let position = stages.indexOf(job.stage);
-    if (position < 0) return;
-    const operations = [hooks.provider.rotate, hooks.provider.disconnect, hooks.provider.remove];
-    while (position < operations.length) {
-      if (!(yield* hooks.enabled())) return;
-      yield* operations[position]!(job.tunnel_id);
-      yield* hooks.checkpoint(stages[position + 1]!);
-      position++;
-    }
-    if (yield* hooks.enabled()) yield* hooks.finish();
-  });
+) {
+  const stages = ["rotating", "rotated", "disconnected", "deleted"];
+  let position = stages.indexOf(job.stage);
+  if (position < 0) return;
+  const operations = [hooks.provider.rotate, hooks.provider.disconnect, hooks.provider.remove];
+  while (position < operations.length) {
+    if (!(yield* hooks.enabled())) return;
+    yield* operations[position]!(job.tunnel_id);
+    yield* hooks.checkpoint(stages[position + 1]!);
+    position++;
+  }
+  if (yield* hooks.enabled()) yield* hooks.finish();
+});
 
 const currentTime = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const unavailable = () =>
   new BillingError({ code: "unavailable", message: "Tunnel retirement storage is unavailable" });
 
-export const makeManagedSuspensions = (config: {
-  /** Evaluate at every external boundary; observe/rollback must return false. */
-  readonly enabled: () => Effect.Effect<boolean, BillingError>;
-  readonly provider: SuspensionProvider;
-  readonly enforcementUsers?: ReadonlyArray<string> | undefined;
-  readonly teamsEnabled?: boolean;
-}) =>
-  Effect.gen(function* () {
+export const makeManagedSuspensions = Effect.fn("ManagedSuspensions.makeManagedSuspensions")(
+  function* (config: {
+    /** Evaluate at every external boundary; observe/rollback must return false. */
+    readonly enabled: () => Effect.Effect<boolean, BillingError>;
+    readonly provider: SuspensionProvider;
+    readonly enforcementUsers?: ReadonlyArray<string> | undefined;
+    readonly teamsEnabled?: boolean;
+  }) {
     const { $client: sql } = yield* RelayDb;
     const teams = config.teamsEnabled ? yield* makeTeamStore : undefined;
     const query = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(unavailable));
@@ -124,17 +123,16 @@ export const makeManagedSuspensions = (config: {
         }>`SELECT enabled,epoch FROM relay_billing_enforcement_control WHERE id=1`,
       ))[0];
       if (!control?.enabled) return;
-      const stillEnabled = () =>
-        Effect.gen(function* () {
-          if (!(yield* config.enabled())) return false;
-          const row = (yield* query(
-            sql<{
-              enabled: boolean;
-              epoch: number;
-            }>`SELECT enabled,epoch FROM relay_billing_enforcement_control WHERE id=1`,
-          ))[0];
-          return row?.enabled === true && row.epoch === control.epoch;
-        });
+      const stillEnabled = Effect.fn("ManagedSuspensions.stillEnabled")(function* () {
+        if (!(yield* config.enabled())) return false;
+        const row = (yield* query(
+          sql<{
+            enabled: boolean;
+            epoch: number;
+          }>`SELECT enabled,epoch FROM relay_billing_enforcement_control WHERE id=1`,
+        ))[0];
+        return row?.enabled === true && row.epoch === control.epoch;
+      });
       const now = yield* currentTime;
       // A stale projection is uncertainty, never permission to destroy a running environment.
       yield* query(sql`INSERT INTO relay_managed_suspensions(tunnel_id,user_id,environment_id,account_generation,reservation_generation,created_at)
@@ -243,4 +241,5 @@ export const makeManagedSuspensions = (config: {
       }
     });
     return { drain };
-  });
+  },
+);

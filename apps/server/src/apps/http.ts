@@ -54,22 +54,22 @@ const failureResponse = (failure: AppsError) => {
   }
 };
 
-const guarded = <R>(
+// Wraps every app pairing route; the HTTP server already traces the request.
+const guarded = Effect.fnUntraced(function* <R>(
   handle: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AppsError, R>,
-) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const refusal = pairingRefusal(pairingPeerOf(request));
-    if (refusal !== null) {
-      yield* Effect.logWarning("Refused a connected-app pairing request", { refusal });
-      return errorResponse("forbidden", REFUSAL_MESSAGES[refusal], 403);
-    }
-    return yield* handle(request).pipe(
-      Effect.catchTags({ AppsError: (failure) => Effect.succeed(failureResponse(failure)) }),
-    );
-  });
+) {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const refusal = pairingRefusal(pairingPeerOf(request));
+  if (refusal !== null) {
+    yield* Effect.logWarning("Refused a connected-app pairing request", { refusal });
+    return errorResponse("forbidden", REFUSAL_MESSAGES[refusal], 403);
+  }
+  return yield* handle(request).pipe(
+    Effect.catchTags({ AppsError: (failure) => Effect.succeed(failureResponse(failure)) }),
+  );
+});
 
 const invalidBody = new AppsError({
   code: "invalid",

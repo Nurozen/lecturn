@@ -99,8 +99,10 @@ const make = Effect.gen(function* () {
     ...(thread.squire === undefined ? {} : { squire: thread.squire }),
   });
 
-  const getShellSnapshot: StaveOrchestrationShape["getShellSnapshot"] = () =>
-    Effect.gen(function* () {
+  const getShellSnapshot: StaveOrchestrationShape["getShellSnapshot"] = Effect.fn(
+    "StaveOrchestrationLive.getShellSnapshot",
+  )(
+    function* () {
       const [projects, active, archived] = yield* Effect.all(
         [
           shells.list,
@@ -127,7 +129,9 @@ const make = Effect.gen(function* () {
         projects,
         threads,
       };
-    }).pipe(Effect.mapError(fail("getShellSnapshot")));
+    },
+    Effect.mapError(fail("getShellSnapshot")),
+  );
 
   const getThreadShellById: StaveOrchestrationShape["getThreadShellById"] = (threadId) =>
     orchestrator.getThreadShell(threadId).pipe(
@@ -208,63 +212,68 @@ const make = Effect.gen(function* () {
     Effect.mapError(fail("latestSequence")),
   );
 
-  const interrupt = (commandId: CommandId, threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const thread = yield* orchestrator.getThreadShell(threadId);
-      if (thread === null || thread.activeRunId === null) {
-        return { sequence: yield* latestSequence };
-      }
-      const result = yield* orchestrator.dispatch({
-        type: "run.interrupt",
-        commandId,
-        threadId,
-        runId: thread.activeRunId,
-        reason: "Stave space operation",
-        createdBy: "system",
-      });
-      return { sequence: result.sequence };
+  const interrupt = Effect.fn("StaveOrchestrationLive.interrupt")(function* (
+    commandId: CommandId,
+    threadId: ThreadId,
+  ) {
+    const thread = yield* orchestrator.getThreadShell(threadId);
+    if (thread === null || thread.activeRunId === null) {
+      return { sequence: yield* latestSequence };
+    }
+    const result = yield* orchestrator.dispatch({
+      type: "run.interrupt",
+      commandId,
+      threadId,
+      runId: thread.activeRunId,
+      reason: "Stave space operation",
+      createdBy: "system",
     });
+    return { sequence: result.sequence };
+  });
 
-  const dispatchUnlabeled = (command: StaveOrchestrationCommand) =>
-    Effect.gen(function* () {
-      switch (command.type) {
-        case "project.create":
-          yield* projectService.create({
-            commandId: command.commandId,
-            projectId: command.projectId,
-            title: command.title,
-            workspaceRoot: command.workspaceRoot,
-            createWorkspaceRootIfMissing: false,
-          });
-          return { sequence: yield* latestSequence };
-        case "project.meta.update":
-          yield* projectService.update({
-            commandId: command.commandId,
-            projectId: command.projectId,
-            workspaceRoot: command.workspaceRoot,
-          });
-          return { sequence: yield* latestSequence };
-        case "project.delete":
-          yield* projectService.delete({
-            commandId: command.commandId,
-            projectId: command.projectId,
-            ...(command.force === undefined ? {} : { force: command.force }),
-          });
-          return { sequence: yield* latestSequence };
-        case "project.refresh":
-          return yield* refreshProject(command.commandId, command.projectId);
-        case "thread.turn.interrupt":
-          return yield* interrupt(command.commandId, command.threadId);
-      }
-    });
+  const dispatchUnlabeled = Effect.fn("StaveOrchestrationLive.dispatchUnlabeled")(function* (
+    command: StaveOrchestrationCommand,
+  ) {
+    switch (command.type) {
+      case "project.create":
+        yield* projectService.create({
+          commandId: command.commandId,
+          projectId: command.projectId,
+          title: command.title,
+          workspaceRoot: command.workspaceRoot,
+          createWorkspaceRootIfMissing: false,
+        });
+        return { sequence: yield* latestSequence };
+      case "project.meta.update":
+        yield* projectService.update({
+          commandId: command.commandId,
+          projectId: command.projectId,
+          workspaceRoot: command.workspaceRoot,
+        });
+        return { sequence: yield* latestSequence };
+      case "project.delete":
+        yield* projectService.delete({
+          commandId: command.commandId,
+          projectId: command.projectId,
+          ...(command.force === undefined ? {} : { force: command.force }),
+        });
+        return { sequence: yield* latestSequence };
+      case "project.refresh":
+        return yield* refreshProject(command.commandId, command.projectId);
+      case "thread.turn.interrupt":
+        return yield* interrupt(command.commandId, command.threadId);
+    }
+  });
 
   // `project.refreshed` re-pushes the project shell so subscribers re-read its
   // Stave fields; callers already invalidated the cached manifest.
-  const refreshProject = (commandId: CommandId, projectId: ProjectId) =>
-    Effect.gen(function* () {
-      yield* projectService.refresh({ commandId, projectId });
-      return { sequence: yield* latestSequence };
-    });
+  const refreshProject = Effect.fn("StaveOrchestrationLive.refreshProject")(function* (
+    commandId: CommandId,
+    projectId: ProjectId,
+  ) {
+    yield* projectService.refresh({ commandId, projectId });
+    return { sequence: yield* latestSequence };
+  });
 
   const dispatch: StaveOrchestrationShape["dispatch"] = (command, options) =>
     dispatchUnlabeled(command).pipe(

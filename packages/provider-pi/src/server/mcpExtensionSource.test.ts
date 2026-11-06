@@ -46,6 +46,57 @@ async function loadHooks(commands: ReadonlyArray<SkillCommand> = []) {
   return handlers;
 }
 
+describe("Pi orchestration prompt section", () => {
+  it("adds a stable section without overriding the prompt or skipping discovery", async () => {
+    const bridge = await loadMcpBridge({ modern: true, toolSearchAvailable: true });
+    const hook = bridge.handlers.get("before_agent_start")!;
+    const sections: Record<string, string> = { existing: "keep me" };
+    const event = { systemPrompt: "base", systemPromptOptions: { sections } };
+    const ctx = { model: { api: "openai-completions" }, ui: { notify: assert.fail } };
+
+    assert.isUndefined(await hook(event, ctx));
+    assert.include(sections.lecturn_orchestration, "orchestrator_capabilities");
+    assert.equal(event.systemPrompt, "base");
+    assert.include(bridge.getActiveTools(), "mcp__lecturn__preview_snapshot");
+
+    const guidance = sections.lecturn_orchestration!;
+    assert.isUndefined(await hook(event, ctx));
+    assert.deepEqual(event.systemPromptOptions.sections, {
+      existing: "keep me",
+      lecturn_orchestration: guidance,
+    });
+  });
+
+  it.each([
+    {
+      name: "on Pi builds without prompt sections",
+      events: [
+        { systemPrompt: "base" },
+        { systemPrompt: "base", systemPromptOptions: {} },
+        { systemPrompt: "base", systemPromptOptions: { sections: null } },
+      ],
+    },
+    {
+      name: "when an earlier extension forces the system prompt",
+      events: [
+        {
+          systemPrompt: "forced",
+          systemPromptOptions: { sections: {}, forceSystemPrompt: "forced" },
+        },
+      ],
+    },
+  ])("appends guidance $name", async ({ events }) => {
+    const bridge = await loadMcpBridge();
+    const hook = bridge.handlers.get("before_agent_start")!;
+    for (const event of events) {
+      const result = await hook(event, { ui: { notify: assert.fail } });
+      assert.isDefined(result);
+      assert.isTrue(result!.systemPrompt.startsWith(`${event.systemPrompt}\n\n`));
+      assert.include(result!.systemPrompt, "orchestrator_capabilities");
+    }
+  });
+});
+
 describe("Pi MCP tool results", () => {
   it("returns mixed screenshot blocks and typed script output without repeating structured text", async () => {
     const content = [
@@ -160,7 +211,7 @@ describe("Pi MCP tool exposure", () => {
     const start = bridge.handlers.get("before_agent_start");
     assert.isDefined(start);
     const prompt = await start!({ systemPrompt: "Pi system prompt" }, discoveryContext);
-    assert.include(prompt.systemPrompt, "orchestrator_capabilities");
+    assert.include(prompt?.systemPrompt ?? "", "orchestrator_capabilities");
     assert.equal(bridge.servers.length, 0);
     // The public `mcp__lecturn__` prefix is also Pi's canonical name for the
     // `lecturn` server, so each tool registers once and none is hidden.

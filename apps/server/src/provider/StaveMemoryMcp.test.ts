@@ -146,12 +146,17 @@ describe("adapter MCP registration with Stave memory", () => {
   const memoryForCodex = { sm_abc: { command: "/opt/context-marmot" } } as const;
 
   it("adds memory next to the lecturn server, and alone without an MCP session", () => {
+    const mcpServerEntries = (config: Readonly<Record<string, unknown>>) =>
+      Object.fromEntries(Object.entries(config).filter(([key]) => key.startsWith("mcp_servers.")));
     assert.deepStrictEqual(
-      codexThreadRuntimeParams({ mcpSession: undefined, extraMcpServers: memoryForCodex }).config
-        .mcp_servers,
-      memoryForCodex,
+      mcpServerEntries(
+        codexThreadRuntimeParams({ mcpSession: undefined, extraMcpServers: memoryForCodex }).config,
+      ),
+      Object.fromEntries(
+        Object.entries(memoryForCodex).map(([name, server]) => [`mcp_servers.${name}`, server]),
+      ),
     );
-    const codexServers = codexThreadRuntimeParams({
+    const { config } = codexThreadRuntimeParams({
       mcpSession: {
         environmentId: EnvironmentId.make("environment-stave-memory"),
         threadId: ThreadId.make("thread-stave-memory"),
@@ -162,8 +167,11 @@ describe("adapter MCP registration with Stave memory", () => {
         browserToolsAvailable: false,
       },
       extraMcpServers: memoryForCodex,
-    }).config.mcp_servers as Record<string, unknown>;
-    assert.deepStrictEqual(Object.keys(codexServers).toSorted(), ["lecturn", "sm_abc"]);
+    });
+    assert.deepStrictEqual(Object.keys(mcpServerEntries(config)).toSorted(), [
+      "mcp_servers.lecturn",
+      "mcp_servers.sm_abc",
+    ]);
   });
 });
 

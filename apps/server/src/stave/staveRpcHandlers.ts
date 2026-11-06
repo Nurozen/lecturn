@@ -455,22 +455,21 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
       timeToLive: Exit.match({ onSuccess: () => ttl, onFailure: () => Duration.zero }),
     },
   );
-  const cacheKey = (root: string) =>
-    Effect.gen(function* () {
-      const captured = yield* StaveExecutionContext;
-      const identity =
-        captured === undefined
-          ? Option.isSome(settings)
-            ? stableStringify(
-                yield* settings.value.getSettings.pipe(
-                  Effect.map((current) => current.stave),
-                  Effect.orElseSucceed(() => null),
-                ),
-              )
-            : ""
-          : (captured.configurationIdentity ?? stableStringify(captured));
-      return `${identity}\0${root}`;
-    });
+  const cacheKey = Effect.fn("staveRpcHandlers.cacheKey")(function* (root: string) {
+    const captured = yield* StaveExecutionContext;
+    const identity =
+      captured === undefined
+        ? Option.isSome(settings)
+          ? stableStringify(
+              yield* settings.value.getSettings.pipe(
+                Effect.map((current) => current.stave),
+                Effect.orElseSucceed(() => null),
+              ),
+            )
+          : ""
+        : (captured.configurationIdentity ?? stableStringify(captured));
+    return `${identity}\0${root}`;
+  });
   const refreshGeneration = Effect.gen(function* () {
     const generation = Option.isSome(invalidation) ? yield* invalidation.value.generation : -1;
     if (generation === seenGeneration) return;
@@ -660,24 +659,25 @@ export const makeStaveRpcHandlers = Effect.fn("makeStaveRpcHandlers")(function* 
   const listRepos = gatedRead(Effect.suspend(() => cli.reposList).pipe(Effect.map(toRepoRows)));
   const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
   /** Archived rows gain when they were archived and, for sagas, the roster a restore brings back. */
-  const describeArchive = (row: StaveSpaceListRow) =>
-    Effect.gen(function* () {
-      if (!row.archived || row.error !== undefined || Option.isNone(fileSystem)) return row;
-      const fs = fileSystem.value;
-      const info = yield* fs.stat(row.path).pipe(Effect.option);
-      const mtime = Option.isSome(info) ? Option.getOrUndefined(info.value.mtime) : undefined;
-      const manifest = row.isSaga
-        ? yield* fs
-            .readFileString(`${row.path}/${STAVE_MANIFEST_FILE_NAME}`)
-            .pipe(Effect.option, Effect.map(Option.getOrUndefined))
-        : undefined;
-      const sagaMembers = manifest === undefined ? undefined : sagaRosterFromManifest(manifest);
-      return {
-        ...row,
-        ...(mtime === undefined ? {} : { archivedAt: mtime.toISOString() }),
-        ...(sagaMembers === undefined ? {} : { sagaMembers }),
-      };
-    });
+  const describeArchive = Effect.fn("staveRpcHandlers.describeArchive")(function* (
+    row: StaveSpaceListRow,
+  ) {
+    if (!row.archived || row.error !== undefined || Option.isNone(fileSystem)) return row;
+    const fs = fileSystem.value;
+    const info = yield* fs.stat(row.path).pipe(Effect.option);
+    const mtime = Option.isSome(info) ? Option.getOrUndefined(info.value.mtime) : undefined;
+    const manifest = row.isSaga
+      ? yield* fs
+          .readFileString(`${row.path}/${STAVE_MANIFEST_FILE_NAME}`)
+          .pipe(Effect.option, Effect.map(Option.getOrUndefined))
+      : undefined;
+    const sagaMembers = manifest === undefined ? undefined : sagaRosterFromManifest(manifest);
+    return {
+      ...row,
+      ...(mtime === undefined ? {} : { archivedAt: mtime.toISOString() }),
+      ...(sagaMembers === undefined ? {} : { sagaMembers }),
+    };
+  });
   const listSpaces = (input: StaveListSpacesInput) =>
     gatedRead(
       Effect.gen(function* () {

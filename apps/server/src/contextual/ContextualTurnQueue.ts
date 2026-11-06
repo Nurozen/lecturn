@@ -123,14 +123,16 @@ export const make = Effect.gen(function* () {
     sql.withTransaction,
     Effect.mapError(contextualBoundary),
   );
-  const finishRow = (row: QueueRow, state: "done" | "canceled" | "unknown") =>
-    Effect.gen(function* () {
-      yield* sql`INSERT INTO contextual_turn_watermarks(thread_id,through_sequence) VALUES (${row.thread_id},${row.sequence})
+  const finishRow = Effect.fn("ContextualTurnQueue.finishRow")(function* (
+    row: QueueRow,
+    state: "done" | "canceled" | "unknown",
+  ) {
+    yield* sql`INSERT INTO contextual_turn_watermarks(thread_id,through_sequence) VALUES (${row.thread_id},${row.sequence})
         ON CONFLICT(thread_id) DO UPDATE SET through_sequence=MAX(through_sequence,excluded.through_sequence)`;
-      yield* sql`UPDATE contextual_turn_queue SET state=${state},event_json=NULL,updated_at=${yield* contextualNow} WHERE event_id=${row.event_id}`;
-      // Watermarks permanently reject readmission after compact tombstones are removed.
-      yield* sql`DELETE FROM contextual_turn_queue WHERE thread_id=${row.thread_id} AND state IN ('done','canceled','unknown') AND sequence < ${row.sequence}-4096`;
-    });
+    yield* sql`UPDATE contextual_turn_queue SET state=${state},event_json=NULL,updated_at=${yield* contextualNow} WHERE event_id=${row.event_id}`;
+    // Watermarks permanently reject readmission after compact tombstones are removed.
+    yield* sql`DELETE FROM contextual_turn_queue WHERE thread_id=${row.thread_id} AND state IN ('done','canceled','unknown') AND sequence < ${row.sequence}-4096`;
+  });
   /** Finishes one run's row. Unlike V1 any row may finish: V2 owns run order. */
   const finish = Effect.fn("Contextual.finishQueuedTurn")(
     function* (runId: RunId, state: "done" | "canceled" | "unknown") {

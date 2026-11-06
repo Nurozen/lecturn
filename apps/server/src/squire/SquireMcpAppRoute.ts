@@ -106,37 +106,40 @@ const make = Effect.gen(function* () {
   const readResource: SquireMcpAppRoute["readResource"] = (input) =>
     Effect.fail(fail(input.threadId, "not-an-app"));
 
-  const act = (card: SquireShowcaseCard, action: "accept" | "dismiss", cardId: SquireCardId) =>
-    Effect.gen(function* () {
-      const found = yield* repository.getCard(cardId);
-      if (Option.isNone(found)) return outdated(cardId, "missing");
-      const row = found.value;
-      // Re-read at the click: the page is a snapshot and may be days old.
-      if (row.status !== "open") return outdated(cardId, row.status);
-      const owner = yield* repository.getSquire(row.owner_squire_id);
-      if (Option.isNone(owner) || owner.value.lifecycle === "deleting") {
-        return text("This item's Squire no longer exists.", { cardId }, true);
-      }
-      const { results } = yield* actions.act({
-        // Deterministic, so a retried click is the same request.
-        requestId: `showcase:${action}:${cardId}:${card.itemId}`.slice(0, 200),
-        cardIds: [cardId],
-        action,
-      });
-      const outcome = results[0];
-      if (outcome === undefined) return text("Nothing happened.", { cardId }, true);
-      if (outcome.error !== null) {
-        const again = yield* repository.getCard(cardId);
-        if (Option.isSome(again) && again.value.status !== "open") {
-          return outdated(cardId, again.value.status);
-        }
-        return text(outcome.error.message, { cardId, status: outcome.status }, true);
-      }
-      return text(action === "accept" ? "Accepted." : "Dismissed.", {
-        cardId,
-        status: action === "accept" ? "accepted" : outcome.status,
-      });
+  const act = Effect.fn("SquireMcpAppRoute.act")(function* (
+    card: SquireShowcaseCard,
+    action: "accept" | "dismiss",
+    cardId: SquireCardId,
+  ) {
+    const found = yield* repository.getCard(cardId);
+    if (Option.isNone(found)) return outdated(cardId, "missing");
+    const row = found.value;
+    // Re-read at the click: the page is a snapshot and may be days old.
+    if (row.status !== "open") return outdated(cardId, row.status);
+    const owner = yield* repository.getSquire(row.owner_squire_id);
+    if (Option.isNone(owner) || owner.value.lifecycle === "deleting") {
+      return text("This item's Squire no longer exists.", { cardId }, true);
+    }
+    const { results } = yield* actions.act({
+      // Deterministic, so a retried click is the same request.
+      requestId: `showcase:${action}:${cardId}:${card.itemId}`.slice(0, 200),
+      cardIds: [cardId],
+      action,
     });
+    const outcome = results[0];
+    if (outcome === undefined) return text("Nothing happened.", { cardId }, true);
+    if (outcome.error !== null) {
+      const again = yield* repository.getCard(cardId);
+      if (Option.isSome(again) && again.value.status !== "open") {
+        return outdated(cardId, again.value.status);
+      }
+      return text(outcome.error.message, { cardId, status: outcome.status }, true);
+    }
+    return text(action === "accept" ? "Accepted." : "Dismissed.", {
+      cardId,
+      status: action === "accept" ? "accepted" : outcome.status,
+    });
+  });
 
   const callTool: SquireMcpAppRoute["callTool"] = Effect.fn("SquireMcpAppRoute.callTool")(
     function* (input) {

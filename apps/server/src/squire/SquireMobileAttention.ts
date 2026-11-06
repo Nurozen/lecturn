@@ -235,8 +235,8 @@ const make = Effect.gen(function* () {
     ),
   ).pipe(Effect.forkScoped);
 
-  const row: SquireMobileAttention["Service"]["row"] = ({ environmentId, threadId }) =>
-    Effect.gen(function* () {
+  const row: SquireMobileAttention["Service"]["row"] = Effect.fn("SquireMobileAttention.row")(
+    function* ({ environmentId, threadId }) {
       const squireId = (yield* Ref.get(homeThreads)).get(threadId);
       if (squireId === undefined) return Option.none();
       const found = yield* repository.getSquire(squireId);
@@ -286,48 +286,50 @@ const make = Effect.gen(function* () {
               deepLink: `/threads/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`,
             };
       return Option.some<SquireRelayRow>({ squireId, threadId, state, pending, alreadyAlerted });
-    });
+    },
+  );
 
-  const record: SquireMobileAttention["Service"]["record"] = (row, report) =>
-    Effect.gen(function* () {
-      if (row.pending.length === 0) return;
-      const at = DateTime.formatIso(yield* DateTime.now);
-      yield* repository.transaction(
-        Effect.forEach(
-          deliveryOutcomes(row, report),
-          ({ intent, data }) =>
-            Effect.gen(function* () {
-              // A concurrent publish of the same row may have settled it already.
-              const logged = yield* repository.listCardLog({
-                cardId: intent.cardId,
-                kinds: ["notification.delivery"],
-              });
-              const settled = logged.some((entry) => {
-                const parsed = Option.getOrUndefined(decodeDelivery(entry.data_json));
-                return parsed?.surface === "mobile" && parsed.intent === intent.intentId;
-              });
-              if (settled) return;
-              yield* repository.insertActionLog({
-                squire_id: row.squireId,
-                kind: "notification.delivery",
-                room_id: null,
-                post_id: null,
-                trigger_id: null,
-                task_id: null,
-                thread_id: intent.threadId,
-                card_id: intent.cardId,
-                event_id: null,
-                run_id: null,
-                invocation_key: null,
-                execution_key: null,
-                data_json: encodeJson({ ...data, intent: intent.intentId }),
-                created_at: at,
-              });
-            }),
-          { discard: true },
-        ),
-      );
-    });
+  const record: SquireMobileAttention["Service"]["record"] = Effect.fn(
+    "SquireMobileAttention.record",
+  )(function* (row, report) {
+    if (row.pending.length === 0) return;
+    const at = DateTime.formatIso(yield* DateTime.now);
+    yield* repository.transaction(
+      Effect.forEach(
+        deliveryOutcomes(row, report),
+        ({ intent, data }) =>
+          Effect.gen(function* () {
+            // A concurrent publish of the same row may have settled it already.
+            const logged = yield* repository.listCardLog({
+              cardId: intent.cardId,
+              kinds: ["notification.delivery"],
+            });
+            const settled = logged.some((entry) => {
+              const parsed = Option.getOrUndefined(decodeDelivery(entry.data_json));
+              return parsed?.surface === "mobile" && parsed.intent === intent.intentId;
+            });
+            if (settled) return;
+            yield* repository.insertActionLog({
+              squire_id: row.squireId,
+              kind: "notification.delivery",
+              room_id: null,
+              post_id: null,
+              trigger_id: null,
+              task_id: null,
+              thread_id: intent.threadId,
+              card_id: intent.cardId,
+              event_id: null,
+              run_id: null,
+              invocation_key: null,
+              execution_key: null,
+              data_json: encodeJson({ ...data, intent: intent.intentId }),
+              created_at: at,
+            });
+          }),
+        { discard: true },
+      ),
+    );
+  });
 
   return SquireMobileAttention.of({
     subscribe: PubSub.subscribe(changes).pipe(
@@ -339,11 +341,10 @@ const make = Effect.gen(function* () {
       if (!(yield* squireSwitch.isOn)) return [];
       return [...(yield* Ref.get(homeThreads)).keys()];
     }),
-    isHomeThread: (threadId) =>
-      Effect.gen(function* () {
-        if (!(yield* squireSwitch.isOn)) return false;
-        return (yield* Ref.get(homeThreads)).has(threadId);
-      }),
+    isHomeThread: Effect.fn("SquireMobileAttention.isHomeThread")(function* (threadId) {
+      if (!(yield* squireSwitch.isOn)) return false;
+      return (yield* Ref.get(homeThreads)).has(threadId);
+    }),
     row,
     record,
   });

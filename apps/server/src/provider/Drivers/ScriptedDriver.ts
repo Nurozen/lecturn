@@ -109,79 +109,83 @@ export const ScriptedDriver: ProviderDriver<ScriptedSettings, ScriptedDriverEnv>
   metadata: { displayName: "Scripted (test)", hasDefaultInstance: false },
   configSchema: ScriptedSettings,
   defaultConfig: () => decodeScriptedSettings({}),
-  create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const processEnvironment = yield* mergeProviderInstanceEnvironment(
-        environment,
-        yield* HostProcess.Environment,
+  create: Effect.fn("ScriptedDriver.create")(function* ({
+    instanceId,
+    displayName,
+    accentColor,
+    environment,
+    enabled,
+    config,
+  }) {
+    const processEnvironment = yield* mergeProviderInstanceEnvironment(
+      environment,
+      yield* HostProcess.Environment,
+    );
+    const effectiveConfig = { ...config, enabled } satisfies ScriptedSettings;
+    const continuationIdentity = defaultProviderContinuationIdentity({
+      driverKind: SCRIPTED_PROVIDER,
+      instanceId,
+    });
+    const stampIdentity = withInstanceIdentity({
+      instanceId,
+      driverKind: SCRIPTED_PROVIDER,
+      displayName,
+      accentColor,
+      continuationGroupKey: continuationIdentity.continuationKey,
+    });
+    const readySnapshot = Effect.gen(function* () {
+      return stampIdentity(
+        buildServerProvider({
+          presentation: SCRIPTED_PRESENTATION,
+          enabled,
+          checkedAt: DateTime.formatIso(yield* DateTime.now),
+          models: SCRIPTED_MODELS,
+          probe: {
+            installed: true,
+            version: null,
+            status: "ready",
+            auth: { status: "unknown" },
+          },
+        }),
       );
-      const effectiveConfig = { ...config, enabled } satisfies ScriptedSettings;
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: SCRIPTED_PROVIDER,
-        instanceId,
-      });
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        driverKind: SCRIPTED_PROVIDER,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      });
-      const readySnapshot = Effect.gen(function* () {
-        return stampIdentity(
-          buildServerProvider({
-            presentation: SCRIPTED_PRESENTATION,
-            enabled,
-            checkedAt: DateTime.formatIso(yield* DateTime.now),
-            models: SCRIPTED_MODELS,
-            probe: {
-              installed: true,
-              version: null,
-              status: "ready",
-              auth: { status: "unknown" },
-            },
+    });
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
+    const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ScriptedSettings>>({
+      resolveMaintenance: () =>
+        Effect.succeed({ provider: SCRIPTED_PROVIDER, packageName: null, update: null }),
+      getSettings: snapshotSettings.getSettings,
+      streamSettings: snapshotSettings.streamSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      initialSnapshot: () => readySnapshot,
+      checkProvider: readySnapshot,
+      refreshOnInterval: false,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: SCRIPTED_PROVIDER,
+            instanceId,
+            detail: "Failed to build the scripted provider snapshot.",
+            cause,
           }),
-        );
-      });
-      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-      const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ScriptedSettings>>(
-        {
-          resolveMaintenance: () =>
-            Effect.succeed({ provider: SCRIPTED_PROVIDER, packageName: null, update: null }),
-          getSettings: snapshotSettings.getSettings,
-          streamSettings: snapshotSettings.streamSettings,
-          haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-          initialSnapshot: () => readySnapshot,
-          checkProvider: readySnapshot,
-          refreshOnInterval: false,
-        },
-      ).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderDriverError({
-              driver: SCRIPTED_PROVIDER,
-              instanceId,
-              detail: "Failed to build the scripted provider snapshot.",
-              cause,
-            }),
-        ),
-      );
-      const orchestrationAdapter = yield* makeScriptedAdapterV2({
-        instanceId,
-        environment: processEnvironment,
-      });
-      return {
-        instanceId,
-        driverKind: SCRIPTED_PROVIDER,
-        continuationIdentity,
-        displayName,
-        accentColor,
-        enabled,
-        snapshot,
-        orchestrationAdapter,
-        textGeneration: scriptedTextGeneration,
-      } satisfies ProviderInstance;
-    }),
+      ),
+    );
+    const orchestrationAdapter = yield* makeScriptedAdapterV2({
+      instanceId,
+      environment: processEnvironment,
+    });
+    return {
+      instanceId,
+      driverKind: SCRIPTED_PROVIDER,
+      continuationIdentity,
+      displayName,
+      accentColor,
+      enabled,
+      snapshot,
+      orchestrationAdapter,
+      textGeneration: scriptedTextGeneration,
+    } satisfies ProviderInstance;
+  }),
 };
 
 /** The registry's driver list: the built-ins, plus `scripted` only when test providers are on. */

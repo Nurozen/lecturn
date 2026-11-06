@@ -479,21 +479,14 @@ describe("VcsStatusBroadcaster automatic pull eligibility", () => {
         assert.equal(state.policyCalls, 0);
 
         const snapshot = yield* Deferred.make<void>();
-        yield* broadcaster
-          .streamStatus(
-            { cwd: "/repo" },
-            {
-              automaticRemoteRefreshInterval: Effect.succeed(Duration.seconds(30)),
-            },
-          )
-          .pipe(
-            Stream.runForEach((event) =>
-              event._tag === "snapshot"
-                ? Deferred.succeed(snapshot, undefined).pipe(Effect.asVoid)
-                : Effect.void,
-            ),
-            Effect.forkScoped,
-          );
+        yield* broadcaster.streamStatus({ cwd: "/repo" }).pipe(
+          Stream.runForEach((event) =>
+            event._tag === "snapshot"
+              ? Deferred.succeed(snapshot, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+          ),
+          Effect.forkScoped,
+        );
         yield* Deferred.await(snapshot);
         for (let pass = 0; pass < 2; pass += 1) {
           yield* TestClock.adjust(Duration.seconds(30));
@@ -513,24 +506,16 @@ describe("VcsStatusBroadcaster automatic pull eligibility", () => {
       yield* broadcaster.getStatus({ cwd: "/repo" });
       const snapshot = yield* Deferred.make<void>();
       const pulled = yield* Deferred.make<void>();
-      yield* broadcaster
-        .streamStatus(
-          { cwd: "/repo" },
-          {
-            automaticRemoteRefreshInterval: Effect.succeed(Duration.seconds(30)),
-          },
-        )
-        .pipe(
-          Stream.runForEach((event) =>
-            event._tag === "snapshot"
-              ? Deferred.succeed(
-                  event.remote?.behindCount === 0 ? pulled : snapshot,
-                  undefined,
-                ).pipe(Effect.asVoid)
-              : Effect.void,
-          ),
-          Effect.forkScoped,
-        );
+      yield* broadcaster.streamStatus({ cwd: "/repo" }).pipe(
+        Stream.runForEach((event) =>
+          event._tag === "snapshot"
+            ? Deferred.succeed(event.remote?.behindCount === 0 ? pulled : snapshot, undefined).pipe(
+                Effect.asVoid,
+              )
+            : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
       yield* Deferred.await(snapshot);
       yield* TestClock.adjust(Duration.seconds(30));
       yield* Deferred.await(pulled);

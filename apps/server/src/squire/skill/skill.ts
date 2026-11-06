@@ -15,10 +15,10 @@ export const squireSkillSections = (role: SquireRole): ReadonlyArray<string> =>
  * repository is reached optionally, as ProviderSessionManager does, and a
  * missing or unreadable record reads as the narrower Squire role.
  */
-export const squireInstructionsTurnInput = (appThread: {
-  readonly squire?: SquireThreadMarker | undefined;
-}): Effect.Effect<{ readonly squireInstructions?: ReadonlyArray<string> }> =>
-  Effect.gen(function* () {
+export const squireInstructionsTurnInput = Effect.fn("SquireSkill.squireInstructionsTurnInput")(
+  function* (appThread: {
+    readonly squire?: SquireThreadMarker | undefined;
+  }): Effect.fn.Return<{ readonly squireInstructions?: ReadonlyArray<string> }> {
     const marker = appThread.squire;
     if (marker === undefined || marker.role !== "home") return {};
     const repository = yield* Effect.serviceOption(SquireRepository);
@@ -33,4 +33,5 @@ export const squireInstructionsTurnInput = (appThread: {
           ),
         );
     return { squireInstructions: squireSkillSections(role) };
-  });
+  },
+);

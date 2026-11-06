@@ -152,41 +152,44 @@ const make = Effect.gen(function* () {
 
   const readRow = (squireId: SquireId) => repository.getSquire(squireId);
 
-  const homeProjectCandidate: SquireLifecycle["Service"]["homeProjectCandidate"] = (exclude) =>
-    Effect.gen(function* () {
-      const candidates = (yield* projects.list()).filter(
-        (project) => project.appBinding === undefined && project.projectId !== exclude,
-      );
-      if (candidates.length === 0) return Option.none();
-      const snapshot = yield* projections.getShellSnapshot();
-      const lastActive = new Map<ProjectId, number>();
-      for (const thread of snapshot.threads) {
-        if (isSquireThread(thread)) continue;
-        const at = DateTime.toEpochMillis(thread.updatedAt);
-        if (at > (lastActive.get(thread.projectId) ?? 0)) lastActive.set(thread.projectId, at);
-      }
-      const activity = (project: ProjectStore.ProjectRow) =>
-        Math.max(lastActive.get(project.projectId) ?? 0, Date.parse(project.updatedAt));
-      return Option.some(
-        candidates.reduce((best, project) => (activity(project) > activity(best) ? project : best)),
-      );
-    }).pipe(orSquireError("find a project for the Squire"));
+  const homeProjectCandidate: SquireLifecycle["Service"]["homeProjectCandidate"] = Effect.fn(
+    "SquireLifecycle.homeProjectCandidate",
+  )(function* (exclude) {
+    const candidates = (yield* projects.list()).filter(
+      (project) => project.appBinding === undefined && project.projectId !== exclude,
+    );
+    if (candidates.length === 0) return Option.none();
+    const snapshot = yield* projections.getShellSnapshot();
+    const lastActive = new Map<ProjectId, number>();
+    for (const thread of snapshot.threads) {
+      if (isSquireThread(thread)) continue;
+      const at = DateTime.toEpochMillis(thread.updatedAt);
+      if (at > (lastActive.get(thread.projectId) ?? 0)) lastActive.set(thread.projectId, at);
+    }
+    const activity = (project: ProjectStore.ProjectRow) =>
+      Math.max(lastActive.get(project.projectId) ?? 0, Date.parse(project.updatedAt));
+    return Option.some(
+      candidates.reduce((best, project) => (activity(project) > activity(best) ? project : best)),
+    );
+  }, orSquireError("find a project for the Squire"));
 
-  const archiveIfLive = (squireId: SquireId, generation: number) =>
-    Effect.gen(function* () {
-      if (generation < 1) return;
-      const threadId = homeThreadIdFor(squireId, generation);
-      const shell = yield* projections.getThreadShell(threadId);
-      if (shell === null || shell.archivedAt !== null) return;
-      yield* dispatch({
-        type: "thread.archive",
-        commandId: homeCommandId(squireId, generation, "archive"),
-        threadId,
-      });
+  const archiveIfLive = Effect.fn("SquireLifecycle.archiveIfLive")(function* (
+    squireId: SquireId,
+    generation: number,
+  ) {
+    if (generation < 1) return;
+    const threadId = homeThreadIdFor(squireId, generation);
+    const shell = yield* projections.getThreadShell(threadId);
+    if (shell === null || shell.archivedAt !== null) return;
+    yield* dispatch({
+      type: "thread.archive",
+      commandId: homeCommandId(squireId, generation, "archive"),
+      threadId,
     });
+  });
 
-  const syncHome: SquireLifecycle["Service"]["syncHome"] = (target) =>
-    Effect.gen(function* () {
+  const syncHome: SquireLifecycle["Service"]["syncHome"] = Effect.fn("SquireLifecycle.syncHome")(
+    function* (target) {
       const shell = yield* projections.getThreadShell(target.threadId);
       // A deleted home thread is the reactor's to re-home.
       if (shell === null) return;
@@ -207,23 +210,24 @@ const make = Effect.gen(function* () {
           modelSelection: target.modelSelection,
         });
       }
-    }).pipe(orSquireError("update the Squire's thread"));
+    },
+    orSquireError("update the Squire's thread"),
+  );
 
-  const updateRow = (
+  const updateRow = Effect.fn("SquireLifecycle.updateRow")(function* (
     row: SquireRepository.SquireRow,
     patch: Parameters<SquireRepository.SquireRepository["Service"]["updateSquire"]>[0]["patch"],
-  ) =>
-    Effect.gen(function* () {
-      return yield* repository.updateSquire({
-        id: row.id,
-        expectedRevision: row.revision,
-        patch,
-        updatedAt: yield* nowIso,
-      });
+  ) {
+    return yield* repository.updateSquire({
+      id: row.id,
+      expectedRevision: row.revision,
+      patch,
+      updatedAt: yield* nowIso,
     });
+  });
 
-  const homeStep: SquireLifecycle["Service"]["homeStep"] = (squireId, step) =>
-    Effect.gen(function* () {
+  const homeStep: SquireLifecycle["Service"]["homeStep"] = Effect.fn("SquireLifecycle.homeStep")(
+    function* (squireId, step) {
       const current = yield* readRow(squireId);
       if (Option.isNone(current)) return false;
       const row = current.value;
@@ -294,69 +298,71 @@ const make = Effect.gen(function* () {
           return true;
         }
       }
-    }).pipe(orSquireError("set up the Squire's home thread"));
+    },
+    orSquireError("set up the Squire's home thread"),
+  );
 
-  const deleteStep: SquireLifecycle["Service"]["deleteStep"] = (squireId, step) =>
-    Effect.gen(function* () {
-      const current = yield* readRow(squireId);
-      if (Option.isNone(current) || current.value.lifecycle !== "deleting") return;
-      const row = current.value;
-      switch (step) {
-        case "archive":
-          // A delete that interrupted a re-home also owns the generation before it.
-          yield* archiveIfLive(squireId, row.home_generation);
-          yield* archiveIfLive(squireId, row.home_generation - 1);
-          return;
-        case "workspace":
-          yield* workspaces.remove(squireId);
-          return;
-        case "rows": {
-          const { triggerSecretRefs } = yield* repository.deleteSquireRows(squireId);
-          yield* Effect.forEach(
-            triggerSecretRefs,
-            (ref) =>
-              secrets
-                .remove(ref)
-                .pipe(
-                  Effect.catch((cause) =>
-                    Effect.logWarning("Could not delete a Squire trigger secret", { cause }),
-                  ),
+  const deleteStep: SquireLifecycle["Service"]["deleteStep"] = Effect.fn(
+    "SquireLifecycle.deleteStep",
+  )(function* (squireId, step) {
+    const current = yield* readRow(squireId);
+    if (Option.isNone(current) || current.value.lifecycle !== "deleting") return;
+    const row = current.value;
+    switch (step) {
+      case "archive":
+        // A delete that interrupted a re-home also owns the generation before it.
+        yield* archiveIfLive(squireId, row.home_generation);
+        yield* archiveIfLive(squireId, row.home_generation - 1);
+        return;
+      case "workspace":
+        yield* workspaces.remove(squireId);
+        return;
+      case "rows": {
+        const { triggerSecretRefs } = yield* repository.deleteSquireRows(squireId);
+        yield* Effect.forEach(
+          triggerSecretRefs,
+          (ref) =>
+            secrets
+              .remove(ref)
+              .pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("Could not delete a Squire trigger secret", { cause }),
                 ),
-            { discard: true },
-          );
-          return;
-        }
+              ),
+          { discard: true },
+        );
+        return;
       }
-    }).pipe(orSquireError("delete the Squire"));
+    }
+  }, orSquireError("delete the Squire"));
 
-  const driveUnlocked = (squireId: SquireId) =>
-    Effect.gen(function* () {
-      for (let pass = 0; pass < MAX_DRIVE_PASSES; pass++) {
-        const current = yield* readRow(squireId).pipe(orSquireError("read the Squire"));
-        if (Option.isNone(current)) return Option.none<SquireRepository.SquireRow>();
-        const row = current.value;
-        switch (row.lifecycle) {
-          case "ready":
-          case "needs_provider":
-            return current;
-          case "deleting":
-            for (const step of DELETE_STEPS) yield* deleteStep(squireId, step);
-            break;
-          case "creating":
-          case "rehoming":
-            for (const step of HOME_STEPS) {
-              if (!(yield* homeStep(squireId, step))) {
-                const after = yield* readRow(squireId).pipe(orSquireError("read the Squire"));
-                // Stuck without a project: the row waits for the next start.
-                if (Option.isSome(after) && after.value.revision === row.revision) return after;
-                break;
-              }
+  const driveUnlocked = Effect.fn("SquireLifecycle.driveUnlocked")(function* (squireId: SquireId) {
+    for (let pass = 0; pass < MAX_DRIVE_PASSES; pass++) {
+      const current = yield* readRow(squireId).pipe(orSquireError("read the Squire"));
+      if (Option.isNone(current)) return Option.none<SquireRepository.SquireRow>();
+      const row = current.value;
+      switch (row.lifecycle) {
+        case "ready":
+        case "needs_provider":
+          return current;
+        case "deleting":
+          for (const step of DELETE_STEPS) yield* deleteStep(squireId, step);
+          break;
+        case "creating":
+        case "rehoming":
+          for (const step of HOME_STEPS) {
+            if (!(yield* homeStep(squireId, step))) {
+              const after = yield* readRow(squireId).pipe(orSquireError("read the Squire"));
+              // Stuck without a project: the row waits for the next start.
+              if (Option.isSome(after) && after.value.revision === row.revision) return after;
+              break;
             }
-            break;
-        }
+          }
+          break;
       }
-      return yield* readRow(squireId).pipe(orSquireError("read the Squire"));
-    });
+    }
+    return yield* readRow(squireId).pipe(orSquireError("read the Squire"));
+  });
 
   const drive: SquireLifecycle["Service"]["drive"] = (squireId) =>
     driving.withPermits(1)(driveUnlocked(squireId));

@@ -178,29 +178,31 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
             ),
           );
 
-  const appTools = (scope: McpAppInvocationScope, record: AppRecord) =>
-    Effect.gen(function* () {
-      const cached = yield* registry.cachedTools(scope.app.appId);
-      const tools: Array<AppTool> = [];
-      const seen = new Set<string>();
-      const add = (tier: AppToolTier, list: ReadonlyArray<McpSchema.Tool>) => {
-        for (const tool of list) {
-          if (seen.has(tool.name)) continue;
-          seen.add(tool.name);
-          tools.push({ tier, tool });
-        }
-      };
-      add("headless", yield* headlessTools(scope, record, cached.headless));
-      if (record.registration.liveTools)
-        add(
-          "live",
-          Option.getOrElse(cached.live, () => []),
-        );
-      return tools;
-    });
+  const appTools = Effect.fn("AppToolkit.appTools")(function* (
+    scope: McpAppInvocationScope,
+    record: AppRecord,
+  ) {
+    const cached = yield* registry.cachedTools(scope.app.appId);
+    const tools: Array<AppTool> = [];
+    const seen = new Set<string>();
+    const add = (tier: AppToolTier, list: ReadonlyArray<McpSchema.Tool>) => {
+      for (const tool of list) {
+        if (seen.has(tool.name)) continue;
+        seen.add(tool.name);
+        tools.push({ tier, tool });
+      }
+    };
+    add("headless", yield* headlessTools(scope, record, cached.headless));
+    if (record.registration.liveTools)
+      add(
+        "live",
+        Option.getOrElse(cached.live, () => []),
+      );
+    return tools;
+  });
 
-  const listFor: AppToolkit["Service"]["listFor"] = (invocation) =>
-    Effect.gen(function* () {
+  const listFor: AppToolkit["Service"]["listFor"] = Effect.fn("AppToolkit.listFor")(
+    function* (invocation) {
       const scope = appInvocationScope(invocation);
       if (scope === undefined) return [];
       const record = yield* grantedApp(scope.app.appId);
@@ -209,33 +211,33 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
       return (yield* appTools(scope, record.value))
         .filter(({ tool }) => visibleToModel(tool))
         .map(({ tool }) => presentTool(prefix, tool));
-    });
+    },
+  );
 
-  const contextMeta = (scope: McpAppInvocationScope) =>
-    Effect.gen(function* () {
-      const binding = yield* projects.resolveAppForProject(scope.app.projectId);
-      if (Option.isNone(binding) || binding.value.appId !== scope.app.appId) {
-        return yield* new AppsError({
-          code: "forbidden",
-          message: `Project ${scope.app.projectId} does not belong to ${scope.app.appId}.`,
-        });
-      }
-      const running = Option.getOrUndefined(
-        yield* projection.getRunningTurnContext(scope.thread.threadId).pipe(Effect.option),
-      );
-      return {
-        meta: {
-          projectId: scope.app.projectId,
-          threadId: scope.thread.threadId,
-          workspaceRoot: binding.value.workspaceRoot,
-          turnId: running?.providerTurn?.id ?? null,
-        } satisfies AppToolContextMeta,
-        runModelSelection: running?.run?.modelSelection,
-      };
-    });
+  const contextMeta = Effect.fn("AppToolkit.contextMeta")(function* (scope: McpAppInvocationScope) {
+    const binding = yield* projects.resolveAppForProject(scope.app.projectId);
+    if (Option.isNone(binding) || binding.value.appId !== scope.app.appId) {
+      return yield* new AppsError({
+        code: "forbidden",
+        message: `Project ${scope.app.projectId} does not belong to ${scope.app.appId}.`,
+      });
+    }
+    const running = Option.getOrUndefined(
+      yield* projection.getRunningTurnContext(scope.thread.threadId).pipe(Effect.option),
+    );
+    return {
+      meta: {
+        projectId: scope.app.projectId,
+        threadId: scope.thread.threadId,
+        workspaceRoot: binding.value.workspaceRoot,
+        turnId: running?.providerTurn?.id ?? null,
+      } satisfies AppToolContextMeta,
+      runModelSelection: running?.run?.modelSelection,
+    };
+  });
 
-  const call: AppToolkit["Service"]["call"] = (invocation, name, args, meta) =>
-    Effect.gen(function* () {
+  const call: AppToolkit["Service"]["call"] = Effect.fn("AppToolkit.call")(
+    function* (invocation, name, args, meta) {
       const scope = appInvocationScope(invocation);
       if (scope === undefined) {
         return yield* new AppsError({
@@ -318,74 +320,73 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         });
       // The user can change the app's ceiling and the thread's mode while a
       // call waits on them or on the app, so later decisions read both again.
-      const gateNow = (stage: AppToolGate.AppToolGateInput["stage"]) =>
-        Effect.gen(function* () {
-          const current = yield* requireGranted;
-          return gate(stage, current.status.runtimeCeiling, yield* resolvePolicy);
-        });
-      const approve = (
+      const gateNow = Effect.fn("AppToolkit.gateNow")(function* (
+        stage: AppToolGate.AppToolGateInput["stage"],
+      ) {
+        const current = yield* requireGranted;
+        return gate(stage, current.status.runtimeCeiling, yield* resolvePolicy);
+      });
+      const approve = Effect.fn("AppToolkit.approve")(function* (
         decision: AppToolGate.AppToolGateDecision,
         source: "static" | "app",
         reason: string | null,
-      ) =>
-        Effect.gen(function* () {
-          switch (decision.kind) {
-            case "refuse":
-              return { refused: decision.reason } as const;
-            case "forward":
-              return { approval: { approved: decision.approved } satisfies AppToolApprovalMeta };
-            case "ask": {
-              const answer = yield* extensions.requestApproval({
-                scope,
-                info: { appId, appName: registration.name, toolName: name, reason, source },
-              });
-              return answer.approved
-                ? {
-                    approval: {
-                      approved: true,
-                      requestId: answer.requestId,
-                    } satisfies AppToolApprovalMeta,
-                  }
-                : ({ refused: answer.message } as const);
-            }
+      ) {
+        switch (decision.kind) {
+          case "refuse":
+            return { refused: decision.reason } as const;
+          case "forward":
+            return { approval: { approved: decision.approved } satisfies AppToolApprovalMeta };
+          case "ask": {
+            const answer = yield* extensions.requestApproval({
+              scope,
+              info: { appId, appName: registration.name, toolName: name, reason, source },
+            });
+            return answer.approved
+              ? {
+                  approval: {
+                    approved: true,
+                    requestId: answer.requestId,
+                  } satisfies AppToolApprovalMeta,
+                }
+              : ({ refused: answer.message } as const);
           }
-        });
+        }
+      });
 
-      const forward = (
+      const forward = Effect.fn("AppToolkit.forward")(function* (
         approval: AppToolApprovalMeta,
         stage: AppToolGate.AppToolGateInput["stage"],
-      ) =>
-        Effect.gen(function* () {
-          const request: AppToolCallRequest = {
-            name: bare,
-            arguments: args,
-            meta: {
-              ...withoutLecturnKeys(meta),
-              [APP_TOOL_CONTEXT_META_KEY]: context.meta,
-              [APP_TOOL_APPROVAL_META_KEY]: approval,
-            },
+      ) {
+        const request: AppToolCallRequest = {
+          name: bare,
+          arguments: args,
+          meta: {
+            ...withoutLecturnKeys(meta),
+            [APP_TOOL_CONTEXT_META_KEY]: context.meta,
+            [APP_TOOL_APPROVAL_META_KEY]: approval,
+          },
+        };
+        // An approval can wait for minutes, so everything read before it is
+        // stale: an app revoked or closed meanwhile is not contacted, and an
+        // approved call is gated again on the ceiling and mode it has now.
+        if (approval.requestId === undefined) {
+          yield* requireGranted;
+        } else {
+          const decision = yield* gateNow(stage);
+          if (decision.kind === "refuse") return { request, refused: decision.reason } as const;
+        }
+        if (appTool.tier === "headless") {
+          return { request, result: yield* headless.call(appId, projectId, request) };
+        }
+        const current = yield* leases.current(appId);
+        if (Option.isNone(current)) {
+          return {
+            request,
+            result: errorResult(`${registration.name} is closed; open it to use ${name}.`),
           };
-          // An approval can wait for minutes, so everything read before it is
-          // stale: an app revoked or closed meanwhile is not contacted, and an
-          // approved call is gated again on the ceiling and mode it has now.
-          if (approval.requestId === undefined) {
-            yield* requireGranted;
-          } else {
-            const decision = yield* gateNow(stage);
-            if (decision.kind === "refuse") return { request, refused: decision.reason } as const;
-          }
-          if (appTool.tier === "headless") {
-            return { request, result: yield* headless.call(appId, projectId, request) };
-          }
-          const current = yield* leases.current(appId);
-          if (Option.isNone(current)) {
-            return {
-              request,
-              result: errorResult(`${registration.name} is closed; open it to use ${name}.`),
-            };
-          }
-          return { request, result: yield* live.call(current.value, request) };
-        });
+        }
+        return { request, result: yield* live.call(current.value, request) };
+      });
 
       // A refused call still gets its card, shown as cancelled.
       const refuse = (request: AppToolCallRequest, reason: string) =>
@@ -436,7 +437,8 @@ export const makeAppToolkit = Effect.fn("AppToolkit.make")(function* (
         request: sent.request,
         result: sanitizeResult(sent.result),
       });
-    });
+    },
+  );
 
   return AppToolkit.of({ listFor, call });
 });

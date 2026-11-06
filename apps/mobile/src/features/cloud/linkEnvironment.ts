@@ -156,134 +156,134 @@ type LinkEnvironmentToCloudRequirements =
   | ManagedRelay.ManagedRelayClient
   | MobileStorage.MobileStorage;
 
-export function linkEnvironmentToCloudWithPreference(
+export const linkEnvironmentToCloudWithPreference = Effect.fn(
+  "linkEnvironment.linkEnvironmentToCloudWithPreference",
+)(function* (
   input: LinkEnvironmentToCloudInput & { readonly liveActivitiesEnabled: boolean },
-): Effect.Effect<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
-  return Effect.gen(function* () {
-    if (!input.connection.bearerToken) {
-      return yield* new CloudEnvironmentLinkError({
-        message: "Only a locally paired bearer connection can be linked to the cloud.",
-      });
-    }
-    const localBearerToken = input.connection.bearerToken;
-    const environmentClient = yield* makeEnvironmentHttpApiClient(input.connection.httpBaseUrl);
-    const host = yield* environmentClient.connect
-      .linkState({ headers: { authorization: `Bearer ${localBearerToken}` } })
-      .pipe(
-        Effect.mapError(
-          cloudEnvironmentLinkError("Could not check the environment's owning account."),
-        ),
-      );
-    const owner = host.cloudUserId ?? input.connection.accountId ?? input.accountId;
-    const ownerAccountId = owner;
-    if (!owner)
-      return yield* new CloudEnvironmentLinkError({
-        message: "Choose a Connect account before linking this environment.",
-      });
-    const token = yield* Effect.tryPromise({
-      try: accountTokenReader(owner),
-      catch: cloudEnvironmentLinkError("Could not read the environment owner's token."),
+): Effect.fn.Return<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
+  if (!input.connection.bearerToken) {
+    return yield* new CloudEnvironmentLinkError({
+      message: "Only a locally paired bearer connection can be linked to the cloud.",
     });
-    if (!token)
-      return yield* new CloudEnvironmentLinkError({
-        message: "Sign in to the environment's owning account before changing Live Activities.",
-      });
-    const clerkToken = token;
-    const relayUrl = yield* requireRelayUrl();
-    const relayClient = yield* ManagedRelay.ManagedRelayClient;
-    const storage = yield* MobileStorage.MobileStorage;
-    const deviceId = yield* storage.loadOrCreateAgentAwarenessDeviceId.pipe(
-      Effect.mapError(cloudEnvironmentLinkError("Could not load the mobile device id.")),
+  }
+  const localBearerToken = input.connection.bearerToken;
+  const environmentClient = yield* makeEnvironmentHttpApiClient(input.connection.httpBaseUrl);
+  const host = yield* environmentClient.connect
+    .linkState({ headers: { authorization: `Bearer ${localBearerToken}` } })
+    .pipe(
+      Effect.mapError(
+        cloudEnvironmentLinkError("Could not check the environment's owning account."),
+      ),
     );
-    const funding = teamLinkFunding(clerkToken);
-    let notificationsEnabled = true;
-    if (funding.organizationId) {
-      const teams = yield* Effect.tryPromise({
-        try: () => createTeamsClient({ relayUrl, getToken: async () => clerkToken }).list(),
-        catch: cloudEnvironmentLinkError("Could not check company publishing policy."),
-      });
-      const company = teams.organizations.find(
-        (org) => org.organizationId === funding.organizationId,
-      );
-      if (!company?.hasAccess)
-        return yield* new CloudEnvironmentLinkError({
-          message: "Company Connect access is not active.",
-        });
-      notificationsEnabled = company.policy.publishAgentActivity;
-    }
-    const liveActivitiesEnabled = input.liveActivitiesEnabled && notificationsEnabled;
-    const challenge = yield* relayClient
-      .createEnvironmentLinkChallenge({
-        clerkToken: clerkToken,
-        payload: {
-          notificationsEnabled,
-          liveActivitiesEnabled,
-          managedTunnelsEnabled: true,
-        },
-      })
-      .pipe(
-        Effect.mapError(
-          decodedRelayClientError(`${relayUrl}/v1/client/environment-link-challenges failed`),
-        ),
-      );
-    const proof = yield* environmentClient.connect
-      .linkProof({
-        headers: { authorization: `Bearer ${localBearerToken}` },
-        payload: {
-          challenge: challenge.challenge,
-          relayIssuer: relayUrl,
-          endpoint: {
-            httpBaseUrl: input.connection.httpBaseUrl,
-            wsBaseUrl: input.connection.wsBaseUrl,
-            providerKind: MANAGED_ENDPOINT_PROVIDER_KIND,
-          },
-          origin: endpointOrigin(input.connection.httpBaseUrl),
-        },
-      })
-      .pipe(Effect.mapError(cloudEnvironmentLinkError("Could not obtain environment link proof.")));
-    const link = yield* relayClient
-      .linkEnvironment({
-        clerkToken: clerkToken,
-        payload: {
-          deviceId,
-          ...funding,
-          proof,
-          notificationsEnabled,
-          liveActivitiesEnabled,
-          managedTunnelsEnabled: true,
-        },
-      })
-      .pipe(
-        Effect.mapError(decodedRelayClientError(`${relayUrl}/v1/client/environment-links failed`)),
-      );
-    if (ownerAccountId && link.cloudUserId !== ownerAccountId)
-      return yield* new CloudEnvironmentLinkError({
-        message: "Relay returned link credentials for a different account.",
-      });
-    yield* ensureLinkedEnvironmentMatches({
-      expectedEnvironmentId: input.connection.environmentId,
-      expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
-      link,
+  const owner = host.cloudUserId ?? input.connection.accountId ?? input.accountId;
+  const ownerAccountId = owner;
+  if (!owner)
+    return yield* new CloudEnvironmentLinkError({
+      message: "Choose a Connect account before linking this environment.",
     });
-
-    yield* environmentClient.connect
-      .relayConfig({
-        headers: { authorization: `Bearer ${localBearerToken}` },
-        payload: {
-          relayUrl,
-          relayIssuer: link.relayIssuer,
-          cloudUserId: link.cloudUserId,
-          ...(link.organizationId ? { organizationId: link.organizationId } : {}),
-          environmentCredential: link.environmentCredential,
-          cloudMintPublicKey: link.cloudMintPublicKey,
-          endpointRuntime: link.endpointRuntime,
-        },
-      })
-      .pipe(
-        Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
-      );
+  const token = yield* Effect.tryPromise({
+    try: accountTokenReader(owner),
+    catch: cloudEnvironmentLinkError("Could not read the environment owner's token."),
   });
-}
+  if (!token)
+    return yield* new CloudEnvironmentLinkError({
+      message: "Sign in to the environment's owning account before changing Live Activities.",
+    });
+  const clerkToken = token;
+  const relayUrl = yield* requireRelayUrl();
+  const relayClient = yield* ManagedRelay.ManagedRelayClient;
+  const storage = yield* MobileStorage.MobileStorage;
+  const deviceId = yield* storage.loadOrCreateAgentAwarenessDeviceId.pipe(
+    Effect.mapError(cloudEnvironmentLinkError("Could not load the mobile device id.")),
+  );
+  const funding = teamLinkFunding(clerkToken);
+  let notificationsEnabled = true;
+  if (funding.organizationId) {
+    const teams = yield* Effect.tryPromise({
+      try: () => createTeamsClient({ relayUrl, getToken: async () => clerkToken }).list(),
+      catch: cloudEnvironmentLinkError("Could not check company publishing policy."),
+    });
+    const company = teams.organizations.find(
+      (org) => org.organizationId === funding.organizationId,
+    );
+    if (!company?.hasAccess)
+      return yield* new CloudEnvironmentLinkError({
+        message: "Company Connect access is not active.",
+      });
+    notificationsEnabled = company.policy.publishAgentActivity;
+  }
+  const liveActivitiesEnabled = input.liveActivitiesEnabled && notificationsEnabled;
+  const challenge = yield* relayClient
+    .createEnvironmentLinkChallenge({
+      clerkToken: clerkToken,
+      payload: {
+        notificationsEnabled,
+        liveActivitiesEnabled,
+        managedTunnelsEnabled: true,
+      },
+    })
+    .pipe(
+      Effect.mapError(
+        decodedRelayClientError(`${relayUrl}/v1/client/environment-link-challenges failed`),
+      ),
+    );
+  const proof = yield* environmentClient.connect
+    .linkProof({
+      headers: { authorization: `Bearer ${localBearerToken}` },
+      payload: {
+        challenge: challenge.challenge,
+        relayIssuer: relayUrl,
+        endpoint: {
+          httpBaseUrl: input.connection.httpBaseUrl,
+          wsBaseUrl: input.connection.wsBaseUrl,
+          providerKind: MANAGED_ENDPOINT_PROVIDER_KIND,
+        },
+        origin: endpointOrigin(input.connection.httpBaseUrl),
+      },
+    })
+    .pipe(Effect.mapError(cloudEnvironmentLinkError("Could not obtain environment link proof.")));
+  const link = yield* relayClient
+    .linkEnvironment({
+      clerkToken: clerkToken,
+      payload: {
+        deviceId,
+        ...funding,
+        proof,
+        notificationsEnabled,
+        liveActivitiesEnabled,
+        managedTunnelsEnabled: true,
+      },
+    })
+    .pipe(
+      Effect.mapError(decodedRelayClientError(`${relayUrl}/v1/client/environment-links failed`)),
+    );
+  if (ownerAccountId && link.cloudUserId !== ownerAccountId)
+    return yield* new CloudEnvironmentLinkError({
+      message: "Relay returned link credentials for a different account.",
+    });
+  yield* ensureLinkedEnvironmentMatches({
+    expectedEnvironmentId: input.connection.environmentId,
+    expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
+    link,
+  });
+
+  yield* environmentClient.connect
+    .relayConfig({
+      headers: { authorization: `Bearer ${localBearerToken}` },
+      payload: {
+        relayUrl,
+        relayIssuer: link.relayIssuer,
+        cloudUserId: link.cloudUserId,
+        ...(link.organizationId ? { organizationId: link.organizationId } : {}),
+        environmentCredential: link.environmentCredential,
+        cloudMintPublicKey: link.cloudMintPublicKey,
+        endpointRuntime: link.endpointRuntime,
+      },
+    })
+    .pipe(
+      Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
+    );
+});
 
 function teamLinkFunding(token: string): { organizationId?: string } {
   try {

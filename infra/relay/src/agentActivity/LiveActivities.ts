@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 import { claimPushToken, displacedTokenRows } from "./PushTokenClaims.ts";
 import * as RelayDb from "../db.ts";
@@ -46,6 +46,18 @@ export class LiveActivityTargetListPersistenceError extends Schema.TaggedError<L
 ) {
   override get message(): string {
     return `Failed to list Live Activity delivery targets for user ${this.userId}.`;
+  }
+}
+
+export class LiveActivityIdleTargetListPersistenceError extends Schema.TaggedError<LiveActivityIdleTargetListPersistenceError>()(
+  "LiveActivityIdleTargetListPersistenceError",
+  {
+    deliveredBefore: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to list idle Live Activities delivered before ${this.deliveredBefore}.`;
   }
 }
 
@@ -108,6 +120,12 @@ export class LiveActivities extends Context.Service<
     readonly listTargets: (input: {
       readonly userId: string;
     }) => Effect.Effect<ReadonlyArray<TargetRow>, LiveActivityTargetListPersistenceError>;
+    readonly listIdleArmedTargets: (input: {
+      readonly deliveredBefore: string;
+    }) => Effect.Effect<
+      ReadonlyArray<{ readonly user_id: string; readonly device_id: string }>,
+      LiveActivityIdleTargetListPersistenceError
+    >;
     readonly markDelivery: (input: {
       readonly userId: string;
       readonly deviceId: string;
@@ -319,6 +337,32 @@ export const make = Effect.gen(function* () {
           ),
         );
     }),
+
+    listIdleArmedTargets: Effect.fn("relay.live_activities.list_idle_armed_targets")(
+      function* (input) {
+        return yield* db
+          .select({
+            user_id: relayLiveActivities.userId,
+            device_id: relayLiveActivities.deviceId,
+          })
+          .from(relayLiveActivities)
+          .where(
+            and(
+              isNotNull(relayLiveActivities.activityPushToken),
+              sql`coalesce(${relayLiveActivities.lastLiveActivityDeliveryAt}, ${relayLiveActivities.remoteStartedAt}, ${relayLiveActivities.updatedAt}) < ${input.deliveredBefore}`,
+            ),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new LiveActivityIdleTargetListPersistenceError({
+                  deliveredBefore: input.deliveredBefore,
+                  cause,
+                }),
+            ),
+          );
+      },
+    ),
 
     markDelivery: Effect.fn("relay.live_activities.mark_delivery")(function* (input) {
       yield* Effect.annotateCurrentSpan({

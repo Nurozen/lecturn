@@ -39,46 +39,46 @@ const eventOf = (transition: LeadItemTransition, card: LeadItemCard): SquireEven
  * active Lead, the card is FYI or the Lead's own, or the row already exists
  * (a retried transition).
  */
-export const writeLeadItemEvent = (
+export const writeLeadItemEvent = Effect.fn("squireLeadItems.writeLeadItemEvent")(function* (
   repository: SquireRepository.SquireRepository["Service"],
   input: {
     readonly transition: LeadItemTransition;
     readonly card: LeadItemCard;
     readonly now: string;
   },
-) =>
-  Effect.gen(function* () {
-    const { transition, card, now } = input;
-    if (card.kind === "fyi") return Option.none<SquireId>();
-    const lead = yield* repository.getLead;
-    if (Option.isNone(lead) || lead.value.status !== "active") return Option.none<SquireId>();
-    if (card.squire_id === lead.value.id) return Option.none<SquireId>();
-    const inserted = yield* repository.insertTriggerEvent({
-      squire_id: lead.value.id,
-      thread_id: null,
-      kind: `item-${transition}`,
-      state_key: `${card.id}:${transition}`,
-      payload_json: encodeJson(eventOf(transition, card)),
-      status: "pending",
-      defer_reason: null,
-      not_before: now,
-      batch_id: null,
-      created_at: now,
-    });
-    return Option.as(inserted, lead.value.id);
+) {
+  const { transition, card, now } = input;
+  if (card.kind === "fyi") return Option.none<SquireId>();
+  const lead = yield* repository.getLead;
+  if (Option.isNone(lead) || lead.value.status !== "active") return Option.none<SquireId>();
+  if (card.squire_id === lead.value.id) return Option.none<SquireId>();
+  const inserted = yield* repository.insertTriggerEvent({
+    squire_id: lead.value.id,
+    thread_id: null,
+    kind: `item-${transition}`,
+    state_key: `${card.id}:${transition}`,
+    payload_json: encodeJson(eventOf(transition, card)),
+    status: "pending",
+    defer_reason: null,
+    not_before: now,
+    batch_id: null,
+    created_at: now,
   });
+  return Option.as(inserted, lead.value.id);
+});
 
 /** The item-resolved rows for cards that just left open/held; the Lead to wake, if any. */
-export const writeLeadItemsResolved = (
-  repository: SquireRepository.SquireRepository["Service"],
-  cards: Iterable<LeadItemCard>,
-  now: string,
-) =>
-  Effect.gen(function* () {
+export const writeLeadItemsResolved = Effect.fn("squireLeadItems.writeLeadItemsResolved")(
+  function* (
+    repository: SquireRepository.SquireRepository["Service"],
+    cards: Iterable<LeadItemCard>,
+    now: string,
+  ) {
     let woken = Option.none<SquireId>();
     for (const card of cards) {
       const lead = yield* writeLeadItemEvent(repository, { transition: "resolved", card, now });
       if (Option.isSome(lead)) woken = lead;
     }
     return woken;
-  });
+  },
+);

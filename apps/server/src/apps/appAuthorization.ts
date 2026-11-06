@@ -98,6 +98,8 @@ type AppRpcTable = { readonly [M in WsRpcMethod]?: AppRpcRule<PayloadOf<M>> };
 const EMBED_COMMAND_TYPES: ReadonlySet<OrchestrationV2Command["type"]> = new Set([
   "message.dispatch",
   "run.interrupt",
+  // Stop without a run id (the chat's Stop button) also ends the thread's background work.
+  "thread.stop",
   "queued-run.cancel",
   "queued-run.edit",
   "queued-run.reorder",

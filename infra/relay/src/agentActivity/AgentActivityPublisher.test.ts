@@ -2,6 +2,7 @@ import type { RelayAgentActivityState, RelayDeliveryResult } from "@lecturn/cont
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
@@ -11,15 +12,24 @@ import * as FcmDeliveries from "./FcmDeliveries.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
 import { TeamRuntime } from "../teams/TeamRuntime.ts";
 import { TeamError } from "../teams/TeamStore.ts";
+import {
+  layerDisabled,
+  ManagedAccess,
+  ManagedAccessRequired,
+  ManagedAccessUnavailable,
+} from "../billing/ManagedAccess.ts";
 
-const layerPublisher = AgentActivityPublisher.layer.pipe(
-  Layer.provide(
-    Layer.succeed(FcmDeliveries.FcmDeliveries, {
-      enqueue: () => Effect.succeed(null),
-      process: () => Effect.void,
-    }),
-  ),
-);
+const layerPublisherWithAccess = (access: Layer.Layer<ManagedAccess> = layerDisabled) =>
+  AgentActivityPublisher.layer.pipe(
+    Layer.provide(
+      Layer.succeed(FcmDeliveries.FcmDeliveries, {
+        enqueue: () => Effect.succeed(null),
+        process: () => Effect.void,
+      }),
+    ),
+    Layer.provide(access),
+  );
+const layerPublisher = layerPublisherWithAccess();
 
 const state: RelayAgentActivityState = {
   environmentId: "env" as RelayAgentActivityState["environmentId"],
@@ -61,6 +71,7 @@ function makeLiveActivities(
   return {
     register: () => Effect.void,
     listTargets: () => Effect.succeed([]),
+    listIdleArmedTargets: () => Effect.succeed([]),
     markDelivery: () => Effect.void,
     withPushNotificationLock: (target, use) => use(target),
     markPushNotified: () => Effect.void,
@@ -170,6 +181,7 @@ describe("AgentActivityPublisher", () => {
     }).pipe(
       Effect.provide(
         AgentActivityPublisher.layer.pipe(
+          Layer.provide(layerDisabled),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
@@ -274,6 +286,127 @@ describe("AgentActivityPublisher", () => {
       });
     });
   });
+
+  it.effect("ends an idle card after finished work ages out without another publish", () => {
+    const sent: Array<Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]> =
+      [];
+    let activeStates: ReadonlyArray<RelayAgentActivityState> = [state];
+    const endIdle = AgentActivityPublisher.AgentActivityPublisher.pipe(
+      Effect.flatMap((publisher) => publisher.endIdleLiveActivities),
+      Effect.provide(
+        layerPublisher.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(
+                AgentActivityRows.AgentActivityRows,
+                makeAgentActivityRows({ listForUser: () => Effect.sync(() => activeStates) }),
+              ),
+              Layer.succeed(EnvironmentLinks.EnvironmentLinks, makeEnvironmentLinks()),
+              Layer.succeed(
+                LiveActivities.LiveActivities,
+                makeLiveActivities({
+                  listIdleArmedTargets: () =>
+                    Effect.succeed([{ user_id: "dev:julius", device_id: "device-1" }]),
+                  listTargets: () =>
+                    Effect.succeed([
+                      { ...target("device-1"), activity_push_token: "activity-token" },
+                      target("device-2"),
+                    ]),
+                }),
+              ),
+              Layer.succeed(
+                ApnsDeliveries.ApnsDeliveries,
+                makeApnsDeliveries({
+                  sendForTarget: (input) =>
+                    Effect.sync(() => {
+                      sent.push(input);
+                      return null;
+                    }),
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      yield* TestClock.adjust("1 hour");
+      yield* endIdle;
+      expect(sent).toEqual([]);
+
+      activeStates = [{ ...state, phase: "completed", updatedAt: "1970-01-01T01:00:00.000Z" }];
+      yield* TestClock.adjust("15 minutes");
+      yield* endIdle;
+      expect(sent).toEqual([]);
+
+      yield* TestClock.adjust("5 minutes");
+      yield* endIdle;
+      expect(sent).toMatchObject([
+        { target: { device_id: "device-1" }, aggregate: null, publishingEnvironmentId: null },
+      ]);
+    });
+  });
+
+  it.effect.each([
+    { access: "revoked", ends: true },
+    { access: "unavailable", ends: false },
+  ] as const)(
+    "ends an idle card whose content is $access only when access is lost",
+    ({ access, ends }) => {
+      const sent: Array<Parameters<ApnsDeliveries.ApnsDeliveries["Service"]["sendForTarget"]>[0]> =
+        [];
+      return AgentActivityPublisher.AgentActivityPublisher.pipe(
+        Effect.flatMap((publisher) => publisher.endIdleLiveActivities),
+        Effect.andThen(
+          Effect.sync(() => {
+            expect(sent).toMatchObject(
+              ends ? [{ target: { device_id: "device-1" }, aggregate: null }] : [],
+            );
+          }),
+        ),
+        Effect.provide(
+          layerPublisherWithAccess(
+            Layer.succeed(ManagedAccess, {
+              check: () =>
+                access === "revoked"
+                  ? Effect.fail(new ManagedAccessRequired({ message: "Company seat removed" }))
+                  : Effect.fail(new ManagedAccessUnavailable({ message: "Billing unavailable" })),
+            }),
+          ).pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                // Running work the user can no longer see must not hold the card.
+                Layer.succeed(AgentActivityRows.AgentActivityRows, makeAgentActivityRows()),
+                Layer.succeed(EnvironmentLinks.EnvironmentLinks, makeEnvironmentLinks()),
+                Layer.succeed(
+                  LiveActivities.LiveActivities,
+                  makeLiveActivities({
+                    listIdleArmedTargets: () =>
+                      Effect.succeed([{ user_id: "dev:julius", device_id: "device-1" }]),
+                    listTargets: () =>
+                      Effect.succeed([
+                        { ...target("device-1"), activity_push_token: "activity-token" },
+                      ]),
+                  }),
+                ),
+                Layer.succeed(
+                  ApnsDeliveries.ApnsDeliveries,
+                  makeApnsDeliveries({
+                    sendForTarget: (input) =>
+                      Effect.sync(() => {
+                        sent.push(input);
+                        return null;
+                      }),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 
   it.effect("publishes listed targets through the APNs delivery service", () => {
     const firstTarget = target("device-1");

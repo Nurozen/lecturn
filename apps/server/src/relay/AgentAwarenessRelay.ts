@@ -125,6 +125,7 @@ export function shouldPublishAgentAwarenessEvent(
     case "thread.metadata-updated":
     case "thread.pull-request-link-updated":
     case "thread.pull-request-synced":
+    case "thread.settled":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
     case "thread.imported":
@@ -134,7 +135,7 @@ export function shouldPublishAgentAwarenessEvent(
     case "subagent.updated":
     case "provider-thread.updated":
       return true;
-    case "thread.settled":
+    // Unsettling must not re-alert a dismissed result.
     case "thread.unsettled":
     case "thread.snoozed":
     case "thread.unsnoozed":
@@ -485,8 +486,8 @@ export const make = Effect.gen(function* () {
   const cloudLinkKeyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const startedAt = (yield* DateTime.now).epochMilliseconds;
   // The contracts Project carries no app binding, so it is read from the store.
-  const withAppTitle = (project: Option.Option<Project>) =>
-    Effect.gen(function* () {
+  const withAppTitle = Effect.fn("AgentAwarenessRelay.withAppTitle")(
+    function* (project: Option.Option<Project>) {
       if (Option.isNone(project)) return project;
       const row = yield* projectStore.get(project.value.id);
       const binding = Option.getOrUndefined(row)?.appBinding;
@@ -497,15 +498,18 @@ export const make = Effect.gen(function* () {
         ...project.value,
         title: appProjectTitle(record.value.registration.name, project.value.title),
       });
-    }).pipe(
-      // A missing app name must never cost the user the push.
-      Effect.catch((cause) =>
-        Effect.logWarning("agent activity could not read the project's connected app", {
-          projectId: Option.getOrUndefined(project)?.id,
-          cause,
-        }).pipe(Effect.as(project)),
+    },
+    // A missing app name must never cost the user the push.
+    (effect, project) =>
+      effect.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("agent activity could not read the project's connected app", {
+            projectId: Option.getOrUndefined(project)?.id,
+            cause,
+          }).pipe(Effect.as(project)),
+        ),
       ),
-    );
+  );
   const activeSnapshotPublishedRef = yield* Ref.make(false);
   const catchUpRequests = yield* Queue.dropping<void>(1);
   const publishedStateByThreadRef = yield* Ref.make(new Map<ThreadId, string>());
@@ -571,8 +575,10 @@ export const make = Effect.gen(function* () {
   );
   let schedulePublishRetry: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
   // Until the retries give up, a Squire's intents stay owed: a later success records them.
-  const settleSquireIntentsUndelivered = (threadId: ThreadId) =>
-    Effect.gen(function* () {
+  const settleSquireIntentsUndelivered = Effect.fn(
+    "AgentAwarenessRelay.settleSquireIntentsUndelivered",
+  )(
+    function* (threadId: ThreadId) {
       if (Option.isNone(squireAttention)) return;
       const attention = squireAttention.value;
       if (!(yield* attention.isHomeThread(threadId))) return;
@@ -581,14 +587,17 @@ export const make = Effect.gen(function* () {
       if (Option.isSome(row)) {
         yield* attention.record(row.value, { kind: "no_transport", reason: "failed" });
       }
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Squire intents could not be marked undelivered", {
-          threadId,
-          cause: Cause.pretty(cause),
-        }),
+    },
+    (effect, threadId) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire intents could not be marked undelivered", {
+            threadId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
       ),
-    );
+  );
   /** Startup and link catch-up: every Squire row, tombstones included, and owed intents. */
   const enqueueSquireRows = Effect.gen(function* () {
     if (Option.isNone(squireAttention)) return;
@@ -654,68 +663,70 @@ export const make = Effect.gen(function* () {
     relayConfig: NonNullable<Effect.Success<typeof readRelayConfig>>,
     environmentId: EnvironmentId,
     threadId: ThreadId,
-  ) =>
-    function publishState(input: {
+  ) => {
+    const publishState = Effect.fn("relay.agent_activity.publish")(function* (input: {
       readonly projectId: string | null;
       readonly state: RelayAgentActivityState | null;
       readonly reason: string;
       /** Squire rows: presence hold-back is SquirePresence's, so the relay always rings. */
       readonly ringWhilePresent?: boolean;
     }) {
-      return Effect.gen(function* () {
-        if (cachedRelayClient === undefined) {
-          cachedRelayClient = yield* makeRelayClient(relayConfig);
-        }
-        const relayClient = cachedRelayClient;
-        const userPresent =
-          input.ringWhilePresent === true ? false : yield* backgroundPolicy.isUserPresent;
-        const proof = yield* makePublishProof({
-          privateKey: cloudLinkKeyPair.privateKey,
-          relayIssuer: relayConfig.issuer,
-          environmentId,
-          threadId,
-          state: input.state,
-          jti: yield* crypto.randomUUIDv4(),
-        });
+      if (cachedRelayClient === undefined) {
+        cachedRelayClient = yield* makeRelayClient(relayConfig);
+      }
+      const relayClient = cachedRelayClient;
+      const userPresent =
+        input.ringWhilePresent === true ? false : yield* backgroundPolicy.isUserPresent;
+      const proof = yield* makePublishProof({
+        privateKey: cloudLinkKeyPair.privateKey,
+        relayIssuer: relayConfig.issuer,
+        environmentId,
+        threadId,
+        state: input.state,
+        jti: yield* crypto.randomUUIDv4(),
+      });
 
-        yield* Effect.logInfo("publishing agent activity for thread", {
-          environmentId,
-          threadId,
-          projectId: input.projectId,
-          statePhase: input.state?.phase ?? null,
-          hasState: input.state !== null,
-          reason: input.reason,
-          userPresent,
-        });
+      yield* Effect.logInfo("publishing agent activity for thread", {
+        environmentId,
+        threadId,
+        projectId: input.projectId,
+        statePhase: input.state?.phase ?? null,
+        hasState: input.state !== null,
+        reason: input.reason,
+        userPresent,
+      });
 
-        const response = yield* relayClient.server
-          .publishAgentActivity({
-            params: {
-              environmentId,
-              threadId,
-            },
-            payload: {
-              state: input.state,
-              proof,
-              userPresent,
-            },
-          })
-          .pipe(Effect.timeout("10 seconds"));
+      const response = yield* relayClient.server
+        .publishAgentActivity({
+          params: {
+            environmentId,
+            threadId,
+          },
+          payload: {
+            state: input.state,
+            proof,
+            userPresent,
+          },
+        })
+        .pipe(Effect.timeout("10 seconds"));
 
-        yield* Effect.logInfo("agent activity publish completed", {
-          environmentId,
-          threadId,
-          ok: response.ok,
-          deliveries: deliveryStats(response.deliveries),
-        });
+      yield* Effect.logInfo("agent activity publish completed", {
+        environmentId,
+        threadId,
+        ok: response.ok,
+        deliveries: deliveryStats(response.deliveries),
+      });
 
-        if (userPresent && input.state !== null && RING_ELIGIBLE_PHASES.has(input.state.phase)) {
-          suppressedRingThreadIds.add(threadId);
-        } else {
-          suppressedRingThreadIds.delete(threadId);
-        }
-      }).pipe(Effect.withSpan("relay.agent_activity.publish"), withRelayClientTracing);
-    };
+      if (userPresent && input.state !== null && RING_ELIGIBLE_PHASES.has(input.state.phase)) {
+        suppressedRingThreadIds.add(threadId);
+      } else {
+        suppressedRingThreadIds.delete(threadId);
+      }
+    });
+    // Wrapping the call, not the body, exports the publish span itself through the relay tracer.
+    return (input: Parameters<typeof publishState>[0]) =>
+      publishState(input).pipe(withRelayClientTracing);
+  };
 
   // One row per Squire, keyed by its home thread. SquireMobileAttention
   // owns the attention set and the delivery rows; this publishes and reports.
@@ -1019,31 +1030,33 @@ export const make = Effect.gen(function* () {
 
   // Many environments never link, so while unlinked the retry backs off from
   // 5 s to 60 s. A linked environment keeps the 5 s retry, because
-  // `lecturn connect publish` can turn publishing on from another process.
-  const publishActiveThreadsOnceWhenConfigured = (logEnabledWhenReady: boolean) =>
-    Effect.gen(function* () {
-      let unlinkedRetryDelayMs = 5_000;
-      while (!(yield* Ref.get(activeSnapshotPublishedRef))) {
-        const result = yield* publishActiveThreadsUnsafe.pipe(
-          Effect.orElseSucceed(() => "failed" as const),
-        );
-        if (result === "published") {
-          yield* Ref.set(activeSnapshotPublishedRef, true);
-          if (logEnabledWhenReady) {
-            const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
-            yield* Effect.logInfo("agent activity publishing enabled after link reconciliation", {
-              relayUrl: relayConfig?.url,
-            });
-          }
-          return;
+  // `lecturn connect publish` can turn publishing on from another process. Keep
+  // this untraced: an unlinked environment can retry for the lifetime of the process.
+  const publishActiveThreadsOnceWhenConfigured = Effect.fnUntraced(function* (
+    logEnabledWhenReady: boolean,
+  ) {
+    let unlinkedRetryDelayMs = 5_000;
+    while (!(yield* Ref.get(activeSnapshotPublishedRef))) {
+      const result = yield* publishActiveThreadsUnsafe.pipe(
+        Effect.orElseSucceed(() => "failed" as const),
+      );
+      if (result === "published") {
+        yield* Ref.set(activeSnapshotPublishedRef, true);
+        if (logEnabledWhenReady) {
+          const relayConfig = yield* readRelayConfig.pipe(Effect.orElseSucceed(() => null));
+          yield* Effect.logInfo("agent activity publishing enabled after link reconciliation", {
+            relayUrl: relayConfig?.url,
+          });
         }
-        const retryDelayMs = result === "unlinked" ? unlinkedRetryDelayMs : 5_000;
-        yield* Effect.race(Effect.sleep(retryDelayMs), Queue.take(catchUpRequests));
-        if (result === "unlinked") {
-          unlinkedRetryDelayMs = Math.min(unlinkedRetryDelayMs * 2, 60_000);
-        }
+        return;
       }
-    });
+      const retryDelayMs = result === "unlinked" ? unlinkedRetryDelayMs : 5_000;
+      yield* Effect.race(Effect.sleep(retryDelayMs), Queue.take(catchUpRequests));
+      if (result === "unlinked") {
+        unlinkedRetryDelayMs = Math.min(unlinkedRetryDelayMs * 2, 60_000);
+      }
+    }
+  });
 
   const redeliverSuppressedRings = Effect.gen(function* () {
     if (suppressedRingThreadIds.size === 0 || (yield* backgroundPolicy.isUserPresent)) return;

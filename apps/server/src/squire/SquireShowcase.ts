@@ -361,149 +361,145 @@ const make = Effect.gen(function* () {
       .get(projectId, { includeDeleted: true })
       .pipe(Effect.map(Option.match({ onNone: () => "", onSome: (row) => row.title })));
 
-  const threadInput = ({
+  const threadInput = Effect.fn("SquireShowcase.threadInput")(function* ({
     shell,
     watchers,
   }: {
     readonly shell: OrchestrationV2ThreadShell;
     readonly watchers: number;
-  }) =>
-    Effect.gen(function* () {
-      const summaries = yield* repository.listThreadSummaries({
-        threadId: shell.id,
-        limit: SUMMARIES_PER_THREAD,
-      });
-      const files = summaries.flatMap((row) =>
-        Option.match(decodeSummary(row.summary_json), {
-          onNone: () => [],
-          onSome: (summary) => summary.files.entries.map((entry) => entry.path),
-        }),
-      );
-      return {
-        id: shell.id,
-        title: shell.title,
-        project: yield* projectTitle(shell.projectId),
-        projectId: shell.projectId,
-        pullRequests: shell.pullRequests ?? [],
-        files,
-        watchers,
-      } satisfies ShowcaseThreadInput;
+  }) {
+    const summaries = yield* repository.listThreadSummaries({
+      threadId: shell.id,
+      limit: SUMMARIES_PER_THREAD,
     });
+    const files = summaries.flatMap((row) =>
+      Option.match(decodeSummary(row.summary_json), {
+        onNone: () => [],
+        onSome: (summary) => summary.files.entries.map((entry) => entry.path),
+      }),
+    );
+    return {
+      id: shell.id,
+      title: shell.title,
+      project: yield* projectTitle(shell.projectId),
+      projectId: shell.projectId,
+      pullRequests: shell.pullRequests ?? [],
+      files,
+      watchers,
+    } satisfies ShowcaseThreadInput;
+  });
 
-  const collect = (ctx: SquireToolContext) =>
-    Effect.gen(function* () {
-      const squires = yield* repository.listSquires;
-      // The Lead view's team (`SquireReadModel` drops deleting rows), so the counts agree.
-      const team = new Set(
-        squires
-          .filter((row) => row.role !== "lead" && row.lifecycle !== "deleting")
-          .map((row) => row.id),
-      );
-      const snapshot = yield* projections.getShellSnapshot({ location: "active" });
-      const tracked: Array<{ shell: OrchestrationV2ThreadShell; watchers: number }> = [];
-      for (const shell of snapshot.threads) {
-        const trackers = yield* scope.trackersOf(shell.id);
-        if (trackers.length === 0) continue;
-        tracked.push({ shell, watchers: trackers.filter((id) => team.has(id)).length });
-      }
-      const threads = yield* Effect.forEach(
-        tracked.toSorted(
-          (a, b) =>
-            DateTime.toEpochMillis(b.shell.updatedAt) - DateTime.toEpochMillis(a.shell.updatedAt),
-        ),
-        threadInput,
-      );
-      return buildShowcaseData({
-        generatedAt: ctx.now,
-        lead: {
-          id: ctx.squire.id,
-          name: ctx.squire.name,
-          still: yield* leadStill(ctx.squire.companion_json),
+  const collect = Effect.fn("SquireShowcase.collect")(function* (ctx: SquireToolContext) {
+    const squires = yield* repository.listSquires;
+    // The Lead view's team (`SquireReadModel` drops deleting rows), so the counts agree.
+    const team = new Set(
+      squires
+        .filter((row) => row.role !== "lead" && row.lifecycle !== "deleting")
+        .map((row) => row.id),
+    );
+    const snapshot = yield* projections.getShellSnapshot({ location: "active" });
+    const tracked: Array<{ shell: OrchestrationV2ThreadShell; watchers: number }> = [];
+    for (const shell of snapshot.threads) {
+      const trackers = yield* scope.trackersOf(shell.id);
+      if (trackers.length === 0) continue;
+      tracked.push({ shell, watchers: trackers.filter((id) => team.has(id)).length });
+    }
+    const threads = yield* Effect.forEach(
+      tracked.toSorted(
+        (a, b) =>
+          DateTime.toEpochMillis(b.shell.updatedAt) - DateTime.toEpochMillis(a.shell.updatedAt),
+      ),
+      threadInput,
+    );
+    return buildShowcaseData({
+      generatedAt: ctx.now,
+      lead: {
+        id: ctx.squire.id,
+        name: ctx.squire.name,
+        still: yield* leadStill(ctx.squire.companion_json),
+      },
+      threads,
+      cards: yield* repository.listCards({ statuses: ["open"] }),
+      squireNames: new Map(squires.map((row) => [row.id, row.name])),
+      environmentId: environment === undefined ? null : yield* environment.getEnvironmentId,
+    });
+  });
+
+  const publish = Effect.fn("SquireShowcase.publish")(function* (
+    ctx: SquireToolContext,
+    kit: SquireToolKit,
+  ) {
+    const decoded = yield* kit.decodeArgs(NoArgs, ctx.args);
+    if (!decoded.ok) {
+      return yield* kit.refuse(ctx, "invalid-arguments", `Invalid arguments: ${decoded.message}`);
+    }
+    const data = yield* collect(ctx);
+    const reference = yield* snapshotMcpApp({
+      attachmentsDir,
+      threadId: ctx.caller.threadId,
+      server: LECTURN_MCP_APP_SERVER,
+      tool: SQUIRE_SHOWCASE_TOOL,
+      resourceUri: SQUIRE_SHOWCASE_RESOURCE_URI,
+      contents: [
+        {
+          uri: SQUIRE_SHOWCASE_RESOURCE_URI,
+          mimeType: MCP_APP_MIME_TYPE,
+          text: renderShowcase(data),
+          _meta: { ui: { prefersBorder: true } },
         },
-        threads,
-        cards: yield* repository.listCards({ statuses: ["open"] }),
-        squireNames: new Map(squires.map((row) => [row.id, row.name])),
-        environmentId: environment === undefined ? null : yield* environment.getEnvironmentId,
-      });
+      ],
+    }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+    if (reference === undefined) {
+      return yield* kit.refuse(ctx, "capture", "The showcase page could not be saved. Try again.");
+    }
+    const itemIds = data.items.map((item) => item.id);
+    const { counts } = data;
+    const breakdown = showcaseDecisionBreakdown(counts);
+    const text = `Published the showcase: ${counts.needsDecision} ${counts.needsDecision === 1 ? "needs" : "need"} a decision${breakdown === "" ? "" : ` (${breakdown})`}, ${plural(counts.threadsWatched, "thread")} watched.`;
+    const record = {
+      leadId: ctx.squire.id,
+      templateVersion: data.templateVersion,
+      generatedAt: data.generatedAt,
+      itemIds,
+    };
+    const filePath = resolveAttachmentRelativePath({
+      attachmentsDir,
+      relativePath: `${reference.attachmentId}.html`,
     });
-
-  const publish = (ctx: SquireToolContext, kit: SquireToolKit) =>
-    Effect.gen(function* () {
-      const decoded = yield* kit.decodeArgs(NoArgs, ctx.args);
-      if (!decoded.ok) {
-        return yield* kit.refuse(ctx, "invalid-arguments", `Invalid arguments: ${decoded.message}`);
-      }
-      const data = yield* collect(ctx);
-      const reference = yield* snapshotMcpApp({
-        attachmentsDir,
-        threadId: ctx.caller.threadId,
-        server: LECTURN_MCP_APP_SERVER,
-        tool: SQUIRE_SHOWCASE_TOOL,
-        resourceUri: SQUIRE_SHOWCASE_RESOURCE_URI,
-        contents: [
-          {
-            uri: SQUIRE_SHOWCASE_RESOURCE_URI,
-            mimeType: MCP_APP_MIME_TYPE,
-            text: renderShowcase(data),
-            _meta: { ui: { prefersBorder: true } },
-          },
-        ],
-      }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
-      if (reference === undefined) {
-        return yield* kit.refuse(
-          ctx,
-          "capture",
-          "The showcase page could not be saved. Try again.",
-        );
-      }
-      const itemIds = data.items.map((item) => item.id);
-      const { counts } = data;
-      const breakdown = showcaseDecisionBreakdown(counts);
-      const text = `Published the showcase: ${counts.needsDecision} ${counts.needsDecision === 1 ? "needs" : "need"} a decision${breakdown === "" ? "" : ` (${breakdown})`}, ${plural(counts.threadsWatched, "thread")} watched.`;
-      const record = {
-        leadId: ctx.squire.id,
-        templateVersion: data.templateVersion,
-        generatedAt: data.generatedAt,
-        itemIds,
-      };
-      const filePath = resolveAttachmentRelativePath({
-        attachmentsDir,
-        relativePath: `${reference.attachmentId}.html`,
-      });
-      return yield* kit
-        .commit(
-          ctx,
-          null,
-          Effect.gen(function* () {
-            yield* kit.logRow(ctx, "showcase.published", {
-              ...record,
-              attachmentId: reference.attachmentId,
-              counts,
-            });
-            return {
-              result: {
-                isError: false,
-                text,
-                structuredContent: {
-                  [MCP_APP_OUTPUT_KEY]: reference,
-                  result: {
-                    content: [{ type: "text", text }],
-                    structuredContent: { showcase: record },
-                  },
+    return yield* kit
+      .commit(
+        ctx,
+        null,
+        Effect.gen(function* () {
+          yield* kit.logRow(ctx, "showcase.published", {
+            ...record,
+            attachmentId: reference.attachmentId,
+            counts,
+          });
+          return {
+            result: {
+              isError: false,
+              text,
+              structuredContent: {
+                [MCP_APP_OUTPUT_KEY]: reference,
+                result: {
+                  content: [{ type: "text", text }],
+                  structuredContent: { showcase: record },
                 },
               },
-            };
-          }),
-        )
-        .pipe(
-          // Only the committed result names the document, so an unrecorded one is removed.
-          Effect.onError(() =>
-            filePath === null
-              ? Effect.void
-              : fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
-          ),
-        );
-    });
+            },
+          };
+        }),
+      )
+      .pipe(
+        // Only the committed result names the document, so an unrecorded one is removed.
+        Effect.onError(() =>
+          filePath === null
+            ? Effect.void
+            : fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
+        ),
+      );
+  });
 
   const handler: SquireToolHandler = { definition, roles: ["lead"], call: publish };
   yield* registry.register([handler]);

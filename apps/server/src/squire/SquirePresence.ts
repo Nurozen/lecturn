@@ -180,32 +180,33 @@ const make = Effect.gen(function* () {
       created_at: now,
     });
 
-  const holdIntent: SquirePresence["Service"]["holdIntent"] = (intent) =>
-    Effect.gen(function* () {
-      if ((yield* phoneAlerts) === "immediately" || !(yield* desktopActive)) return false;
-      const escalates = intent.kind !== "fyi";
-      const escalateAt = DateTime.formatIso(
-        DateTime.add(DateTime.makeUnsafe(intent.now), { milliseconds: SQUIRE_ESCALATION_DELAY_MS }),
-      );
-      const held = yield* repository.updateCard({
-        id: intent.cardId,
-        fromStatuses: ["open"],
-        patch: { escalate_at: escalateAt },
-        updatedAt: intent.now,
-      });
-      if (Option.isNone(held)) return false;
-      yield* deliveryRow(
-        { id: intent.cardId, squire_id: intent.squireId, target_thread_id: intent.threadId },
-        {
-          outcome: "deferred_desktop_active",
-          kind: intent.kind,
-          ...(escalates ? { escalateAt } : { escalates: false }),
-        },
-        intent.now,
-        intent.runId,
-      );
-      return true;
+  const holdIntent: SquirePresence["Service"]["holdIntent"] = Effect.fn(
+    "SquirePresence.holdIntent",
+  )(function* (intent) {
+    if ((yield* phoneAlerts) === "immediately" || !(yield* desktopActive)) return false;
+    const escalates = intent.kind !== "fyi";
+    const escalateAt = DateTime.formatIso(
+      DateTime.add(DateTime.makeUnsafe(intent.now), { milliseconds: SQUIRE_ESCALATION_DELAY_MS }),
+    );
+    const held = yield* repository.updateCard({
+      id: intent.cardId,
+      fromStatuses: ["open"],
+      patch: { escalate_at: escalateAt },
+      updatedAt: intent.now,
     });
+    if (Option.isNone(held)) return false;
+    yield* deliveryRow(
+      { id: intent.cardId, squire_id: intent.squireId, target_thread_id: intent.threadId },
+      {
+        outcome: "deferred_desktop_active",
+        kind: intent.kind,
+        ...(escalates ? { escalateAt } : { escalates: false }),
+      },
+      intent.now,
+      intent.runId,
+    );
+    return true;
+  });
 
   const isDue = (card: SquireCardRow, now: number) => Date.parse(card.escalate_at ?? "") <= now;
 

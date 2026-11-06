@@ -14,6 +14,7 @@ import { OtlpExporter, OtlpSerialization, OtlpTracer } from "effect/observabilit
 import { relayPhysicalName } from "./physicalIdentity.ts";
 
 import { relayResourceNameForStage } from "./deploymentConfig.ts";
+import { RelayMonitoring } from "./monitoring.ts";
 
 const relayRecentSpansQuery = (dataset: string) =>
   [
@@ -72,6 +73,8 @@ export const RelayObservability = Effect.gen(function* () {
     datasets: [traces.name],
     aplQuery: Output.map(traces.name, relayRecentSpansQuery),
   });
+
+  yield* RelayMonitoring(traces);
 
   return { traces, workerIngestToken, mobileIngestToken, clientIngestToken } as const;
 });

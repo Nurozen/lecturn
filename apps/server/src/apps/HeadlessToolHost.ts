@@ -73,17 +73,19 @@ const make = Effect.gen(function* () {
     });
 
   /** Drops the slot only if it is still the one the caller saw. */
-  const forget = (key: HeadlessProcessKey, slot: Slot) =>
-    Effect.gen(function* () {
-      if (slots.get(key) !== slot) return false;
-      slots.delete(key);
-      yield* Ref.update(headlessProcesses, (entries) => {
-        const next = new Map(entries);
-        next.delete(key);
-        return next;
-      });
-      return true;
+  const forget = Effect.fn("HeadlessToolHost.forget")(function* (
+    key: HeadlessProcessKey,
+    slot: Slot,
+  ) {
+    if (slots.get(key) !== slot) return false;
+    slots.delete(key);
+    yield* Ref.update(headlessProcesses, (entries) => {
+      const next = new Map(entries);
+      next.delete(key);
+      return next;
     });
+    return true;
+  });
 
   const kill = (key: HeadlessProcessKey, slot: Slot) =>
     forget(key, slot).pipe(Effect.andThen(Scope.close(slot.scope, Exit.void)));
@@ -107,20 +109,19 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const requireHeadless = (appId: AppId) =>
-    Effect.gen(function* () {
-      const record = yield* registry.get(appId);
-      if (Option.isNone(record) || record.value.status.state !== "granted") {
-        return yield* new AppsError({
-          code: "forbidden",
-          message: `${appId} is not a granted connected app.`,
-        });
-      }
-      return {
-        name: record.value.registration.name,
-        headless: record.value.registration.headlessTools,
-      };
-    });
+  const requireHeadless = Effect.fn("HeadlessToolHost.requireHeadless")(function* (appId: AppId) {
+    const record = yield* registry.get(appId);
+    if (Option.isNone(record) || record.value.status.state !== "granted") {
+      return yield* new AppsError({
+        code: "forbidden",
+        message: `${appId} is not a granted connected app.`,
+      });
+    }
+    return {
+      name: record.value.registration.name,
+      headless: record.value.registration.headlessTools,
+    };
+  });
 
   const requireWorkspaceRoot = (projectId: ProjectId) =>
     projects.resolveAppForProject(projectId).pipe(
@@ -136,58 +137,64 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const specFor = (appId: AppId, projectId: ProjectId, mode: "call" | "list") =>
-    Effect.gen(function* () {
-      const { name, headless } = yield* requireHeadless(appId);
-      if (headless === undefined) return Option.none();
-      const args = mode === "call" ? headless.args : headless.listArgs;
-      if (args === undefined) return Option.none();
-      const workspaceRoot = yield* requireWorkspaceRoot(projectId);
-      return Option.some({
-        name,
-        spec: resolveHeadlessSpec({ headless, workspaceRoot, hostEnv, args }),
-      });
+  const specFor = Effect.fn("HeadlessToolHost.specFor")(function* (
+    appId: AppId,
+    projectId: ProjectId,
+    mode: "call" | "list",
+  ) {
+    const { name, headless } = yield* requireHeadless(appId);
+    if (headless === undefined) return Option.none();
+    const args = mode === "call" ? headless.args : headless.listArgs;
+    if (args === undefined) return Option.none();
+    const workspaceRoot = yield* requireWorkspaceRoot(projectId);
+    return Option.some({
+      name,
+      spec: resolveHeadlessSpec({ headless, workspaceRoot, hostEnv, args }),
     });
+  });
 
-  const spawn = (appId: AppId, projectId: ProjectId, key: HeadlessProcessKey) =>
-    Effect.gen(function* () {
-      const resolved = yield* specFor(appId, projectId, "call");
-      if (Option.isNone(resolved)) {
-        return yield* new AppsError({
-          code: "not-found",
-          message: `${appId} has no headless tools.`,
-        });
-      }
-      const scope = yield* Scope.fork(layerScope);
-      const connection = yield* connect(resolved.value.spec).pipe(
-        Scope.provide(scope),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
-      );
-      const slot: Slot = { connection, scope };
-      slots.set(key, slot);
-      yield* Ref.update(headlessProcesses, (entries) =>
-        new Map(entries).set(key, {
-          appId,
-          projectId,
-          inFlightCalls: 0,
-          lastCallEndedAt: null,
-          close: closeIfIdle(key, slot),
-          kill: kill(key, slot),
-        }),
-      );
-      // stopApp found no entry for a revoke that landed during the handshake.
-      // The registry commits before it publishes, so a revoke this check
-      // misses is one whose stopApp will find the entry above.
-      yield* requireHeadless(appId).pipe(Effect.onError(() => kill(key, slot)));
-      // A process that exits on its own is replaced on the next call.
-      yield* connection.exited.pipe(
-        Effect.andThen(forget(key, slot)),
-        Effect.andThen(Scope.close(scope, Exit.void)),
-        Effect.forkIn(layerScope),
-      );
-      return slot;
-    });
+  const spawn = Effect.fn("HeadlessToolHost.spawn")(function* (
+    appId: AppId,
+    projectId: ProjectId,
+    key: HeadlessProcessKey,
+  ) {
+    const resolved = yield* specFor(appId, projectId, "call");
+    if (Option.isNone(resolved)) {
+      return yield* new AppsError({
+        code: "not-found",
+        message: `${appId} has no headless tools.`,
+      });
+    }
+    const scope = yield* Scope.fork(layerScope);
+    const connection = yield* connect(resolved.value.spec).pipe(
+      Scope.provide(scope),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+    );
+    const slot: Slot = { connection, scope };
+    slots.set(key, slot);
+    yield* Ref.update(headlessProcesses, (entries) =>
+      new Map(entries).set(key, {
+        appId,
+        projectId,
+        inFlightCalls: 0,
+        lastCallEndedAt: null,
+        close: closeIfIdle(key, slot),
+        kill: kill(key, slot),
+      }),
+    );
+    // stopApp found no entry for a revoke that landed during the handshake.
+    // The registry commits before it publishes, so a revoke this check
+    // misses is one whose stopApp will find the entry above.
+    yield* requireHeadless(appId).pipe(Effect.onError(() => kill(key, slot)));
+    // A process that exits on its own is replaced on the next call.
+    yield* connection.exited.pipe(
+      Effect.andThen(forget(key, slot)),
+      Effect.andThen(Scope.close(scope, Exit.void)),
+      Effect.forkIn(layerScope),
+    );
+    return slot;
+  });
 
   const hold = (appId: AppId, projectId: ProjectId) => {
     const key = headlessProcessKey(appId, projectId);
@@ -201,20 +208,22 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const release = (appId: AppId, projectId: ProjectId) =>
-    Effect.gen(function* () {
-      const key = headlessProcessKey(appId, projectId);
-      const now = yield* DateTime.now;
-      yield* updateEntry(key, (entry) => ({
-        ...entry,
-        inFlightCalls: Math.max(0, entry.inFlightCalls - 1),
-        lastCallEndedAt: now,
-      }));
-      // A card's call outside any run has no run end to arm the reaper.
-      if ((yield* Ref.get(headlessProcesses)).get(key)?.inFlightCalls !== 0) return;
-      const watchIdle = yield* Ref.get(headlessIdleWatch);
-      if (Option.isSome(watchIdle)) yield* watchIdle.value(key);
-    });
+  const release = Effect.fn("HeadlessToolHost.release")(function* (
+    appId: AppId,
+    projectId: ProjectId,
+  ) {
+    const key = headlessProcessKey(appId, projectId);
+    const now = yield* DateTime.now;
+    yield* updateEntry(key, (entry) => ({
+      ...entry,
+      inFlightCalls: Math.max(0, entry.inFlightCalls - 1),
+      lastCallEndedAt: now,
+    }));
+    // A card's call outside any run has no run end to arm the reaper.
+    if ((yield* Ref.get(headlessProcesses)).get(key)?.inFlightCalls !== 0) return;
+    const watchIdle = yield* Ref.get(headlessIdleWatch);
+    if (Option.isSome(watchIdle)) yield* watchIdle.value(key);
+  });
 
   const withProcess = <A, E>(
     appId: AppId,
@@ -321,8 +330,8 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
-    refreshDefinitions: (appId, projectId) =>
-      Effect.gen(function* () {
+    refreshDefinitions: Effect.fn("HeadlessToolHost.refreshDefinitions")(
+      function* (appId, projectId) {
         const listed = yield* listFromCommand(appId, projectId);
         if (Option.isSome(listed)) {
           yield* cache(appId, listed.value);
@@ -333,9 +342,10 @@ const make = Effect.gen(function* () {
         if (slots.has(headlessProcessKey(appId, projectId))) {
           yield* cache(appId, yield* listFromProcess(appId, projectId));
         }
-      }),
-    listForEmptyCache: (appId, projectId) =>
-      Effect.gen(function* () {
+      },
+    ),
+    listForEmptyCache: Effect.fn("HeadlessToolHost.listForEmptyCache")(
+      function* (appId, projectId) {
         const { headless } = yield* requireHeadless(appId);
         if (headless === undefined) return [];
         const listed = yield* listFromCommand(appId, projectId).pipe(
@@ -348,7 +358,8 @@ const make = Effect.gen(function* () {
         );
         if (Option.isSome(listed)) return yield* cache(appId, listed.value);
         return yield* cache(appId, yield* listFromProcess(appId, projectId));
-      }),
+      },
+    ),
     stopApp,
   });
 });

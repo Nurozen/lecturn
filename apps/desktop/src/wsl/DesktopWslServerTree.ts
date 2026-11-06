@@ -48,42 +48,44 @@ export class DesktopWslServerTree extends Context.Service<
   }
 >()("@lecturn/desktop/wsl/DesktopWslServerTree") {}
 
-export const forEachBoundedTree = <Node, E, R>(
+export const forEachBoundedTree = Effect.fn("DesktopWslServerTree.forEachBoundedTree")(function* <
+  Node,
+  E,
+  R,
+>(
   roots: ReadonlyArray<Node>,
   visit: (node: Node) => Effect.Effect<ReadonlyArray<Node>, E, R>,
-): Effect.Effect<void, E, R> =>
-  Effect.gen(function* () {
-    const pending = [...roots];
-    while (pending.length > 0) {
-      const batch = pending.splice(-COPY_CONCURRENCY);
-      const children = yield* Effect.forEach(batch, visit, {
-        concurrency: COPY_CONCURRENCY,
-      });
-      for (const entries of children) {
-        pending.push(...entries);
-      }
+): Effect.fn.Return<void, E, R> {
+  const pending = [...roots];
+  while (pending.length > 0) {
+    const batch = pending.splice(-COPY_CONCURRENCY);
+    const children = yield* Effect.forEach(batch, visit, {
+      concurrency: COPY_CONCURRENCY,
+    });
+    for (const entries of children) {
+      pending.push(...entries);
     }
-  });
+  }
+});
 
 // copyTree writes every file with the default mode, which drops the exec bit
 // the extensionless Linux Stave binary needs once the distro runs it over
 // /mnt. Restore it for every per-arch copy the tree carries; best-effort
 // because a missing stave dir (or a host fs without POSIX modes) is not an
 // extraction failure.
-const markStaveExecutable = (
+const markStaveExecutable = Effect.fn("DesktopWslServerTree.markStaveExecutable")(function* (
   fs: FileSystem.FileSystem,
   join: (first: string, ...rest: string[]) => string,
   root: string,
-): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    const staveDir = join(root, "apps/server/dist/stave");
-    const entries = yield* fs.readDirectory(staveDir).pipe(Effect.orElseSucceed(() => []));
-    yield* Effect.forEach(
-      entries,
-      (entry) => fs.chmod(join(staveDir, entry, "stave"), 0o755).pipe(Effect.ignore),
-      { discard: true },
-    );
-  });
+): Effect.fn.Return<void> {
+  const staveDir = join(root, "apps/server/dist/stave");
+  const entries = yield* fs.readDirectory(staveDir).pipe(Effect.orElseSucceed(() => []));
+  yield* Effect.forEach(
+    entries,
+    (entry) => fs.chmod(join(staveDir, entry, "stave"), 0o755).pipe(Effect.ignore),
+    { discard: true },
+  );
+});
 
 interface CopyTreeEntry {
   readonly sourcePath: string;

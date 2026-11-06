@@ -471,6 +471,11 @@ from upstream's side.
   `app.t3.context-fragment`, `data-t3-context-fragment` and `t3-context:` are
   shared wire formats with contracts and the composer editor; keep them.
   Vendored third-party tarballs keep upstream file names (`*-t3.N.tgz`).
+- **Mobile `RequestActionButton` (upstream deleted it in the shared-controls
+  series, sync to be6dd8b7).** `apps/mobile/src/features/threads/RequestActionButton.tsx`
+  stays fork-owned for the fork-only `squires/*` cards and
+  `apps/AppPairingRow`. Upstream-owned files use `ui/Button`. Delete it only
+  after those callers move to `ui/Button`.
 
 **Upstream changes taken in a Lecturn shape (sync to upstream 791feeb0).**
 
@@ -783,6 +788,95 @@ from upstream's side.
     turn (upstream), reports `mcp-activation-failed` only when an add fails
     while Lecturn MCP is not yet up for the session, and appends
     `connectedAppInstructionsSection` (fork).
+
+**Upstream changes taken in a Lecturn shape (sync to upstream be6dd8b7).**
+
+- **Patched mobile dependencies are pinned exactly.** Upstream #22043 patches
+  `expo-network@58.0.3` but declares `~58.0.3`. Release smoke resolves a fresh
+  lockfile, picks 58.0.4 and fails with an unused patch, so the fork pins
+  `"expo-network": "58.0.3"` (like `expo-audio`). Bump the patch with the pin.
+
+- **Effect functions (#21989-#22000).** `lecturn/prefer-effect-fn` is an error
+  outside tests, and fork-only files follow it too. Span names are
+  `<Service>.<operation>` and reuse the file's existing span prefix, never a
+  `t3` name. A trailing `Effect.withSpan` folds into `Effect.fn(name)`. Use
+  `Effect.fnUntraced` for per-event, per-row and per-request helpers that run
+  inside an owning span, with a short comment saying why. `Effect.fn`
+  evaluates parameter defaults at run time, so a default that must be
+  captured at call time is passed explicitly. Examples: the mobile
+  `remoteRegistration` device-registration generation, and the
+  `StaveOperations.createProject` `failure` default, which moves into the pipe
+  transform. `AgentAwarenessRelay` keeps the fork `makePublishState` factory.
+  `withRelayClientTracing` wraps the `Effect.fn` call, not its body.
+- **jsdom pragmas (#21937, `lecturn/no-dom-test-environment`).** Fork React
+  tests drop the pragma. Mobile lists them in `apps/mobile/vite.config.ts`
+  `reactTests`. Web tests move to `*.browser.test.ts(x)`.
+- **Relay alerts (#22067+).** Axiom monitors are opt-in through
+  `RELAY_ALERT_NOTIFIER_ID`. Their thresholds were tuned on upstream traffic
+  (traffic-dropped <10k/10min, `alertOnNoData`), so recalibrate them for
+  Lecturn volume before setting the variable. The dashboard is
+  `lecturn-relay-health`. Don't apply `relayPhysicalName` to new resources.
+- **APNs routing (#16350).** Routing fields, including the fork `accountId`,
+  go under `payload.body` (Expo iOS `content.data`), never at the top level.
+  Fork relay `ApnsDeliveries` passes `publishingEnvironmentId: null` where
+  upstream passes `replay: true`.
+- **Codex MCP config (#15839).** Thread config uses dotted keys
+  (`mcp_servers.lecturn`, `mcp_servers.<name>` for Stave memory), so MCP
+  servers passed as launch args survive. Squire threads keep the full
+  `mcp_servers` table. Upstream's `codex mcp list` stall test runs unchanged,
+  because the fork still runs `mcp list` for non-inference text generation.
+- **`thread.stop` (#22052)** is a public command. The fork `createdBy` moves
+  with it and follows the same provenance rules as `run.interrupt`. The fork
+  app commands stay internal.
+- **Server identity.** The Git branch config key is
+  `branch.<b>.lecturn-merge-base-ref`. The fetch-interval key is
+  `lecturn/vcs/VcsAutomaticFetchInterval`. The relay delivery header is
+  `x-lecturn-relay-delivery-id`. The boot service uses
+  `LECTURN_BOOT_SERVICE_UNIT` and
+  `lecturn.service`/`com.cloudgatherer.lecturn.service`. The relay client
+  OTLP variables are `LECTURN_RELAY_CLIENT_OTLP_*`. MCP thread tools are
+  `lecturn_thread_*` with `lecturn-thread://` links. The Pi prompt section is
+  `lecturn_orchestration`, with `mcp__lecturn__` tool names (#18933).
+- **acp-replay-agent.** Upstream's batch-checkpoint-then-send replaces the
+  fork's per-frame advance. The fork keeps its atomic tmp/rename status write
+  and `LECTURN_ACP_REPLAY_*`.
+- **`http.ts`.** The static fallback (asar or no handle) also sends
+  `frame-ancestors` for HTML.
+- **Agent awareness.** The fork keeps the Squire exclusion. Settled threads
+  follow upstream and hide only completed or failed work that holds no
+  background work. Live or waiting work on a settled thread stays visible.
+- **Usage limits.** Hub routing (`hubRedeem`) stays fork. Balances follow
+  upstream's native-account dedup; a hub balance shows only when it is newer
+  than the native credit snapshot.
+- **Cursor tests** load `Cursor` through `CursorSdk.load`, because the fork
+  has no `./sdk.ts` (`@cursor/sdk` loads lazily).
+- **Mobile shared controls (#21914-#21978).**
+  - `SheetActionButton` keeps the fork iOS glass pill; only Android uses
+    `ui/Button`.
+  - `GitCommitSheet` takes upstream's flat layout and keeps the fork's
+    `repoKey`, repo-name line and busy rules. Its iOS `GlassCard` sections are
+    retired.
+  - `ThreadComposer` keeps the fork `COMPOSER_EXPANDED_CHROME` (198) with
+    upstream's `collapsedEditorInset`.
+  - The ConnectionsNew sign-in row is a `SettingsRow` inside a `GlassCard`,
+    not a bare `ListRow`.
+  - `protectedData.ts` looks up `LecturnNativeControls`; a `T3NativeControls`
+    name never finds the module.
+- **Mobile feed cache (#19135).** `deriveThreadFeedPresentation` takes
+  `importedFrom` before the cache. Imported threads skip prefix reuse, because
+  the import divider's position depends on the whole feed.
+- **Web.**
+  - `ConnectOnboardingDialog` keeps the fork request queue. Upstream's
+    hosted-home skip (#19680) consumes the request without opening the wizard.
+  - The hosted `/` empty state is upstream's `HostedEmptyState` with Lecturn
+    copy (`npx lecturn connect`/`pair`, `LecturnConnectSteps`).
+    `DESKTOP_DOWNLOAD_URL` is the Nurozen/lecturn latest release.
+  - The banner z-index (#21441, z-30) lives in fork-only
+    `chat/ChatBannerLane.tsx`.
+  - `providerInstances` keeps `getProviderInstanceEntry` exported for the fork
+    embed.
+  - LaTeX (#18735): fork assistant-text selection uses upstream's
+    formula-aware range helpers.
 
 ## Recurring mechanical conflicts
 

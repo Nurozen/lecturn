@@ -124,6 +124,7 @@ describe("pi Lecturn MCP injection", () => {
       environment: {},
       mcpSession,
       extensionPath: "/tmp/cache/pi-lecturn-mcp-extension.ts",
+      sessionPath: "/fake/persisted.jsonl",
       ephemeral: true,
       disableExtensions: true,
       disableTools: true,

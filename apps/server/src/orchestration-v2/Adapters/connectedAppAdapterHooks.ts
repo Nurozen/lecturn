@@ -65,51 +65,52 @@ export function makeCodexMcpActivation(mcpSessions: McpSessions, driver: Provide
 
   return {
     /** After `thread/start` or `thread/resume` answers for an app thread. */
-    report: (input: {
+    report: Effect.fn("connectedAppAdapterHooks.report")(function* (input: {
       readonly nativeThreadId: string;
       readonly threadId: ThreadId;
       readonly providerThreadId: ProviderThreadId;
       readonly mcpSession: McpSessionConfig | undefined;
-    }) =>
-      Effect.gen(function* () {
-        const target = { threadId: input.threadId, providerThreadId: input.providerThreadId };
-        yield* McpProviderSessions.reportThreadMcpActivation({
-          mcpSessions,
-          ...target,
-          driver,
-          mcpActivated: input.mcpSession !== undefined,
-        });
-        // From here to the buffer read nothing yields, so a failure the
-        // handler sees lands either in the buffer or on the mapped thread,
-        // and always after the activation above.
-        if (input.mcpSession !== undefined) {
-          threadsByNativeId.set(input.nativeThreadId, target);
-        } else {
-          threadsByNativeId.delete(input.nativeThreadId);
-        }
-        const early = earlyStartupFailures.get(input.nativeThreadId);
-        earlyStartupFailures.delete(input.nativeThreadId);
-        if (early !== undefined && input.mcpSession !== undefined) {
-          yield* reportFailure(target, early);
-        }
-      }),
+    }) {
+      const target = { threadId: input.threadId, providerThreadId: input.providerThreadId };
+      yield* McpProviderSessions.reportThreadMcpActivation({
+        mcpSessions,
+        ...target,
+        driver,
+        mcpActivated: input.mcpSession !== undefined,
+      });
+      // From here to the buffer read nothing yields, so a failure the
+      // handler sees lands either in the buffer or on the mapped thread,
+      // and always after the activation above.
+      if (input.mcpSession !== undefined) {
+        threadsByNativeId.set(input.nativeThreadId, target);
+      } else {
+        threadsByNativeId.delete(input.nativeThreadId);
+      }
+      const early = earlyStartupFailures.get(input.nativeThreadId);
+      earlyStartupFailures.delete(input.nativeThreadId);
+      if (early !== undefined && input.mcpSession !== undefined) {
+        yield* reportFailure(target, early);
+      }
+    }),
     /** Handles `mcpServer/startupStatus/updated`. */
-    onStartupStatus: (payload: CodexSchema.V2McpServerStatusUpdatedNotification) =>
-      Effect.gen(function* () {
-        if (payload.name !== "lecturn" || payload.status !== "failed") return;
-        const nativeThreadId = payload.threadId;
-        if (nativeThreadId === undefined || nativeThreadId === null) return;
-        const reason = payload.error ?? "Codex could not start Lecturn's MCP server.";
-        const target = threadsByNativeId.get(nativeThreadId);
-        if (target === undefined) {
-          // Codex's own subagent threads are never mapped; keep the buffer small.
-          if (earlyStartupFailures.size < 64) {
-            earlyStartupFailures.set(nativeThreadId, reason);
-          }
-          return;
+    // Runs for every MCP server status notification; most return early, so avoid a span per event.
+    onStartupStatus: Effect.fnUntraced(function* (
+      payload: CodexSchema.V2McpServerStatusUpdatedNotification,
+    ) {
+      if (payload.name !== "lecturn" || payload.status !== "failed") return;
+      const nativeThreadId = payload.threadId;
+      if (nativeThreadId === undefined || nativeThreadId === null) return;
+      const reason = payload.error ?? "Codex could not start Lecturn's MCP server.";
+      const target = threadsByNativeId.get(nativeThreadId);
+      if (target === undefined) {
+        // Codex's own subagent threads are never mapped; keep the buffer small.
+        if (earlyStartupFailures.size < 64) {
+          earlyStartupFailures.set(nativeThreadId, reason);
         }
-        yield* reportFailure(target, reason);
-      }),
+        return;
+      }
+      yield* reportFailure(target, reason);
+    }),
   };
 }
 

@@ -13,13 +13,14 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 
-export const clearV2Projection = (sql: SqlClient.SqlClient) =>
-  Effect.gen(function* () {
-    yield* sql`DELETE FROM orchestration_v2_projection_messages`;
-    yield* sql`DELETE FROM orchestration_v2_projection_runs`;
-    yield* sql`DELETE FROM orchestration_v2_projection_threads`;
-    yield* sql`DELETE FROM orchestration_v2_legacy_imports`;
-  });
+export const clearV2Projection = Effect.fn("V2ProjectionTestFixtures.clearV2Projection")(function* (
+  sql: SqlClient.SqlClient,
+) {
+  yield* sql`DELETE FROM orchestration_v2_projection_messages`;
+  yield* sql`DELETE FROM orchestration_v2_projection_runs`;
+  yield* sql`DELETE FROM orchestration_v2_projection_threads`;
+  yield* sql`DELETE FROM orchestration_v2_legacy_imports`;
+});
 
 export const insertV2Thread = (
   sql: SqlClient.SqlClient,
@@ -102,27 +103,28 @@ const v2MessageFromLegacy = `INSERT OR REPLACE INTO orchestration_v2_projection_
  * SQL while the code under test reads only the V2 projection: every write to
  * the V1 tables is mirrored into the V2 rows.
  */
-export const installLegacyProjectionMirror = (sql: SqlClient.SqlClient) =>
-  Effect.gen(function* () {
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_thread_insert AFTER INSERT ON projection_threads BEGIN ${v2ThreadFromLegacy} END`,
-    );
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_thread_update AFTER UPDATE ON projection_threads BEGIN ${v2ThreadFromLegacy} END`,
-    );
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_thread_delete AFTER DELETE ON projection_threads BEGIN DELETE FROM orchestration_v2_projection_threads WHERE thread_id = OLD.thread_id; END`,
-    );
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_message_insert AFTER INSERT ON projection_thread_messages BEGIN ${v2MessageFromLegacy} END`,
-    );
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_message_update AFTER UPDATE ON projection_thread_messages BEGIN ${v2MessageFromLegacy} END`,
-    );
-    yield* sql.unsafe(
-      `CREATE TRIGGER IF NOT EXISTS test_v2_message_delete AFTER DELETE ON projection_thread_messages BEGIN DELETE FROM orchestration_v2_projection_messages WHERE message_id = OLD.message_id; END`,
-    );
-  });
+export const installLegacyProjectionMirror = Effect.fn(
+  "V2ProjectionTestFixtures.installLegacyProjectionMirror",
+)(function* (sql: SqlClient.SqlClient) {
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_thread_insert AFTER INSERT ON projection_threads BEGIN ${v2ThreadFromLegacy} END`,
+  );
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_thread_update AFTER UPDATE ON projection_threads BEGIN ${v2ThreadFromLegacy} END`,
+  );
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_thread_delete AFTER DELETE ON projection_threads BEGIN DELETE FROM orchestration_v2_projection_threads WHERE thread_id = OLD.thread_id; END`,
+  );
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_message_insert AFTER INSERT ON projection_thread_messages BEGIN ${v2MessageFromLegacy} END`,
+  );
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_message_update AFTER UPDATE ON projection_thread_messages BEGIN ${v2MessageFromLegacy} END`,
+  );
+  yield* sql.unsafe(
+    `CREATE TRIGGER IF NOT EXISTS test_v2_message_delete AFTER DELETE ON projection_thread_messages BEGIN DELETE FROM orchestration_v2_projection_messages WHERE message_id = OLD.message_id; END`,
+  );
+});
 
 const occurredAt = DateTime.makeUnsafe("2026-09-23T00:00:00.000Z");
 const stored = (

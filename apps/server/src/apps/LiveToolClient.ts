@@ -93,8 +93,8 @@ export const make = (options: LiveToolClientOptions = {}) => {
 
       const unreachable = () => failure(`The app's live tool server at ${label} is not answering.`);
 
-      const post = (message: unknown, method: string, timeout: Duration.Input) =>
-        Effect.gen(function* () {
+      const post = Effect.fn("LiveToolClient.post")(
+        function* (message: unknown, method: string, _timeout: Duration.Input) {
           const response = yield* Effect.tryPromise({
             try: (signal) =>
               fetchImpl(lease.url, {
@@ -123,18 +123,23 @@ export const make = (options: LiveToolClientOptions = {}) => {
               failure(`The app's live tool server at ${label} sent a reply Lecturn cannot read.`),
             ),
           );
-        }).pipe(
-          Effect.timeoutOrElse({
-            duration: timeout,
-            orElse: () =>
-              Effect.fail(
-                failure(`The app's live tool server at ${label} did not answer ${method} in time.`),
-              ),
-          }),
-        );
+        },
+        (effect, message, method, timeout) =>
+          effect.pipe(
+            Effect.timeoutOrElse({
+              duration: timeout,
+              orElse: () =>
+                Effect.fail(
+                  failure(
+                    `The app's live tool server at ${label} did not answer ${method} in time.`,
+                  ),
+                ),
+            }),
+          ),
+      );
 
-      const request: Session["request"] = (method, params, timeout) =>
-        Effect.gen(function* () {
+      const request: Session["request"] = Effect.fn("LiveToolClient.request")(
+        function* (method, params, timeout) {
           const id = ++nextId;
           const payloads = yield* post({ jsonrpc: "2.0", id, method, params }, method, timeout);
           const envelope = payloads.find((payload) => isRecord(payload) && payload.id === id);
@@ -149,7 +154,8 @@ export const make = (options: LiveToolClientOptions = {}) => {
             );
           }
           return envelope.result;
-        });
+        },
+      );
 
       // Best effort: a stateless server answers 405, and a gone one not at all.
       const endSession = Effect.suspend(() =>

@@ -245,39 +245,40 @@ const make = Effect.gen(function* () {
     return { instanceId: instance.instanceId, model: model.slug } satisfies ModelSelection;
   });
 
-  const intentFor: SquireLaunchAction["Service"]["intentFor"] = (input) =>
-    Effect.gen(function* () {
-      const commandId = CommandId.make(
-        squireActionCommandId(input.verb, input.card.id, input.attempt),
-      );
-      const project = yield* projects
-        .get(input.proposal.projectId)
-        .pipe(Effect.mapError(failed(commandId)));
-      if (Option.isNone(project)) {
-        return yield* new SquireLaunchRefused({ reason: "The project no longer exists." });
-      }
-      const fixture =
-        (input.squire.create_request_id?.startsWith("fixture:") ?? false) ||
-        isFixtureWorkspaceRoot(config.baseDir, project.value.workspaceRoot);
-      const current = yield* settings.getSettings.pipe(Effect.mapError(failed(commandId)));
-      const fixtureOwned = fixture ? yield* scriptedModel : null;
-      return yield* Effect.fromResult(
-        launchIntentFor({
-          card: input.card,
-          proposal: input.proposal,
-          text: input.text,
-          verb: input.verb,
-          attempt: input.attempt,
-          senderThreadId: input.squire.home_thread_id,
-          modes: {
-            runtimeMode: resolveProjectSettings(current, input.proposal.projectId).settings
-              .defaultRuntimeMode,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          },
-          fixtureOwned,
-        }),
-      );
-    });
+  const intentFor: SquireLaunchAction["Service"]["intentFor"] = Effect.fn(
+    "SquireLaunchAction.intentFor",
+  )(function* (input) {
+    const commandId = CommandId.make(
+      squireActionCommandId(input.verb, input.card.id, input.attempt),
+    );
+    const project = yield* projects
+      .get(input.proposal.projectId)
+      .pipe(Effect.mapError(failed(commandId)));
+    if (Option.isNone(project)) {
+      return yield* new SquireLaunchRefused({ reason: "The project no longer exists." });
+    }
+    const fixture =
+      (input.squire.create_request_id?.startsWith("fixture:") ?? false) ||
+      isFixtureWorkspaceRoot(config.baseDir, project.value.workspaceRoot);
+    const current = yield* settings.getSettings.pipe(Effect.mapError(failed(commandId)));
+    const fixtureOwned = fixture ? yield* scriptedModel : null;
+    return yield* Effect.fromResult(
+      launchIntentFor({
+        card: input.card,
+        proposal: input.proposal,
+        text: input.text,
+        verb: input.verb,
+        attempt: input.attempt,
+        senderThreadId: input.squire.home_thread_id,
+        modes: {
+          runtimeMode: resolveProjectSettings(current, input.proposal.projectId).settings
+            .defaultRuntimeMode,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        },
+        fixtureOwned,
+      }),
+    );
+  });
 
   const receipts: SquireLaunchAction["Service"]["receipts"] = (intent) =>
     Effect.all({
@@ -317,8 +318,10 @@ const make = Effect.gen(function* () {
         }),
       );
 
-  const archiveEmpty: SquireLaunchAction["Service"]["archiveEmpty"] = (intent) =>
-    Effect.gen(function* () {
+  const archiveEmpty: SquireLaunchAction["Service"]["archiveEmpty"] = Effect.fn(
+    "SquireLaunchAction.archiveEmpty",
+  )(
+    function* (intent) {
       const shell = yield* threads.getThreadShell(intent.threadId);
       if (shell === null || shell.archivedAt !== null || shell.deletedAt !== null) return;
       if ((yield* threads.getMessageCount(intent.threadId)) > 0) return;
@@ -327,15 +330,17 @@ const make = Effect.gen(function* () {
         commandId: CommandId.make(`${intent.commandId}:archive`),
         threadId: intent.threadId,
       });
-    }).pipe(
-      // Idempotent by command id, so the next reconcile retries a failed archive.
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Squire could not archive an empty launched thread", {
-          threadId: intent.threadId,
-          cause,
-        }),
+    },
+    (effect, intent) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire could not archive an empty launched thread", {
+            threadId: intent.threadId,
+            cause,
+          }),
+        ),
       ),
-    );
+  );
 
   return SquireLaunchAction.of({ intentFor, receipts, launch, archiveEmpty });
 });

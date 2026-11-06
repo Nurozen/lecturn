@@ -156,16 +156,15 @@ const makeLive = Effect.gen(function* () {
   );
 
   return SquireContainers.of({
-    ofProject: (projectId) =>
-      Effect.gen(function* () {
-        if (Option.isSome(fixtureStave)) {
-          const synthetic = yield* fixtureStave.value.ofProject(projectId);
-          if (Option.isSome(synthetic)) return synthetic.value;
-        }
-        return yield* Cache.get(cache, projectId).pipe(
-          Effect.orElseSucceed((): SquireStaveMembership => ({ status: "unknown" })),
-        );
-      }),
+    ofProject: Effect.fn("SquireContainers.ofProject")(function* (projectId) {
+      if (Option.isSome(fixtureStave)) {
+        const synthetic = yield* fixtureStave.value.ofProject(projectId);
+        if (Option.isSome(synthetic)) return synthetic.value;
+      }
+      return yield* Cache.get(cache, projectId).pipe(
+        Effect.orElseSucceed((): SquireStaveMembership => ({ status: "unknown" })),
+      );
+    }),
   });
 });
 

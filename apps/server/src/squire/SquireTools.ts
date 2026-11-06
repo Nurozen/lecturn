@@ -615,17 +615,16 @@ const make = Effect.gen(function* () {
       .listRules({ squireId })
       .pipe(Effect.map((rows) => rows.flatMap((row) => Option.toArray(toRule(row)))));
 
-  const trackersFor = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const ids = yield* scope.trackersOf(threadId);
-      const trackers: Array<squirePolicy.SquirePolicyTracker> = [];
-      for (const id of ids) {
-        const row = yield* repository.getSquire(id);
-        if (Option.isNone(row)) continue;
-        trackers.push({ squire: policySquireOf(row.value), rules: yield* rulesOf(id) });
-      }
-      return trackers;
-    });
+  const trackersFor = Effect.fn("SquireTools.trackersFor")(function* (threadId: ThreadId) {
+    const ids = yield* scope.trackersOf(threadId);
+    const trackers: Array<squirePolicy.SquirePolicyTracker> = [];
+    for (const id of ids) {
+      const row = yield* repository.getSquire(id);
+      if (Option.isNone(row)) continue;
+      trackers.push({ squire: policySquireOf(row.value), rules: yield* rulesOf(id) });
+    }
+    return trackers;
+  });
 
   /**
    * The Squire whose item the Lead acts on. A thread several Squires
@@ -633,51 +632,52 @@ const make = Effect.gen(function* () {
    * event for it in the Lead's batch, else the owner of its newest open
    * decision item, else its earliest-created tracker.
    */
-  const ownerOf = (ctx: Ctx, threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const trackers: Array<SquireRepository.SquireRow> = [];
-      for (const id of yield* scope.trackersOf(threadId)) {
-        const row = yield* repository.getSquire(id);
-        if (Option.isSome(row) && row.value.role !== "lead" && row.value.lifecycle !== "deleting") {
-          trackers.push(row.value);
-        }
+  const ownerOf = Effect.fn("SquireTools.ownerOf")(function* (ctx: Ctx, threadId: ThreadId) {
+    const trackers: Array<SquireRepository.SquireRow> = [];
+    for (const id of yield* scope.trackersOf(threadId)) {
+      const row = yield* repository.getSquire(id);
+      if (Option.isSome(row) && row.value.role !== "lead" && row.value.lifecycle !== "deleting") {
+        trackers.push(row.value);
       }
-      const tracker = (id: string) => Option.fromNullishOr(trackers.find((row) => row.id === id));
-      for (const row of (yield* batchEvents(ctx)).toReversed()) {
-        if (row.kind !== "item-raised") continue;
-        const event = Option.getOrUndefined(decodeEvent(row.payload_json ?? ""));
-        if (event === undefined || isUnknownUnionMember(event)) continue;
-        if (event.type !== "item-raised" || event.targetThreadId !== threadId) continue;
-        const found = tracker(event.squireId);
-        if (Option.isSome(found)) return found;
-      }
-      const open = yield* repository.listCards({
-        targetThreadId: threadId,
-        statuses: ["open", "held"],
-        kinds: ["steer", "question", "overlap", "proposal"],
-      });
-      for (const card of open.toReversed()) {
-        const found = tracker(card.owner_squire_id);
-        if (Option.isSome(found)) return found;
-      }
-      // `trackersOf` lists in creation order (created_at, then rowid).
-      return Option.fromNullishOr(trackers[0]);
+    }
+    const tracker = (id: string) => Option.fromNullishOr(trackers.find((row) => row.id === id));
+    for (const row of (yield* batchEvents(ctx)).toReversed()) {
+      if (row.kind !== "item-raised") continue;
+      const event = Option.getOrUndefined(decodeEvent(row.payload_json ?? ""));
+      if (event === undefined || isUnknownUnionMember(event)) continue;
+      if (event.type !== "item-raised" || event.targetThreadId !== threadId) continue;
+      const found = tracker(event.squireId);
+      if (Option.isSome(found)) return found;
+    }
+    const open = yield* repository.listCards({
+      targetThreadId: threadId,
+      statuses: ["open", "held"],
+      kinds: ["steer", "question", "overlap", "proposal"],
     });
+    for (const card of open.toReversed()) {
+      const found = tracker(card.owner_squire_id);
+      if (Option.isSome(found)) return found;
+    }
+    // `trackersOf` lists in creation order (created_at, then rowid).
+    return Option.fromNullishOr(trackers[0]);
+  });
 
   /** A Lead sweep finding, admitted inside the card's transaction. */
-  const admitFinding = (ctx: Ctx, finding: NonNullable<CardPlan["finding"]>) =>
-    Effect.gen(function* () {
-      if (Option.isNone(sweep)) {
-        return { ok: false, reason: "sweep-unavailable", text: SWEEP_UNAVAILABLE } as const;
-      }
-      return yield* sweep.value.admitFinding({
-        lead: ctx.squire,
-        batchEvents: yield* batchEvents(ctx),
-        threadId: finding.threadId,
-        kind: finding.kind,
-        now: ctx.now,
-      });
+  const admitFinding = Effect.fn("SquireTools.admitFinding")(function* (
+    ctx: Ctx,
+    finding: NonNullable<CardPlan["finding"]>,
+  ) {
+    if (Option.isNone(sweep)) {
+      return { ok: false, reason: "sweep-unavailable", text: SWEEP_UNAVAILABLE } as const;
+    }
+    return yield* sweep.value.admitFinding({
+      lead: ctx.squire,
+      batchEvents: yield* batchEvents(ctx),
+      threadId: finding.threadId,
+      kind: finding.kind,
+      now: ctx.now,
     });
+  });
 
   /** The Lead reads any thread one of its Squires tracks. */
   const readable = (ctx: Ctx, threadId: ThreadId) =>
@@ -702,34 +702,36 @@ const make = Effect.gen(function* () {
    * `unknown`, which only recommends. A run that read another Squire's room
    * posts acts as `message` from then on.
    */
-  const callRun = (squireId: SquireId, homeThreadId: ThreadId) =>
-    Effect.gen(function* () {
-      const shell = yield* projections.getThreadShell(homeThreadId);
-      const runId = shell?.activeRunId ?? shell?.latestRunId ?? null;
-      if (runId === null) {
-        return { runId: "none", origin: "unknown", batchId: null } satisfies CallRun;
-      }
-      const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
-        runIds: [runId],
-      });
-      const run = runs.find((entry) => entry.id === runId);
-      if (run === undefined) return { runId, origin: "unknown", batchId: null } satisfies CallRun;
-      const parsed = SquireDelivery.parseSquireMessageId(run.userMessageId);
-      const started: SquireCardOrigin = Option.match(parsed, {
-        onNone: () => "user",
-        onSome: ({ origin: value }) => decodeTurnOrigin(value),
-      });
-      const origin: SquireCardOrigin =
-        !recommendOnlyOrigins.has(started) &&
-        (yield* readSquireText(repository, { squireId, runId })).tainted
-          ? "message"
-          : started;
-      const batchId = Option.match(parsed, {
-        onNone: () => null,
-        onSome: ({ batchId: value }) => value,
-      });
-      return { runId, origin, batchId } satisfies CallRun;
+  const callRun = Effect.fn("SquireTools.callRun")(function* (
+    squireId: SquireId,
+    homeThreadId: ThreadId,
+  ) {
+    const shell = yield* projections.getThreadShell(homeThreadId);
+    const runId = shell?.activeRunId ?? shell?.latestRunId ?? null;
+    if (runId === null) {
+      return { runId: "none", origin: "unknown", batchId: null } satisfies CallRun;
+    }
+    const { runs } = yield* projections.getThreadRecords(homeThreadId, ["runs"], {
+      runIds: [runId],
     });
+    const run = runs.find((entry) => entry.id === runId);
+    if (run === undefined) return { runId, origin: "unknown", batchId: null } satisfies CallRun;
+    const parsed = SquireDelivery.parseSquireMessageId(run.userMessageId);
+    const started: SquireCardOrigin = Option.match(parsed, {
+      onNone: () => "user",
+      onSome: ({ origin: value }) => decodeTurnOrigin(value),
+    });
+    const origin: SquireCardOrigin =
+      !recommendOnlyOrigins.has(started) &&
+      (yield* readSquireText(repository, { squireId, runId })).tainted
+        ? "message"
+        : started;
+    const batchId = Option.match(parsed, {
+      onNone: () => null,
+      onSome: ({ batchId: value }) => value,
+    });
+    return { runId, origin, batchId } satisfies CallRun;
+  });
 
   // ── Read tools ──
 
@@ -753,145 +755,148 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const summaryOf = (ctx: Ctx, shell: OrchestrationV2ThreadShell, turnId: RunId | undefined) =>
-    Effect.gen(function* () {
-      const event = yield* latestEventRow(ctx.squire.id, shell.id, turnId ?? null);
-      const runId = turnId ?? event?.payload.runId ?? shell.latestRunId;
-      if (runId === null) return null;
-      const stored = yield* summaries.read({
+  const summaryOf = Effect.fn("SquireTools.summaryOf")(function* (
+    ctx: Ctx,
+    shell: OrchestrationV2ThreadShell,
+    turnId: RunId | undefined,
+  ) {
+    const event = yield* latestEventRow(ctx.squire.id, shell.id, turnId ?? null);
+    const runId = turnId ?? event?.payload.runId ?? shell.latestRunId;
+    if (runId === null) return null;
+    const stored = yield* summaries.read({
+      threadId: shell.id,
+      runId,
+      ...(event?.row.kind === "waiting-on-user" && event.payload.pendingRequest
+        ? { stage: `request:${event.payload.pendingRequest.requestId}` as const }
+        : {}),
+    });
+    if (Option.isNone(stored)) return { runId, summary: null };
+    const summary: SquireTurnSummary =
+      stored.value.status === "complete"
+        ? stored.value.summary
+        : { ...stored.value.summary, summaryStatus: "partial" };
+    const payload = event?.payload;
+    const overlay = {
+      ...(payload?.outcome ? { outcome: payload.outcome } : {}),
+      ...(payload?.pendingRequest?.question
+        ? { pendingQuestion: payload.pendingRequest.question }
+        : {}),
+      ...(payload?.pullRequest
+        ? { pullRequest: SquireDelivery.toSummaryPullRequest(payload.pullRequest, summary) }
+        : {}),
+    };
+    return { runId, summary, overlay };
+  });
+
+  const listTracked = Effect.fn("SquireTools.listTracked")(function* (ctx: Ctx) {
+    const snapshot = yield* projections.getShellSnapshot({ location: "active" });
+    const tracked: Array<OrchestrationV2ThreadShell> = [];
+    for (const shell of snapshot.threads) {
+      if (yield* readable(ctx, shell.id)) tracked.push(shell);
+    }
+    const shown = tracked
+      .toSorted((a, b) => DateTime.toEpochMillis(b.updatedAt) - DateTime.toEpochMillis(a.updatedAt))
+      .slice(0, LIST_MAX_THREADS);
+    const entries = [];
+    const lines: Array<string> = [];
+    for (const shell of shown) {
+      const project = yield* projectTitle(shell.projectId);
+      const found = yield* summaryOf(ctx, shell, undefined);
+      const last =
+        found?.summary == null
+          ? null
+          : renderSquireTurnSummary(found.summary, {
+              overlay: found.overlay,
+              maxChars: LIST_SUMMARY_CHARS,
+            });
+      entries.push({
         threadId: shell.id,
-        runId,
-        ...(event?.row.kind === "waiting-on-user" && event.payload.pendingRequest
-          ? { stage: `request:${event.payload.pendingRequest.requestId}` as const }
-          : {}),
+        title: shell.title,
+        project,
+        status: shell.status,
+        latestTurnId: shell.latestRunId,
+        lastSummary: last,
       });
-      if (Option.isNone(stored)) return { runId, summary: null };
-      const summary: SquireTurnSummary =
-        stored.value.status === "complete"
-          ? stored.value.summary
-          : { ...stored.value.summary, summaryStatus: "partial" };
-      const payload = event?.payload;
-      const overlay = {
-        ...(payload?.outcome ? { outcome: payload.outcome } : {}),
-        ...(payload?.pendingRequest?.question
-          ? { pendingQuestion: payload.pendingRequest.question }
-          : {}),
-        ...(payload?.pullRequest
-          ? { pullRequest: SquireDelivery.toSummaryPullRequest(payload.pullRequest, summary) }
-          : {}),
-      };
-      return { runId, summary, overlay };
-    });
-
-  const listTracked = (ctx: Ctx) =>
-    Effect.gen(function* () {
-      const snapshot = yield* projections.getShellSnapshot({ location: "active" });
-      const tracked: Array<OrchestrationV2ThreadShell> = [];
-      for (const shell of snapshot.threads) {
-        if (yield* readable(ctx, shell.id)) tracked.push(shell);
-      }
-      const shown = tracked
-        .toSorted(
-          (a, b) => DateTime.toEpochMillis(b.updatedAt) - DateTime.toEpochMillis(a.updatedAt),
-        )
-        .slice(0, LIST_MAX_THREADS);
-      const entries = [];
-      const lines: Array<string> = [];
-      for (const shell of shown) {
-        const project = yield* projectTitle(shell.projectId);
-        const found = yield* summaryOf(ctx, shell, undefined);
-        const last =
-          found?.summary == null
-            ? null
-            : renderSquireTurnSummary(found.summary, {
-                overlay: found.overlay,
-                maxChars: LIST_SUMMARY_CHARS,
-              });
-        entries.push({
-          threadId: shell.id,
-          title: shell.title,
-          project,
-          status: shell.status,
-          latestTurnId: shell.latestRunId,
-          lastSummary: last,
-        });
-        lines.push(
-          `- ${shell.title} (${shell.id}) · ${project} · ${shell.status}`,
-          ...(last === null ? [] : [last.replaceAll(/^/gm, "  ")]),
-        );
-      }
-      const more = tracked.length - shown.length;
-      const text =
-        tracked.length === 0
-          ? "You track no threads."
-          : [...lines, ...(more > 0 ? [`+${more} more`] : [])].join("\n");
-      yield* logRow(ctx, "tool.called", { tool: ctx.tool, threads: tracked.length });
-      return ok(text, { threads: entries, total: tracked.length });
-    });
-
-  const readShell = (ctx: Ctx, threadId: ThreadId) =>
-    Effect.gen(function* () {
-      if (!(yield* readable(ctx, threadId))) return null;
-      return yield* projections.getThreadShell(threadId);
-    });
-
-  const getSummary = (ctx: Ctx, args: typeof ThreadReadArgs.Type) =>
-    Effect.gen(function* () {
-      const shell = yield* readShell(ctx, args.threadId);
-      if (shell === null) return refused("scope", notInScope(args.threadId));
-      const found = yield* summaryOf(ctx, shell, args.turnId);
-      yield* logRow(
-        ctx,
-        "tool.called",
-        { tool: ctx.tool, turnId: found?.runId ?? null },
-        { threadId: shell.id },
+      lines.push(
+        `- ${shell.title} (${shell.id}) · ${project} · ${shell.status}`,
+        ...(last === null ? [] : [last.replaceAll(/^/gm, "  ")]),
       );
-      if (found === null) return ok(`${shell.title} has no turns yet.`);
-      if (found.summary === null) {
-        return ok(`No summary is stored for turn ${found.runId} of ${shell.title} yet.`);
-      }
-      return ok(renderSquireTurnSummary(found.summary, { overlay: found.overlay }), {
-        summary: mergeSquireSummaryOverlay(found.summary, found.overlay),
-      });
-    });
+    }
+    const more = tracked.length - shown.length;
+    const text =
+      tracked.length === 0
+        ? "You track no threads."
+        : [...lines, ...(more > 0 ? [`+${more} more`] : [])].join("\n");
+    yield* logRow(ctx, "tool.called", { tool: ctx.tool, threads: tracked.length });
+    return ok(text, { threads: entries, total: tracked.length });
+  });
 
-  const getDetail = (ctx: Ctx, args: typeof ThreadReadArgs.Type) =>
-    Effect.gen(function* () {
-      const shell = yield* readShell(ctx, args.threadId);
-      if (shell === null) return refused("scope", notInScope(args.threadId));
-      const runId = args.turnId ?? shell.latestRunId;
-      if (runId === null) return ok(`${shell.title} has no turns yet.`);
-      const { runs } = yield* projections.getThreadRecords(shell.id, ["runs"], {
-        runIds: [runId],
-      });
-      const run = runs.find((entry) => entry.id === runId);
-      if (run === undefined) {
-        return refused("not-found", `Turn ${runId} is not a turn of ${shell.title}.`);
-      }
-      const { messages } = yield* projections.getThreadRecords(shell.id, ["messages"], {
-        messageRunIds: [runId],
-        messageRoles: ["user", "assistant"],
-      });
-      const { messages: prompt } = yield* projections.getThreadRecords(shell.id, ["messages"], {
-        messageIds: [run.userMessageId],
-      });
-      const ordered = [
-        ...prompt,
-        ...messages.filter((message) => message.id !== run.userMessageId),
-      ].filter((message) => message.role !== "system" && message.text.trim().length > 0);
-      const body = [
-        `${shell.title} · turn ${runId} · ${run.status}`,
-        ...ordered.map((message) => `${message.role}: ${message.text.trim()}`),
-      ].join("\n\n");
-      const excerpt = squireDetailExcerpt(body);
-      yield* logRow(
-        ctx,
-        "tool.called",
-        { tool: ctx.tool, turnId: runId, chars: excerpt.length },
-        { threadId: shell.id },
-      );
-      return ok(excerpt, { threadId: shell.id, turnId: runId, truncated: excerpt !== body });
+  const readShell = Effect.fn("SquireTools.readShell")(function* (ctx: Ctx, threadId: ThreadId) {
+    if (!(yield* readable(ctx, threadId))) return null;
+    return yield* projections.getThreadShell(threadId);
+  });
+
+  const getSummary = Effect.fn("SquireTools.getSummary")(function* (
+    ctx: Ctx,
+    args: typeof ThreadReadArgs.Type,
+  ) {
+    const shell = yield* readShell(ctx, args.threadId);
+    if (shell === null) return refused("scope", notInScope(args.threadId));
+    const found = yield* summaryOf(ctx, shell, args.turnId);
+    yield* logRow(
+      ctx,
+      "tool.called",
+      { tool: ctx.tool, turnId: found?.runId ?? null },
+      { threadId: shell.id },
+    );
+    if (found === null) return ok(`${shell.title} has no turns yet.`);
+    if (found.summary === null) {
+      return ok(`No summary is stored for turn ${found.runId} of ${shell.title} yet.`);
+    }
+    return ok(renderSquireTurnSummary(found.summary, { overlay: found.overlay }), {
+      summary: mergeSquireSummaryOverlay(found.summary, found.overlay),
     });
+  });
+
+  const getDetail = Effect.fn("SquireTools.getDetail")(function* (
+    ctx: Ctx,
+    args: typeof ThreadReadArgs.Type,
+  ) {
+    const shell = yield* readShell(ctx, args.threadId);
+    if (shell === null) return refused("scope", notInScope(args.threadId));
+    const runId = args.turnId ?? shell.latestRunId;
+    if (runId === null) return ok(`${shell.title} has no turns yet.`);
+    const { runs } = yield* projections.getThreadRecords(shell.id, ["runs"], {
+      runIds: [runId],
+    });
+    const run = runs.find((entry) => entry.id === runId);
+    if (run === undefined) {
+      return refused("not-found", `Turn ${runId} is not a turn of ${shell.title}.`);
+    }
+    const { messages } = yield* projections.getThreadRecords(shell.id, ["messages"], {
+      messageRunIds: [runId],
+      messageRoles: ["user", "assistant"],
+    });
+    const { messages: prompt } = yield* projections.getThreadRecords(shell.id, ["messages"], {
+      messageIds: [run.userMessageId],
+    });
+    const ordered = [
+      ...prompt,
+      ...messages.filter((message) => message.id !== run.userMessageId),
+    ].filter((message) => message.role !== "system" && message.text.trim().length > 0);
+    const body = [
+      `${shell.title} · turn ${runId} · ${run.status}`,
+      ...ordered.map((message) => `${message.role}: ${message.text.trim()}`),
+    ].join("\n\n");
+    const excerpt = squireDetailExcerpt(body);
+    yield* logRow(
+      ctx,
+      "tool.called",
+      { tool: ctx.tool, turnId: runId, chars: excerpt.length },
+      { threadId: shell.id },
+    );
+    return ok(excerpt, { threadId: shell.id, turnId: runId, truncated: excerpt !== body });
+  });
 
   // ── Cards ──
 
@@ -941,168 +946,171 @@ const make = Effect.gen(function* () {
    * Inside the caller's transaction. An open card of the same
    * (Squire, target, kind) is replaced in place and counted as "updated".
    */
-  const writeCard = (ctx: Ctx, plan: CardPlan, finding: Admitted | null = null) =>
-    Effect.gen(function* () {
-      // An item the Lead raises for a typed task is that task's receipt.
-      const leadTask =
-        ctx.squire.role === "lead" &&
-        ctx.run.origin === "user" &&
-        plan.kind !== "fyi" &&
-        finding === null
-          ? `task:${ctx.key.slice(0, 24)}`
-          : null;
-      const routedTaskId = leadTask ?? (yield* routedTaskOf(ctx));
-      // A voice turn's card says whether the note's speaker was verified.
-      const speakerVerified =
-        ctx.run.origin === "voice" && ctx.run.batchId !== null
-          ? SquireDelivery.batchSpeakerVerified(yield* repository.listBatch(ctx.run.batchId))
-          : undefined;
-      const trigger = finding?.trigger ?? plan.trigger;
-      // A sweep finding is its own item, keyed for the dismissal memory.
-      const [open] =
-        plan.targetThreadId === null || finding !== null
-          ? []
-          : yield* repository.listCards({
-              squireId: ctx.squire.id,
-              targetThreadId: plan.targetThreadId,
-              kinds: [plan.kind],
-              statuses: ["open"],
-            });
-      const columns = {
-        title: plan.title,
-        why: plan.why,
-        payload_json: encodeCardPayload(plan.payload),
-        trigger_json: encodeCardTrigger(
-          speakerVerified === undefined ? trigger : { ...trigger, speakerVerified },
-        ),
-        intent_json: plan.intent === null ? null : encodeSquireActionIntent(plan.intent),
-        origin: storedOrigin(ctx.run.origin),
-        steer_kind: plan.steerKind,
-        rule_id: plan.ruleId,
-        owner_squire_id: plan.owner ?? ctx.squire.id,
-        ...(routedTaskId === null ? {} : { routed_task_id: routedTaskId }),
-      };
-      let cardId: SquireCardId;
-      let replacedCount = 0;
-      // A hold is its own card; in-place replacement applies to open cards only.
-      if (open !== undefined && plan.hold === null) {
-        cardId = open.id;
-        replacedCount = open.replaced_count + 1;
-        yield* repository.updateCard({
-          id: open.id,
-          fromStatuses: ["open"],
-          patch: { ...columns, replaced_count: replacedCount },
-          updatedAt: ctx.now,
-        });
-      } else {
-        cardId = cardIdFor(ctx, plan.kind);
-        yield* repository.insertCard({
-          id: cardId,
-          squire_id: ctx.squire.id,
-          kind: plan.kind,
-          status: plan.hold === null ? "open" : "held",
-          target_thread_id: plan.targetThreadId,
-          project_id: plan.projectId,
-          evidence_json: "{}",
-          routed_task_id: null,
-          finding_key: finding?.findingKey ?? null,
-          escalate_at: null,
-          opened_at: null,
-          executes_at: plan.hold?.executesAt ?? null,
-          attempt: plan.hold === null ? 0 : 1,
-          command_id: plan.hold === null ? null : squireActionCommandId("execute", cardId, 1),
-          execution_key: null,
-          dedupe_key: null,
-          replaced_count: 0,
-          ask_json: null,
-          resolution: null,
-          created_at: ctx.now,
-          updated_at: ctx.now,
-          ...columns,
-        });
-      }
-      // The fallback FYI for threads a turn raised nothing on reads these rows
-      // by run, so an update writes one too.
-      // A hold is not a card until it is undone or refused at execution.
+  const writeCard = Effect.fn("SquireTools.writeCard")(function* (
+    ctx: Ctx,
+    plan: CardPlan,
+    finding: Admitted | null = null,
+  ) {
+    // An item the Lead raises for a typed task is that task's receipt.
+    const leadTask =
+      ctx.squire.role === "lead" &&
+      ctx.run.origin === "user" &&
+      plan.kind !== "fyi" &&
+      finding === null
+        ? `task:${ctx.key.slice(0, 24)}`
+        : null;
+    const routedTaskId = leadTask ?? (yield* routedTaskOf(ctx));
+    // A voice turn's card says whether the note's speaker was verified.
+    const speakerVerified =
+      ctx.run.origin === "voice" && ctx.run.batchId !== null
+        ? SquireDelivery.batchSpeakerVerified(yield* repository.listBatch(ctx.run.batchId))
+        : undefined;
+    const trigger = finding?.trigger ?? plan.trigger;
+    // A sweep finding is its own item, keyed for the dismissal memory.
+    const [open] =
+      plan.targetThreadId === null || finding !== null
+        ? []
+        : yield* repository.listCards({
+            squireId: ctx.squire.id,
+            targetThreadId: plan.targetThreadId,
+            kinds: [plan.kind],
+            statuses: ["open"],
+          });
+    const columns = {
+      title: plan.title,
+      why: plan.why,
+      payload_json: encodeCardPayload(plan.payload),
+      trigger_json: encodeCardTrigger(
+        speakerVerified === undefined ? trigger : { ...trigger, speakerVerified },
+      ),
+      intent_json: plan.intent === null ? null : encodeSquireActionIntent(plan.intent),
+      origin: storedOrigin(ctx.run.origin),
+      steer_kind: plan.steerKind,
+      rule_id: plan.ruleId,
+      owner_squire_id: plan.owner ?? ctx.squire.id,
+      ...(routedTaskId === null ? {} : { routed_task_id: routedTaskId }),
+    };
+    let cardId: SquireCardId;
+    let replacedCount = 0;
+    // A hold is its own card; in-place replacement applies to open cards only.
+    if (open !== undefined && plan.hold === null) {
+      cardId = open.id;
+      replacedCount = open.replaced_count + 1;
+      yield* repository.updateCard({
+        id: open.id,
+        fromStatuses: ["open"],
+        patch: { ...columns, replaced_count: replacedCount },
+        updatedAt: ctx.now,
+      });
+    } else {
+      cardId = cardIdFor(ctx, plan.kind);
+      yield* repository.insertCard({
+        id: cardId,
+        squire_id: ctx.squire.id,
+        kind: plan.kind,
+        status: plan.hold === null ? "open" : "held",
+        target_thread_id: plan.targetThreadId,
+        project_id: plan.projectId,
+        evidence_json: "{}",
+        routed_task_id: null,
+        finding_key: finding?.findingKey ?? null,
+        escalate_at: null,
+        opened_at: null,
+        executes_at: plan.hold?.executesAt ?? null,
+        attempt: plan.hold === null ? 0 : 1,
+        command_id: plan.hold === null ? null : squireActionCommandId("execute", cardId, 1),
+        execution_key: null,
+        dedupe_key: null,
+        replaced_count: 0,
+        ask_json: null,
+        resolution: null,
+        created_at: ctx.now,
+        updated_at: ctx.now,
+        ...columns,
+      });
+    }
+    // The fallback FYI for threads a turn raised nothing on reads these rows
+    // by run, so an update writes one too.
+    // A hold is not a card until it is undone or refused at execution.
+    yield* logRow(
+      ctx,
+      plan.hold === null ? "card.created" : "action.held",
+      {
+        kind: plan.kind,
+        origin: ctx.run.origin,
+        caption: plan.caption,
+        ...(plan.hold === null ? {} : { executesAt: plan.hold.executesAt }),
+        ...(replacedCount > 0 ? { updated: true, replacedCount } : {}),
+        ...plan.logData,
+      },
+      { threadId: plan.targetThreadId, cardId },
+    );
+    if (leadTask !== null) {
       yield* logRow(
         ctx,
-        plan.hold === null ? "card.created" : "action.held",
-        {
-          kind: plan.kind,
-          origin: ctx.run.origin,
-          caption: plan.caption,
-          ...(plan.hold === null ? {} : { executesAt: plan.hold.executesAt }),
-          ...(replacedCount > 0 ? { updated: true, replacedCount } : {}),
-          ...plan.logData,
-        },
+        "task.routed",
+        { toSquireId: plan.owner ?? ctx.squire.id, text: plan.title, via: plan.kind },
+        { threadId: plan.targetThreadId, cardId, taskId: leadTask },
+      );
+    }
+    if (plan.ruleId !== null) {
+      yield* logRow(
+        ctx,
+        "rule.matched",
+        { ruleId: plan.ruleId, tool: ctx.tool },
         { threadId: plan.targetThreadId, cardId },
       );
-      if (leadTask !== null) {
+      yield* repository.recordRuleMatch({ id: plan.ruleId, matchedAt: ctx.now });
+    }
+    let wakeLead: SquireId | null = null;
+    if (replacedCount === 0) {
+      // A hold pushes only if it becomes a card.
+      if (plan.push && plan.hold === null) {
         yield* logRow(
           ctx,
-          "task.routed",
-          { toSquireId: plan.owner ?? ctx.squire.id, text: plan.title, via: plan.kind },
-          { threadId: plan.targetThreadId, cardId, taskId: leadTask },
-        );
-      }
-      if (plan.ruleId !== null) {
-        yield* logRow(
-          ctx,
-          "rule.matched",
-          { ruleId: plan.ruleId, tool: ctx.tool },
+          "notification.pushed",
+          { kind: plan.kind, source: plan.kind === "fyi" ? "notify" : "card" },
           { threadId: plan.targetThreadId, cardId },
         );
-        yield* repository.recordRuleMatch({ id: plan.ruleId, matchedAt: ctx.now });
-      }
-      let wakeLead: SquireId | null = null;
-      if (replacedCount === 0) {
-        // A hold pushes only if it becomes a card.
-        if (plan.push && plan.hold === null) {
-          yield* logRow(
-            ctx,
-            "notification.pushed",
-            { kind: plan.kind, source: plan.kind === "fyi" ? "notify" : "card" },
-            { threadId: plan.targetThreadId, cardId },
-          );
-          // Held back while a desktop is active; it reaches the phone on
-          // escalation. SquireMobileAttention writes the mobile delivery row.
-          if (Option.isSome(presence)) {
-            yield* presence.value.holdIntent({
-              squireId: ctx.squire.id,
-              cardId,
-              kind: plan.kind,
-              threadId: plan.targetThreadId,
-              runId: ctx.run.runId,
-              now: ctx.now,
-            });
-          }
-        }
-        // A decision item wakes the Lead, as the reactor's question card does.
-        if (ctx.squire.role !== "lead") {
-          const lead = yield* writeLeadItemEvent(repository, {
-            transition: "raised",
-            card: {
-              id: cardId,
-              squire_id: ctx.squire.id,
-              kind: plan.kind,
-              title: plan.title,
-              target_thread_id: plan.targetThreadId,
-              status: plan.hold === null ? "open" : "held",
-              resolution: null,
-            },
+        // Held back while a desktop is active; it reaches the phone on
+        // escalation. SquireMobileAttention writes the mobile delivery row.
+        if (Option.isSome(presence)) {
+          yield* presence.value.holdIntent({
+            squireId: ctx.squire.id,
+            cardId,
+            kind: plan.kind,
+            threadId: plan.targetThreadId,
+            runId: ctx.run.runId,
             now: ctx.now,
           });
-          if (Option.isSome(lead)) wakeLead = lead.value;
         }
       }
-      return { cardId, replacedCount, wakeLead };
-    });
+      // A decision item wakes the Lead, as the reactor's question card does.
+      if (ctx.squire.role !== "lead") {
+        const lead = yield* writeLeadItemEvent(repository, {
+          transition: "raised",
+          card: {
+            id: cardId,
+            squire_id: ctx.squire.id,
+            kind: plan.kind,
+            title: plan.title,
+            target_thread_id: plan.targetThreadId,
+            status: plan.hold === null ? "open" : "held",
+            resolution: null,
+          },
+          now: ctx.now,
+        });
+        if (Option.isSome(lead)) wakeLead = lead.value;
+      }
+    }
+    return { cardId, replacedCount, wakeLead };
+  });
 
   /**
    * One keyed transaction: `tool.called`, `decision.recorded`, then the card
    * and its rows. A duplicate committed meanwhile wins, and its result is returned.
    */
-  const commitCard = (
+  const commitCard = Effect.fn("SquireTools.commitCard")(function* (
     ctx: Ctx,
     plan: CardPlan,
     decision: Record<string, unknown>,
@@ -1110,50 +1118,49 @@ const make = Effect.gen(function* () {
       readonly text: string;
       readonly structuredContent: Record<string, unknown>;
     },
-  ) =>
-    Effect.gen(function* () {
-      const written = yield* repository.transaction(
-        Effect.gen(function* () {
-          // Admitted in the card's transaction, so per-sweep and per-day counts stay exact.
-          let finding: Admitted | null = null;
-          if (plan.finding !== undefined) {
-            const admitted = yield* admitFinding(ctx, plan.finding);
-            if (!admitted.ok) {
-              const result = refused(admitted.reason, admitted.text);
-              yield* toolCalled(ctx, result, plan.targetThreadId);
-              yield* logRow(
-                ctx,
-                "decision.recorded",
-                { tool: ctx.tool, outcome: "refused", reason: admitted.reason },
-                { threadId: plan.targetThreadId },
-              );
-              return { result, wakeLead: null };
-            }
-            finding = admitted;
+  ) {
+    const written = yield* repository.transaction(
+      Effect.gen(function* () {
+        // Admitted in the card's transaction, so per-sweep and per-day counts stay exact.
+        let finding: Admitted | null = null;
+        if (plan.finding !== undefined) {
+          const admitted = yield* admitFinding(ctx, plan.finding);
+          if (!admitted.ok) {
+            const result = refused(admitted.reason, admitted.text);
+            yield* toolCalled(ctx, result, plan.targetThreadId);
+            yield* logRow(
+              ctx,
+              "decision.recorded",
+              { tool: ctx.tool, outcome: "refused", reason: admitted.reason },
+              { threadId: plan.targetThreadId },
+            );
+            return { result, wakeLead: null };
           }
-          const card = yield* writeCard(ctx, plan, finding);
-          const described = describe(card);
-          const result = ok(described.text, {
-            ...described.structuredContent,
-            cardId: card.cardId,
-            ...(plan.caption === null ? {} : { caption: plan.caption }),
-            ...(card.replacedCount > 0 ? { updated: true, replacedCount: card.replacedCount } : {}),
-          });
-          yield* toolCalled(ctx, result, plan.targetThreadId);
-          yield* logRow(
-            ctx,
-            "decision.recorded",
-            { tool: ctx.tool, ...decision },
-            { threadId: plan.targetThreadId, cardId: card.cardId },
-          );
-          return { result, wakeLead: card.wakeLead };
-        }),
-      );
-      if (written.wakeLead !== null && Option.isSome(delivery)) {
-        yield* delivery.value.wake(written.wakeLead);
-      }
-      return written.result;
-    });
+          finding = admitted;
+        }
+        const card = yield* writeCard(ctx, plan, finding);
+        const described = describe(card);
+        const result = ok(described.text, {
+          ...described.structuredContent,
+          cardId: card.cardId,
+          ...(plan.caption === null ? {} : { caption: plan.caption }),
+          ...(card.replacedCount > 0 ? { updated: true, replacedCount: card.replacedCount } : {}),
+        });
+        yield* toolCalled(ctx, result, plan.targetThreadId);
+        yield* logRow(
+          ctx,
+          "decision.recorded",
+          { tool: ctx.tool, ...decision },
+          { threadId: plan.targetThreadId, cardId: card.cardId },
+        );
+        return { result, wakeLead: card.wakeLead };
+      }),
+    );
+    if (written.wakeLead !== null && Option.isSome(delivery)) {
+      yield* delivery.value.wake(written.wakeLead);
+    }
+    return written.result;
+  });
 
   const notifyOn = (ctx: Ctx) =>
     squirePolicy.decide({
@@ -1221,139 +1228,142 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const steer = (ctx: Ctx, args: typeof SquireSteerArgs.Type, send: boolean) =>
-    Effect.gen(function* () {
-      const lead = ctx.squire.role === "lead";
-      // The Lead's steer belongs to, and is charged to, the thread's owning Squire.
-      const owner = lead
-        ? yield* ownerOf(ctx, args.threadId)
-        : (yield* scope.isTracked(ctx.squire.id, args.threadId))
-          ? Option.some(ctx.squire)
-          : Option.none<SquireRepository.SquireRow>();
-      const target = Option.isSome(owner) ? yield* scope.targetOf(args.threadId) : Option.none();
-      if (Option.isNone(owner) || Option.isNone(target)) {
-        return yield* refuse(ctx, "scope", notInScope(args.threadId), {
-          decision: { reason: "scope" },
-        });
-      }
-      if (lead && ctx.run.origin === "sweep" && Option.isNone(sweep)) {
-        return yield* refuse(ctx, "sweep-unavailable", SWEEP_UNAVAILABLE, {
-          threadId: args.threadId,
-        });
-      }
-      const self = policySquireOf(owner.value);
-      const budgetRows = yield* budgetRowsOf(owner.value.id, ctx.now);
-      const decision = squirePolicy.decide({
-        actionClass: "steer",
-        squire: self,
-        ...(lead ? { lead: policySquireOf(ctx.squire) } : {}),
-        rules: yield* rulesOf(owner.value.id),
-        target: target.value,
-        trackers: yield* trackersFor(args.threadId),
-        budgetRows,
-        origin: ctx.run.origin,
-        steerKind: args.steerKind,
-        now: ctx.now,
+  const steer = Effect.fn("SquireTools.steer")(function* (
+    ctx: Ctx,
+    args: typeof SquireSteerArgs.Type,
+    send: boolean,
+  ) {
+    const lead = ctx.squire.role === "lead";
+    // The Lead's steer belongs to, and is charged to, the thread's owning Squire.
+    const owner = lead
+      ? yield* ownerOf(ctx, args.threadId)
+      : (yield* scope.isTracked(ctx.squire.id, args.threadId))
+        ? Option.some(ctx.squire)
+        : Option.none<SquireRepository.SquireRow>();
+    const target = Option.isSome(owner) ? yield* scope.targetOf(args.threadId) : Option.none();
+    if (Option.isNone(owner) || Option.isNone(target)) {
+      return yield* refuse(ctx, "scope", notInScope(args.threadId), {
+        decision: { reason: "scope" },
       });
-      if (decision.level === "off") {
-        return yield* refuse(
-          ctx,
-          decision.reason,
-          decision.reason === "paused"
-            ? "This Squire is paused, so it cannot steer."
-            : decision.reason === "intersection"
-              ? `Steer is Off for ${owner.value.name}, which owns this thread, so you cannot steer or recommend steers on it.`
-              : "Steer is Off for this Squire, so it cannot steer or recommend steers.",
-          { threadId: args.threadId, decision: { level: decision.level } },
-        );
-      }
-      const held = send && decision.level === "auto";
-      const reason: Reason =
-        send && decision.reason === "permission" && recommendOnlyOrigins.has(ctx.run.origin)
-          ? ctx.run.origin === "voice"
-            ? "voice"
-            : "origin"
-          : decision.reason;
-      const shell = yield* projections.getThreadShell(args.threadId);
-      const title = shell?.title ?? args.threadId;
-      const caption = squireBudgetCaption({
-        actionClass: "steer",
-        budgets: self.budgets,
+    }
+    if (lead && ctx.run.origin === "sweep" && Option.isNone(sweep)) {
+      return yield* refuse(ctx, "sweep-unavailable", SWEEP_UNAVAILABLE, {
         threadId: args.threadId,
-        budgetRows,
-        now: ctx.now,
       });
-      const plan: CardPlan = {
-        kind: "steer",
-        targetThreadId: args.threadId,
-        projectId: target.value.projectId,
-        title: squireSteerTitle({
-          project: yield* projectTitle(target.value.projectId),
-          threadTitle: shell?.title ?? "",
-          pullRequest: primaryLink(shell?.pullRequests ?? []) ?? null,
-          steerKind: args.steerKind,
-          steer: args.steer,
-        }),
-        why: args.reason,
-        payload: {
-          type: "steer",
-          threadId: args.threadId,
-          steer: args.steer,
-          steerKind: args.steerKind,
-        },
-        trigger: {
-          ...(shell?.latestRunId ? { runId: shell.latestRunId } : {}),
-          ...(yield* pullRequestTriggerOf(ctx, args.threadId, args.steerKind)),
-        },
-        intent: {
-          type: "steer",
-          threadId: args.threadId,
-          text: args.steer,
-          steerKind: args.steerKind,
-          dispatchMode: yield* steerDispatchMode(projections, args.threadId),
-          precondition: yield* captureSquirePrecondition(projections, args.threadId),
-        },
-        hold: held ? { executesAt: holdUntil(ctx) } : null,
-        steerKind: args.steerKind,
-        ruleId: send ? (decision.ruleId ?? null) : null,
-        caption,
-        push: notifyOn(ctx),
-        logData: { steerKind: args.steerKind },
-        owner: owner.value.id,
-        ...(lead && ctx.run.origin === "sweep"
-          ? { finding: { threadId: args.threadId, kind: "steer" as const } }
-          : {}),
-      };
-      return yield* commitCard(
-        ctx,
-        plan,
-        {
-          outcome: held ? "held" : "card",
-          level: decision.level,
-          reason,
-          ...(decision.ruleId === undefined ? {} : { ruleId: decision.ruleId }),
-          ...(decision.recommendingUntil === undefined
-            ? {}
-            : { recommendingUntil: decision.recommendingUntil }),
-        },
-        ({ replacedCount }) => ({
-          text: `${
-            held
-              ? `Held: the steer goes to ${title} in ${ctx.squire.undo_window_seconds} s unless the user undoes it. ${caption}.`
-              : send
-                ? `Recorded as a recommendation card for ${title}: ${reasonText(reason, ctx.run.origin, decision.recommendingUntil)}. ${caption}.${updatedText(replacedCount)}`
-                : `Recommendation card created for ${title}. ${caption}.${updatedText(replacedCount)}`
-          }${lead ? ` It belongs to ${owner.value.name}.` : ""}`,
-          structuredContent: {
-            outcome: held ? "held" : "card",
-            reason,
-            origin: ctx.run.origin,
-            ...(held ? { executesAt: plan.hold!.executesAt } : {}),
-            ...(lead ? { ownerSquireId: owner.value.id } : {}),
-          },
-        }),
-      );
+    }
+    const self = policySquireOf(owner.value);
+    const budgetRows = yield* budgetRowsOf(owner.value.id, ctx.now);
+    const decision = squirePolicy.decide({
+      actionClass: "steer",
+      squire: self,
+      ...(lead ? { lead: policySquireOf(ctx.squire) } : {}),
+      rules: yield* rulesOf(owner.value.id),
+      target: target.value,
+      trackers: yield* trackersFor(args.threadId),
+      budgetRows,
+      origin: ctx.run.origin,
+      steerKind: args.steerKind,
+      now: ctx.now,
     });
+    if (decision.level === "off") {
+      return yield* refuse(
+        ctx,
+        decision.reason,
+        decision.reason === "paused"
+          ? "This Squire is paused, so it cannot steer."
+          : decision.reason === "intersection"
+            ? `Steer is Off for ${owner.value.name}, which owns this thread, so you cannot steer or recommend steers on it.`
+            : "Steer is Off for this Squire, so it cannot steer or recommend steers.",
+        { threadId: args.threadId, decision: { level: decision.level } },
+      );
+    }
+    const held = send && decision.level === "auto";
+    const reason: Reason =
+      send && decision.reason === "permission" && recommendOnlyOrigins.has(ctx.run.origin)
+        ? ctx.run.origin === "voice"
+          ? "voice"
+          : "origin"
+        : decision.reason;
+    const shell = yield* projections.getThreadShell(args.threadId);
+    const title = shell?.title ?? args.threadId;
+    const caption = squireBudgetCaption({
+      actionClass: "steer",
+      budgets: self.budgets,
+      threadId: args.threadId,
+      budgetRows,
+      now: ctx.now,
+    });
+    const plan: CardPlan = {
+      kind: "steer",
+      targetThreadId: args.threadId,
+      projectId: target.value.projectId,
+      title: squireSteerTitle({
+        project: yield* projectTitle(target.value.projectId),
+        threadTitle: shell?.title ?? "",
+        pullRequest: primaryLink(shell?.pullRequests ?? []) ?? null,
+        steerKind: args.steerKind,
+        steer: args.steer,
+      }),
+      why: args.reason,
+      payload: {
+        type: "steer",
+        threadId: args.threadId,
+        steer: args.steer,
+        steerKind: args.steerKind,
+      },
+      trigger: {
+        ...(shell?.latestRunId ? { runId: shell.latestRunId } : {}),
+        ...(yield* pullRequestTriggerOf(ctx, args.threadId, args.steerKind)),
+      },
+      intent: {
+        type: "steer",
+        threadId: args.threadId,
+        text: args.steer,
+        steerKind: args.steerKind,
+        dispatchMode: yield* steerDispatchMode(projections, args.threadId),
+        precondition: yield* captureSquirePrecondition(projections, args.threadId),
+      },
+      hold: held ? { executesAt: holdUntil(ctx) } : null,
+      steerKind: args.steerKind,
+      ruleId: send ? (decision.ruleId ?? null) : null,
+      caption,
+      push: notifyOn(ctx),
+      logData: { steerKind: args.steerKind },
+      owner: owner.value.id,
+      ...(lead && ctx.run.origin === "sweep"
+        ? { finding: { threadId: args.threadId, kind: "steer" as const } }
+        : {}),
+    };
+    return yield* commitCard(
+      ctx,
+      plan,
+      {
+        outcome: held ? "held" : "card",
+        level: decision.level,
+        reason,
+        ...(decision.ruleId === undefined ? {} : { ruleId: decision.ruleId }),
+        ...(decision.recommendingUntil === undefined
+          ? {}
+          : { recommendingUntil: decision.recommendingUntil }),
+      },
+      ({ replacedCount }) => ({
+        text: `${
+          held
+            ? `Held: the steer goes to ${title} in ${ctx.squire.undo_window_seconds} s unless the user undoes it. ${caption}.`
+            : send
+              ? `Recorded as a recommendation card for ${title}: ${reasonText(reason, ctx.run.origin, decision.recommendingUntil)}. ${caption}.${updatedText(replacedCount)}`
+              : `Recommendation card created for ${title}. ${caption}.${updatedText(replacedCount)}`
+        }${lead ? ` It belongs to ${owner.value.name}.` : ""}`,
+        structuredContent: {
+          outcome: held ? "held" : "card",
+          reason,
+          origin: ctx.run.origin,
+          ...(held ? { executesAt: plan.hold!.executesAt } : {}),
+          ...(lead ? { ownerSquireId: owner.value.id } : {}),
+        },
+      }),
+    );
+  });
 
   // ── Thread proposals ──
 
@@ -1361,327 +1371,331 @@ const make = Effect.gen(function* () {
     isFixtureWorkspaceRoot(config.baseDir, workspaceRoot);
 
   /** By id or name, among projects a project, space, or saga grant covers. */
-  const scopedProject = (squireId: SquireId, wanted: string) =>
-    Effect.gen(function* () {
-      const grants = yield* repository.listGrants(squireId);
-      const all = yield* projects.list();
-      const lowered = wanted.trim().toLowerCase();
-      const named = all.filter(
-        (project) => project.projectId === wanted || project.title.trim().toLowerCase() === lowered,
+  const scopedProject = Effect.fn("SquireTools.scopedProject")(function* (
+    squireId: SquireId,
+    wanted: string,
+  ) {
+    const grants = yield* repository.listGrants(squireId);
+    const all = yield* projects.list();
+    const lowered = wanted.trim().toLowerCase();
+    const named = all.filter(
+      (project) => project.projectId === wanted || project.title.trim().toLowerCase() === lowered,
+    );
+    for (const project of named) {
+      const direct = grants.some(
+        (grant) => grant.kind === "project" && grant.target_id === project.projectId,
       );
-      for (const project of named) {
-        const direct = grants.some(
-          (grant) => grant.kind === "project" && grant.target_id === project.projectId,
-        );
-        if (direct) return Option.some(project);
-        if (!grants.some((grant) => grant.kind === "staveSpace" || grant.kind === "staveSaga")) {
-          continue;
-        }
-        const stave = yield* containers.ofProject(project.projectId);
-        if (
-          stave.status === "known" &&
-          grants.some(
-            (grant) =>
-              (grant.kind === "staveSpace" && grant.target_id === stave.spaceId) ||
-              (grant.kind === "staveSaga" && grant.target_id === stave.sagaId),
-          )
-        ) {
-          return Option.some(project);
-        }
+      if (direct) return Option.some(project);
+      if (!grants.some((grant) => grant.kind === "staveSpace" || grant.kind === "staveSaga")) {
+        continue;
       }
-      return Option.none<ProjectStore.ProjectRow>();
-    });
+      const stave = yield* containers.ofProject(project.projectId);
+      if (
+        stave.status === "known" &&
+        grants.some(
+          (grant) =>
+            (grant.kind === "staveSpace" && grant.target_id === stave.spaceId) ||
+            (grant.kind === "staveSaga" && grant.target_id === stave.sagaId),
+        )
+      ) {
+        return Option.some(project);
+      }
+    }
+    return Option.none<ProjectStore.ProjectRow>();
+  });
 
-  const defaultModelOf = (instance: ProviderInstance) =>
-    Effect.gen(function* () {
-      const models = (yield* instance.snapshot.getSnapshot).models;
-      return (models.find((candidate) => candidate.isDefault) ?? models[0])?.slug ?? null;
-    });
+  const defaultModelOf = Effect.fn("SquireTools.defaultModelOf")(function* (
+    instance: ProviderInstance,
+  ) {
+    const models = (yield* instance.snapshot.getSnapshot).models;
+    return (models.find((candidate) => candidate.isDefault) ?? models[0])?.slug ?? null;
+  });
 
-  const proposal = (
+  const proposal = Effect.fn("SquireTools.proposal")(function* (
     ctx: Ctx,
     args: typeof ThreadProposalArgs.Type & {
       readonly squireId?: SquireId;
       readonly aboutThreadId?: ThreadId;
     },
     create: boolean,
-  ) =>
-    Effect.gen(function* () {
-      const lead = ctx.squire.role === "lead";
-      // The Lead proposes for a named Squire, inside that Squire's grants.
-      let owner = ctx.squire;
-      if (lead) {
-        const named =
-          args.squireId === undefined ? Option.none() : yield* repository.getSquire(args.squireId);
-        if (
-          Option.isNone(named) ||
-          named.value.role === "lead" ||
-          named.value.lifecycle === "deleting"
-        ) {
-          return yield* refuse(
-            ctx,
-            "not-found",
-            `${args.squireId ?? "That"} is not one of your Squires. Name the Squire that will track the thread, from squire_list_items or the event header.`,
-            { decision: { reason: "not-found" } },
-          );
-        }
-        owner = named.value;
-        if (ctx.run.origin === "sweep" && Option.isNone(sweep)) {
-          return yield* refuse(ctx, "sweep-unavailable", SWEEP_UNAVAILABLE);
-        }
-      }
-      const project = yield* scopedProject(owner.id, args.project);
-      if (Option.isNone(project)) {
+  ) {
+    const lead = ctx.squire.role === "lead";
+    // The Lead proposes for a named Squire, inside that Squire's grants.
+    let owner = ctx.squire;
+    if (lead) {
+      const named =
+        args.squireId === undefined ? Option.none() : yield* repository.getSquire(args.squireId);
+      if (
+        Option.isNone(named) ||
+        named.value.role === "lead" ||
+        named.value.lifecycle === "deleting"
+      ) {
         return yield* refuse(
           ctx,
-          "scope",
-          lead
-            ? `Project ${args.project} is not in ${owner.name}'s scope. Propose the thread for a Squire whose grants cover the project.`
-            : `Project ${args.project} is not in this Squire's scope. Propose threads only in your scoped projects.`,
-          { decision: { reason: "scope" } },
+          "not-found",
+          `${args.squireId ?? "That"} is not one of your Squires. Name the Squire that will track the thread, from squire_list_items or the event header.`,
+          { decision: { reason: "not-found" } },
         );
       }
-      const instances = (yield* providers.listInstances).filter((instance) => instance.enabled);
-      const proposed =
-        instances.find((instance) => instance.instanceId === args.provider) ??
-        instances.find((instance) => String(instance.driverKind) === args.provider);
-      // Fixtures always launch on the scripted instance, never a real provider.
-      const fixture =
-        (owner.create_request_id?.startsWith("fixture:") ?? false) ||
-        isFixtureProject(project.value.workspaceRoot);
-      const runner = fixture
-        ? instances.find((instance) => String(instance.driverKind) === "scripted")
-        : proposed;
-      if (runner === undefined) {
-        return yield* refuse(
-          ctx,
-          "provider",
-          fixture
-            ? "No scripted provider instance is available for this fixture."
-            : `No enabled ${args.provider} provider is available.`,
-          { decision: { reason: "provider" } },
-        );
+      owner = named.value;
+      if (ctx.run.origin === "sweep" && Option.isNone(sweep)) {
+        return yield* refuse(ctx, "sweep-unavailable", SWEEP_UNAVAILABLE);
       }
-      const runnerModel =
-        runner === proposed && args.model !== undefined
-          ? args.model
-          : yield* defaultModelOf(runner);
-      if (runnerModel === null) {
-        return yield* refuse(ctx, "provider", `${args.provider} lists no model.`, {
-          decision: { reason: "provider" },
-        });
-      }
-      const shownModel =
-        args.model ?? (proposed === undefined ? null : yield* defaultModelOf(proposed));
+    }
+    const project = yield* scopedProject(owner.id, args.project);
+    if (Option.isNone(project)) {
+      return yield* refuse(
+        ctx,
+        "scope",
+        lead
+          ? `Project ${args.project} is not in ${owner.name}'s scope. Propose the thread for a Squire whose grants cover the project.`
+          : `Project ${args.project} is not in this Squire's scope. Propose threads only in your scoped projects.`,
+        { decision: { reason: "scope" } },
+      );
+    }
+    const instances = (yield* providers.listInstances).filter((instance) => instance.enabled);
+    const proposed =
+      instances.find((instance) => instance.instanceId === args.provider) ??
+      instances.find((instance) => String(instance.driverKind) === args.provider);
+    // Fixtures always launch on the scripted instance, never a real provider.
+    const fixture =
+      (owner.create_request_id?.startsWith("fixture:") ?? false) ||
+      isFixtureProject(project.value.workspaceRoot);
+    const runner = fixture
+      ? instances.find((instance) => String(instance.driverKind) === "scripted")
+      : proposed;
+    if (runner === undefined) {
+      return yield* refuse(
+        ctx,
+        "provider",
+        fixture
+          ? "No scripted provider instance is available for this fixture."
+          : `No enabled ${args.provider} provider is available.`,
+        { decision: { reason: "provider" } },
+      );
+    }
+    const runnerModel =
+      runner === proposed && args.model !== undefined ? args.model : yield* defaultModelOf(runner);
+    if (runnerModel === null) {
+      return yield* refuse(ctx, "provider", `${args.provider} lists no model.`, {
+        decision: { reason: "provider" },
+      });
+    }
+    const shownModel =
+      args.model ?? (proposed === undefined ? null : yield* defaultModelOf(proposed));
 
-      const stave = yield* containers.ofProject(project.value.projectId);
-      const self = policySquireOf(owner);
-      const budgetRows = yield* budgetRowsOf(owner.id, ctx.now);
-      const decision = squirePolicy.decide({
-        actionClass: "createThread",
-        squire: self,
-        ...(lead ? { lead: policySquireOf(ctx.squire) } : {}),
-        rules: yield* rulesOf(owner.id),
-        target: {
-          threadId: null,
-          projectId: project.value.projectId,
-          staveSpaceId: stave.status === "known" ? stave.spaceId : null,
-          staveSagaId: stave.status === "known" ? stave.sagaId : null,
-        },
-        trackers: [],
-        budgetRows,
-        origin: ctx.run.origin,
-        now: ctx.now,
-      });
-      if (decision.level === "off") {
-        return yield* refuse(
-          ctx,
-          decision.reason,
-          decision.reason === "paused"
-            ? "This Squire is paused, so it cannot propose threads."
-            : decision.reason === "intersection"
-              ? `Create thread is Off for ${owner.name}, so you cannot propose threads for it.`
-              : "Create thread is Off for this Squire, so it cannot propose or create threads.",
-          { decision: { level: decision.level } },
-        );
-      }
-      const reason: Reason =
-        create && decision.reason === "permission" && recommendOnlyOrigins.has(ctx.run.origin)
-          ? ctx.run.origin === "voice"
-            ? "voice"
-            : "origin"
-          : decision.reason;
-      const caption = squireBudgetCaption({
-        actionClass: "createThread",
-        budgets: self.budgets,
+    const stave = yield* containers.ofProject(project.value.projectId);
+    const self = policySquireOf(owner);
+    const budgetRows = yield* budgetRowsOf(owner.id, ctx.now);
+    const decision = squirePolicy.decide({
+      actionClass: "createThread",
+      squire: self,
+      ...(lead ? { lead: policySquireOf(ctx.squire) } : {}),
+      rules: yield* rulesOf(owner.id),
+      target: {
         threadId: null,
-        budgetRows,
-        now: ctx.now,
-      });
-      const title = firstLine(args.firstPrompt, 120);
-      const payload = {
-        type: "thread-proposal" as const,
         projectId: project.value.projectId,
-        provider: proposed?.driverKind ?? ProviderDriverKind.make(args.provider),
-        providerInstanceId: proposed?.instanceId ?? null,
-        model: shownModel,
-        firstPrompt: args.firstPrompt,
-      };
-      // A hold stores the full launch input with its
-      // deterministic ids; one that cannot be prepared waits for an accept.
-      let launch: SquireLaunchAction.SquireLaunchIntent | null = null;
-      let unprepared: string | null = null;
-      if (create && decision.level === "auto") {
-        const prepared = Option.isNone(launcher)
-          ? Result.fail("thread creation is not available on this server")
-          : yield* launcher.value
-              .intentFor({
-                card: { id: cardIdFor(ctx, "proposal") },
-                squire: ctx.squire,
-                proposal: payload,
-                text: args.firstPrompt,
-                verb: "execute",
-                attempt: 1,
-              })
-              .pipe(
-                Effect.map((intent) => Result.succeed(intent)),
-                Effect.catch((error) =>
-                  Effect.succeed(
-                    Result.fail(
-                      error._tag === "SquireLaunchRefused"
-                        ? error.reason
-                        : "the thread could not be prepared",
-                    ),
+        staveSpaceId: stave.status === "known" ? stave.spaceId : null,
+        staveSagaId: stave.status === "known" ? stave.sagaId : null,
+      },
+      trackers: [],
+      budgetRows,
+      origin: ctx.run.origin,
+      now: ctx.now,
+    });
+    if (decision.level === "off") {
+      return yield* refuse(
+        ctx,
+        decision.reason,
+        decision.reason === "paused"
+          ? "This Squire is paused, so it cannot propose threads."
+          : decision.reason === "intersection"
+            ? `Create thread is Off for ${owner.name}, so you cannot propose threads for it.`
+            : "Create thread is Off for this Squire, so it cannot propose or create threads.",
+        { decision: { level: decision.level } },
+      );
+    }
+    const reason: Reason =
+      create && decision.reason === "permission" && recommendOnlyOrigins.has(ctx.run.origin)
+        ? ctx.run.origin === "voice"
+          ? "voice"
+          : "origin"
+        : decision.reason;
+    const caption = squireBudgetCaption({
+      actionClass: "createThread",
+      budgets: self.budgets,
+      threadId: null,
+      budgetRows,
+      now: ctx.now,
+    });
+    const title = firstLine(args.firstPrompt, 120);
+    const payload = {
+      type: "thread-proposal" as const,
+      projectId: project.value.projectId,
+      provider: proposed?.driverKind ?? ProviderDriverKind.make(args.provider),
+      providerInstanceId: proposed?.instanceId ?? null,
+      model: shownModel,
+      firstPrompt: args.firstPrompt,
+    };
+    // A hold stores the full launch input with its
+    // deterministic ids; one that cannot be prepared waits for an accept.
+    let launch: SquireLaunchAction.SquireLaunchIntent | null = null;
+    let unprepared: string | null = null;
+    if (create && decision.level === "auto") {
+      const prepared = Option.isNone(launcher)
+        ? Result.fail("thread creation is not available on this server")
+        : yield* launcher.value
+            .intentFor({
+              card: { id: cardIdFor(ctx, "proposal") },
+              squire: ctx.squire,
+              proposal: payload,
+              text: args.firstPrompt,
+              verb: "execute",
+              attempt: 1,
+            })
+            .pipe(
+              Effect.map((intent) => Result.succeed(intent)),
+              Effect.catch((error) =>
+                Effect.succeed(
+                  Result.fail(
+                    error._tag === "SquireLaunchRefused"
+                      ? error.reason
+                      : "the thread could not be prepared",
                   ),
                 ),
-              );
-        if (Result.isSuccess(prepared)) launch = prepared.success;
-        else unprepared = prepared.failure;
-      }
-      const held = launch !== null;
-      const plan: CardPlan = {
-        kind: "proposal",
-        targetThreadId: null,
-        projectId: project.value.projectId,
-        title,
-        why: args.reason,
-        payload,
-        trigger: {},
-        intent: launch === null ? null : { type: "thread-create", launch, precondition: {} },
-        hold: held ? { executesAt: holdUntil(ctx) } : null,
-        steerKind: null,
-        ruleId: create ? (decision.ruleId ?? null) : null,
-        caption,
-        push: notifyOn(ctx),
-        logData: { fixture },
-        owner: owner.id,
-        ...(lead && ctx.run.origin === "sweep"
-          ? { finding: { threadId: args.aboutThreadId ?? null, kind: "proposal" as const } }
-          : {}),
-      };
-      return yield* commitCard(
-        ctx,
-        plan,
-        {
+              ),
+            );
+      if (Result.isSuccess(prepared)) launch = prepared.success;
+      else unprepared = prepared.failure;
+    }
+    const held = launch !== null;
+    const plan: CardPlan = {
+      kind: "proposal",
+      targetThreadId: null,
+      projectId: project.value.projectId,
+      title,
+      why: args.reason,
+      payload,
+      trigger: {},
+      intent: launch === null ? null : { type: "thread-create", launch, precondition: {} },
+      hold: held ? { executesAt: holdUntil(ctx) } : null,
+      steerKind: null,
+      ruleId: create ? (decision.ruleId ?? null) : null,
+      caption,
+      push: notifyOn(ctx),
+      logData: { fixture },
+      owner: owner.id,
+      ...(lead && ctx.run.origin === "sweep"
+        ? { finding: { threadId: args.aboutThreadId ?? null, kind: "proposal" as const } }
+        : {}),
+    };
+    return yield* commitCard(
+      ctx,
+      plan,
+      {
+        outcome: held ? "held" : "card",
+        level: decision.level,
+        reason,
+        ...(decision.ruleId === undefined ? {} : { ruleId: decision.ruleId }),
+        ...(unprepared === null ? {} : { unprepared }),
+      },
+      () => ({
+        text: held
+          ? `Held: the thread is created in ${project.value.title} in ${ctx.squire.undo_window_seconds} s unless the user undoes it. ${caption}.`
+          : unprepared !== null
+            ? `Recorded as a proposal card in ${project.value.title}: ${unprepared}. ${caption}.`
+            : create
+              ? `Recorded as a proposal card in ${project.value.title}: ${reasonText(reason, ctx.run.origin, decision.recommendingUntil)}. ${caption}.`
+              : `Thread proposal card created in ${project.value.title}${lead ? ` for ${owner.name}` : ""}. ${caption}.`,
+        structuredContent: {
           outcome: held ? "held" : "card",
-          level: decision.level,
           reason,
-          ...(decision.ruleId === undefined ? {} : { ruleId: decision.ruleId }),
-          ...(unprepared === null ? {} : { unprepared }),
+          origin: ctx.run.origin,
+          ...(held ? { executesAt: plan.hold!.executesAt } : {}),
+          ...(lead ? { ownerSquireId: owner.id } : {}),
         },
-        () => ({
-          text: held
-            ? `Held: the thread is created in ${project.value.title} in ${ctx.squire.undo_window_seconds} s unless the user undoes it. ${caption}.`
-            : unprepared !== null
-              ? `Recorded as a proposal card in ${project.value.title}: ${unprepared}. ${caption}.`
-              : create
-                ? `Recorded as a proposal card in ${project.value.title}: ${reasonText(reason, ctx.run.origin, decision.recommendingUntil)}. ${caption}.`
-                : `Thread proposal card created in ${project.value.title}${lead ? ` for ${owner.name}` : ""}. ${caption}.`,
-          structuredContent: {
-            outcome: held ? "held" : "card",
-            reason,
-            origin: ctx.run.origin,
-            ...(held ? { executesAt: plan.hold!.executesAt } : {}),
-            ...(lead ? { ownerSquireId: owner.id } : {}),
-          },
-        }),
-      );
-    });
+      }),
+    );
+  });
 
   // ── Notify and quiet ──
 
-  const notify = (ctx: Ctx, args: typeof NotifyArgs.Type) =>
-    Effect.gen(function* () {
-      if (args.threadId !== undefined && !(yield* readable(ctx, args.threadId))) {
-        return yield* refuse(ctx, "scope", notInScope(args.threadId), {
-          decision: { reason: "scope" },
-        });
-      }
-      const decision = squirePolicy.decide({
-        actionClass: "notify",
-        squire: policySquireOf(ctx.squire),
-        rules: [],
-        target: {
-          threadId: args.threadId ?? null,
-          projectId: ctx.squire.home_project_id,
-          staveSpaceId: null,
-          staveSagaId: null,
-        },
-        trackers: [],
-        budgetRows: [],
-        origin: ctx.run.origin,
-        now: ctx.now,
+  const notify = Effect.fn("SquireTools.notify")(function* (
+    ctx: Ctx,
+    args: typeof NotifyArgs.Type,
+  ) {
+    if (args.threadId !== undefined && !(yield* readable(ctx, args.threadId))) {
+      return yield* refuse(ctx, "scope", notInScope(args.threadId), {
+        decision: { reason: "scope" },
       });
-      if (decision.level === "off") {
-        return yield* refuse(
-          ctx,
-          decision.reason,
-          decision.reason === "origin"
-            ? `A ${ctx.run.origin} turn never pushes, so nothing was sent.`
-            : decision.reason === "paused"
-              ? "This Squire is paused, so it cannot notify."
-              : "Notify is Off for this Squire, so nothing was sent.",
-          { threadId: args.threadId ?? null, decision: { level: decision.level } },
-        );
-      }
-      const threadId = args.threadId ?? null;
-      return yield* commitCard(
+    }
+    const decision = squirePolicy.decide({
+      actionClass: "notify",
+      squire: policySquireOf(ctx.squire),
+      rules: [],
+      target: {
+        threadId: args.threadId ?? null,
+        projectId: ctx.squire.home_project_id,
+        staveSpaceId: null,
+        staveSagaId: null,
+      },
+      trackers: [],
+      budgetRows: [],
+      origin: ctx.run.origin,
+      now: ctx.now,
+    });
+    if (decision.level === "off") {
+      return yield* refuse(
         ctx,
-        {
-          kind: "fyi",
-          targetThreadId: threadId,
-          projectId: null,
-          title: firstLine(args.message, 120),
-          why: "",
-          payload: { type: "fyi", source: "notify", text: args.message, threadId },
-          trigger: {},
-          intent: null,
-          hold: null,
-          steerKind: null,
-          ruleId: null,
-          caption: null,
-          push: true,
-          logData: { source: "notify" },
-        },
-        { outcome: "pushed", level: decision.level, reason: decision.reason },
-        () => ({ text: "Sent to the user.", structuredContent: { outcome: "pushed" } }),
+        decision.reason,
+        decision.reason === "origin"
+          ? `A ${ctx.run.origin} turn never pushes, so nothing was sent.`
+          : decision.reason === "paused"
+            ? "This Squire is paused, so it cannot notify."
+            : "Notify is Off for this Squire, so nothing was sent.",
+        { threadId: args.threadId ?? null, decision: { level: decision.level } },
       );
-    });
+    }
+    const threadId = args.threadId ?? null;
+    return yield* commitCard(
+      ctx,
+      {
+        kind: "fyi",
+        targetThreadId: threadId,
+        projectId: null,
+        title: firstLine(args.message, 120),
+        why: "",
+        payload: { type: "fyi", source: "notify", text: args.message, threadId },
+        trigger: {},
+        intent: null,
+        hold: null,
+        steerKind: null,
+        ruleId: null,
+        caption: null,
+        push: true,
+        logData: { source: "notify" },
+      },
+      { outcome: "pushed", level: decision.level, reason: decision.reason },
+      () => ({ text: "Sent to the user.", structuredContent: { outcome: "pushed" } }),
+    );
+  });
 
-  const stayQuiet = (ctx: Ctx, args: typeof QuietArgs.Type) =>
-    Effect.gen(function* () {
-      const threadId =
-        args.threadId !== undefined && (yield* readable(ctx, args.threadId)) ? args.threadId : null;
-      const result = ok("Recorded: no action.", { outcome: "quiet" });
-      const taskId = yield* routedTaskOf(ctx);
-      yield* repository.transaction(
-        Effect.gen(function* () {
-          yield* toolCalled(ctx, result, threadId);
-          yield* logRow(ctx, "quiet.recorded", { reason: args.reason }, { threadId, taskId });
-        }),
-      );
-      return result;
-    });
+  const stayQuiet = Effect.fn("SquireTools.stayQuiet")(function* (
+    ctx: Ctx,
+    args: typeof QuietArgs.Type,
+  ) {
+    const threadId =
+      args.threadId !== undefined && (yield* readable(ctx, args.threadId)) ? args.threadId : null;
+    const result = ok("Recorded: no action.", { outcome: "quiet" });
+    const taskId = yield* routedTaskOf(ctx);
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        yield* toolCalled(ctx, result, threadId);
+        yield* logRow(ctx, "quiet.recorded", { reason: args.reason }, { threadId, taskId });
+      }),
+    );
+    return result;
+  });
 
   // ── Lead ──
 
@@ -1693,130 +1707,134 @@ const make = Effect.gen(function* () {
     fyi: "fyi",
   };
 
-  const listItems = (ctx: Ctx, args: typeof ListItemsArgs.Type) =>
-    Effect.gen(function* () {
-      const squires = new Map((yield* repository.listSquires).map((row) => [row.id, row]));
-      const items = (yield* repository.listCards({
-        statuses: ["open", "held"],
-        ...(args.type === undefined ? {} : { kinds: [ITEM_KIND[args.type]] }),
-      }))
-        .filter(
-          (card) =>
-            args.squireId === undefined ||
-            card.squire_id === args.squireId ||
-            card.owner_squire_id === args.squireId,
-        )
-        .toReversed();
-      const shown = items.slice(0, LIST_MAX_ITEMS);
-      const entries = [];
-      const lines: Array<string> = [];
-      for (const card of shown) {
-        const raisedBy = squires.get(card.squire_id)?.name ?? card.squire_id;
-        const ownedBy = squires.get(card.owner_squire_id)?.name ?? card.owner_squire_id;
-        const thread =
-          card.target_thread_id === null
-            ? null
-            : yield* projections.getThreadShell(card.target_thread_id);
-        entries.push({
-          itemId: card.id,
-          kind: card.kind,
-          status: card.status,
-          title: card.title,
-          raisedBy: card.squire_id,
-          owner: card.owner_squire_id,
-          threadId: card.target_thread_id,
-          createdAt: card.created_at,
-        });
-        lines.push(
-          `- [${card.kind}${card.status === "held" ? ", held" : ""}] ${card.title} (${card.id}) · ${raisedBy}${ownedBy === raisedBy ? "" : ` for ${ownedBy}`}${thread === null ? "" : ` · ${thread.title} (${thread.id})`} · ${card.created_at}`,
-        );
-      }
-      const more = items.length - shown.length;
-      yield* logRow(ctx, "tool.called", { tool: ctx.tool, items: items.length });
-      return ok(
-        items.length === 0
-          ? "No open items."
-          : [...lines, ...(more > 0 ? [`+${more} more`] : [])].join("\n"),
-        { items: entries, total: items.length },
+  const listItems = Effect.fn("SquireTools.listItems")(function* (
+    ctx: Ctx,
+    args: typeof ListItemsArgs.Type,
+  ) {
+    const squires = new Map((yield* repository.listSquires).map((row) => [row.id, row]));
+    const items = (yield* repository.listCards({
+      statuses: ["open", "held"],
+      ...(args.type === undefined ? {} : { kinds: [ITEM_KIND[args.type]] }),
+    }))
+      .filter(
+        (card) =>
+          args.squireId === undefined ||
+          card.squire_id === args.squireId ||
+          card.owner_squire_id === args.squireId,
+      )
+      .toReversed();
+    const shown = items.slice(0, LIST_MAX_ITEMS);
+    const entries = [];
+    const lines: Array<string> = [];
+    for (const card of shown) {
+      const raisedBy = squires.get(card.squire_id)?.name ?? card.squire_id;
+      const ownedBy = squires.get(card.owner_squire_id)?.name ?? card.owner_squire_id;
+      const thread =
+        card.target_thread_id === null
+          ? null
+          : yield* projections.getThreadShell(card.target_thread_id);
+      entries.push({
+        itemId: card.id,
+        kind: card.kind,
+        status: card.status,
+        title: card.title,
+        raisedBy: card.squire_id,
+        owner: card.owner_squire_id,
+        threadId: card.target_thread_id,
+        createdAt: card.created_at,
+      });
+      lines.push(
+        `- [${card.kind}${card.status === "held" ? ", held" : ""}] ${card.title} (${card.id}) · ${raisedBy}${ownedBy === raisedBy ? "" : ` for ${ownedBy}`}${thread === null ? "" : ` · ${thread.title} (${thread.id})`} · ${card.created_at}`,
       );
-    });
+    }
+    const more = items.length - shown.length;
+    yield* logRow(ctx, "tool.called", { tool: ctx.tool, items: items.length });
+    return ok(
+      items.length === 0
+        ? "No open items."
+        : [...lines, ...(more > 0 ? [`+${more} more`] : [])].join("\n"),
+      { items: entries, total: items.length },
+    );
+  });
 
-  const routeTask = (ctx: Ctx, args: typeof RouteTaskArgs.Type) =>
-    Effect.gen(function* () {
-      // Only work the user typed; a Squire turn of any origin never routes.
-      if (ctx.squire.role !== "lead" || ctx.run.origin !== "user") {
-        return yield* refuse(
-          ctx,
-          "origin",
-          "squire_route_task works only in a turn the user's message started, so nothing was routed.",
-          { decision: { reason: "origin" } },
-        );
-      }
-      const found = yield* repository.getSquire(args.toSquireId);
-      if (Option.isNone(found) || found.value.role === "lead") {
-        return yield* refuse(
-          ctx,
-          "not-found",
-          `${args.toSquireId} is not one of your Squires, so nothing was routed.`,
-          { decision: { reason: "not-found" } },
-        );
-      }
-      const target = found.value;
-      if (target.status === "paused") {
-        return yield* refuse(
-          ctx,
-          "paused",
-          `${target.name} is paused, so it cannot take the task. Tell the user; they can resume it from its setup.`,
-          { decision: { reason: "paused" } },
-        );
-      }
-      if (target.lifecycle !== "ready" || target.home_thread_id === null) {
-        return yield* refuse(
-          ctx,
-          "inactive",
-          `${target.name} is not ready (${target.lifecycle}), so it cannot take the task now.`,
-          { decision: { reason: "inactive" } },
-        );
-      }
-      const taskId = SquireTaskId.make(`task:${ctx.key.slice(0, 24)}`);
-      return yield* commit(
+  const routeTask = Effect.fn("SquireTools.routeTask")(function* (
+    ctx: Ctx,
+    args: typeof RouteTaskArgs.Type,
+  ) {
+    // Only work the user typed; a Squire turn of any origin never routes.
+    if (ctx.squire.role !== "lead" || ctx.run.origin !== "user") {
+      return yield* refuse(
         ctx,
-        null,
-        Effect.gen(function* () {
-          yield* logRow(
-            ctx,
-            "task.routed",
-            { toSquireId: target.id, text: args.text, reason: args.reason },
-            { taskId },
-          );
-          yield* repository.insertTriggerEvent({
-            squire_id: target.id,
-            thread_id: null,
-            kind: "routed-task",
-            state_key: taskId,
-            payload_json: encodeEvent({
-              type: "routed-task",
-              taskId,
-              text: args.text,
-              reason: args.reason,
-            }),
-            status: "pending",
-            defer_reason: null,
-            not_before: ctx.now,
-            batch_id: null,
-            created_at: ctx.now,
-          });
-          return {
-            result: ok(`Sent to ${target.name}: ${firstLine(args.text, 160)}`, {
-              outcome: "routed",
-              taskId,
-              toSquireId: target.id,
-            }),
-            wake: [target.id],
-          };
-        }),
+        "origin",
+        "squire_route_task works only in a turn the user's message started, so nothing was routed.",
+        { decision: { reason: "origin" } },
       );
-    });
+    }
+    const found = yield* repository.getSquire(args.toSquireId);
+    if (Option.isNone(found) || found.value.role === "lead") {
+      return yield* refuse(
+        ctx,
+        "not-found",
+        `${args.toSquireId} is not one of your Squires, so nothing was routed.`,
+        { decision: { reason: "not-found" } },
+      );
+    }
+    const target = found.value;
+    if (target.status === "paused") {
+      return yield* refuse(
+        ctx,
+        "paused",
+        `${target.name} is paused, so it cannot take the task. Tell the user; they can resume it from its setup.`,
+        { decision: { reason: "paused" } },
+      );
+    }
+    if (target.lifecycle !== "ready" || target.home_thread_id === null) {
+      return yield* refuse(
+        ctx,
+        "inactive",
+        `${target.name} is not ready (${target.lifecycle}), so it cannot take the task now.`,
+        { decision: { reason: "inactive" } },
+      );
+    }
+    const taskId = SquireTaskId.make(`task:${ctx.key.slice(0, 24)}`);
+    return yield* commit(
+      ctx,
+      null,
+      Effect.gen(function* () {
+        yield* logRow(
+          ctx,
+          "task.routed",
+          { toSquireId: target.id, text: args.text, reason: args.reason },
+          { taskId },
+        );
+        yield* repository.insertTriggerEvent({
+          squire_id: target.id,
+          thread_id: null,
+          kind: "routed-task",
+          state_key: taskId,
+          payload_json: encodeEvent({
+            type: "routed-task",
+            taskId,
+            text: args.text,
+            reason: args.reason,
+          }),
+          status: "pending",
+          defer_reason: null,
+          not_before: ctx.now,
+          batch_id: null,
+          created_at: ctx.now,
+        });
+        return {
+          result: ok(`Sent to ${target.name}: ${firstLine(args.text, 160)}`, {
+            outcome: "routed",
+            taskId,
+            toSquireId: target.id,
+          }),
+          wake: [target.id],
+        };
+      }),
+    );
+  });
 
   // ── Dispatch ──
 
@@ -1829,67 +1847,66 @@ const make = Effect.gen(function* () {
       Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
     );
 
-  const runBuiltIn = (ctx: Ctx) =>
-    Effect.gen(function* () {
-      const bad = (message: string) =>
-        refuse(ctx, "invalid-arguments", `Invalid arguments for ${ctx.tool}: ${message}`);
-      switch (ctx.tool) {
-        case "squire_list_tracked": {
-          const decoded = yield* decodeArgs(NoArgs, ctx.args);
-          return decoded.ok ? yield* listTracked(ctx) : yield* bad(decoded.message);
-        }
-        case "squire_get_summary":
-        case "squire_get_detail": {
-          const decoded = yield* decodeArgs(ThreadReadArgs, ctx.args);
-          if (!decoded.ok) return yield* bad(decoded.message);
-          return ctx.tool === "squire_get_summary"
-            ? yield* getSummary(ctx, decoded.value)
-            : yield* getDetail(ctx, decoded.value);
-        }
-        case "squire_recommend_steer":
-        case "squire_send_steer": {
-          const decoded = yield* decodeArgs(SquireSteerArgs, ctx.args);
-          if (!decoded.ok) return yield* bad(decoded.message);
-          const length = [...decoded.value.steer.trim()].length;
-          if (length >= SQUIRE_STEER_MAX_CHARS) {
-            return yield* bad(
-              `the steer is ${length} characters; shorten it to one action under ${SQUIRE_STEER_MAX_CHARS} characters and call ${ctx.tool} again.`,
-            );
-          }
-          return yield* steer(ctx, decoded.value, ctx.tool === "squire_send_steer");
-        }
-        case "squire_propose_thread":
-        case "squire_create_thread": {
-          if (ctx.squire.role === "lead") {
-            const decoded = yield* decodeArgs(LeadProposalArgs, ctx.args);
-            return decoded.ok
-              ? yield* proposal(ctx, decoded.value, false)
-              : yield* bad(decoded.message);
-          }
-          const decoded = yield* decodeArgs(ThreadProposalArgs, ctx.args);
-          if (!decoded.ok) return yield* bad(decoded.message);
-          return yield* proposal(ctx, decoded.value, ctx.tool === "squire_create_thread");
-        }
-        case "squire_list_items": {
-          const decoded = yield* decodeArgs(ListItemsArgs, ctx.args);
-          return decoded.ok ? yield* listItems(ctx, decoded.value) : yield* bad(decoded.message);
-        }
-        case "squire_route_task": {
-          const decoded = yield* decodeArgs(RouteTaskArgs, ctx.args);
-          return decoded.ok ? yield* routeTask(ctx, decoded.value) : yield* bad(decoded.message);
-        }
-        case "squire_notify": {
-          const decoded = yield* decodeArgs(NotifyArgs, ctx.args);
-          return decoded.ok ? yield* notify(ctx, decoded.value) : yield* bad(decoded.message);
-        }
-        case "squire_stay_quiet": {
-          const decoded = yield* decodeArgs(QuietArgs, ctx.args);
-          return decoded.ok ? yield* stayQuiet(ctx, decoded.value) : yield* bad(decoded.message);
-        }
-        default:
-          return yield* bad("unknown tool");
+  const runBuiltIn = Effect.fn("SquireTools.runBuiltIn")(function* (ctx: Ctx) {
+    const bad = (message: string) =>
+      refuse(ctx, "invalid-arguments", `Invalid arguments for ${ctx.tool}: ${message}`);
+    switch (ctx.tool) {
+      case "squire_list_tracked": {
+        const decoded = yield* decodeArgs(NoArgs, ctx.args);
+        return decoded.ok ? yield* listTracked(ctx) : yield* bad(decoded.message);
       }
-    });
+      case "squire_get_summary":
+      case "squire_get_detail": {
+        const decoded = yield* decodeArgs(ThreadReadArgs, ctx.args);
+        if (!decoded.ok) return yield* bad(decoded.message);
+        return ctx.tool === "squire_get_summary"
+          ? yield* getSummary(ctx, decoded.value)
+          : yield* getDetail(ctx, decoded.value);
+      }
+      case "squire_recommend_steer":
+      case "squire_send_steer": {
+        const decoded = yield* decodeArgs(SquireSteerArgs, ctx.args);
+        if (!decoded.ok) return yield* bad(decoded.message);
+        const length = [...decoded.value.steer.trim()].length;
+        if (length >= SQUIRE_STEER_MAX_CHARS) {
+          return yield* bad(
+            `the steer is ${length} characters; shorten it to one action under ${SQUIRE_STEER_MAX_CHARS} characters and call ${ctx.tool} again.`,
+          );
+        }
+        return yield* steer(ctx, decoded.value, ctx.tool === "squire_send_steer");
+      }
+      case "squire_propose_thread":
+      case "squire_create_thread": {
+        if (ctx.squire.role === "lead") {
+          const decoded = yield* decodeArgs(LeadProposalArgs, ctx.args);
+          return decoded.ok
+            ? yield* proposal(ctx, decoded.value, false)
+            : yield* bad(decoded.message);
+        }
+        const decoded = yield* decodeArgs(ThreadProposalArgs, ctx.args);
+        if (!decoded.ok) return yield* bad(decoded.message);
+        return yield* proposal(ctx, decoded.value, ctx.tool === "squire_create_thread");
+      }
+      case "squire_list_items": {
+        const decoded = yield* decodeArgs(ListItemsArgs, ctx.args);
+        return decoded.ok ? yield* listItems(ctx, decoded.value) : yield* bad(decoded.message);
+      }
+      case "squire_route_task": {
+        const decoded = yield* decodeArgs(RouteTaskArgs, ctx.args);
+        return decoded.ok ? yield* routeTask(ctx, decoded.value) : yield* bad(decoded.message);
+      }
+      case "squire_notify": {
+        const decoded = yield* decodeArgs(NotifyArgs, ctx.args);
+        return decoded.ok ? yield* notify(ctx, decoded.value) : yield* bad(decoded.message);
+      }
+      case "squire_stay_quiet": {
+        const decoded = yield* decodeArgs(QuietArgs, ctx.args);
+        return decoded.ok ? yield* stayQuiet(ctx, decoded.value) : yield* bad(decoded.message);
+      }
+      default:
+        return yield* bad("unknown tool");
+    }
+  });
 
   const READ_TOOLS: ReadonlySet<string> = new Set([
     "squire_list_tracked",
@@ -1901,8 +1918,8 @@ const make = Effect.gen(function* () {
   // ── Kit (squireToolKit.ts) ──
 
   /** One keyed transaction: `body`, then `tool.called`; wakes run after the commit. */
-  const commit: SquireToolKit["commit"] = (ctx, threadId, body) =>
-    Effect.gen(function* () {
+  const commit: SquireToolKit["commit"] = Effect.fn("SquireTools.commit")(
+    function* (ctx, threadId, body) {
       const written = yield* repository.transaction(
         Effect.gen(function* () {
           const out = yield* body;
@@ -1914,7 +1931,8 @@ const make = Effect.gen(function* () {
         for (const id of written.wake ?? []) yield* delivery.value.wake(id);
       }
       return written.result;
-    });
+    },
+  );
 
   const batchEvents: SquireToolKit["batchEvents"] = (ctx) =>
     ctx.run.batchId === null ? Effect.succeed([]) : repository.listBatch(ctx.run.batchId);
@@ -1947,8 +1965,9 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const call: SquireTools["Service"]["call"] = (caller, name, args) =>
-    Effect.gen(function* () {
+  // Untraced: the withSpan below keeps the existing span and its tool attribute.
+  const call: SquireTools["Service"]["call"] = Effect.fnUntraced(
+    function* (caller, name, args) {
       const found = yield* repository.getSquire(caller.squireId);
       if (
         Option.isNone(found) ||
@@ -2009,14 +2028,17 @@ const make = Effect.gen(function* () {
           );
         }),
       );
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Squire tool call failed", { tool: name, cause }).pipe(
-          Effect.as(refused("internal", `${name} failed on the server. Try again later.`)),
+    },
+    (effect, caller, name) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Squire tool call failed", { tool: name, cause }).pipe(
+            Effect.as(refused("internal", `${name} failed on the server. Try again later.`)),
+          ),
         ),
+        Effect.withSpan("SquireTools.call", { attributes: { tool: name } }),
       ),
-      Effect.withSpan("SquireTools.call", { attributes: { tool: name } }),
-    );
+  );
 
   return SquireTools.of({ definitions, call });
 });

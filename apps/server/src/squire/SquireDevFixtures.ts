@@ -458,19 +458,21 @@ const make = Effect.gen(function* () {
    * Re-checks `check` after each committed event on the thread, driving the
    * effect worker between checks, until it yields a value.
    */
-  const awaitThread = <A, E, R>(threadId: ThreadId, check: Effect.Effect<Option.Option<A>, E, R>) =>
-    Effect.gen(function* () {
-      for (;;) {
-        const head = yield* events.latestApplicationSequence;
-        yield* drainWorker;
-        const found = yield* check;
-        if (Option.isSome(found)) return found.value;
-        yield* events.streamApplicationEvents({ afterSequence: head }).pipe(
-          Stream.filter((stored) => "event" in stored && stored.event.threadId === threadId),
-          Stream.runHead,
-        );
-      }
-    });
+  const awaitThread = Effect.fn("SquireDevFixtures.awaitThread")(function* <A, E, R>(
+    threadId: ThreadId,
+    check: Effect.Effect<Option.Option<A>, E, R>,
+  ) {
+    for (;;) {
+      const head = yield* events.latestApplicationSequence;
+      yield* drainWorker;
+      const found = yield* check;
+      if (Option.isSome(found)) return found.value;
+      yield* events.streamApplicationEvents({ afterSequence: head }).pipe(
+        Stream.filter((stored) => "event" in stored && stored.event.threadId === threadId),
+        Stream.runHead,
+      );
+    }
+  });
 
   // ── Scripted provider ──
 
@@ -501,82 +503,81 @@ const make = Effect.gen(function* () {
       );
 
   /** Reuses only the sandbox project a fixture made, never a real project of the same name. */
-  const ensureProject = (name: string) =>
-    Effect.gen(function* () {
-      const dir = path.join(sandboxRoot, slugOf(name));
-      yield* fileSystem.makeDirectory(dir, { recursive: true });
-      const workspaceRoot = yield* fileSystem.realPath(dir);
-      const existing = yield* projects.findActiveByWorkspaceRoot(workspaceRoot);
-      if (Option.isSome(existing)) return existing.value.projectId;
-      const projectId = ProjectId.make(`project-fixture-${slugOf(name)}-${yield* uniqueSuffix}`);
-      yield* projectService.create({
-        commandId: CommandId.make(`fixture:project:${projectId}`),
-        projectId,
-        title: name,
-        workspaceRoot,
-      });
-      return projectId;
+  const ensureProject = Effect.fn("SquireDevFixtures.ensureProject")(function* (name: string) {
+    const dir = path.join(sandboxRoot, slugOf(name));
+    yield* fileSystem.makeDirectory(dir, { recursive: true });
+    const workspaceRoot = yield* fileSystem.realPath(dir);
+    const existing = yield* projects.findActiveByWorkspaceRoot(workspaceRoot);
+    if (Option.isSome(existing)) return existing.value.projectId;
+    const projectId = ProjectId.make(`project-fixture-${slugOf(name)}-${yield* uniqueSuffix}`);
+    yield* projectService.create({
+      commandId: CommandId.make(`fixture:project:${projectId}`),
+      projectId,
+      title: name,
+      workspaceRoot,
     });
+    return projectId;
+  });
 
   const uniqueSuffix = crypto.randomUUIDv4().pipe(
     Effect.orDie,
     Effect.map((uuid) => uuid.slice(0, 8)),
   );
 
-  const ensureThread = (
+  const ensureThread = Effect.fn("SquireDevFixtures.ensureThread")(function* (
     thread: NonNullable<SquireFixtureSetup["threads"]>[number],
     projectId: ProjectId,
     modelSelection: ModelSelection,
-  ) =>
-    Effect.gen(function* () {
-      const shell = yield* projections.getThreadShell(thread.threadId);
-      if (shell !== null) {
-        if (!(yield* isFixtureProjectId(shell.projectId))) {
-          return yield* fail(`thread ${thread.threadId} already exists outside the fixtures`);
-        }
-        if (shell.title !== thread.title) {
-          yield* orchestrator.dispatch({
-            type: "thread.metadata.update",
-            commandId: CommandId.make(`fixture:thread-title:${thread.threadId}:${thread.title}`),
-            threadId: thread.threadId,
-            title: thread.title,
-          });
-        }
-        if (thread.branch !== undefined && shell.branch !== thread.branch) {
-          yield* orchestrator.dispatch({
-            type: "thread.metadata.update",
-            commandId: CommandId.make(`fixture:thread-branch:${thread.threadId}:${thread.branch}`),
-            threadId: thread.threadId,
-            branch: thread.branch,
-          });
-        }
-        return;
-      }
-      yield* orchestrator.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make(`fixture:thread:${thread.threadId}`),
-        threadId: thread.threadId,
-        projectId,
-        title: thread.title,
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: thread.branch ?? null,
-        worktreePath: null,
-        createdBy: "system",
-        creationSource: "server",
-      });
-    });
-
-  const requireFixtureThread = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const shell = yield* projections.getThreadShell(threadId);
-      if (shell === null) return yield* fail(`thread ${threadId} does not exist`);
+  ) {
+    const shell = yield* projections.getThreadShell(thread.threadId);
+    if (shell !== null) {
       if (!(yield* isFixtureProjectId(shell.projectId))) {
-        return yield* fail(`thread ${threadId} is not fixture-owned`);
+        return yield* fail(`thread ${thread.threadId} already exists outside the fixtures`);
       }
-      return shell;
+      if (shell.title !== thread.title) {
+        yield* orchestrator.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make(`fixture:thread-title:${thread.threadId}:${thread.title}`),
+          threadId: thread.threadId,
+          title: thread.title,
+        });
+      }
+      if (thread.branch !== undefined && shell.branch !== thread.branch) {
+        yield* orchestrator.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make(`fixture:thread-branch:${thread.threadId}:${thread.branch}`),
+          threadId: thread.threadId,
+          branch: thread.branch,
+        });
+      }
+      return;
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(`fixture:thread:${thread.threadId}`),
+      threadId: thread.threadId,
+      projectId,
+      title: thread.title,
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: thread.branch ?? null,
+      worktreePath: null,
+      createdBy: "system",
+      creationSource: "server",
     });
+  });
+
+  const requireFixtureThread = Effect.fn("SquireDevFixtures.requireFixtureThread")(function* (
+    threadId: ThreadId,
+  ) {
+    const shell = yield* projections.getThreadShell(threadId);
+    if (shell === null) return yield* fail(`thread ${threadId} does not exist`);
+    if (!(yield* isFixtureProjectId(shell.projectId))) {
+      return yield* fail(`thread ${threadId} is not fixture-owned`);
+    }
+    return shell;
+  });
 
   // ── Squire records ──
 
@@ -647,31 +648,30 @@ const make = Effect.gen(function* () {
     };
   };
 
-  const grantsOf = (
+  const grantsOf = Effect.fn("SquireDevFixtures.grantsOf")(function* (
     containers: ReadonlyArray<SquireFixtureContainer>,
     exclusions: ReadonlyArray<ThreadId>,
     projectIds: ReadonlyMap<string, ProjectId>,
-  ) =>
-    Effect.gen(function* () {
-      const grants: Array<{ readonly kind: SquireGrantKind; readonly targetId: string }> = [];
-      for (const container of containers) {
-        switch (container.kind) {
-          case "project":
-            grants.push({ kind: "project", targetId: projectIds.get(container.name)! });
-            break;
-          case "thread":
-            yield* requireFixtureThread(container.threadId);
-            grants.push({ kind: "thread", targetId: container.threadId });
-            break;
-          case "staveSpace":
-          case "staveSaga":
-            grants.push({ kind: container.kind, targetId: syntheticStaveId(container) });
-            break;
-        }
+  ) {
+    const grants: Array<{ readonly kind: SquireGrantKind; readonly targetId: string }> = [];
+    for (const container of containers) {
+      switch (container.kind) {
+        case "project":
+          grants.push({ kind: "project", targetId: projectIds.get(container.name)! });
+          break;
+        case "thread":
+          yield* requireFixtureThread(container.threadId);
+          grants.push({ kind: "thread", targetId: container.threadId });
+          break;
+        case "staveSpace":
+        case "staveSaga":
+          grants.push({ kind: container.kind, targetId: syntheticStaveId(container) });
+          break;
       }
-      for (const threadId of exclusions) grants.push({ kind: "exclusion", targetId: threadId });
-      return grants;
-    });
+    }
+    for (const threadId of exclusions) grants.push({ kind: "exclusion", targetId: threadId });
+    return grants;
+  });
 
   /** Config, grants, and budget usage written straight to the record, Auto included. */
   const writeConfig = (
@@ -787,123 +787,127 @@ const make = Effect.gen(function* () {
     );
 
   /** Usage rows only, never log rows, so seeding never counts as a scenario effect. */
-  const seedBudget = (
+  const seedBudget = Effect.fn("SquireDevFixtures.seedBudget")(function* (
     squireId: SquireId,
     usage: NonNullable<SquireFixtureSetup["budgetUsage"]>,
     executedAt: string,
-  ) =>
-    Effect.gen(function* () {
-      yield* repository.deleteBudgetUsage(squireId);
-      const row = (kind: "steer" | "thread", threadId: ThreadId | null) =>
-        repository.insertBudgetUsage({
-          squire_id: squireId,
-          thread_id: threadId,
-          kind,
-          room_id: null,
-          executed_at: executedAt,
-          execution_key: null,
-        });
-      let steers = 0;
-      for (const [threadId, count] of Object.entries(usage.steersPerThreadPerHour.usedByThread)) {
-        for (let index = 0; index < count; index++) yield* row("steer", threadId as ThreadId);
-        steers += count;
-      }
-      for (; steers < usage.steersPerDay.used; steers++) yield* row("steer", null);
-      for (let index = 0; index < usage.threadsPerDay.used; index++) yield* row("thread", null);
-    });
+  ) {
+    yield* repository.deleteBudgetUsage(squireId);
+    const row = (kind: "steer" | "thread", threadId: ThreadId | null) =>
+      repository.insertBudgetUsage({
+        squire_id: squireId,
+        thread_id: threadId,
+        kind,
+        room_id: null,
+        executed_at: executedAt,
+        execution_key: null,
+      });
+    let steers = 0;
+    for (const [threadId, count] of Object.entries(usage.steersPerThreadPerHour.usedByThread)) {
+      for (let index = 0; index < count; index++) yield* row("steer", threadId as ThreadId);
+      steers += count;
+    }
+    for (; steers < usage.steersPerDay.used; steers++) yield* row("steer", null);
+    for (let index = 0; index < usage.threadsPerDay.used; index++) yield* row("thread", null);
+  });
 
   const syntheticStaveId = (container: { readonly kind: string; readonly name: string }) =>
     `fixture-${container.kind === "staveSaga" ? "saga" : "space"}:${slugOf(container.name)}`;
 
   /** Each Squire record's provider, switched through the service so the home thread follows. */
-  const ensureProvider = (squireId: SquireId, instanceId: ProviderInstanceId) =>
-    Effect.gen(function* () {
-      const row = yield* repository.getSquire(squireId);
-      if (Option.isNone(row) || row.value.provider_instance_id === instanceId) return;
-      yield* service.update({
-        requestId: `fixture:provider:${squireId}:${instanceId}:${row.value.revision}`,
-        squireId,
-        expectedRevision: row.value.revision,
-        providerInstanceId: instanceId,
-      });
+  const ensureProvider = Effect.fn("SquireDevFixtures.ensureProvider")(function* (
+    squireId: SquireId,
+    instanceId: ProviderInstanceId,
+  ) {
+    const row = yield* repository.getSquire(squireId);
+    if (Option.isNone(row) || row.value.provider_instance_id === instanceId) return;
+    yield* service.update({
+      requestId: `fixture:provider:${squireId}:${instanceId}:${row.value.revision}`,
+      squireId,
+      expectedRevision: row.value.revision,
+      providerInstanceId: instanceId,
     });
+  });
 
   /** A fixture's own Squire first, then one the user made with that name. */
-  const squireNamed = (name: string) =>
-    Effect.gen(function* () {
-      const owned = yield* repository.getSquireByCreateRequestId(fixtureRequestId(name));
-      if (Option.isSome(owned) && owned.value.lifecycle !== "deleting") {
-        return Option.some({ id: owned.value.id, owned: true });
-      }
-      const wanted = name.trim().toLowerCase();
-      const user = (yield* repository.listSquires).find(
-        (row) =>
-          row.role === "squire" &&
-          row.lifecycle !== "deleting" &&
-          row.name.trim().toLowerCase() === wanted,
-      );
-      return user === undefined ? Option.none() : Option.some({ id: user.id, owned: false });
-    });
+  const squireNamed = Effect.fn("SquireDevFixtures.squireNamed")(function* (name: string) {
+    const owned = yield* repository.getSquireByCreateRequestId(fixtureRequestId(name));
+    if (Option.isSome(owned) && owned.value.lifecycle !== "deleting") {
+      return Option.some({ id: owned.value.id, owned: true });
+    }
+    const wanted = name.trim().toLowerCase();
+    const user = (yield* repository.listSquires).find(
+      (row) =>
+        row.role === "squire" &&
+        row.lifecycle !== "deleting" &&
+        row.name.trim().toLowerCase() === wanted,
+    );
+    return user === undefined ? Option.none() : Option.some({ id: user.id, owned: false });
+  });
 
   /**
    * A user's Squire with the fixture's name is reused rather than duplicated,
    * and keeps its provider; `planSquire` limits what the fixture changes on it.
    */
-  const upsertSquire = (input: {
+  const upsertSquire = Effect.fn("SquireDevFixtures.upsertSquire")(function* (input: {
     readonly name: string;
     readonly homeProjectId: ProjectId;
     readonly instanceId: ProviderInstanceId;
-  }) =>
-    Effect.gen(function* () {
-      const existing = yield* squireNamed(input.name);
-      if (Option.isSome(existing)) {
-        if (existing.value.owned) yield* ensureProvider(existing.value.id, input.instanceId);
-        return existing.value;
-      }
-      const created = yield* service.create(
-        yield* decodeCreateInput({
-          requestId: fixtureRequestId(input.name),
-          homeProjectId: input.homeProjectId,
-          providerInstanceId: input.instanceId,
-          name: input.name,
-          brief: "",
-          grants: [],
-          events: {},
-          permissions: {},
-          budgets: {},
-        }),
-      );
-      return { id: created.id, owned: true };
-    });
+  }) {
+    const existing = yield* squireNamed(input.name);
+    if (Option.isSome(existing)) {
+      if (existing.value.owned) yield* ensureProvider(existing.value.id, input.instanceId);
+      return existing.value;
+    }
+    const created = yield* service.create(
+      yield* decodeCreateInput({
+        requestId: fixtureRequestId(input.name),
+        homeProjectId: input.homeProjectId,
+        providerInstanceId: input.instanceId,
+        name: input.name,
+        brief: "",
+        grants: [],
+        events: {},
+        permissions: {},
+        budgets: {},
+      }),
+    );
+    return { id: created.id, owned: true };
+  });
 
-  const ensureLead = (instanceId: ProviderInstanceId) =>
-    Effect.gen(function* () {
-      const lead = yield* service.ensureLead({ requestId: "fixture" });
-      if (Option.isNone(lead)) return yield* fail("no project to home the Lead in");
-      yield* ensureProvider(lead.value.id, instanceId);
-      return lead.value.id;
-    });
+  const ensureLead = Effect.fn("SquireDevFixtures.ensureLead")(function* (
+    instanceId: ProviderInstanceId,
+  ) {
+    const lead = yield* service.ensureLead({ requestId: "fixture" });
+    if (Option.isNone(lead)) return yield* fail("no project to home the Lead in");
+    yield* ensureProvider(lead.value.id, instanceId);
+    return lead.value.id;
+  });
 
-  const setFake = (squireId: SquireId, fake: SquireFakeScript) =>
-    Effect.gen(function* () {
-      if (Option.isNone(fakes)) {
-        return yield* fail("fake scripts need the scripted provider's script registry");
-      }
-      const row = yield* repository.getSquire(squireId);
-      const homeThreadId = Option.isSome(row) ? row.value.home_thread_id : null;
-      if (homeThreadId === null) return yield* fail("the fixture Squire has no home thread yet");
-      const entry: FixtureFake = { homeThreadId };
-      yield* Ref.update(fakeBySquire, (current) => new Map(current).set(squireId, entry));
-      yield* fakes.value.set(homeThreadId, squireFakeScriptSet(fake), fillFromBatch);
-    });
+  const setFake = Effect.fn("SquireDevFixtures.setFake")(function* (
+    squireId: SquireId,
+    fake: SquireFakeScript,
+  ) {
+    if (Option.isNone(fakes)) {
+      return yield* fail("fake scripts need the scripted provider's script registry");
+    }
+    const row = yield* repository.getSquire(squireId);
+    const homeThreadId = Option.isSome(row) ? row.value.home_thread_id : null;
+    if (homeThreadId === null) return yield* fail("the fixture Squire has no home thread yet");
+    const entry: FixtureFake = { homeThreadId };
+    yield* Ref.update(fakeBySquire, (current) => new Map(current).set(squireId, entry));
+    yield* fakes.value.set(homeThreadId, squireFakeScriptSet(fake), fillFromBatch);
+  });
 
   /**
    * `{{event.*}}` reads the batch that woke the turn: its first event of the
    * picked kind (its first event for `*`). A typed message names no batch, so
    * its templates stay as written.
    */
-  const fillFromBatch: SquireFakeScripts.SquireFakeFill = ({ kind, script, message }) =>
-    Effect.gen(function* () {
+  const fillFromBatch: SquireFakeScripts.SquireFakeFill = Effect.fn(
+    "SquireDevFixtures.fillFromBatch",
+  )(
+    function* ({ kind, script, message }) {
       const batch = SquireDelivery.parseSquireMessageId(message.messageId);
       if (Option.isNone(batch)) return script;
       const rows = yield* repository.listBatch(batch.value.batchId);
@@ -914,11 +918,14 @@ const make = Effect.gen(function* () {
         (yield* Ref.get(injectedEvents)).get(row.id) ??
         Option.getOrUndefined(decodeEventJson(row.payload_json));
       return fillSquireFakeScript(script, event);
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Squire fake could not read its batch", error).pipe(Effect.as(script)),
+    },
+    (effect, { script }) =>
+      effect.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Squire fake could not read its batch", error).pipe(Effect.as(script)),
+        ),
       ),
-    );
+  );
 
   const noteInjected = (ids: ReadonlyArray<number>, event: KnownEvent) =>
     Ref.update(injectedEvents, (current) => {
@@ -927,159 +934,160 @@ const make = Effect.gen(function* () {
       return next;
     });
 
-  const loadSetup: SquireDevFixtures["Service"]["loadSetup"] = (input, options = {}) =>
-    Effect.gen(function* () {
-      const overrides = options.set ?? {};
-      const setup =
-        Object.keys(overrides).length === 0
-          ? input
-          : yield* decodeSetup(applyFixtureOverrides(encodeSetup(input), overrides));
-      const configs: ReadonlyArray<SquireConfig> = [setup, ...(setup.squires ?? [])];
-      for (const config of configs) {
-        if ((config.rules?.length ?? 0) > 0 || (config.triggers?.length ?? 0) > 0) {
-          return yield* new SquireFixtureActionUnavailable({
-            action: "loadSetup",
-            phase: 8,
-            detail: "fixture rules and triggers load with the dev fixture route",
-          });
-        }
-      }
-      if ((setup.rooms?.length ?? 0) > 0) {
+  const loadSetup: SquireDevFixtures["Service"]["loadSetup"] = Effect.fn(
+    "SquireDevFixtures.loadSetup",
+  )(function* (input, options = {}) {
+    const overrides = options.set ?? {};
+    const setup =
+      Object.keys(overrides).length === 0
+        ? input
+        : yield* decodeSetup(applyFixtureOverrides(encodeSetup(input), overrides));
+    const configs: ReadonlyArray<SquireConfig> = [setup, ...(setup.squires ?? [])];
+    for (const config of configs) {
+      if ((config.rules?.length ?? 0) > 0 || (config.triggers?.length ?? 0) > 0) {
         return yield* new SquireFixtureActionUnavailable({
           action: "loadSetup",
-          phase: 9,
-          detail: "fixture rooms arrive with messaging",
+          phase: 8,
+          detail: "fixture rules and triggers load with the dev fixture route",
         });
       }
+    }
+    if ((setup.rooms?.length ?? 0) > 0) {
+      return yield* new SquireFixtureActionUnavailable({
+        action: "loadSetup",
+        phase: 9,
+        detail: "fixture rooms arrive with messaging",
+      });
+    }
 
-      const threadModel = yield* scriptedModel;
-      const squireInstance = options.providerInstanceId ?? threadModel.instanceId;
+    const threadModel = yield* scriptedModel;
+    const squireInstance = options.providerInstanceId ?? threadModel.instanceId;
 
-      // Projects: the threads', then every container's, in fixture order.
-      const names: Array<string> = [];
-      const addName = (name: string) => {
-        if (!names.includes(name)) names.push(name);
-      };
-      for (const thread of setup.threads ?? []) addName(thread.project);
+    // Projects: the threads', then every container's, in fixture order.
+    const names: Array<string> = [];
+    const addName = (name: string) => {
+      if (!names.includes(name)) names.push(name);
+    };
+    for (const thread of setup.threads ?? []) addName(thread.project);
+    for (const config of configs) {
+      for (const container of config.scope ?? []) {
+        if (container.kind === "project") addName(container.name);
+        if (container.kind === "staveSpace" || container.kind === "staveSaga") {
+          container.covers.forEach(addName);
+        }
+      }
+    }
+    const projectIds = new Map<string, ProjectId>();
+    for (const name of names) projectIds.set(name, yield* ensureProject(name));
+    for (const thread of setup.threads ?? []) {
+      yield* ensureThread(thread, projectIds.get(thread.project)!, threadModel);
+    }
+    if (Option.isSome(fixtureStave)) {
+      const memberships = new Map<ProjectId, { spaceId: string | null; sagaId: string | null }>();
       for (const config of configs) {
         for (const container of config.scope ?? []) {
-          if (container.kind === "project") addName(container.name);
-          if (container.kind === "staveSpace" || container.kind === "staveSaga") {
-            container.covers.forEach(addName);
+          if (container.kind !== "staveSpace" && container.kind !== "staveSaga") continue;
+          yield* fixtureStave.value.setName(syntheticStaveId(container), container.name);
+          for (const name of container.covers) {
+            const projectId = projectIds.get(name)!;
+            const current = memberships.get(projectId) ?? { spaceId: null, sagaId: null };
+            memberships.set(
+              projectId,
+              container.kind === "staveSaga"
+                ? { ...current, sagaId: syntheticStaveId(container) }
+                : { ...current, spaceId: syntheticStaveId(container) },
+            );
           }
         }
       }
-      const projectIds = new Map<string, ProjectId>();
-      for (const name of names) projectIds.set(name, yield* ensureProject(name));
-      for (const thread of setup.threads ?? []) {
-        yield* ensureThread(thread, projectIds.get(thread.project)!, threadModel);
+      for (const [projectId, membership] of memberships) {
+        yield* fixtureStave.value.set(projectId, membership);
       }
-      if (Option.isSome(fixtureStave)) {
-        const memberships = new Map<ProjectId, { spaceId: string | null; sagaId: string | null }>();
-        for (const config of configs) {
-          for (const container of config.scope ?? []) {
-            if (container.kind !== "staveSpace" && container.kind !== "staveSaga") continue;
-            yield* fixtureStave.value.setName(syntheticStaveId(container), container.name);
-            for (const name of container.covers) {
-              const projectId = projectIds.get(name)!;
-              const current = memberships.get(projectId) ?? { spaceId: null, sagaId: null };
-              memberships.set(
-                projectId,
-                container.kind === "staveSaga"
-                  ? { ...current, sagaId: syntheticStaveId(container) }
-                  : { ...current, spaceId: syntheticStaveId(container) },
-              );
-            }
-          }
-        }
-        for (const [projectId, membership] of memberships) {
-          yield* fixtureStave.value.set(projectId, membership);
-        }
-      }
-      const homeProjectId =
-        names.length > 0 ? projectIds.get(names[0]!)! : yield* ensureProject(FIXTURE_HOME_PROJECT);
+    }
+    const homeProjectId =
+      names.length > 0 ? projectIds.get(names[0]!)! : yield* ensureProject(FIXTURE_HOME_PROJECT);
 
-      const squires: Record<string, SquireId> = {};
-      let main: SquireId;
-      if (setup.role === "lead") {
-        main = yield* ensureLead(squireInstance);
-        const plan = planSquire({
-          declared: input,
-          config: setup,
-          brief: setup.squire?.brief ?? "",
-          overrides,
-          briefPath: "squire.brief",
-          owned: true,
-        });
-        yield* writeConfig(main, {
-          ...plan,
-          ...(setup.sweep === undefined ? {} : { sweep: setup.sweep }),
-          lead: true,
-        });
-        squires[setup.squire?.name ?? "Lead"] = main;
-      } else {
-        const identity = setup.squire!;
-        const found = yield* upsertSquire({
-          name: identity.name,
-          homeProjectId,
-          instanceId: squireInstance,
-        });
-        main = found.id;
-        const plan = planSquire({
-          declared: input,
-          config: setup,
-          brief: identity.brief,
-          overrides,
-          briefPath: "squire.brief",
-          owned: found.owned,
-        });
-        yield* writeConfig(main, {
-          ...plan,
-          ...(plan.writesGrants
-            ? { grants: yield* grantsOf(setup.scope ?? [], setup.exclusions ?? [], projectIds) }
-            : {}),
-          lead: false,
-        });
-        squires[identity.name] = main;
-      }
-      for (const [index, extra] of (setup.squires ?? []).entries()) {
-        const found = yield* upsertSquire({
-          name: extra.name,
-          homeProjectId,
-          instanceId: squireInstance,
-        });
-        const prefix = `squires.${index}.`;
-        const plan = planSquire({
-          declared: input.squires?.[index] ?? {},
-          config: extra,
-          brief: extra.brief,
-          overrides: Object.fromEntries(
-            Object.entries(overrides).flatMap(([path, value]) =>
-              path.startsWith(prefix) ? [[path.slice(prefix.length), value]] : [],
-            ),
+    const squires: Record<string, SquireId> = {};
+    let main: SquireId;
+    if (setup.role === "lead") {
+      main = yield* ensureLead(squireInstance);
+      const plan = planSquire({
+        declared: input,
+        config: setup,
+        brief: setup.squire?.brief ?? "",
+        overrides,
+        briefPath: "squire.brief",
+        owned: true,
+      });
+      yield* writeConfig(main, {
+        ...plan,
+        ...(setup.sweep === undefined ? {} : { sweep: setup.sweep }),
+        lead: true,
+      });
+      squires[setup.squire?.name ?? "Lead"] = main;
+    } else {
+      const identity = setup.squire!;
+      const found = yield* upsertSquire({
+        name: identity.name,
+        homeProjectId,
+        instanceId: squireInstance,
+      });
+      main = found.id;
+      const plan = planSquire({
+        declared: input,
+        config: setup,
+        brief: identity.brief,
+        overrides,
+        briefPath: "squire.brief",
+        owned: found.owned,
+      });
+      yield* writeConfig(main, {
+        ...plan,
+        ...(plan.writesGrants
+          ? { grants: yield* grantsOf(setup.scope ?? [], setup.exclusions ?? [], projectIds) }
+          : {}),
+        lead: false,
+      });
+      squires[identity.name] = main;
+    }
+    for (const [index, extra] of (setup.squires ?? []).entries()) {
+      const found = yield* upsertSquire({
+        name: extra.name,
+        homeProjectId,
+        instanceId: squireInstance,
+      });
+      const prefix = `squires.${index}.`;
+      const plan = planSquire({
+        declared: input.squires?.[index] ?? {},
+        config: extra,
+        brief: extra.brief,
+        overrides: Object.fromEntries(
+          Object.entries(overrides).flatMap(([path, value]) =>
+            path.startsWith(prefix) ? [[path.slice(prefix.length), value]] : [],
           ),
-          briefPath: "brief",
-          owned: found.owned,
-        });
-        yield* writeConfig(found.id, {
-          ...plan,
-          ...(plan.writesGrants
-            ? { grants: yield* grantsOf(extra.scope ?? [], extra.exclusions ?? [], projectIds) }
-            : {}),
-          lead: false,
-        });
-        squires[extra.name] = found.id;
-      }
-      if (options.fake !== undefined) yield* setFake(main, options.fake);
-      yield* Ref.set(mainSquire, Option.some(main));
-      const row = yield* repository.getSquire(main);
-      return {
-        squireId: main,
-        homeThreadId: Option.isSome(row) ? row.value.home_thread_id : null,
-        squires,
-        projects: Object.fromEntries(projectIds),
-      } satisfies SquireFixtureLoaded;
-    }).pipe(asFixtureError("loadSetup"));
+        ),
+        briefPath: "brief",
+        owned: found.owned,
+      });
+      yield* writeConfig(found.id, {
+        ...plan,
+        ...(plan.writesGrants
+          ? { grants: yield* grantsOf(extra.scope ?? [], extra.exclusions ?? [], projectIds) }
+          : {}),
+        lead: false,
+      });
+      squires[extra.name] = found.id;
+    }
+    if (options.fake !== undefined) yield* setFake(main, options.fake);
+    yield* Ref.set(mainSquire, Option.some(main));
+    const row = yield* repository.getSquire(main);
+    return {
+      squireId: main,
+      homeThreadId: Option.isSome(row) ? row.value.home_thread_id : null,
+      squires,
+      projects: Object.fromEntries(projectIds),
+    } satisfies SquireFixtureLoaded;
+  }, asFixtureError("loadSetup"));
 
   // ── Matching orchestration state ──
 
@@ -1133,32 +1141,31 @@ const make = Effect.gen(function* () {
    * its request) gets a next generation, so a fixture re-runs on a reset home
    * with its own ids.
    */
-  const startTurn = <E, R>(
+  const startTurn = Effect.fn("SquireDevFixtures.startTurn")(function* <E, R>(
     threadId: ThreadId,
     turnId: string,
     prompt: string,
     script: ScriptedScript,
     reusable: (run: OrchestrationV2Run) => Effect.Effect<boolean, E, R>,
-  ) =>
-    Effect.gen(function* () {
-      const latest = yield* latestOfTurn(threadId, turnId);
-      if (latest !== undefined && (yield* reusable(latest.run))) return latest.generation;
-      const generation = latest === undefined ? 0 : latest.generation + 1;
-      const suffix = generation === 0 ? "" : `:g${generation}`;
-      yield* requireFixtureThread(threadId);
-      yield* orchestrator.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make(`fixture:turn:${threadId}:${turnId}${suffix}`),
-        threadId,
-        messageId: fixtureMessageId(threadId, turnId, generation),
-        text: `${prompt}\n\`\`\`scripted\n${encodeScript(script)}\n\`\`\``,
-        attachments: [],
-        dispatchMode: { type: "start_immediately" },
-        createdBy: "system",
-        creationSource: "server",
-      });
-      return generation;
+  ) {
+    const latest = yield* latestOfTurn(threadId, turnId);
+    if (latest !== undefined && (yield* reusable(latest.run))) return latest.generation;
+    const generation = latest === undefined ? 0 : latest.generation + 1;
+    const suffix = generation === 0 ? "" : `:g${generation}`;
+    yield* requireFixtureThread(threadId);
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`fixture:turn:${threadId}:${turnId}${suffix}`),
+      threadId,
+      messageId: fixtureMessageId(threadId, turnId, generation),
+      text: `${prompt}\n\`\`\`scripted\n${encodeScript(script)}\n\`\`\``,
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "system",
+      creationSource: "server",
     });
+    return generation;
+  });
 
   /**
    * Resolves once the turn's run is over, its checkpoint included: `waiting`
@@ -1184,190 +1191,190 @@ const make = Effect.gen(function* () {
     return goal === "" ? "Keep going." : /[.!?]$/.test(goal) ? goal : `${goal}.`;
   };
 
-  const completedTurn = (
+  const completedTurn = Effect.fn("SquireDevFixtures.completedTurn")(function* (
     threadId: ThreadId,
     turnId: string,
     prompt: string,
     assistantText: string,
-  ) =>
-    Effect.gen(function* () {
-      const generation = yield* startTurn(threadId, turnId, prompt, [{ assistantText }], () =>
-        Effect.succeed(true),
-      );
-      const run = yield* awaitThread(
-        threadId,
-        Effect.gen(function* () {
-          const run = yield* runOfTurn(threadId, turnId, generation);
-          if (Option.isNone(run) || isSettledRun(run.value)) return run;
-          if ((yield* pendingRequestItems(threadId, run.value)).length > 0) {
-            return yield* fail(`turn ${turnId} still waits on a request; answer it first`);
-          }
-          return Option.none();
-        }),
-      );
-      return run.id;
-    });
+  ) {
+    const generation = yield* startTurn(threadId, turnId, prompt, [{ assistantText }], () =>
+      Effect.succeed(true),
+    );
+    const run = yield* awaitThread(
+      threadId,
+      Effect.gen(function* () {
+        const run = yield* runOfTurn(threadId, turnId, generation);
+        if (Option.isNone(run) || isSettledRun(run.value)) return run;
+        if ((yield* pendingRequestItems(threadId, run.value)).length > 0) {
+          return yield* fail(`turn ${turnId} still waits on a request; answer it first`);
+        }
+        return Option.none();
+      }),
+    );
+    return run.id;
+  });
 
   /** The waiting event's question is raised for real by a scripted `askUser` run. */
-  const waitingTurn = (
+  const waitingTurn = Effect.fn("SquireDevFixtures.waitingTurn")(function* (
     threadId: ThreadId,
     event: Extract<ThreadEvent, { type: "waiting-on-user" }>,
-  ) =>
-    Effect.gen(function* () {
-      const pending = event.evidence?.pendingRequest;
-      const question = pending?.question ?? event.summary.pendingQuestion;
-      if (!question) return yield* fail("a waiting-on-user event needs a pending question");
-      const turnId = event.summary.turnId;
-      const generation = yield* startTurn(
-        threadId,
-        turnId,
-        turnPrompt(event.summary),
-        [
-          {
-            askUser: {
-              question,
-              ...(pending === undefined
-                ? {}
-                : { options: pending.options.map((option) => option.label) }),
-            },
+  ) {
+    const pending = event.evidence?.pendingRequest;
+    const question = pending?.question ?? event.summary.pendingQuestion;
+    if (!question) return yield* fail("a waiting-on-user event needs a pending question");
+    const turnId = event.summary.turnId;
+    const generation = yield* startTurn(
+      threadId,
+      turnId,
+      turnPrompt(event.summary),
+      [
+        {
+          askUser: {
+            question,
+            ...(pending === undefined
+              ? {}
+              : { options: pending.options.map((option) => option.label) }),
           },
-          { assistantText: turnReply(event.summary) },
-        ],
-        // A duplicate inject reuses the turn while its question still waits.
-        (run) =>
-          isSettledRun(run)
-            ? Effect.succeed(false)
-            : Effect.gen(function* () {
-                const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"], {
-                  turnItemRunId: run.id,
-                  turnItemTypes: ["user_input_request"],
-                });
-                return (
-                  turnItems.length === 0 || (yield* pendingRequestItems(threadId, run)).length > 0
-                );
-              }),
-      );
-      return yield* awaitThread(
-        threadId,
-        Effect.gen(function* () {
-          const run = yield* runOfTurn(threadId, turnId, generation);
-          if (Option.isNone(run)) return Option.none();
-          const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"], {
-            turnItemRunId: run.value.id,
-            turnItemTypes: ["user_input_request"],
-          });
-          const item = turnItems.find((candidate) => candidate.type === "user_input_request");
-          return item?.type === "user_input_request"
-            ? Option.some({ runId: run.value.id, requestId: item.requestId, question })
-            : Option.none();
-        }),
-      );
-    });
+        },
+        { assistantText: turnReply(event.summary) },
+      ],
+      // A duplicate inject reuses the turn while its question still waits.
+      (run) =>
+        isSettledRun(run)
+          ? Effect.succeed(false)
+          : Effect.gen(function* () {
+              const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"], {
+                turnItemRunId: run.id,
+                turnItemTypes: ["user_input_request"],
+              });
+              return (
+                turnItems.length === 0 || (yield* pendingRequestItems(threadId, run)).length > 0
+              );
+            }),
+    );
+    return yield* awaitThread(
+      threadId,
+      Effect.gen(function* () {
+        const run = yield* runOfTurn(threadId, turnId, generation);
+        if (Option.isNone(run)) return Option.none();
+        const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"], {
+          turnItemRunId: run.value.id,
+          turnItemTypes: ["user_input_request"],
+        });
+        const item = turnItems.find((candidate) => candidate.type === "user_input_request");
+        return item?.type === "user_input_request"
+          ? Option.some({ runId: run.value.id, requestId: item.requestId, question })
+          : Option.none();
+      }),
+    );
+  });
 
   /** Links the PR on host `fixture.invalid` and commits the snapshot the event claims. */
-  const commitPullRequest = (threadId: ThreadId, event: ThreadEvent) =>
-    Effect.gen(function* () {
-      const pr = event.summary.pullRequest ?? event.evidence?.pullRequest;
-      if (!pr) return yield* fail("a pull-request-changed event needs summary.pullRequest");
-      const key = {
-        host: FIXTURE_PULL_REQUEST_HOST,
-        repository: pr.repository,
-        number: pr.number,
-      };
-      const url = `https://${FIXTURE_PULL_REQUEST_HOST}/${pr.repository}/pull/${pr.number}`;
-      const prKey = threadPullRequestKeyOf({ ...key, url });
-      const linked = (yield* projections.getThreadsWithPullRequests(threadId))
-        .flatMap((thread) => thread.pullRequests ?? [])
-        .some((link) => threadPullRequestKeyOf(link) === prKey);
-      if (!linked) {
-        yield* orchestrator.dispatch({
-          type: "thread.pull-request.link",
-          commandId: CommandId.make(`fixture:pr-link:${threadId}:${prKey}`),
-          threadId,
-          ...key,
-          url,
-          source: "manual",
-        });
-      }
-      const snapshot = fixturePullRequestSnapshot(pr, {
-        title: event.summary.threadTitle || `PR #${pr.number}`,
-        ...(event.evidence?.headBranch === undefined
-          ? {}
-          : { headBranch: event.evidence.headBranch }),
-        at: yield* nowIso,
-      });
+  const commitPullRequest = Effect.fn("SquireDevFixtures.commitPullRequest")(function* (
+    threadId: ThreadId,
+    event: ThreadEvent,
+  ) {
+    const pr = event.summary.pullRequest ?? event.evidence?.pullRequest;
+    if (!pr) return yield* fail("a pull-request-changed event needs summary.pullRequest");
+    const key = {
+      host: FIXTURE_PULL_REQUEST_HOST,
+      repository: pr.repository,
+      number: pr.number,
+    };
+    const url = `https://${FIXTURE_PULL_REQUEST_HOST}/${pr.repository}/pull/${pr.number}`;
+    const prKey = threadPullRequestKeyOf({ ...key, url });
+    const linked = (yield* projections.getThreadsWithPullRequests(threadId))
+      .flatMap((thread) => thread.pullRequests ?? [])
+      .some((link) => threadPullRequestKeyOf(link) === prKey);
+    if (!linked) {
       yield* orchestrator.dispatch({
-        type: "thread.pull-request-link.sync",
-        commandId: CommandId.make(
-          `fixture:pr-sync:${threadId}:${prKey}:${pr.headSha}:${pr.transition}`,
-        ),
+        type: "thread.pull-request.link",
+        commandId: CommandId.make(`fixture:pr-link:${threadId}:${prKey}`),
         threadId,
         ...key,
-        snapshot,
-        stack: null,
+        url,
+        source: "manual",
       });
-      return {
-        stateKey: `${prKey}:${pr.headSha}:${pr.transition}`,
-        pullRequest: {
-          ...key,
-          url,
-          headSha: pr.headSha,
-          transition: pr.transition,
-          state: snapshot.state,
-          title: snapshot.title,
-          headBranch: snapshot.headBranch,
-          baseBranch: snapshot.baseBranch,
-          checksState: snapshot.checksState ?? null,
-          reviewDecision: snapshot.reviewDecision ?? null,
-          mergeability: snapshot.mergeability ?? null,
-          threadSelfWatching: false,
-        } satisfies NonNullable<SquireEventPayload["pullRequest"]>,
-      };
+    }
+    const snapshot = fixturePullRequestSnapshot(pr, {
+      title: event.summary.threadTitle || `PR #${pr.number}`,
+      ...(event.evidence?.headBranch === undefined
+        ? {}
+        : { headBranch: event.evidence.headBranch }),
+      at: yield* nowIso,
     });
+    yield* orchestrator.dispatch({
+      type: "thread.pull-request-link.sync",
+      commandId: CommandId.make(
+        `fixture:pr-sync:${threadId}:${prKey}:${pr.headSha}:${pr.transition}`,
+      ),
+      threadId,
+      ...key,
+      snapshot,
+      stack: null,
+    });
+    return {
+      stateKey: `${prKey}:${pr.headSha}:${pr.transition}`,
+      pullRequest: {
+        ...key,
+        url,
+        headSha: pr.headSha,
+        transition: pr.transition,
+        state: snapshot.state,
+        title: snapshot.title,
+        headBranch: snapshot.headBranch,
+        baseBranch: snapshot.baseBranch,
+        checksState: snapshot.checksState ?? null,
+        reviewDecision: snapshot.reviewDecision ?? null,
+        mergeability: snapshot.mergeability ?? null,
+        threadSelfWatching: false,
+      } satisfies NonNullable<SquireEventPayload["pullRequest"]>,
+    };
+  });
 
   /** Stored `complete`, no payer, immutable once there. */
-  const storeSummary = (stored: SquireInjectedSummary) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      const inserted = yield* repository.insertSummary({
-        thread_id: stored.threadId,
-        run_id: stored.runId,
-        stage: stored.stage,
-        status: "complete",
-        summary_json: encodeSummary(stored.summary),
-        payer_squire_id: null,
-        created_at: now,
-        updated_at: now,
-      });
-      if (inserted && Option.isSome(postStore)) yield* postStore.value.summaryStored(stored);
+  const storeSummary = Effect.fn("SquireDevFixtures.storeSummary")(function* (
+    stored: SquireInjectedSummary,
+  ) {
+    const now = yield* nowIso;
+    const inserted = yield* repository.insertSummary({
+      thread_id: stored.threadId,
+      run_id: stored.runId,
+      stage: stored.stage,
+      status: "complete",
+      summary_json: encodeSummary(stored.summary),
+      payer_squire_id: null,
+      created_at: now,
+      updated_at: now,
     });
+    if (inserted && Option.isSome(postStore)) yield* postStore.value.summaryStored(stored);
+  });
 
   /** Inserts the row for each Squire, or finds the row its dedupe key already holds. */
-  const writeRows = (
+  const writeRows = Effect.fn("SquireDevFixtures.writeRows")(function* (
     targets: ReadonlyArray<SquireRepository.SquireRow>,
     row: (squire: SquireRepository.SquireRow) => Omit<SquireRepository.SquireEventRow, "id">,
-  ) =>
-    Effect.gen(function* () {
-      const ids: Array<number> = [];
-      const fresh: Array<SquireRepository.SquireEventRow> = [];
-      for (const squire of targets) {
-        const candidate = row(squire);
-        const id = yield* repository.insertTriggerEvent(candidate);
-        if (Option.isSome(id)) {
-          ids.push(id.value);
-          fresh.push({ ...candidate, id: id.value });
-          continue;
-        }
-        const original = yield* repository.getEventByKey({
-          squireId: candidate.squire_id,
-          kind: candidate.kind,
-          threadId: candidate.thread_id,
-          stateKey: candidate.state_key,
-        });
-        if (Option.isSome(original)) ids.push(original.value.id);
+  ) {
+    const ids: Array<number> = [];
+    const fresh: Array<SquireRepository.SquireEventRow> = [];
+    for (const squire of targets) {
+      const candidate = row(squire);
+      const id = yield* repository.insertTriggerEvent(candidate);
+      if (Option.isSome(id)) {
+        ids.push(id.value);
+        fresh.push({ ...candidate, id: id.value });
+        continue;
       }
-      return { ids, fresh };
-    });
+      const original = yield* repository.getEventByKey({
+        squireId: candidate.squire_id,
+        kind: candidate.kind,
+        threadId: candidate.thread_id,
+        stateKey: candidate.state_key,
+      });
+      if (Option.isSome(original)) ids.push(original.value.id);
+    }
+    return { ids, fresh };
+  });
 
   const togglesOf = (row: SquireRepository.SquireRow) =>
     Option.getOrElse(decodeToggles(row.events_json), () => DEFAULT_TOGGLES);
@@ -1381,149 +1388,153 @@ const make = Effect.gen(function* () {
           ? "waitingOnUser"
           : "pullRequestChanged";
 
-  const injectThreadEvent = (event: ThreadEvent) =>
-    Effect.gen(function* () {
-      const threadId = event.summary.threadId;
-      yield* requireFixtureThread(threadId);
+  const injectThreadEvent = Effect.fn("SquireDevFixtures.injectThreadEvent")(function* (
+    event: ThreadEvent,
+  ) {
+    const threadId = event.summary.threadId;
+    yield* requireFixtureThread(threadId);
 
-      let runId: RunId;
-      let stateKey: string;
-      let payload: SquireEventPayload;
-      let stage: SquireSummaryStage = "terminal";
-      let waitingSince: DateTime.Utc | null = null;
-      if (event.type === "waiting-on-user") {
-        const raised = yield* waitingTurn(threadId, event);
-        runId = raised.runId;
-        stateKey = raised.requestId;
-        stage = `request:${raised.requestId}`;
-        waitingSince = DateTime.subtract(yield* DateTime.now, { minutes: event.waitingMinutes });
+    let runId: RunId;
+    let stateKey: string;
+    let payload: SquireEventPayload;
+    let stage: SquireSummaryStage = "terminal";
+    let waitingSince: DateTime.Utc | null = null;
+    if (event.type === "waiting-on-user") {
+      const raised = yield* waitingTurn(threadId, event);
+      runId = raised.runId;
+      stateKey = raised.requestId;
+      stage = `request:${raised.requestId}`;
+      waitingSince = DateTime.subtract(yield* DateTime.now, { minutes: event.waitingMinutes });
+      payload = {
+        outcome: "waiting-on-input",
+        runId,
+        pendingRequest: {
+          kind: "user_input",
+          requestId: raised.requestId,
+          createdAt: DateTime.formatIso(waitingSince),
+          question: raised.question,
+        },
+        pullRequest: null,
+      };
+    } else {
+      runId = yield* completedTurn(
+        threadId,
+        event.summary.turnId,
+        turnPrompt(event.summary),
+        turnReply(event.summary),
+      );
+      if (event.type === "pull-request-changed") {
+        const committed = yield* commitPullRequest(threadId, event);
+        stateKey = committed.stateKey;
         payload = {
-          outcome: "waiting-on-input",
+          outcome: null,
           runId,
-          pendingRequest: {
-            kind: "user_input",
-            requestId: raised.requestId,
-            createdAt: DateTime.formatIso(waitingSince),
-            question: raised.question,
-          },
-          pullRequest: null,
+          pendingRequest: null,
+          pullRequest: committed.pullRequest,
         };
       } else {
-        runId = yield* completedTurn(
-          threadId,
-          event.summary.turnId,
-          turnPrompt(event.summary),
-          turnReply(event.summary),
-        );
-        if (event.type === "pull-request-changed") {
-          const committed = yield* commitPullRequest(threadId, event);
-          stateKey = committed.stateKey;
-          payload = {
-            outcome: null,
-            runId,
-            pendingRequest: null,
-            pullRequest: committed.pullRequest,
-          };
-        } else {
-          stateKey = runId;
-          payload = {
-            outcome: event.summary.outcome,
-            runId,
-            pendingRequest: null,
-            pullRequest: null,
-          };
-        }
-      }
-      const quoted = quotedEvidence(event.evidence);
-      if (quoted !== undefined) payload = { ...payload, evidence: quoted };
-      yield* storeSummary({
-        threadId,
-        runId,
-        stage,
-        summary: { ...event.summary, turnId: runId },
-      });
-
-      const trackerIds = yield* scope.trackersOf(threadId);
-      const targets = (yield* repository.listSquires).filter(
-        (row) =>
-          trackerIds.includes(row.id) &&
-          row.status === "active" &&
-          row.lifecycle !== "deleting" &&
-          togglesOf(row)[toggleOf(event.type)],
-      );
-      if (targets.length === 0) return yield* fail(`no active Squire tracks ${threadId}`);
-      const now = yield* DateTime.now;
-      const createdAt = DateTime.formatIso(now);
-      const { ids, fresh } = yield* writeRows(targets, (squire) => {
-        const notBefore =
-          waitingSince === null
-            ? createdAt
-            : DateTime.formatIso(
-                DateTime.add(waitingSince, { minutes: togglesOf(squire).waitingThresholdMinutes }),
-              );
-        return {
-          squire_id: squire.id,
-          thread_id: threadId,
-          kind: event.type,
-          state_key: stateKey,
-          payload_json: encodePayload(payload),
-          status: waitingSince === null ? "pending" : "deferred",
-          defer_reason: waitingSince === null ? null : "threshold",
-          not_before: notBefore,
-          batch_id: null,
-          created_at: createdAt,
+        stateKey = runId;
+        payload = {
+          outcome: event.summary.outcome,
+          runId,
+          pendingRequest: null,
+          pullRequest: null,
         };
-      });
-      yield* noteInjected(ids, event);
-      // A due waiting row raises its question card on promotion, as the clock would.
-      if (fresh.some((row) => row.status === "deferred" && row.not_before <= createdAt)) {
-        yield* reactor.promoteDue(now);
       }
-      for (const row of fresh) if (row.status === "pending") yield* delivery.wake(row.squire_id);
-      return ids;
+    }
+    const quoted = quotedEvidence(event.evidence);
+    if (quoted !== undefined) payload = { ...payload, evidence: quoted };
+    yield* storeSummary({
+      threadId,
+      runId,
+      stage,
+      summary: { ...event.summary, turnId: runId },
     });
 
-  const targetSquire = (name: string | undefined) =>
-    Effect.gen(function* () {
-      if (name === undefined) {
-        const main = yield* Ref.get(mainSquire);
-        if (Option.isNone(main)) return yield* fail("inject before loadSetup names no Squire");
-        return main.value;
-      }
-      const row = yield* squireNamed(name);
-      if (Option.isSome(row)) return row.value.id;
-      const lead = yield* repository.getLead;
-      if (Option.isSome(lead) && (name === "lead" || lead.value.name === name)) {
-        return lead.value.id;
-      }
-      return yield* fail(`no fixture Squire named ${name}`);
-    });
-
-  const injectOtherEvent = (event: OtherEvent, options: SquireFixtureInjectOptions) =>
-    Effect.gen(function* () {
-      const squireId = yield* targetSquire(options.squire);
-      const row = yield* repository.getSquire(squireId);
-      if (Option.isNone(row)) return yield* fail(`Squire ${squireId} vanished`);
-      const createdAt = yield* nowIso;
-      const { ids, fresh } = yield* writeRows([row.value], (squire) => ({
+    const trackerIds = yield* scope.trackersOf(threadId);
+    const targets = (yield* repository.listSquires).filter(
+      (row) =>
+        trackerIds.includes(row.id) &&
+        row.status === "active" &&
+        row.lifecycle !== "deleting" &&
+        togglesOf(row)[toggleOf(event.type)],
+    );
+    if (targets.length === 0) return yield* fail(`no active Squire tracks ${threadId}`);
+    const now = yield* DateTime.now;
+    const createdAt = DateTime.formatIso(now);
+    const { ids, fresh } = yield* writeRows(targets, (squire) => {
+      const notBefore =
+        waitingSince === null
+          ? createdAt
+          : DateTime.formatIso(
+              DateTime.add(waitingSince, { minutes: togglesOf(squire).waitingThresholdMinutes }),
+            );
+      return {
         squire_id: squire.id,
-        thread_id: null,
+        thread_id: threadId,
         kind: event.type,
-        state_key: otherStateKey(event),
-        payload_json: encodeEventJson(event),
-        status: "pending",
-        defer_reason: null,
-        not_before: createdAt,
+        state_key: stateKey,
+        payload_json: encodePayload(payload),
+        status: waitingSince === null ? "pending" : "deferred",
+        defer_reason: waitingSince === null ? null : "threshold",
+        not_before: notBefore,
         batch_id: null,
         created_at: createdAt,
-      }));
-      yield* noteInjected(ids, event);
-      if (fresh.length > 0) yield* delivery.wake(squireId);
-      return ids;
+      };
     });
+    yield* noteInjected(ids, event);
+    // A due waiting row raises its question card on promotion, as the clock would.
+    if (fresh.some((row) => row.status === "deferred" && row.not_before <= createdAt)) {
+      yield* reactor.promoteDue(now);
+    }
+    for (const row of fresh) if (row.status === "pending") yield* delivery.wake(row.squire_id);
+    return ids;
+  });
 
-  const inject: SquireDevFixtures["Service"]["inject"] = (input, options = {}) =>
-    Effect.gen(function* () {
+  const targetSquire = Effect.fn("SquireDevFixtures.targetSquire")(function* (
+    name: string | undefined,
+  ) {
+    if (name === undefined) {
+      const main = yield* Ref.get(mainSquire);
+      if (Option.isNone(main)) return yield* fail("inject before loadSetup names no Squire");
+      return main.value;
+    }
+    const row = yield* squireNamed(name);
+    if (Option.isSome(row)) return row.value.id;
+    const lead = yield* repository.getLead;
+    if (Option.isSome(lead) && (name === "lead" || lead.value.name === name)) {
+      return lead.value.id;
+    }
+    return yield* fail(`no fixture Squire named ${name}`);
+  });
+
+  const injectOtherEvent = Effect.fn("SquireDevFixtures.injectOtherEvent")(function* (
+    event: OtherEvent,
+    options: SquireFixtureInjectOptions,
+  ) {
+    const squireId = yield* targetSquire(options.squire);
+    const row = yield* repository.getSquire(squireId);
+    if (Option.isNone(row)) return yield* fail(`Squire ${squireId} vanished`);
+    const createdAt = yield* nowIso;
+    const { ids, fresh } = yield* writeRows([row.value], (squire) => ({
+      squire_id: squire.id,
+      thread_id: null,
+      kind: event.type,
+      state_key: otherStateKey(event),
+      payload_json: encodeEventJson(event),
+      status: "pending",
+      defer_reason: null,
+      not_before: createdAt,
+      batch_id: null,
+      created_at: createdAt,
+    }));
+    yield* noteInjected(ids, event);
+    if (fresh.length > 0) yield* delivery.wake(squireId);
+    return ids;
+  });
+
+  const inject: SquireDevFixtures["Service"]["inject"] = Effect.fn("SquireDevFixtures.inject")(
+    function* (input, options = {}) {
       const event = yield* decodeEvent(input);
       if (isUnknownUnionMember(event)) return yield* fail("unknown event type");
       const ids = isThreadEvent(event)
@@ -1536,16 +1547,17 @@ const make = Effect.gen(function* () {
         return new Map(current).set(sequence, [...new Set([...known, ...ids])]);
       });
       return sequence;
-    }).pipe(asFixtureError("inject"));
+    },
+    asFixtureError("inject"),
+  );
 
   // ── drainThrough ──
 
-  const settleAll = (head: number) =>
-    Effect.gen(function* () {
-      yield* drainWorker;
-      yield* reactor.drainThrough(head);
-      yield* delivery.drain;
-    });
+  const settleAll = Effect.fn("SquireDevFixtures.settleAll")(function* (head: number) {
+    yield* drainWorker;
+    yield* reactor.drainThrough(head);
+    yield* delivery.drain;
+  });
 
   const drainThrough: SquireDevFixtures["Service"]["drainThrough"] = (sequence) =>
     Effect.scoped(
@@ -1590,76 +1602,80 @@ const make = Effect.gen(function* () {
           );
     });
 
-  const moveHead = (threadId: ThreadId, headSha: string) =>
-    Effect.gen(function* () {
-      yield* requireFixtureThread(threadId);
-      const links = (yield* projections.getThreadsWithPullRequests(threadId))
-        .flatMap((thread) => thread.pullRequests ?? [])
-        .filter((link) => link.host === FIXTURE_PULL_REQUEST_HOST && link.snapshot !== null);
-      if (links.length === 0) return yield* fail(`thread ${threadId} has no fixture PR link`);
-      const syncedAt = yield* nowIso;
-      for (const link of links) {
-        const prKey = threadPullRequestKeyOf(link);
-        yield* orchestrator.dispatch({
-          type: "thread.pull-request-link.sync",
-          commandId: CommandId.make(`fixture:pr-head:${threadId}:${prKey}:${headSha}`),
-          threadId,
-          host: link.host,
-          repository: link.repository,
-          number: link.number,
-          snapshot: { ...link.snapshot!, headSha, syncedAt, updatedAt: syncedAt },
-          stack: link.stack,
-        } satisfies OrchestrationV2ServerCommand);
-      }
-    });
+  const moveHead = Effect.fn("SquireDevFixtures.moveHead")(function* (
+    threadId: ThreadId,
+    headSha: string,
+  ) {
+    yield* requireFixtureThread(threadId);
+    const links = (yield* projections.getThreadsWithPullRequests(threadId))
+      .flatMap((thread) => thread.pullRequests ?? [])
+      .filter((link) => link.host === FIXTURE_PULL_REQUEST_HOST && link.snapshot !== null);
+    if (links.length === 0) return yield* fail(`thread ${threadId} has no fixture PR link`);
+    const syncedAt = yield* nowIso;
+    for (const link of links) {
+      const prKey = threadPullRequestKeyOf(link);
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request-link.sync",
+        commandId: CommandId.make(`fixture:pr-head:${threadId}:${prKey}:${headSha}`),
+        threadId,
+        host: link.host,
+        repository: link.repository,
+        number: link.number,
+        snapshot: { ...link.snapshot!, headSha, syncedAt, updatedAt: syncedAt },
+        stack: link.stack,
+      } satisfies OrchestrationV2ServerCommand);
+    }
+  });
 
-  const seedUsage = (action: Extract<SquireFixtureTimelineAction, { action: "seedUsage" }>) =>
-    Effect.gen(function* () {
-      const squireId = yield* targetSquire(undefined);
-      const executedAt = yield* nowIso;
-      yield* repository.transaction(
-        Effect.forEach(
-          Array.from({ length: action.count }),
-          () =>
-            repository.insertBudgetUsage({
-              squire_id: squireId,
-              thread_id: action.threadId ?? null,
-              kind: action.kind,
-              room_id: null,
-              executed_at: executedAt,
-              execution_key: null,
-            }),
-          { discard: true },
-        ),
-      );
-    });
+  const seedUsage = Effect.fn("SquireDevFixtures.seedUsage")(function* (
+    action: Extract<SquireFixtureTimelineAction, { action: "seedUsage" }>,
+  ) {
+    const squireId = yield* targetSquire(undefined);
+    const executedAt = yield* nowIso;
+    yield* repository.transaction(
+      Effect.forEach(
+        Array.from({ length: action.count }),
+        () =>
+          repository.insertBudgetUsage({
+            squire_id: squireId,
+            thread_id: action.threadId ?? null,
+            kind: action.kind,
+            room_id: null,
+            executed_at: executedAt,
+            execution_key: null,
+          }),
+        { discard: true },
+      ),
+    );
+  });
 
-  const timeline: SquireDevFixtures["Service"]["timeline"] = (action) =>
-    Effect.gen(function* () {
-      switch (action.action) {
-        case "advance":
-          return yield* advance(action.seconds);
-        case "seedUsage":
-          return yield* seedUsage(action);
-        case "moveHead":
-          return yield* moveHead(action.threadId, action.headSha);
-        case "undo":
-          return yield* new SquireFixtureActionUnavailable({
-            action: "undo",
-            phase: 5,
-            detail: "Auto holds and Undo arrive with the Squire tools",
-          });
-        case "restart":
-          return yield* new SquireFixtureActionUnavailable({
-            action: "restart",
-            phase: 5,
-            detail: "the B2 harness restarts the server layer around held actions",
-          });
-      }
-    }).pipe(asFixtureError("timeline"));
+  const timeline: SquireDevFixtures["Service"]["timeline"] = Effect.fn(
+    "SquireDevFixtures.timeline",
+  )(function* (action) {
+    switch (action.action) {
+      case "advance":
+        return yield* advance(action.seconds);
+      case "seedUsage":
+        return yield* seedUsage(action);
+      case "moveHead":
+        return yield* moveHead(action.threadId, action.headSha);
+      case "undo":
+        return yield* new SquireFixtureActionUnavailable({
+          action: "undo",
+          phase: 5,
+          detail: "Auto holds and Undo arrive with the Squire tools",
+        });
+      case "restart":
+        return yield* new SquireFixtureActionUnavailable({
+          action: "restart",
+          phase: 5,
+          detail: "the B2 harness restarts the server layer around held actions",
+        });
+    }
+  }, asFixtureError("timeline"));
 
-  const reset: SquireDevFixtures["Service"]["reset"] = (name) =>
-    Effect.gen(function* () {
+  const reset: SquireDevFixtures["Service"]["reset"] = Effect.fn("SquireDevFixtures.reset")(
+    function* (name) {
       const row = yield* repository.getSquireByCreateRequestId(fixtureRequestId(name));
       if (Option.isNone(row)) return;
       const squireId = row.value.id;
@@ -1675,7 +1691,9 @@ const make = Effect.gen(function* () {
         Option.filter((id) => id !== squireId),
       );
       yield* service.delete({ requestId: `fixture:reset:${squireId}`, squireId });
-    }).pipe(asFixtureError("reset"));
+    },
+    asFixtureError("reset"),
+  );
 
   const pauseLeadForHarness: SquireDevFixtures["Service"]["pauseLeadForHarness"] = Effect.gen(
     function* () {

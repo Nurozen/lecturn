@@ -103,8 +103,8 @@ const make = Effect.gen(function* () {
     return yield* displayMembership.value.enrich(workspaceRoot, info);
   });
 
-  const decorate: StaveProjectShellsShape["decorate"] = (shells) =>
-    Effect.gen(function* () {
+  const decorate: StaveProjectShellsShape["decorate"] = Effect.fn("StaveProjectShells.decorate")(
+    function* (shells) {
       const roots = [...new Set(shells.map((shell) => shell.workspaceRoot))];
       const staveByRoot = new Map(
         yield* Effect.forEach(
@@ -127,7 +127,8 @@ const make = Effect.gen(function* () {
           })),
         ),
       );
-    });
+    },
+  );
 
   const fail = (operation: string) => (cause: unknown) =>
     new StaveProjectShellsError({ operation, cause });

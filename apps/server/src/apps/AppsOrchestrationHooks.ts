@@ -52,20 +52,22 @@ const make = Effect.gen(function* () {
   );
 
   /** Most servers run no headless process, so they skip the thread lookup. */
-  const reapIdleHeadless = (notice: LecturnRunTerminalNotice) =>
-    Effect.gen(function* () {
+  const reapIdleHeadless = Effect.fn("AppsOrchestrationHooks.reapIdleHeadless")(
+    function* (notice: LecturnRunTerminalNotice) {
       if ((yield* Ref.get(headlessProcesses)).size === 0) return;
       const thread = yield* threads.getThread(notice.threadId);
       yield* reaper.onProjectRunEnded(thread.projectId);
-    }).pipe(Effect.ignore);
+    },
+    (effect) => Effect.ignore(effect),
+  );
 
   /**
    * An app project's root is the app's own folder: the app finds the project
    * by it and its tools run there, so moving it would orphan both. The planner
    * stays upstream-shaped; the refusal lives here, inside the project lock.
    */
-  const refuseAppWorkspaceMove = (input: LecturnCommandAdmissionInput) =>
-    Effect.gen(function* () {
+  const refuseAppWorkspaceMove = Effect.fn("AppsOrchestrationHooks.refuseAppWorkspaceMove")(
+    function* (input: LecturnCommandAdmissionInput) {
       if (input.scope !== "project") return;
       const { command } = input;
       if (command.type !== "project.meta.update" || command.workspaceRoot === undefined) return;
@@ -86,29 +88,32 @@ const make = Effect.gen(function* () {
         contribution: CONTRIBUTION,
         reason: `This project belongs to the connected app ${project.value.appBinding.appId}; its folder cannot be changed.`,
       });
-    });
+    },
+  );
 
   /**
    * A revoked or denied app keeps its project rows, so the binding alone does
    * not make its context or instructions current.
    */
-  const grantedAppOf = (projectId: ProjectId) =>
-    Effect.gen(function* () {
+  const grantedAppOf = Effect.fn("AppsOrchestrationHooks.grantedAppOf")(
+    function* (projectId: ProjectId) {
       const project = yield* projects.get(projectId);
       if (Option.isNone(project) || project.value.appBinding === undefined) {
         return Option.none<AppRegistrationRecord>();
       }
       const record = yield* registrations.get(project.value.appBinding.appId);
       return Option.filter(record, (entry) => entry.state === "granted");
-    }).pipe(
-      // A missing context or instruction must never cost the user the turn.
-      Effect.catch((cause) =>
-        Effect.logWarning("Could not read the connected app for a turn.", {
-          projectId,
-          cause,
-        }).pipe(Effect.as(Option.none<AppRegistrationRecord>())),
+    },
+    (effect, projectId) =>
+      effect.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not read the connected app for a turn.", {
+            projectId,
+            cause,
+          }).pipe(Effect.as(Option.none<AppRegistrationRecord>())),
+        ),
       ),
-    );
+  );
 
   const instructionsFor = (projectId: ProjectId) =>
     grantedAppOf(projectId).pipe(
@@ -149,19 +154,20 @@ const make = Effect.gen(function* () {
   });
 
   /** Most turns are on servers where no app ever set context, so they skip both reads. */
-  const hostContextPrefix = (input: LecturnTurnStartInput) =>
-    Effect.gen(function* () {
-      if (input.compaction) return;
-      const text = hostContextForTurn(
-        yield* Ref.get(hostContext),
-        input.thread.id,
-        input.thread.projectId,
-      );
-      if (Option.isNone(text)) return;
-      const app = yield* grantedAppOf(input.thread.projectId);
-      if (Option.isNone(app)) return;
-      return { contextPrefix: formatAppContext(app.value.appId, text.value) };
-    });
+  const hostContextPrefix = Effect.fn("AppsOrchestrationHooks.hostContextPrefix")(function* (
+    input: LecturnTurnStartInput,
+  ) {
+    if (input.compaction) return;
+    const text = hostContextForTurn(
+      yield* Ref.get(hostContext),
+      input.thread.id,
+      input.thread.projectId,
+    );
+    if (Option.isNone(text)) return;
+    const app = yield* grantedAppOf(input.thread.projectId);
+    if (Option.isNone(app)) return;
+    return { contextPrefix: formatAppContext(app.value.appId, text.value) };
+  });
 
   return {
     instructionsFor,

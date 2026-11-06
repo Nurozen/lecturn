@@ -2,6 +2,8 @@ import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
 import * as NodeURL from "node:url";
 
+const DOM_TEST_ENVIRONMENT_ALLOWLIST: Array<string> = [];
+
 const RESTRICTED_IMPORT_PATHS = [
   {
     name: "@lecturn/client-runtime",
@@ -170,10 +172,24 @@ export default defineConfig({
       "lecturn/no-unscoped-has": "error",
       "lecturn/namespace-node-imports": "error",
       "lecturn/prefer-catch-tags": "error",
+      "lecturn/prefer-effect-fn": "error",
       "lecturn/require-centered-scroll-gutter": "error",
       "lecturn/require-suppression-reason": "error",
     },
     overrides: [
+      {
+        files: [
+          "**/*.{test,spec,testkit}.{ts,tsx}",
+          "**/{test,tests,testkit,testing,fixtures,integration}/**",
+          "packages/provider-testing/**",
+        ],
+        rules: { "lecturn/prefer-effect-fn": "off" },
+      },
+      {
+        files: ["apps/**/src/**", "packages/**/src/**"],
+        excludeFiles: DOM_TEST_ENVIRONMENT_ALLOWLIST,
+        rules: { "lecturn/no-dom-test-environment": "error" },
+      },
       {
         files: ["packages/client-runtime/src/state/**", "apps/{web,mobile,desktop}/src/**"],
         rules: { "lecturn/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },

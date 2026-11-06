@@ -50,7 +50,9 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
 
-  const runCopilotJson = <S extends Schema.Top>({
+  const runCopilotJson = Effect.fn("CopilotTextGeneration.runCopilotJson")(function* <
+    S extends Schema.Top,
+  >({
     operation,
     cwd,
     prompt,
@@ -67,8 +69,8 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
-  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
-    Effect.gen(function* () {
+  }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
+    return yield* Effect.gen(function* () {
       const inference = operation === "generateWorkflowSummary";
       const commandCwd = inference
         ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "lecturn-workflow-inference-" }).pipe(
@@ -218,6 +220,7 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       ),
       Effect.scoped,
     );
+  });
 
   const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
     Effect.fn("CopilotTextGeneration.generateCommitMessage")(function* (input) {

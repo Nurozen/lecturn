@@ -50,17 +50,16 @@ export const clerkIdentityLookup =
       catch: unavailable,
     });
 
-export const reconcileIdentity = (
+export const reconcileIdentity = Effect.fn("BillingOperations.reconcileIdentity")(function* (
   userId: string,
   now: number,
   lookup: IdentityLookup,
   tombstone: BillingStore["tombstone"],
-) =>
-  Effect.gen(function* () {
-    const result = yield* lookup(userId);
-    if (result === "missing") yield* tombstone(userId, now, `identity-reconcile:${userId}`);
-    return result;
-  });
+) {
+  const result = yield* lookup(userId);
+  if (result === "missing") yield* tombstone(userId, now, `identity-reconcile:${userId}`);
+  return result;
+});
 
 export interface BillingHealth {
   pending_events: number;
@@ -75,11 +74,11 @@ export interface BillingHealth {
   identity_check_failures: number;
 }
 
-export const makeBillingOperations = (config: {
-  readonly store: Pick<BillingStore, "tombstone">;
-  readonly identity: IdentityLookup;
-}) =>
-  Effect.gen(function* () {
+export const makeBillingOperations = Effect.fn("BillingOperations.makeBillingOperations")(
+  function* (config: {
+    readonly store: Pick<BillingStore, "tombstone">;
+    readonly identity: IdentityLookup;
+  }) {
     const { $client: sql } = yield* RelayDb;
     const query = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(unavailable));
     const audit = (operation: string, target: string | null, reason: string, now: number) =>
@@ -231,4 +230,5 @@ export const makeBillingOperations = (config: {
         );
       }),
     };
-  });
+  },
+);

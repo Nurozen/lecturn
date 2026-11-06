@@ -45,22 +45,21 @@ export const make = Effect.gen(function* () {
       }
     >
   >();
-  const rememberSupport = (
+  const rememberSupport = Effect.fn("DecisionWriterBinding.rememberSupport")(function* (
     instance: object,
     fingerprint: string,
     supported: boolean,
     reason: string | null,
-  ) =>
-    Effect.gen(function* () {
-      const entries = supportCache.get(instance) ?? new Map();
-      entries.set(fingerprint, {
-        supported,
-        reason,
-        expiresAt: (yield* Clock.currentTimeMillis) + 300_000,
-      });
-      if (entries.size > 64) entries.delete(entries.keys().next().value!);
-      supportCache.set(instance, entries);
+  ) {
+    const entries = supportCache.get(instance) ?? new Map();
+    entries.set(fingerprint, {
+      supported,
+      reason,
+      expiresAt: (yield* Clock.currentTimeMillis) + 300_000,
     });
+    if (entries.size > 64) entries.delete(entries.keys().next().value!);
+    supportCache.set(instance, entries);
+  });
   const resolve = Effect.fn("Decisions.writer.resolve")(function* (
     projectId: ProjectId,
     threadId: ThreadId,

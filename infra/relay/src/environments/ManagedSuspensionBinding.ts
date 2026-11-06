@@ -13,12 +13,14 @@ export const bindManagedSuspensionProvider = Effect.gen(function* () {
   const token = yield* Token(`${worker.LogicalId}Token`);
   const bound = yield* Cloudflare.Tunnel.bindTunnelToken(token);
   return (runtime: Alchemy.BaseRuntimeContext): SuspensionProvider => {
-    const call = (operation: keyof SuspensionProvider, tunnelId: string) =>
-      Effect.gen(function* () {
+    const call = Effect.fn("ManagedSuspensionBinding.call")(
+      function* (operation: keyof SuspensionProvider, tunnelId: string) {
         const accountId = yield* bound.accountId;
         const apiToken = Redacted.value(yield* bound.value);
         yield* cloudflareSuspensionProvider({ accountId, apiToken })[operation](tunnelId);
-      }).pipe(Effect.provideService(Alchemy.RuntimeContext, runtime));
+      },
+      Effect.provideService(Alchemy.RuntimeContext, runtime),
+    );
     return {
       rotate: (id) => call("rotate", id),
       disconnect: (id) => call("disconnect", id),

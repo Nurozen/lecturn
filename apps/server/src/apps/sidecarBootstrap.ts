@@ -45,27 +45,26 @@ const SEED_TTL_DAYS = 30;
  * not a pairing code (it cannot approve MCP clients) and a re-exchange
  * replaces the helper's previous session instead of piling them up.
  */
-export const appSidecarSeedGrants = (
+export const appSidecarSeedGrants = Effect.fn("sidecarBootstrap.appSidecarSeedGrants")(function* (
   config: Pick<ServerConfig.ServerConfig["Service"], "appSidecar">,
-) =>
-  Effect.gen(function* () {
-    const sidecar = config.appSidecar;
-    if (sidecar === undefined) return [];
-    const now = yield* DateTime.now;
-    return [
-      [
-        sidecar.appSeedToken,
-        {
-          method: "desktop-bootstrap" as const,
-          scopes: [AuthAppHostScope],
-          subject: formatAppSubject(sidecar.registration.appId),
-          label: sidecar.registration.name,
-          expiresAt: DateTime.add(now, { days: SEED_TTL_DAYS }),
-          remainingUses: "unbounded" as const,
-        },
-      ] as const,
-    ];
-  });
+) {
+  const sidecar = config.appSidecar;
+  if (sidecar === undefined) return [];
+  const now = yield* DateTime.now;
+  return [
+    [
+      sidecar.appSeedToken,
+      {
+        method: "desktop-bootstrap" as const,
+        scopes: [AuthAppHostScope],
+        subject: formatAppSubject(sidecar.registration.appId),
+        label: sidecar.registration.name,
+        expiresAt: DateTime.add(now, { days: SEED_TTL_DAYS }),
+        remainingUses: "unbounded" as const,
+      },
+    ] as const,
+  ];
+});
 
 export class AppSidecarParentExitedError extends Schema.TaggedError<AppSidecarParentExitedError>()(
   "AppSidecarParentExitedError",

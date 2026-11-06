@@ -286,60 +286,61 @@ const make = Effect.gen(function* () {
   };
 
   /** The Squire when its triggers may fire: switch on, active, not the Lead, no inactivity pause. */
-  const firingSquire = (squireId: SquireId) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled)) return Option.none();
-      const squire = yield* repository.getSquire(squireId);
-      if (
-        Option.isNone(squire) ||
-        squire.value.role === "lead" ||
-        squire.value.status !== "active" ||
-        squire.value.lifecycle === "deleting"
-      ) {
-        return Option.none();
-      }
-      const lead = yield* repository.getLead;
-      if (Option.isSome(lead) && lead.value.automation_paused_at !== null) return Option.none();
-      return squire;
-    });
+  const firingSquire = Effect.fn("SquireTriggers.firingSquire")(function* (squireId: SquireId) {
+    if (!(yield* enabled)) return Option.none();
+    const squire = yield* repository.getSquire(squireId);
+    if (
+      Option.isNone(squire) ||
+      squire.value.role === "lead" ||
+      squire.value.status !== "active" ||
+      squire.value.lifecycle === "deleting"
+    ) {
+      return Option.none();
+    }
+    const lead = yield* repository.getLead;
+    if (Option.isSome(lead) && lead.value.automation_paused_at !== null) return Option.none();
+    return squire;
+  });
 
   /** The limit that holds at `now`, if any, and whether its window already has its log row. */
-  const limitAt = (row: SquireRepository.SquireTriggerRow, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const nowMs = DateTime.toEpochMillis(now);
-      const log = yield* repository.listActionLogAfter({
-        squireId: row.squire_id,
-        kinds: [RECEIVED, RATE_LIMITED],
-        after: DateTime.formatIso(DateTime.makeUnsafe(nowMs - DAY_MS)),
-      });
-      const runs = log.filter((entry) => entry.kind === RECEIVED);
-      const hourStart = DateTime.formatIso(DateTime.makeUnsafe(nowMs - HOUR_MS));
-      const hourRuns = runs.filter(
-        (entry) => entry.trigger_id === row.id && entry.created_at > hourStart,
-      );
-      // A window ends when the oldest run that fills the cap ages out of it.
-      const limits: Array<Limit> = [];
-      const hourOldest = hourRuns.at(-RUNS_PER_TRIGGER_PER_HOUR);
-      if (hourRuns.length >= RUNS_PER_TRIGGER_PER_HOUR && hourOldest !== undefined) {
-        limits.push({ limit: "hour", until: plusMs(hourOldest.created_at, HOUR_MS) });
-      }
-      const dayOldest = runs.at(-RUNS_PER_SQUIRE_PER_DAY);
-      if (runs.length >= RUNS_PER_SQUIRE_PER_DAY && dayOldest !== undefined) {
-        limits.push({ limit: "day", until: plusMs(dayOldest.created_at, DAY_MS) });
-      }
-      const limit = limits.toSorted((a, b) => b.until.localeCompare(a.until))[0];
-      if (limit === undefined) return Option.none();
-      const logged = log.some(
-        (entry) =>
-          entry.kind === RATE_LIMITED &&
-          (limit.limit === "day" || entry.trigger_id === row.id) &&
-          Option.exists(
-            decodeLogData(entry.data_json),
-            (data) => data.limit === limit.limit && data.until === limit.until,
-          ),
-      );
-      return Option.some({ ...limit, logged });
+  const limitAt = Effect.fn("SquireTriggers.limitAt")(function* (
+    row: SquireRepository.SquireTriggerRow,
+    now: DateTime.Utc,
+  ) {
+    const nowMs = DateTime.toEpochMillis(now);
+    const log = yield* repository.listActionLogAfter({
+      squireId: row.squire_id,
+      kinds: [RECEIVED, RATE_LIMITED],
+      after: DateTime.formatIso(DateTime.makeUnsafe(nowMs - DAY_MS)),
     });
+    const runs = log.filter((entry) => entry.kind === RECEIVED);
+    const hourStart = DateTime.formatIso(DateTime.makeUnsafe(nowMs - HOUR_MS));
+    const hourRuns = runs.filter(
+      (entry) => entry.trigger_id === row.id && entry.created_at > hourStart,
+    );
+    // A window ends when the oldest run that fills the cap ages out of it.
+    const limits: Array<Limit> = [];
+    const hourOldest = hourRuns.at(-RUNS_PER_TRIGGER_PER_HOUR);
+    if (hourRuns.length >= RUNS_PER_TRIGGER_PER_HOUR && hourOldest !== undefined) {
+      limits.push({ limit: "hour", until: plusMs(hourOldest.created_at, HOUR_MS) });
+    }
+    const dayOldest = runs.at(-RUNS_PER_SQUIRE_PER_DAY);
+    if (runs.length >= RUNS_PER_SQUIRE_PER_DAY && dayOldest !== undefined) {
+      limits.push({ limit: "day", until: plusMs(dayOldest.created_at, DAY_MS) });
+    }
+    const limit = limits.toSorted((a, b) => b.until.localeCompare(a.until))[0];
+    if (limit === undefined) return Option.none();
+    const logged = log.some(
+      (entry) =>
+        entry.kind === RATE_LIMITED &&
+        (limit.limit === "day" || entry.trigger_id === row.id) &&
+        Option.exists(
+          decodeLogData(entry.data_json),
+          (data) => data.limit === limit.limit && data.until === limit.until,
+        ),
+    );
+    return Option.some({ ...limit, logged });
+  });
 
   const logRow = (
     row: SquireRepository.SquireTriggerRow,
@@ -369,64 +370,66 @@ const make = Effect.gen(function* () {
    * Dedupe, then limits, then the pending row and its `trigger.received`.
    * Callers hold `runLock` inside one transaction, so the count stays exact.
    */
-  const admit = (input: {
+  const admit = Effect.fn("SquireTriggers.admit")(function* (input: {
     readonly row: SquireRepository.SquireTriggerRow;
     readonly origin: RunOrigin;
     readonly stateKey: string;
     readonly event: TriggerEvent;
     readonly now: DateTime.Utc;
-  }) =>
-    Effect.gen(function* () {
-      const { row, now } = input;
-      const key = { squireId: row.squire_id, kind: input.event.type, stateKey: input.stateKey };
-      if (yield* repository.hasThreadlessEvent(key)) return { outcome: "duplicate" } as Admission;
-      const limit = yield* limitAt(row, now);
-      if (Option.isSome(limit)) {
-        if (!limit.value.logged) {
-          yield* logRow(
-            row,
-            RATE_LIMITED,
-            { origin: input.origin, limit: limit.value.limit, until: limit.value.until },
-            now,
-          );
-        }
-        return { outcome: "rate_limited", retryAt: limit.value.until } as Admission;
+  }) {
+    const { row, now } = input;
+    const key = { squireId: row.squire_id, kind: input.event.type, stateKey: input.stateKey };
+    if (yield* repository.hasThreadlessEvent(key)) return { outcome: "duplicate" } as Admission;
+    const limit = yield* limitAt(row, now);
+    if (Option.isSome(limit)) {
+      if (!limit.value.logged) {
+        yield* logRow(
+          row,
+          RATE_LIMITED,
+          { origin: input.origin, limit: limit.value.limit, until: limit.value.until },
+          now,
+        );
       }
-      const at = DateTime.formatIso(now);
-      const eventId = yield* repository.insertTriggerEvent({
-        squire_id: row.squire_id,
-        thread_id: null,
-        kind: input.event.type,
-        state_key: input.stateKey,
-        payload_json: encodeEvent(input.event),
-        status: "pending",
-        defer_reason: null,
-        not_before: at,
-        batch_id: null,
-        created_at: at,
-      });
-      if (Option.isNone(eventId)) return { outcome: "duplicate" } as Admission;
-      yield* logRow(row, RECEIVED, { origin: input.origin }, now, eventId.value);
-      return { outcome: "queued" } as Admission;
+      return { outcome: "rate_limited", retryAt: limit.value.until } as Admission;
+    }
+    const at = DateTime.formatIso(now);
+    const eventId = yield* repository.insertTriggerEvent({
+      squire_id: row.squire_id,
+      thread_id: null,
+      kind: input.event.type,
+      state_key: input.stateKey,
+      payload_json: encodeEvent(input.event),
+      status: "pending",
+      defer_reason: null,
+      not_before: at,
+      batch_id: null,
+      created_at: at,
     });
+    if (Option.isNone(eventId)) return { outcome: "duplicate" } as Admission;
+    yield* logRow(row, RECEIVED, { origin: input.origin }, now, eventId.value);
+    return { outcome: "queued" } as Admission;
+  });
 
-  const toTrigger = (row: SquireRepository.SquireTriggerRow, now: DateTime.Utc) =>
-    Effect.gen(function* () {
-      const limit = row.status === "revoked" ? Option.none() : yield* limitAt(row, now);
-      return yield* decodeTrigger({
-        id: row.id,
-        squireId: row.squire_id,
-        name: row.name,
-        kind: row.kind,
-        instruction: row.instruction,
-        status: row.status,
-        schedule: row.schedule_json === null ? null : yield* decodeSchedule(row.schedule_json),
-        nextSlotAt: row.next_slot_at,
-        secretGeneration: row.secret_generation,
-        limitedUntil: Option.match(limit, { onNone: () => null, onSome: (l) => l.until }),
-        createdAt: row.created_at,
-      });
+  // Runs per trigger row; list and write operations own the span.
+  const toTrigger = Effect.fnUntraced(function* (
+    row: SquireRepository.SquireTriggerRow,
+    now: DateTime.Utc,
+  ) {
+    const limit = row.status === "revoked" ? Option.none() : yield* limitAt(row, now);
+    return yield* decodeTrigger({
+      id: row.id,
+      squireId: row.squire_id,
+      name: row.name,
+      kind: row.kind,
+      instruction: row.instruction,
+      status: row.status,
+      schedule: row.schedule_json === null ? null : yield* decodeSchedule(row.schedule_json),
+      nextSlotAt: row.next_slot_at,
+      secretGeneration: row.secret_generation,
+      limitedUntil: Option.match(limit, { onNone: () => null, onSome: (l) => l.until }),
+      createdAt: row.created_at,
     });
+  });
 
   const requireTrigger = (triggerId: SquireTriggerId) =>
     repository
@@ -451,20 +454,23 @@ const make = Effect.gen(function* () {
           );
 
   /** Stores a fresh secret under the generation's ref; `set` so a retried step overwrites its own leftover. */
-  const storeSecret = (triggerId: SquireTriggerId, generation: number) =>
-    Effect.gen(function* () {
-      const secret = newSecret();
-      const ref = secretRef(triggerId, generation);
-      yield* secrets.set(ref, new TextEncoder().encode(secret));
-      return { secret, ref };
-    });
+  const storeSecret = Effect.fn("SquireTriggers.storeSecret")(function* (
+    triggerId: SquireTriggerId,
+    generation: number,
+  ) {
+    const secret = newSecret();
+    const ref = secretRef(triggerId, generation);
+    yield* secrets.set(ref, new TextEncoder().encode(secret));
+    return { secret, ref };
+  });
 
-  const list: SquireTriggers["Service"]["list"] = (squireId) =>
-    Effect.gen(function* () {
-      const now = yield* nowUtc;
-      const rows = yield* repository.listTriggers(squireId);
-      return yield* Effect.forEach(rows, (row) => toTrigger(row, now));
-    }).pipe(orSquireError("read the Squire's triggers"));
+  const list: SquireTriggers["Service"]["list"] = Effect.fn("SquireTriggers.list")(function* (
+    squireId,
+  ) {
+    const now = yield* nowUtc;
+    const rows = yield* repository.listTriggers(squireId);
+    return yield* Effect.forEach(rows, (row) => toTrigger(row, now));
+  }, orSquireError("read the Squire's triggers"));
 
   const create: SquireTriggers["Service"]["create"] = (input) =>
     requireEnabled.pipe(
@@ -736,21 +742,22 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const fireDueSlots: SquireTriggers["Service"]["fireDueSlots"] = (now) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled)) return 0;
-      const nowIso = DateTime.formatIso(now);
-      const due = (yield* repository.listArmedTriggers).filter(
-        (row) => row.next_slot_at !== null && row.next_slot_at <= nowIso,
-      );
-      let queued = 0;
-      for (const row of due) {
-        // A blocked trigger keeps its slot, so after a resume it fires once, like downtime.
-        if (Option.isNone(yield* firingSquire(row.squire_id))) continue;
-        if (yield* fireSlot(row.id, now)) queued += 1;
-      }
-      return queued;
-    }).pipe(orSquireError("fire the due triggers"));
+  const fireDueSlots: SquireTriggers["Service"]["fireDueSlots"] = Effect.fn(
+    "SquireTriggers.fireDueSlots",
+  )(function* (now) {
+    if (!(yield* enabled)) return 0;
+    const nowIso = DateTime.formatIso(now);
+    const due = (yield* repository.listArmedTriggers).filter(
+      (row) => row.next_slot_at !== null && row.next_slot_at <= nowIso,
+    );
+    let queued = 0;
+    for (const row of due) {
+      // A blocked trigger keeps its slot, so after a resume it fires once, like downtime.
+      if (Option.isNone(yield* firingSquire(row.squire_id))) continue;
+      if (yield* fireSlot(row.id, now)) queued += 1;
+    }
+    return queued;
+  }, orSquireError("fire the due triggers"));
 
   const earliestSlotAt: SquireTriggers["Service"]["earliestSlotAt"] = Effect.gen(function* () {
     if (!(yield* enabled)) return Option.none();
@@ -762,8 +769,8 @@ const make = Effect.gen(function* () {
     return Option.none();
   }).pipe(orSquireError("read the next trigger slot"));
 
-  const receive: SquireTriggers["Service"]["receive"] = (rawTriggerId, rawHeaders, body) =>
-    Effect.gen(function* () {
+  const receive: SquireTriggers["Service"]["receive"] = Effect.fn("SquireTriggers.receive")(
+    function* (rawTriggerId, rawHeaders, body) {
       const missing = { outcome: "not_found" } as const;
       if (!(yield* enabled)) return missing;
       const triggerId = decodeTriggerId(rawTriggerId);
@@ -844,7 +851,9 @@ const make = Effect.gen(function* () {
         ),
       );
       return admitted.outcome === "rotated" ? yield* reject("unauthorized") : admitted;
-    }).pipe(orSquireError("receive the webhook"));
+    },
+    orSquireError("receive the webhook"),
+  );
 
   /** User mutations only; the clock and webhooks are not the user acting. */
   const touched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -880,22 +889,21 @@ const make = Effect.gen(function* () {
       created_at: at,
     });
 
-  const closeInactivityCards = (
+  const closeInactivityCards = Effect.fn("SquireTriggers.closeInactivityCards")(function* (
     leadId: SquireId,
     patch: { readonly status: "resolved" | "dismissed"; readonly resolution: string },
     at: string,
-  ) =>
-    Effect.gen(function* () {
-      const open = yield* repository.listCards({
-        squireId: leadId,
-        kinds: ["fyi"],
-        statuses: ["open"],
-      });
-      for (const card of open) {
-        if (!card.id.startsWith(inactivityCardPrefix(leadId))) continue;
-        yield* repository.updateCard({ id: card.id, fromStatuses: ["open"], patch, updatedAt: at });
-      }
+  ) {
+    const open = yield* repository.listCards({
+      squireId: leadId,
+      kinds: ["fyi"],
+      statuses: ["open"],
     });
+    for (const card of open) {
+      if (!card.id.startsWith(inactivityCardPrefix(leadId))) continue;
+      yield* repository.updateCard({ id: card.id, fromStatuses: ["open"], patch, updatedAt: at });
+    }
+  });
 
   const notifyOn = (lead: SquireRepository.SquireRow) =>
     Option.getOrElse(decodePermissions(lead.permissions_json), () => DEFAULT_SQUIRE_PERMISSIONS)
@@ -905,114 +913,184 @@ const make = Effect.gen(function* () {
    * Inside the caller's transaction. A trigger the user paused stays paused
    * on a resume of all; naming it resumes it.
    */
-  const resumeIn = (
+  const resumeIn = Effect.fn("SquireTriggers.resumeIn")(function* (
     lead: SquireRepository.SquireRow,
     triggerIds: ReadonlyArray<SquireTriggerId> | undefined,
     now: DateTime.Utc,
-  ) =>
-    Effect.gen(function* () {
-      const at = DateTime.formatIso(now);
-      const named = triggerIds === undefined ? undefined : new Set<string>(triggerIds);
-      for (const id of triggerIds ?? []) yield* requireTrigger(id);
-      const wasPaused = lead.automation_paused_at !== null;
-      const zone = yield* leadZone;
-      const resumed: Array<string> = [];
-      for (const squire of yield* repository.listSquires) {
-        for (const row of yield* repository.listTriggers(squire.id)) {
-          if (row.status === "revoked") continue;
-          if (named !== undefined && !named.has(row.id)) {
-            if (wasPaused && row.status === "active") {
-              yield* repository.updateTrigger({
-                id: row.id,
-                patch: { status: "paused", next_slot_at: null },
-              });
-            }
-            continue;
+  ) {
+    const at = DateTime.formatIso(now);
+    const named = triggerIds === undefined ? undefined : new Set<string>(triggerIds);
+    for (const id of triggerIds ?? []) yield* requireTrigger(id);
+    const wasPaused = lead.automation_paused_at !== null;
+    const zone = yield* leadZone;
+    const resumed: Array<string> = [];
+    for (const squire of yield* repository.listSquires) {
+      for (const row of yield* repository.listTriggers(squire.id)) {
+        if (row.status === "revoked") continue;
+        if (named !== undefined && !named.has(row.id)) {
+          if (wasPaused && row.status === "active") {
+            yield* repository.updateTrigger({
+              id: row.id,
+              patch: { status: "paused", next_slot_at: null },
+            });
           }
-          if (named === undefined) {
-            if (!wasPaused || row.status !== "active") continue;
-          } else if (row.status === "active" && !wasPaused) {
-            continue;
-          }
-          // From now, so a slot missed while paused never fires.
-          const schedule =
-            row.schedule_json === null ? null : yield* decodeSchedule(row.schedule_json);
-          yield* repository.updateTrigger({
-            id: row.id,
-            patch: {
-              status: "active",
-              next_slot_at:
-                schedule === null
-                  ? null
-                  : Option.match(nextSlot(schedule, now, zone), {
-                      onNone: () => null,
-                      onSome: DateTime.formatIso,
-                    }),
-            },
-          });
-          resumed.push(row.id);
+          continue;
         }
+        if (named === undefined) {
+          if (!wasPaused || row.status !== "active") continue;
+        } else if (row.status === "active" && !wasPaused) {
+          continue;
+        }
+        // From now, so a slot missed while paused never fires.
+        const schedule =
+          row.schedule_json === null ? null : yield* decodeSchedule(row.schedule_json);
+        yield* repository.updateTrigger({
+          id: row.id,
+          patch: {
+            status: "active",
+            next_slot_at:
+              schedule === null
+                ? null
+                : Option.match(nextSlot(schedule, now, zone), {
+                    onNone: () => null,
+                    onSome: DateTime.formatIso,
+                  }),
+          },
+        });
+        resumed.push(row.id);
       }
-      if (wasPaused || lead.inactivity_prompted_at !== null) {
-        yield* repository.updateSquire({
+    }
+    if (wasPaused || lead.inactivity_prompted_at !== null) {
+      yield* repository.updateSquire({
+        id: lead.id,
+        patch: { automation_paused_at: null, inactivity_prompted_at: null, user_active_at: at },
+        updatedAt: at,
+      });
+    }
+    if (wasPaused || resumed.length > 0) {
+      yield* leadLog(
+        lead,
+        "automation.resumed",
+        { scope: named === undefined ? "all" : "triggers", triggers: resumed.join(",") },
+        at,
+      );
+    }
+  });
+
+  const checkInactivity: SquireTriggers["Service"]["checkInactivity"] = Effect.fn(
+    "SquireTriggers.checkInactivity",
+  )(function* (now) {
+    if (!(yield* enabled)) return;
+    const at = DateTime.formatIso(now);
+    // Read here rather than from the settings stream: no fiber, and a
+    // sweep-late stamp is nothing against a window of days.
+    const squireSettings = (yield* serverSettings.getSettings).squire;
+    const seen = encodeSquireSettings(squireSettings);
+    const previous = yield* Ref.getAndSet(lastSquireSettings, Option.some(seen));
+    if (Option.isSome(previous) && previous.value !== seen) {
+      yield* touchUserActivity(repository, at);
+    }
+    const found = yield* repository.getLead;
+    if (Option.isNone(found)) return;
+    const lead = found.value;
+    if (lead.automation_paused_at !== null) return;
+    const nowMs = DateTime.toEpochMillis(now);
+    const prompted = lead.inactivity_prompted_at;
+    if (prompted === null) {
+      const days = squireSettings.inactivityDays;
+      const since = lead.user_active_at ?? lead.created_at;
+      if (nowMs - DateTime.toEpochMillis(DateTime.makeUnsafe(since)) < days * DAY_MS) return;
+      yield* repository.transaction(
+        Effect.gen(function* () {
+          // The revision guards against a concurrent answer or a second sweep.
+          const claimed = yield* repository.updateSquire({
+            id: lead.id,
+            expectedRevision: lead.revision,
+            patch: { inactivity_prompted_at: at },
+            updatedAt: at,
+          });
+          if (Option.isNone(claimed)) return;
+          const cardId = SquireCardId.make(`${inactivityCardPrefix(lead.id)}${at}`);
+          const text = `No Squire activity here in ${days} day${days === 1 ? "" : "s"}. Keep leaves triggers and the find-work sweep running; Pause stops them until you resume. With no answer in 48 hours they pause.`;
+          yield* repository.insertCard({
+            id: cardId,
+            squire_id: lead.id,
+            owner_squire_id: lead.id,
+            kind: "fyi",
+            status: "open",
+            target_thread_id: null,
+            project_id: null,
+            title: INACTIVITY_TITLE,
+            why: text,
+            payload_json: encodeCardPayload({
+              type: "fyi",
+              source: "inactivity",
+              text,
+              threadId: null,
+            }),
+            evidence_json: "{}",
+            trigger_json: "{}",
+            intent_json: null,
+            origin: "event",
+            steer_kind: null,
+            routed_task_id: null,
+            rule_id: null,
+            finding_key: null,
+            escalate_at: null,
+            opened_at: null,
+            executes_at: null,
+            attempt: 0,
+            command_id: null,
+            execution_key: null,
+            dedupe_key: null,
+            replaced_count: 0,
+            ask_json: null,
+            resolution: null,
+            created_at: at,
+            updated_at: at,
+          });
+          yield* leadLog(lead, "card.created", { kind: "fyi", source: "inactivity" }, at, {
+            cardId,
+          });
+          yield* leadLog(lead, "automation.prompted", { inactivityDays: String(days), since }, at, {
+            cardId,
+          });
+          // The push intent row; SquireMobileAttention writes the mobile delivery row.
+          if (notifyOn(lead)) {
+            yield* leadLog(lead, "notification.pushed", { kind: "fyi", source: "inactivity" }, at, {
+              cardId,
+            });
+          }
+        }),
+      );
+      return;
+    }
+    if (nowMs - DateTime.toEpochMillis(DateTime.makeUnsafe(prompted)) < INACTIVITY_ANSWER_MS) {
+      return;
+    }
+    yield* repository.transaction(
+      Effect.gen(function* () {
+        const paused = yield* repository.updateSquire({
           id: lead.id,
-          patch: { automation_paused_at: null, inactivity_prompted_at: null, user_active_at: at },
+          expectedRevision: lead.revision,
+          patch: { automation_paused_at: at },
           updatedAt: at,
         });
-      }
-      if (wasPaused || resumed.length > 0) {
-        yield* leadLog(
-          lead,
-          "automation.resumed",
-          { scope: named === undefined ? "all" : "triggers", triggers: resumed.join(",") },
-          at,
-        );
-      }
-    });
-
-  const checkInactivity: SquireTriggers["Service"]["checkInactivity"] = (now) =>
-    Effect.gen(function* () {
-      if (!(yield* enabled)) return;
-      const at = DateTime.formatIso(now);
-      // Read here rather than from the settings stream: no fiber, and a
-      // sweep-late stamp is nothing against a window of days.
-      const squireSettings = (yield* serverSettings.getSettings).squire;
-      const seen = encodeSquireSettings(squireSettings);
-      const previous = yield* Ref.getAndSet(lastSquireSettings, Option.some(seen));
-      if (Option.isSome(previous) && previous.value !== seen) {
-        yield* touchUserActivity(repository, at);
-      }
-      const found = yield* repository.getLead;
-      if (Option.isNone(found)) return;
-      const lead = found.value;
-      if (lead.automation_paused_at !== null) return;
-      const nowMs = DateTime.toEpochMillis(now);
-      const prompted = lead.inactivity_prompted_at;
-      if (prompted === null) {
-        const days = squireSettings.inactivityDays;
-        const since = lead.user_active_at ?? lead.created_at;
-        if (nowMs - DateTime.toEpochMillis(DateTime.makeUnsafe(since)) < days * DAY_MS) return;
-        yield* repository.transaction(
-          Effect.gen(function* () {
-            // The revision guards against a concurrent answer or a second sweep.
-            const claimed = yield* repository.updateSquire({
-              id: lead.id,
-              expectedRevision: lead.revision,
-              patch: { inactivity_prompted_at: at },
-              updatedAt: at,
-            });
-            if (Option.isNone(claimed)) return;
-            const cardId = SquireCardId.make(`${inactivityCardPrefix(lead.id)}${at}`);
-            const text = `No Squire activity here in ${days} day${days === 1 ? "" : "s"}. Keep leaves triggers and the find-work sweep running; Pause stops them until you resume. With no answer in 48 hours they pause.`;
-            yield* repository.insertCard({
-              id: cardId,
-              squire_id: lead.id,
-              owner_squire_id: lead.id,
-              kind: "fyi",
-              status: "open",
-              target_thread_id: null,
-              project_id: null,
-              title: INACTIVITY_TITLE,
+        if (Option.isNone(paused)) return;
+        // The card stays open: Keep on it resumes everything.
+        const text =
+          "Triggers and the find-work sweep paused after 48 hours without an answer. Keep resumes them.";
+        const open = yield* repository.listCards({
+          squireId: lead.id,
+          kinds: ["fyi"],
+          statuses: ["open"],
+        });
+        for (const card of open) {
+          if (!card.id.startsWith(inactivityCardPrefix(lead.id))) continue;
+          yield* repository.updateCard({
+            id: card.id,
+            fromStatuses: ["open"],
+            patch: {
               why: text,
               payload_json: encodeCardPayload({
                 type: "fyi",
@@ -1020,118 +1098,40 @@ const make = Effect.gen(function* () {
                 text,
                 threadId: null,
               }),
-              evidence_json: "{}",
-              trigger_json: "{}",
-              intent_json: null,
-              origin: "event",
-              steer_kind: null,
-              routed_task_id: null,
-              rule_id: null,
-              finding_key: null,
-              escalate_at: null,
-              opened_at: null,
-              executes_at: null,
-              attempt: 0,
-              command_id: null,
-              execution_key: null,
-              dedupe_key: null,
-              replaced_count: 0,
-              ask_json: null,
-              resolution: null,
-              created_at: at,
-              updated_at: at,
-            });
-            yield* leadLog(lead, "card.created", { kind: "fyi", source: "inactivity" }, at, {
-              cardId,
-            });
-            yield* leadLog(
-              lead,
-              "automation.prompted",
-              { inactivityDays: String(days), since },
-              at,
-              { cardId },
-            );
-            // The push intent row; SquireMobileAttention writes the mobile delivery row.
-            if (notifyOn(lead)) {
-              yield* leadLog(
-                lead,
-                "notification.pushed",
-                { kind: "fyi", source: "inactivity" },
-                at,
-                { cardId },
-              );
-            }
-          }),
-        );
-        return;
-      }
-      if (nowMs - DateTime.toEpochMillis(DateTime.makeUnsafe(prompted)) < INACTIVITY_ANSWER_MS) {
-        return;
-      }
-      yield* repository.transaction(
-        Effect.gen(function* () {
-          const paused = yield* repository.updateSquire({
-            id: lead.id,
-            expectedRevision: lead.revision,
-            patch: { automation_paused_at: at },
+            },
             updatedAt: at,
           });
-          if (Option.isNone(paused)) return;
-          // The card stays open: Keep on it resumes everything.
-          const text =
-            "Triggers and the find-work sweep paused after 48 hours without an answer. Keep resumes them.";
-          const open = yield* repository.listCards({
-            squireId: lead.id,
-            kinds: ["fyi"],
-            statuses: ["open"],
-          });
-          for (const card of open) {
-            if (!card.id.startsWith(inactivityCardPrefix(lead.id))) continue;
-            yield* repository.updateCard({
-              id: card.id,
-              fromStatuses: ["open"],
-              patch: {
-                why: text,
-                payload_json: encodeCardPayload({
-                  type: "fyi",
-                  source: "inactivity",
-                  text,
-                  threadId: null,
-                }),
-              },
-              updatedAt: at,
-            });
-          }
-          // A system message the Lead's next turn reads, so its thread says so.
-          const messageKey = `inactivity-paused:${at}`;
-          const eventId = yield* repository.insertTriggerEvent({
-            squire_id: lead.id,
-            thread_id: null,
-            kind: "message",
-            state_key: messageKey,
-            payload_json: encodeEvent({
-              type: "message",
-              messageKey,
-              from: { kind: "system" },
-              hop: 0,
-              body: `Lecturn paused every Squire trigger and the find-work sweep: "${INACTIVITY_TITLE}" had no answer in 48 hours. Tell the user in a sentence or two; Keep on that item, or Resume in Settings > Squires, starts them again. Reactions to tracked threads continue.`,
-            }),
-            status: "pending",
-            defer_reason: null,
-            not_before: at,
-            batch_id: null,
-            created_at: at,
-          });
-          yield* leadLog(
-            lead,
-            "automation.paused",
-            { reason: "no-answer", promptedAt: prompted },
-            at,
-            Option.match(eventId, { onNone: () => ({}), onSome: (id) => ({ eventId: id }) }),
-          );
-        }),
-      );
-    }).pipe(orSquireError("check Squire inactivity"));
+        }
+        // A system message the Lead's next turn reads, so its thread says so.
+        const messageKey = `inactivity-paused:${at}`;
+        const eventId = yield* repository.insertTriggerEvent({
+          squire_id: lead.id,
+          thread_id: null,
+          kind: "message",
+          state_key: messageKey,
+          payload_json: encodeEvent({
+            type: "message",
+            messageKey,
+            from: { kind: "system" },
+            hop: 0,
+            body: `Lecturn paused every Squire trigger and the find-work sweep: "${INACTIVITY_TITLE}" had no answer in 48 hours. Tell the user in a sentence or two; Keep on that item, or Resume in Settings > Squires, starts them again. Reactions to tracked threads continue.`,
+          }),
+          status: "pending",
+          defer_reason: null,
+          not_before: at,
+          batch_id: null,
+          created_at: at,
+        });
+        yield* leadLog(
+          lead,
+          "automation.paused",
+          { reason: "no-answer", promptedAt: prompted },
+          at,
+          Option.match(eventId, { onNone: () => ({}), onSome: (id) => ({ eventId: id }) }),
+        );
+      }),
+    );
+  }, orSquireError("check Squire inactivity"));
 
   const answerInactivity: SquireTriggers["Service"]["answerInactivity"] = ({ keep }) =>
     requireEnabled.pipe(

@@ -60,6 +60,7 @@ import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 import * as ResourceCleanupService from "../ResourceCleanupService.ts";
+import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import { threadHasQueuedTurnStart } from "../ThreadSettlementService.ts";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as RuntimeLayer from "../runtimeLayer.ts";
@@ -936,6 +937,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
           ),
           Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
           Layer.provide(Layer.mock(PreviewManager.PreviewManager)({})),
+          Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         ),
       ),
     ),
@@ -1052,6 +1054,7 @@ it.layer(TestLayer)("Lecturn fork behavior on the V2 orchestrator", (it) => {
           ),
           Layer.provide(Layer.mock(TerminalManager.TerminalManager)({})),
           Layer.provide(Layer.mock(PreviewManager.PreviewManager)({})),
+          Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         ),
       ),
     ),

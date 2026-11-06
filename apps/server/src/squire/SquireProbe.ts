@@ -308,36 +308,38 @@ const make = Effect.gen(function* () {
     yield* deleteProbe(input.threadId);
   }, orSquireError("store the answer"));
 
-  const reconcileCard = (card: SquireRepository.SquireCardRow, current: SquireCardAsk) =>
-    Effect.gen(function* () {
-      const threadId = probeThreadIdFor(card.id, current.requestId);
-      const probe = yield* projections.getThreadShell(threadId);
-      const { messages } =
-        probe === null
-          ? { messages: [] }
-          : yield* projections.getThreadRecords(threadId, ["messages"], {
-              messageIds: [probeMessageId(card.id, current.requestId)],
-            });
-      const runId = messages[0]?.runId ?? null;
-      if (runId === null) {
-        if (messages.length > 0) return; // Queued; the worker starts it.
-        if (card.target_thread_id === null) {
-          return yield* storeAsk(card.id, {
-            ...current,
-            status: "failed",
-            error: "The question stopped before it was answered.",
+  const reconcileCard = Effect.fn("SquireProbe.reconcileCard")(function* (
+    card: SquireRepository.SquireCardRow,
+    current: SquireCardAsk,
+  ) {
+    const threadId = probeThreadIdFor(card.id, current.requestId);
+    const probe = yield* projections.getThreadShell(threadId);
+    const { messages } =
+      probe === null
+        ? { messages: [] }
+        : yield* projections.getThreadRecords(threadId, ["messages"], {
+            messageIds: [probeMessageId(card.id, current.requestId)],
           });
-        }
-        return yield* startProbe(card, card.target_thread_id, current);
+    const runId = messages[0]?.runId ?? null;
+    if (runId === null) {
+      if (messages.length > 0) return; // Queued; the worker starts it.
+      if (card.target_thread_id === null) {
+        return yield* storeAsk(card.id, {
+          ...current,
+          status: "failed",
+          error: "The question stopped before it was answered.",
+        });
       }
-      const { runs } = yield* projections.getThreadRecords(threadId, ["runs"], {
-        runIds: [runId],
-      });
-      const run = runs[0];
-      // A live run reaches the reactor when runtime recovery ends it.
-      if (run === undefined || !TERMINAL_RUN_STATUSES.has(run.status)) return;
-      yield* finish({ squireId: card.squire_id, threadId, runId, status: run.status });
+      return yield* startProbe(card, card.target_thread_id, current);
+    }
+    const { runs } = yield* projections.getThreadRecords(threadId, ["runs"], {
+      runIds: [runId],
     });
+    const run = runs[0];
+    // A live run reaches the reactor when runtime recovery ends it.
+    if (run === undefined || !TERMINAL_RUN_STATUSES.has(run.status)) return;
+    yield* finish({ squireId: card.squire_id, threadId, runId, status: run.status });
+  });
 
   const reconcileStartup: SquireProbe["Service"]["reconcileStartup"] = Effect.gen(function* () {
     for (const card of yield* repository.listCards({})) {

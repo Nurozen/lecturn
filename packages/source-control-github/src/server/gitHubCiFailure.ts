@@ -153,8 +153,8 @@ export const readGitHubCiFailure = Effect.fn("GitHubCiFailure.read")(
       );
 
     /** GitHub answers with a redirect to a presigned URL, which is fetched without the token. */
-    const logOf = (id: number) =>
-      Effect.gen(function* () {
+    const logOf = Effect.fn("GitHubCiFailure.readJobLog")(
+      function* (id: number) {
         const answer = yield* rest("readCiJobLog", `repos/${repo}/actions/jobs/${id}/logs`, {
           manualRedirect: true,
           accept: "application/vnd.github+json",
@@ -177,7 +177,9 @@ export const readGitHubCiFailure = Effect.fn("GitHubCiFailure.read")(
           Effect.timeout(LOG_TIMEOUT),
         );
         return { text: withoutToken(read.text), truncated: read.truncated };
-      }).pipe(Effect.orElseSucceed(() => null));
+      },
+      Effect.orElseSucceed(() => null),
+    );
 
     const jobs = yield* Effect.forEach(actionsJobs, (run) =>
       Effect.gen(function* () {

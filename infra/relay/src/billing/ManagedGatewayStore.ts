@@ -37,8 +37,8 @@ const inCohort = (config: ManagedGatewayStoreConfig, userId: string) =>
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 /** Private service methods only. Never enroll an existing direct-tunnel hostname. */
-export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
-  Effect.gen(function* () {
+export const makeManagedGatewayStore = Effect.fn("ManagedGatewayStore.makeManagedGatewayStore")(
+  function* (config: ManagedGatewayStoreConfig) {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.stage) || !hostname.test(config.baseDomain))
       return yield* invalid("Gateway stage and base domain must be explicit lowercase DNS names");
     const { $client: sql } = yield* RelayDb;
@@ -368,4 +368,5 @@ export const makeManagedGatewayStore = (config: ManagedGatewayStoreConfig) =>
         ).pipe(Effect.map((rows) => rows.map((row) => row.user_id)));
       }),
     };
-  });
+  },
+);

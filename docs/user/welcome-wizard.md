@@ -1,7 +1,16 @@
 # Welcome wizard
 
-Lecturn shows a setup flow when you open a new installation or connect to the
-hosted app for the first time. Existing workspaces skip this flow.
+Lecturn shows a setup flow when you open a new installation. Existing
+workspaces skip this flow.
+
+The hosted app at lecturn.cloudgatherer.net does not open setup. With no computer connected,
+it asks you to sign in to Lecturn Connect, then to run `npx lecturn connect` on your
+computer. From home, it adds compatible computers linked to your account and
+opens the app.
+
+Close setup while no import is running to go straight to the app. You can connect
+computers and agents later from Settings, or open `/welcome` to run setup again.
+Direct links, such as Settings, open normally before setup is done.
 
 ## Connect your computers
 
@@ -21,6 +30,9 @@ You can add more computers before continuing:
   Start the server with `lecturn serve`, then run `lecturn pair --tailscale` and
   paste the pairing link. You can also run `lecturn serve --host <address>` and
   use `lecturn pair` when the server is already reachable on your network.
+
+A computer marked **Client not supported** runs a Lecturn version that cannot
+talk to this app. The message under its name says which side to update.
 
 Saved computers and computers discovered through Lecturn Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.

@@ -346,62 +346,64 @@ const make = Effect.gen(function* () {
    * the one alternative. A proposal has no thread, so its project grant is
    * the target and a covering Stave grant the alternative.
    */
-  const offerTargets = (squireId: SquireId, card: SquireRepository.SquireCardRow) =>
-    Effect.gen(function* () {
-      const grants = yield* repository.listGrants(squireId);
-      const granted = (kind: ContainerKind, id: string | null) =>
-        id !== null && grants.some((grant) => grant.kind === kind && grant.target_id === id)
-          ? [{ kind, id }]
-          : [];
-      // Narrowest first: a project, then its Stave space, then its saga.
-      const containersOf = (target: squirePolicy.SquirePolicyTarget) =>
-        Effect.forEach(
-          [
-            ...granted("project", target.projectId),
-            ...granted("staveSpace", target.staveSpaceId),
-            ...granted("staveSaga", target.staveSagaId),
-          ],
-          ({ kind, id }) =>
-            containerName(kind, id).pipe(
-              Effect.map((name): OfferTarget => ({ targetKind: kind, targetId: id, name })),
-            ),
-        );
+  const offerTargets = Effect.fn("SquireRules.offerTargets")(function* (
+    squireId: SquireId,
+    card: SquireRepository.SquireCardRow,
+  ) {
+    const grants = yield* repository.listGrants(squireId);
+    const granted = (kind: ContainerKind, id: string | null) =>
+      id !== null && grants.some((grant) => grant.kind === kind && grant.target_id === id)
+        ? [{ kind, id }]
+        : [];
+    // Narrowest first: a project, then its Stave space, then its saga.
+    const containersOf = (target: squirePolicy.SquirePolicyTarget) =>
+      Effect.forEach(
+        [
+          ...granted("project", target.projectId),
+          ...granted("staveSpace", target.staveSpaceId),
+          ...granted("staveSaga", target.staveSagaId),
+        ],
+        ({ kind, id }) =>
+          containerName(kind, id).pipe(
+            Effect.map((name): OfferTarget => ({ targetKind: kind, targetId: id, name })),
+          ),
+      );
 
-      if (card.kind === "steer") {
-        if (card.target_thread_id === null) return Option.none<OfferTargets>();
-        const threadId = card.target_thread_id;
-        const target = yield* scope.targetOf(threadId);
-        if (Option.isNone(target)) return Option.none<OfferTargets>();
-        const tracked = yield* scope.ruleTargetInScope({
-          squireId,
-          targetKind: "thread",
-          targetId: threadId,
-        });
-        if (!tracked) return Option.none<OfferTargets>();
-        const shell = yield* projections.getThreadShell(threadId);
-        const [container] = yield* containersOf(target.value);
-        return Option.some<OfferTargets>({
-          policyTarget: target.value,
-          primary: { targetKind: "thread", targetId: threadId, name: shell?.title ?? threadId },
-          alternative: container,
-        });
-      }
-      if (card.project_id === null) return Option.none<OfferTargets>();
-      const stave = yield* containers.ofProject(card.project_id);
-      const policyTarget: squirePolicy.SquirePolicyTarget = {
-        threadId: null,
-        projectId: card.project_id,
-        staveSpaceId: stave.status === "known" ? stave.spaceId : null,
-        staveSagaId: stave.status === "known" ? stave.sagaId : null,
-      };
-      const [primary, alternative] = yield* containersOf(policyTarget);
-      return primary === undefined
-        ? Option.none<OfferTargets>()
-        : Option.some<OfferTargets>({ policyTarget, primary, alternative });
-    });
+    if (card.kind === "steer") {
+      if (card.target_thread_id === null) return Option.none<OfferTargets>();
+      const threadId = card.target_thread_id;
+      const target = yield* scope.targetOf(threadId);
+      if (Option.isNone(target)) return Option.none<OfferTargets>();
+      const tracked = yield* scope.ruleTargetInScope({
+        squireId,
+        targetKind: "thread",
+        targetId: threadId,
+      });
+      if (!tracked) return Option.none<OfferTargets>();
+      const shell = yield* projections.getThreadShell(threadId);
+      const [container] = yield* containersOf(target.value);
+      return Option.some<OfferTargets>({
+        policyTarget: target.value,
+        primary: { targetKind: "thread", targetId: threadId, name: shell?.title ?? threadId },
+        alternative: container,
+      });
+    }
+    if (card.project_id === null) return Option.none<OfferTargets>();
+    const stave = yield* containers.ofProject(card.project_id);
+    const policyTarget: squirePolicy.SquirePolicyTarget = {
+      threadId: null,
+      projectId: card.project_id,
+      staveSpaceId: stave.status === "known" ? stave.spaceId : null,
+      staveSagaId: stave.status === "known" ? stave.sagaId : null,
+    };
+    const [primary, alternative] = yield* containersOf(policyTarget);
+    return primary === undefined
+      ? Option.none<OfferTargets>()
+      : Option.some<OfferTargets>({ policyTarget, primary, alternative });
+  });
 
-  const offer = (card: SquireRepository.SquireCardRow, effect: SquireRuleEffect) =>
-    Effect.gen(function* () {
+  const offer = Effect.fn("SquireRules.offer")(
+    function* (card: SquireRepository.SquireCardRow, effect: SquireRuleEffect) {
       if (card.kind !== "steer" && card.kind !== "proposal") return Option.none();
       if (effect === "allow" && !allowOfferOrigins.has(card.origin)) return Option.none();
       const actionClass = offerClasses[card.kind];
@@ -485,13 +487,16 @@ const make = Effect.gen(function* () {
             }),
         capReached: false,
       });
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("Squire rule offer skipped", { cardId: card.id, cause }).pipe(
-          Effect.as(Option.none<SquireRuleOffer>()),
+    },
+    (effect, card) =>
+      effect.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("Squire rule offer skipped", { cardId: card.id, cause }).pipe(
+            Effect.as(Option.none<SquireRuleOffer>()),
+          ),
         ),
       ),
-    );
+  );
 
   // The inactivity check counts user RPCs only.
   const touch = Effect.flatMap(nowIso, (now) => touchUserActivity(repository, now));

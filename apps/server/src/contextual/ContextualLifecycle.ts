@@ -42,40 +42,43 @@ function sql_list(values: ReadonlyArray<string>): string {
   return values.map((value) => `'${value}'`).join(",");
 }
 
-const settlePreparation = (
+const settlePreparation = Effect.fn("ContextualLifecycle.settlePreparation")(function* (
   sql: SqlClient.SqlClient,
   row: { id: string; preparation_json: string },
   threadId: ThreadId,
   at: string,
-) =>
-  Effect.gen(function* () {
-    const preparation = yield* decodePreparation(row.preparation_json);
-    const next = {
-      ...preparation,
-      state:
-        preparation.state === "dispatching" ? ("delivery-unknown" as const) : ("canceled" as const),
-      revision: preparation.revision + 1,
-      updatedAt: at,
-    };
-    yield* sql`UPDATE contextual_preparations SET state=${next.state},revision=${next.revision},preparation_json=${yield* encodePreparation(next)},continuation_json=NULL,updated_at=${at} WHERE id=${row.id}`;
-    yield* appendContextualEvent(sql, {
-      threadId,
-      revision: next.revision,
-      kind: "preparation-changed",
-      entityId: next.id,
-    });
+) {
+  const preparation = yield* decodePreparation(row.preparation_json);
+  const next = {
+    ...preparation,
+    state:
+      preparation.state === "dispatching" ? ("delivery-unknown" as const) : ("canceled" as const),
+    revision: preparation.revision + 1,
+    updatedAt: at,
+  };
+  yield* sql`UPDATE contextual_preparations SET state=${next.state},revision=${next.revision},preparation_json=${yield* encodePreparation(next)},continuation_json=NULL,updated_at=${at} WHERE id=${row.id}`;
+  yield* appendContextualEvent(sql, {
+    threadId,
+    revision: next.revision,
+    kind: "preparation-changed",
+    entityId: next.id,
   });
+});
 
-const finishQueueRows = (sql: SqlClient.SqlClient, threadId: ThreadId, at: string, runId?: RunId) =>
-  Effect.gen(function* () {
-    const scope = runId === undefined ? sql`1=1` : sql`event_id=${runId}`;
-    yield* sql`INSERT INTO contextual_turn_watermarks(thread_id,through_sequence)
+const finishQueueRows = Effect.fn("ContextualLifecycle.finishQueueRows")(function* (
+  sql: SqlClient.SqlClient,
+  threadId: ThreadId,
+  at: string,
+  runId?: RunId,
+) {
+  const scope = runId === undefined ? sql`1=1` : sql`event_id=${runId}`;
+  yield* sql`INSERT INTO contextual_turn_watermarks(thread_id,through_sequence)
       SELECT thread_id, MAX(sequence) FROM contextual_turn_queue
       WHERE thread_id=${threadId} AND ${scope} AND state NOT IN ('done','canceled','unknown') GROUP BY thread_id
       ON CONFLICT(thread_id) DO UPDATE SET through_sequence=MAX(through_sequence,excluded.through_sequence)`;
-    yield* sql`UPDATE contextual_turn_queue SET state=CASE WHEN state='dispatching' THEN 'unknown' ELSE 'canceled' END,event_json=NULL,updated_at=${at}
+  yield* sql`UPDATE contextual_turn_queue SET state=CASE WHEN state='dispatching' THEN 'unknown' ELSE 'canceled' END,event_json=NULL,updated_at=${at}
       WHERE thread_id=${threadId} AND ${scope} AND state NOT IN ('done','canceled','unknown')`;
-  });
+});
 
 /**
  * V1 session stop, now scoped to runs: cancels in-flight preparations of the

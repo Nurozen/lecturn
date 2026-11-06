@@ -30,16 +30,17 @@ export const staleContextual = () =>
     message: "Contextual changed. Refresh and try again.",
   });
 
-const requireContextualProject = (sql: SqlClient.SqlClient, projectId: ProjectId) =>
-  Effect.gen(function* () {
+const requireContextualProject = Effect.fn("ContextualSettings.requireContextualProject")(
+  function* (sql: SqlClient.SqlClient, projectId: ProjectId) {
     const rows =
       yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${projectId} AND deleted_at IS NULL`;
     if (!rows[0])
       return yield* new ContextualError({ code: "not-found", message: "Project unavailable." });
-  });
+  },
+);
 
-export const requireContextualThread = (sql: SqlClient.SqlClient, threadId: ThreadId) =>
-  Effect.gen(function* () {
+export const requireContextualThread = Effect.fn("ContextualSettings.requireContextualThread")(
+  function* (sql: SqlClient.SqlClient, threadId: ThreadId) {
     const rows = yield* sql<{
       project_id: string;
     }>`SELECT t.project_id FROM orchestration_v2_projection_threads t
@@ -48,27 +49,31 @@ export const requireContextualThread = (sql: SqlClient.SqlClient, threadId: Thre
     if (!rows[0])
       return yield* new ContextualError({ code: "not-found", message: "Thread unavailable." });
     return rows[0].project_id as ProjectId;
-  });
-
-export const appendContextualEvent = (
-  sql: SqlClient.SqlClient,
-  input: {
-    threadId?: ThreadId;
-    projectId?: ProjectId;
-    revision: number;
-    kind: string;
-    entityId: string;
   },
-) =>
-  Effect.gen(function* () {
+);
+
+export const appendContextualEvent = Effect.fn("ContextualSettings.appendContextualEvent")(
+  function* (
+    sql: SqlClient.SqlClient,
+    input: {
+      threadId?: ThreadId;
+      projectId?: ProjectId;
+      revision: number;
+      kind: string;
+      entityId: string;
+    },
+  ) {
     yield* sql`INSERT INTO contextual_outbox(thread_id, project_id, revision, kind, entity_id, occurred_at)
     VALUES (${input.threadId ?? null}, ${input.projectId ?? null}, ${input.revision}, ${input.kind}, ${input.entityId}, ${yield* contextualNow})`;
     // Offline clients refetch authoritative state when their cursor precedes the retained outbox.
     yield* sql`DELETE FROM contextual_outbox WHERE sequence <= (SELECT COALESCE(MAX(sequence),0) - 4096 FROM contextual_outbox)`;
-  });
+  },
+);
 
 /** Called in the thread-created projection transaction. Replays never recopy defaults. */
-export const initializeContextualThread = (
+export const initializeContextualThread = Effect.fn(
+  "ContextualSettings.initializeContextualThread",
+)(function* (
   sql: SqlClient.SqlClient,
   input: {
     threadId: ThreadId;
@@ -76,31 +81,30 @@ export const initializeContextualThread = (
     origin?: "new" | "unknown-import";
     parentThreadId?: ThreadId;
   },
-) =>
-  Effect.gen(function* () {
-    const projects = yield* sql<{
-      default_enabled: number;
-      source_ids_json: string;
-    }>`SELECT default_enabled, source_ids_json FROM contextual_project_settings WHERE project_id = ${input.projectId}`;
-    const project = projects[0];
-    const allowed = project ? yield* decodeIds(project.source_ids_json) : [];
-    const parents = input.parentThreadId
-      ? yield* sql<{
-          enabled: number;
-          source_ids_json: string;
-        }>`SELECT enabled, source_ids_json FROM contextual_thread_settings WHERE thread_id = ${input.parentThreadId}`
-      : [];
-    const parent = parents[0];
-    const inherited = parent ? yield* decodeIds(parent.source_ids_json) : allowed;
-    const enabled =
-      input.origin === "unknown-import"
-        ? false
-        : parent
-          ? parent.enabled === 1
-          : project?.default_enabled === 1;
-    yield* sql`INSERT OR IGNORE INTO contextual_thread_settings(thread_id, project_id, enabled, source_ids_json, updated_at)
+) {
+  const projects = yield* sql<{
+    default_enabled: number;
+    source_ids_json: string;
+  }>`SELECT default_enabled, source_ids_json FROM contextual_project_settings WHERE project_id = ${input.projectId}`;
+  const project = projects[0];
+  const allowed = project ? yield* decodeIds(project.source_ids_json) : [];
+  const parents = input.parentThreadId
+    ? yield* sql<{
+        enabled: number;
+        source_ids_json: string;
+      }>`SELECT enabled, source_ids_json FROM contextual_thread_settings WHERE thread_id = ${input.parentThreadId}`
+    : [];
+  const parent = parents[0];
+  const inherited = parent ? yield* decodeIds(parent.source_ids_json) : allowed;
+  const enabled =
+    input.origin === "unknown-import"
+      ? false
+      : parent
+        ? parent.enabled === 1
+        : project?.default_enabled === 1;
+  yield* sql`INSERT OR IGNORE INTO contextual_thread_settings(thread_id, project_id, enabled, source_ids_json, updated_at)
     VALUES (${input.threadId}, ${input.projectId}, ${Number(enabled)}, ${yield* encodeIds(inherited.filter((id) => allowed.includes(id)))}, ${yield* contextualNow})`;
-  });
+});
 
 /** Applies lineage intent once; replay cannot overwrite later user settings. */
 export const applyContextualOrigin = Effect.fn("Contextual.applyOrigin")(function* (

@@ -30,8 +30,8 @@ export const makeHeadlessReaper = Effect.fn("headlessReaper.make")(function* (
   const { headlessProcesses, headlessIdleWatch } = yield* AppRuntimeState;
   const watches = yield* FiberMap.make<HeadlessProcessKey, void, never>();
 
-  const watch = (key: HeadlessProcessKey) =>
-    Effect.gen(function* () {
+  const watch = Effect.fn("headlessReaper.watch")(
+    function* (key: HeadlessProcessKey) {
       const armedAt = yield* DateTime.now;
       while (true) {
         const entry = (yield* Ref.get(headlessProcesses)).get(key);
@@ -54,11 +54,14 @@ export const makeHeadlessReaper = Effect.fn("headlessReaper.make")(function* (
         if (yield* isProjectBusy(entry.projectId)) return;
         return yield* entry.close;
       }
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Headless tool process idle check failed", { key, cause }),
+    },
+    (effect, key) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Headless tool process idle check failed", { key, cause }),
+        ),
       ),
-    );
+  );
 
   const arm = (key: HeadlessProcessKey) =>
     FiberMap.run(watches, key, watch(key), { onlyIfMissing: true }).pipe(Effect.asVoid);

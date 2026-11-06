@@ -169,23 +169,26 @@ const mcpScope = (threadId: ThreadId): McpInvocationScope => ({
   issuedAt: 1,
 });
 
-it.effect.each([
-  ["user", "user"],
-  ["a forged agent", "agent"],
-  ["a forged server", "system"],
-] as const)("a client Stop claiming %s is recorded as the user's", ([, claimed]) =>
+it.effect.each(
+  (["run.interrupt", "thread.stop"] as const).flatMap((type) =>
+    (
+      [
+        ["user", "user"],
+        ["a forged agent", "agent"],
+        ["a forged server", "system"],
+      ] as const
+    ).map(([label, claimed]) => ({ type, label, claimed })),
+  ),
+)("a client $type claiming $label is recorded as the user's", ({ type, claimed }) =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const threadId = ThreadId.make(`thread:client-stop:${claimed}`);
+    const threadId = ThreadId.make(`thread:client-${type}:${claimed}`);
     const run = yield* startThread(threadId);
-    const fromClient: OrchestrationV2Command = {
-      type: "run.interrupt",
-      commandId: CommandId.make(`stop:${threadId}`),
-      threadId,
-      runId: run.id,
-      holdQueue: true,
-      createdBy: claimed,
-    };
+    const commandId = CommandId.make(`stop:${threadId}`);
+    const fromClient: OrchestrationV2Command =
+      type === "run.interrupt"
+        ? { type, commandId, threadId, runId: run.id, holdQueue: true, createdBy: claimed }
+        : { type, commandId, threadId, createdBy: claimed };
     // The provenance ws.ts applies to every client dispatch.
     yield* orchestrator.dispatch(
       ThreadManagementService.withCreationProvenance(fromClient, {

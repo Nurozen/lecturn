@@ -176,17 +176,19 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  const diffScope = (input: { readonly cwd: string; readonly number: number }) =>
-    Effect.gen(function* () {
-      const location = yield* locationOf(input);
-      if (location === null) return null;
-      const iterations = yield* cli.listIterations({
-        cwd: input.cwd,
-        location,
-        number: input.number,
-      });
-      return { location, iterations };
+  const diffScope = Effect.fn("AzureDevOpsPullRequestProvider.diffScope")(function* (input: {
+    readonly cwd: string;
+    readonly number: number;
+  }) {
+    const location = yield* locationOf(input);
+    if (location === null) return null;
+    const iterations = yield* cli.listIterations({
+      cwd: input.cwd,
+      location,
+      number: input.number,
     });
+    return { location, iterations };
+  });
 
   const EMPTY_ITEM: AzureDevOpsItemContent = { contents: "", isBinary: false };
 
@@ -306,8 +308,8 @@ export const make = Effect.gen(function* () {
         })),
       ),
 
-    getChangeRequest: (input) =>
-      Effect.gen(function* () {
+    getChangeRequest: Effect.fn("AzureDevOpsPullRequestProvider.getChangeRequest")(
+      function* (input) {
         const pullRequest = yield* cli.getPullRequest({ cwd: input.cwd, number: input.number });
         const location = pullRequest.location;
         const iterations =
@@ -347,7 +349,9 @@ export const make = Effect.gen(function* () {
             : { autoMergeMethod: pullRequest.autoMergeMethod }),
         };
         return detail;
-      }).pipe(Effect.mapError(fail("getChangeRequest"))),
+      },
+      Effect.mapError(fail("getChangeRequest")),
+    ),
 
     getChangeRequestActivity: (input) =>
       cli.getPullRequest({ cwd: input.cwd, number: input.number }).pipe(
@@ -381,8 +385,8 @@ export const make = Effect.gen(function* () {
 
     // `input.commit` is deliberately dropped: Azure states no commit list on a pull request, so
     // the Code tab has nothing to scope itself to and always asks for the whole change.
-    getDiff: (input) =>
-      Effect.gen(function* () {
+    getDiff: Effect.fn("AzureDevOpsPullRequestProvider.getDiff")(
+      function* (input) {
         const scope = yield* diffScope(input);
         if (scope === null) return EMPTY_DIFF_SLICE;
         const cursor = parseAzureDevOpsDiffCursor(input.cursor);
@@ -480,10 +484,12 @@ export const make = Effect.gen(function* () {
               : formatAzureDevOpsDiffCursor({ iterationId: iteration.id, fileIndex: index }),
         };
         return slice;
-      }).pipe(Effect.mapError(fail("getDiff"))),
+      },
+      Effect.mapError(fail("getDiff")),
+    ),
 
-    getDiffFileContents: (input) =>
-      Effect.gen(function* () {
+    getDiffFileContents: Effect.fn("AzureDevOpsPullRequestProvider.getDiffFileContents")(
+      function* (input) {
         const scope = yield* diffScope(input);
         const iteration = scope?.iterations.at(-1);
         if (scope === null || iteration === undefined) return { oldContents: "", newContents: "" };
@@ -497,15 +503,17 @@ export const make = Effect.gen(function* () {
             oldPath: input.oldPath,
           },
         });
-      }).pipe(Effect.mapError(fail("getDiffFileContents"))),
+      },
+      Effect.mapError(fail("getDiffFileContents")),
+    ),
 
     /**
      * A path the change does not carry is at the empty revision, which is where a file the pull
      * request deletes sits. When the change was too long to follow to its end, those paths are left
      * out instead: reporting them as deleted would clear a file nobody has read.
      */
-    getFileRevisions: (input) =>
-      Effect.gen(function* () {
+    getFileRevisions: Effect.fn("AzureDevOpsPullRequestProvider.getFileRevisions")(
+      function* (input) {
         const revisions = new Map<string, string>();
         if (input.paths.length === 0) return { revisions };
         const scope = yield* diffScope(input);
@@ -526,7 +534,9 @@ export const make = Effect.gen(function* () {
           }
         }
         return { revisions };
-      }).pipe(Effect.mapError(fail("getFileRevisions"))),
+      },
+      Effect.mapError(fail("getFileRevisions")),
+    ),
 
     runAction: (input) =>
       cli

@@ -1,3 +1,4 @@
+import { isProviderSkillUserInvocable } from "@lecturn/client-runtime/providerSkills";
 import { serializeLegacyContextMessage } from "@lecturn/shared/composerContextLegacySend";
 import { filePreviewKind } from "@lecturn/shared/filePreview";
 import { videoMimeType } from "@lecturn/shared/video";
@@ -10,6 +11,7 @@ import {
   type PullRequestContextMetadata,
   type ReviewCommentContextRecord,
   type ScopedThreadRef,
+  type ServerProviderSkill,
   type ThreadContextRecord,
 } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
@@ -147,11 +149,30 @@ export function pullRequestComposerContext(
   };
 }
 
-export function composerContextEditorTokens(text: string, tokens: readonly ComposerInlineToken[]) {
+export function composerSkillLabels(
+  skills: ReadonlyArray<
+    Pick<ServerProviderSkill, "name" | "displayName" | "enabled" | "userInvocable">
+  >,
+) {
+  return new Map(
+    skills
+      .filter(isProviderSkillUserInvocable)
+      .map((skill) => [skill.name, skill.displayName?.trim() || skill.name]),
+  );
+}
+
+export function composerContextEditorTokens(
+  text: string,
+  tokens: readonly ComposerInlineToken[],
+  knownSkills: { has(name: string): boolean },
+) {
   const references = collectComposerContextReferences(text);
   return [
     ...tokens.filter(
-      (token) => !references.some((ref) => token.start < ref.end && token.end > ref.start),
+      (token) =>
+        // `$HOME` and other `$name` text that is not one of the provider's skills stays prose.
+        (token.type !== "skill" || knownSkills.has(token.value)) &&
+        !references.some((ref) => token.start < ref.end && token.end > ref.start),
     ),
     ...references.map((ref) => ({
       type: "context" as const,

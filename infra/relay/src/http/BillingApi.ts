@@ -85,8 +85,8 @@ const requireVerifiedEmail = Effect.fn("billing.require_verified_identity")(func
   }
 });
 export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
-  const accountRoute = (action: "status" | "checkout" | "portal" | "reconcile") =>
-    Effect.gen(function* () {
+  const accountRoute = Effect.fn("billing.accountRoute")(
+    function* (action: "status" | "checkout" | "portal" | "reconcile") {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const userId = yield* billingPrincipal;
       const service = yield* BillingService;
@@ -123,15 +123,15 @@ export function billingRoutes(config: BillingConfig, clerkWebhookSecret = "") {
         return json(yield* service.reconcile(userId, payload.sessionId));
       }
       return json(yield* service.portal(userId));
-    }).pipe(
-      Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(16 * 1024)),
-      Effect.catchTags({
-        BillingError: (error) =>
-          Effect.succeed(
-            json({ code: error.code, message: error.message }, statusForCode(error.code)),
-          ),
-      }),
-    );
+    },
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(16 * 1024)),
+    Effect.catchTags({
+      BillingError: (error) =>
+        Effect.succeed(
+          json({ code: error.code, message: error.message }, statusForCode(error.code)),
+        ),
+    }),
+  );
   const stripeWebhook = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const signature = request.headers["stripe-signature"];

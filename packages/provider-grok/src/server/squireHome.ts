@@ -192,77 +192,75 @@ export const makeGrokSquireHome = (input: {
     fileSystem.exists(target).pipe(Effect.mapError(fail(`could not look for '${target}'.`)));
 
   // Why a Squire cannot run on this launch, or null.
-  const gap = (environment: NodeJS.ProcessEnv) =>
-    Effect.gen(function* () {
-      for (const policyPath of input.managedPolicyPaths ?? GROK_MANAGED_POLICY_PATHS) {
-        if (yield* exists(policyPath)) {
-          return `Grok runs under an organization policy on this computer (${policyPath}), so a Squire cannot keep its tools isolated.`;
-        }
+  const gap = Effect.fn("GrokSquireHome.gap")(function* (environment: NodeJS.ProcessEnv) {
+    for (const policyPath of input.managedPolicyPaths ?? GROK_MANAGED_POLICY_PATHS) {
+      if (yield* exists(policyPath)) {
+        return `Grok runs under an organization policy on this computer (${policyPath}), so a Squire cannot keep its tools isolated.`;
       }
-      const version = yield* input.cliVersion(environment);
-      if (version === null || !GROK_SQUIRE_VERIFIED_VERSIONS.includes(version)) {
-        return GROK_SQUIRE_UNVERIFIED_VERSION;
-      }
-      if (environment.XAI_API_KEY?.trim()) return null;
-      const authPath = path.join(
-        grokSourceHomePath(path, environment, input.homeDirectory),
-        "auth.json",
-      );
-      return (yield* exists(authPath))
-        ? null
-        : `A Squire uses the Grok sign-in saved in ${authPath}, and there is none. Run \`grok login\`, then try again.`;
-    });
+    }
+    const version = yield* input.cliVersion(environment);
+    if (version === null || !GROK_SQUIRE_VERIFIED_VERSIONS.includes(version)) {
+      return GROK_SQUIRE_UNVERIFIED_VERSION;
+    }
+    if (environment.XAI_API_KEY?.trim()) return null;
+    const authPath = path.join(
+      grokSourceHomePath(path, environment, input.homeDirectory),
+      "auth.json",
+    );
+    return (yield* exists(authPath))
+      ? null
+      : `A Squire uses the Grok sign-in saved in ${authPath}, and there is none. Run \`grok login\`, then try again.`;
+  });
 
   return {
     squireRootPath,
     readiness: (environment: NodeJS.ProcessEnv) =>
       // An unreadable path surfaces on open, with its cause.
       gap(environment).pipe(Effect.catchTags({ GrokSquireHomeError: () => Effect.succeed(null) })),
-    prepare: (environment: NodeJS.ProcessEnv) =>
-      Effect.gen(function* () {
-        const reason = yield* gap(environment);
-        if (reason !== null) {
-          return yield* new GrokSquireHomeError({ squireRootPath, detail: reason });
-        }
-        for (const directory of [grokHomePath, homePath]) {
-          yield* fileSystem
-            .makeDirectory(directory, { recursive: true })
-            .pipe(Effect.mapError(fail(`could not create '${directory}'.`)));
-        }
+    prepare: Effect.fn("GrokSquireHome.prepare")(function* (environment: NodeJS.ProcessEnv) {
+      const reason = yield* gap(environment);
+      if (reason !== null) {
+        return yield* new GrokSquireHomeError({ squireRootPath, detail: reason });
+      }
+      for (const directory of [grokHomePath, homePath]) {
         yield* fileSystem
-          .writeFileString(path.join(grokHomePath, "config.toml"), GROK_SQUIRE_CONFIG_TOML)
-          .pipe(Effect.mapError(fail("could not write config.toml.")));
-        yield* fileSystem
-          .writeFileString(profilePath, GROK_SQUIRE_AGENT_PROFILE)
-          .pipe(Effect.mapError(fail("could not write the agent profile.")));
-        const sourceAuthPath = path.join(
-          grokSourceHomePath(path, environment, input.homeDirectory),
-          "auth.json",
-        );
-        const hasSourceAuth = yield* exists(sourceAuthPath);
-        const inherited = Object.fromEntries(
-          Object.entries(environment).filter(
-            ([name]) => !(STRIPPED_ENV as ReadonlyArray<string>).includes(name),
-          ),
-        );
-        return {
-          args: [
-            "--permission-mode",
-            "default",
-            "agent",
-            "--no-leader",
-            "--agent-profile",
-            profilePath,
-            "stdio",
-          ],
-          environment: {
-            ...inherited,
-            GROK_HOME: grokHomePath,
-            HOME: homePath,
-            ...(hasSourceAuth ? { GROK_AUTH_PATH: sourceAuthPath } : {}),
-          },
-        } satisfies GrokSquireLaunch;
-      }),
+          .makeDirectory(directory, { recursive: true })
+          .pipe(Effect.mapError(fail(`could not create '${directory}'.`)));
+      }
+      yield* fileSystem
+        .writeFileString(path.join(grokHomePath, "config.toml"), GROK_SQUIRE_CONFIG_TOML)
+        .pipe(Effect.mapError(fail("could not write config.toml.")));
+      yield* fileSystem
+        .writeFileString(profilePath, GROK_SQUIRE_AGENT_PROFILE)
+        .pipe(Effect.mapError(fail("could not write the agent profile.")));
+      const sourceAuthPath = path.join(
+        grokSourceHomePath(path, environment, input.homeDirectory),
+        "auth.json",
+      );
+      const hasSourceAuth = yield* exists(sourceAuthPath);
+      const inherited = Object.fromEntries(
+        Object.entries(environment).filter(
+          ([name]) => !(STRIPPED_ENV as ReadonlyArray<string>).includes(name),
+        ),
+      );
+      return {
+        args: [
+          "--permission-mode",
+          "default",
+          "agent",
+          "--no-leader",
+          "--agent-profile",
+          profilePath,
+          "stdio",
+        ],
+        environment: {
+          ...inherited,
+          GROK_HOME: grokHomePath,
+          HOME: homePath,
+          ...(hasSourceAuth ? { GROK_AUTH_PATH: sourceAuthPath } : {}),
+        },
+      } satisfies GrokSquireLaunch;
+    }),
   };
 };
 

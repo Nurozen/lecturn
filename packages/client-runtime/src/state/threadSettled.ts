@@ -2,7 +2,7 @@
 import { isImportedHistoryMessage, type ThreadImportOrigin } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 
-import type { PendingSubagentRequest } from "./models.ts";
+import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 
 interface SettlementRunLike {
   readonly turnId?: unknown;
@@ -78,6 +78,7 @@ export function hasQueuedTurnStart(
 }
 
 export interface ThreadSnoozeShell extends QueuedThreadShell {
+  readonly source?: Pick<EnvironmentThreadShell["source"], "pendingRuntimeRequest">;
   readonly snoozedUntil?: string | null;
   readonly snoozedAt?: string | null;
   readonly hasPendingApprovals: boolean;
@@ -87,6 +88,7 @@ export interface ThreadSnoozeShell extends QueuedThreadShell {
 
 export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean {
   if (shell.hasPendingApprovals || shell.hasPendingUserInput) return true;
+  if (shell.source?.pendingRuntimeRequest != null) return true;
   if (shell.pendingSubagentRequest != null) return true;
   const latestRun = shell.latestRun ?? shell.latestTurn ?? null;
   const failedAt = failureEdgeAt(shell);
@@ -132,10 +134,13 @@ export function canSnooze(
     | "session"
     | "runtime"
     | "importedFrom"
+    | "source"
   >,
   options: { readonly now: string },
 ): boolean {
   if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false;
+  // The server rejects snoozing even for nonblocking questions.
+  if (shell.source?.pendingRuntimeRequest != null) return false;
   if (shell.pendingSubagentRequest != null) return false;
   if (hasQueuedTurnStart(shell, options)) return false;
   return true;

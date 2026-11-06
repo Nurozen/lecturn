@@ -433,15 +433,15 @@ export const layer = Api.make(
           stage,
           baseDomain: yield* managedEndpointZoneName,
         });
-        const sync = (userId: string) =>
-          Effect.gen(function* () {
+        const sync = Effect.fn("ManagedGateway.sync")(
+          function* (userId: string) {
             const snapshot = yield* store.capture(userId);
             yield* gatewayNamespace.getByName(userId).update(snapshot);
-          }).pipe(
-            Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-            Effect.timeout("5 seconds"),
-            Effect.catchCause(() => Effect.fail(gatewayUnavailable())),
-          );
+          },
+          Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+          Effect.timeout("5 seconds"),
+          Effect.catchCause(() => Effect.fail(gatewayUnavailable())),
+        );
         return { store, sync };
       }).pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
     );
@@ -480,30 +480,28 @@ export const layer = Api.make(
             store
               .withAllocation(input, effect)
               .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) })),
-          markReady: (input) =>
-            Effect.gen(function* () {
-              const mapping = yield* mappingFor(input.userId, input.environmentId);
-              if (!mapping || mapping.deleting || mapping.generation !== input.generation)
-                return false;
-              return yield* available(store.markReady(mapping));
-            }),
+          markReady: Effect.fn("ManagedGateway.markReady")(function* (input) {
+            const mapping = yield* mappingFor(input.userId, input.environmentId);
+            if (!mapping || mapping.deleting || mapping.generation !== input.generation)
+              return false;
+            return yield* available(store.markReady(mapping));
+          }),
           pause: (input) =>
             available(store.pause(input)).pipe(Effect.map((mapping) => mapping !== undefined)),
-          remove: (input) =>
-            Effect.gen(function* () {
-              const mapping = yield* mappingFor(input.userId, input.environmentId);
-              if (!mapping || mapping.generation !== input.generation) return false;
-              return (
-                (yield* available(
-                  store.remove(
-                    input.userId,
-                    input.environmentId,
-                    mapping.originHostname,
-                    input.generation,
-                  ),
-                )) !== undefined
-              );
-            }),
+          remove: Effect.fn("ManagedGateway.remove")(function* (input) {
+            const mapping = yield* mappingFor(input.userId, input.environmentId);
+            if (!mapping || mapping.generation !== input.generation) return false;
+            return (
+              (yield* available(
+                store.remove(
+                  input.userId,
+                  input.environmentId,
+                  mapping.originHostname,
+                  input.generation,
+                ),
+              )) !== undefined
+            );
+          }),
           finalizeRemove: (input) => available(store.finalizeRemove(input)),
           sync,
         });
@@ -570,8 +568,8 @@ export const layer = Api.make(
         return makeManagedGatewayHttpClient({
           fallback,
           hostnameSuffix: `-g-${relayStageSlug(stage)}.${baseDomain}`,
-          dispatch: (request) =>
-            Effect.gen(function* () {
+          dispatch: Effect.fn("ManagedGateway.dispatch")(
+            function* (request) {
               const mapping = yield* store.lookupPublicHostname(new URL(request.url).hostname);
               if (!mapping) return new Response("Unknown managed environment", { status: 404 });
               yield* sync(mapping.userId);
@@ -579,7 +577,9 @@ export const layer = Api.make(
                 .getByName(mapping.userId)
                 .fetch(HttpServerRequest.fromWeb(request));
               return HttpServerResponse.toWeb(mutableGatewayBindingResponse(response));
-            }).pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+            },
+            Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+          ),
         });
       }),
     ).pipe(Layer.provide(gatewayRuntimeLayer));
@@ -879,8 +879,16 @@ export const layer = Api.make(
                 : Effect.logWarning("Failed to clean up inactive managed tunnels", { cause }),
             ),
           ),
+          AgentActivityPublisher.AgentActivityPublisher.pipe(
+            Effect.flatMap((publisher) => publisher.endIdleLiveActivities),
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("Failed to end idle Live Activities", { cause }),
+            ),
+          ),
         ],
-        { concurrency: 2, discard: true },
+        { concurrency: 3, discard: true },
       ).pipe(
         Effect.withSpan("relay.cron.prune_expired_state"),
         // Export cron spans to Axiom like HTTP spans; the scope flushes them before the run ends.

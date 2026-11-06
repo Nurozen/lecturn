@@ -41,11 +41,14 @@ import {
   workEntryRowLabel,
   isContextHandoffActivityGroup,
   buildThreadFeed,
+  createThreadFeedCache,
   deriveThreadFeedPresentation,
   threadFeedActivityIsVisible,
   threadFeedRunIsUnsettled,
   type ThreadFeedActivity,
+  type ThreadFeedCache,
   type ThreadFeedEntry,
+  type ThreadFeedLatestRun,
   togglePendingUserInputOptionSelection,
   setPendingUserInputCustomAnswer,
   isPendingUserInputOptionSelected,
@@ -3418,5 +3421,510 @@ describe("an app approval that committed before the call it holds", () => {
       { cardApprovals: approvals },
     );
     expect(feedItemIds(feed)).toEqual(["message-user", "item-approval"]);
+  });
+});
+
+describe("streamed feed updates", () => {
+  const runs = [RunId.make("run-1"), RunId.make("run-2"), RunId.make("run-3")] as const;
+  const at = (second: number) => `2026-06-20T00:00:${String(second).padStart(2, "0")}.000Z`;
+  const item = (id: string, second: number, run: RunId) => ({
+    ...base(id, at(second), second),
+    runId: run,
+  });
+  const user = (
+    id: string,
+    second: number,
+    run: RunId,
+  ): Extract<OrchestrationV2TurnItem, { type: "user_message" }> => ({
+    ...item(id, second, run),
+    type: "user_message",
+    messageId: MessageId.make(`message-${id}`),
+    createdBy: "user",
+    creationSource: "mobile",
+    inputIntent: "turn_start",
+    text: `Prompt ${id}`,
+    attachments: [],
+  });
+  const reply = (id: string, second: number, run: RunId, text = "Done", streaming = false) =>
+    ({
+      ...item(id, second, run),
+      ...(streaming ? { status: "running" as const, completedAt: null } : {}),
+      type: "assistant_message",
+      messageId: MessageId.make(`message-${id}`),
+      text,
+      streaming,
+    }) satisfies OrchestrationV2TurnItem;
+  const shell = (id: string, second: number, run: RunId): OrchestrationV2TurnItem => ({
+    ...item(id, second, run),
+    type: "command_execution",
+    input: `echo ${id}`,
+    output: id,
+    exitCode: 0,
+  });
+  const requestId = RuntimeRequestId.make("request-color");
+  const question = (answered: boolean): OrchestrationV2TurnItem => ({
+    ...item("question", 12, runs[1]),
+    type: "user_input_request",
+    requestId,
+    questions: [],
+    ...(answered
+      ? { questionAnswer: { requestId, answers: { color: "Blue" }, attachmentsByQuestionId: {} } }
+      : {}),
+  });
+  const answer: OrchestrationV2TurnItem = {
+    ...user("answer", 40, runs[1]),
+    messageId: MessageId.make(`async-answer:${requestId}`),
+  };
+  const delegation: OrchestrationV2TurnItem = {
+    ...item("delegation", 3, runs[0]),
+    type: "dynamic_tool",
+    toolName: "lecturn.delegate_task",
+    input: { task: "Check" },
+    output: { taskId: "child" },
+  };
+  const lateChild: OrchestrationV2TurnItem = {
+    ...item("late-child", 30, runs[0]),
+    type: "subagent",
+    subagentId: NodeId.make("child"),
+    origin: "app_owned",
+    driver: ProviderDriverKind.make("codex"),
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    childThreadId: sourceThreadId,
+    prompt: "Check",
+    result: "Fine",
+  };
+  const resumed: OrchestrationV2TurnItem = {
+    ...lateChild,
+    ...item("resumed", 3, runs[2]),
+    subagentId: NodeId.make("resumed"),
+    origin: "provider_native",
+    childThreadId: null,
+  };
+  const history: OrchestrationV2TurnItem[] = [
+    user("u1", 1, runs[0]),
+    shell("s1", 2, runs[0]),
+    delegation,
+    reply("a1", 4, runs[0]),
+    user("u2", 10, runs[1]),
+    shell("s2", 11, runs[1]),
+    question(false),
+    reply("a2", 13, runs[1]),
+    user("u3", 20, runs[2]),
+    shell("s3", 21, runs[2]),
+  ];
+  const running = {
+    runId: runs[2],
+    status: "running" as const,
+    startedAt: at(20),
+    completedAt: null,
+  };
+  const settled = { ...running, status: "completed" as const, completedAt: at(50) };
+  // Each step is what one streamed event leaves behind, including the edits
+  // that reach back into earlier runs.
+  const steps: ReadonlyArray<{
+    readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+    readonly latestRun: ThreadFeedLatestRun;
+  }> = [
+    { items: [...history, reply("a3", 22, runs[2], "W", true)], latestRun: running },
+    { items: [...history, reply("a3", 22, runs[2], "Wor", true)], latestRun: running },
+    {
+      items: [...history, reply("a3", 22, runs[2], "Working", true), shell("s4", 23, runs[2])],
+      latestRun: running,
+    },
+    {
+      items: [
+        ...history,
+        reply("a3", 22, runs[2], "Working", true),
+        shell("s4", 23, runs[2]),
+        lateChild,
+      ],
+      latestRun: running,
+    },
+    {
+      items: [
+        ...history.map((entry) => (entry.id === "question" ? question(true) : entry)),
+        reply("a3", 22, runs[2], "Working", true),
+        shell("s4", 23, runs[2]),
+        lateChild,
+        answer,
+      ],
+      latestRun: running,
+    },
+    {
+      items: [
+        ...history.slice(0, 9),
+        shell("inserted", 20, runs[2]),
+        ...history.slice(9),
+        reply("a3", 22, runs[2], "Working", true),
+        shell("s4", 23, runs[2]),
+      ],
+      latestRun: running,
+    },
+    {
+      items: [...history, reply("a3", 22, runs[2], "Working on it"), shell("s4", 23, runs[2])],
+      latestRun: running,
+    },
+    {
+      items: [...history, reply("a3", 22, runs[2], "Working on it"), shell("s4", 23, runs[2])],
+      latestRun: settled,
+    },
+    {
+      items: [
+        ...history,
+        reply("a3", 22, runs[2], "Working on it"),
+        shell("s4", 23, runs[2]),
+        shell("late-s1", 45, runs[0]),
+      ],
+      latestRun: settled,
+    },
+    // The first run's fold above was timed to the late item; dropping it must reach back too.
+    {
+      items: [...history, reply("a3", 22, runs[2], "Working on it"), shell("s4", 23, runs[2])],
+      latestRun: settled,
+    },
+    // The latest run resumes a subagent from the first run: the item moves to
+    // the latest run but keeps its place, so it folds with the first run.
+    {
+      items: [
+        ...history.slice(0, 3),
+        resumed,
+        ...history.slice(3),
+        reply("a3", 22, runs[2], "Working on it"),
+        shell("s4", 23, runs[2]),
+      ],
+      latestRun: running,
+    },
+    {
+      items: [
+        ...history.slice(0, 3),
+        resumed,
+        ...history.slice(3),
+        reply("a3", 22, runs[2], "Working on it"),
+        shell("s4", 23, runs[2]),
+        reply("a4", 24, runs[2], "Still", true),
+      ],
+      latestRun: running,
+    },
+  ];
+  // Like the projection reducer, an unchanged item at an unchanged position keeps its row.
+  const rowsByItem = new Map<
+    OrchestrationV2TurnItem,
+    Map<number, OrchestrationV2ProjectedTurnItem>
+  >();
+  const row = (entry: OrchestrationV2TurnItem, position: number) => {
+    const byPosition = rowsByItem.get(entry) ?? new Map<number, OrchestrationV2ProjectedTurnItem>();
+    rowsByItem.set(entry, byPosition);
+    const cached = byPosition.get(position) ?? projected(entry, position);
+    byPosition.set(position, cached);
+    return cached;
+  };
+  const present = (
+    step: (typeof steps)[number],
+    expandedRunIds: ReadonlySet<RunId>,
+    cache?: ThreadFeedCache,
+  ) =>
+    deriveThreadFeedPresentation(
+      buildThreadFeed(step.items.map(row), { cache }),
+      step.latestRun,
+      expandedRunIds,
+      new Set(),
+      step.latestRun.status === "running" ? at(20) : null,
+      false,
+      null,
+      cache,
+    );
+
+  it.each([
+    { folds: "collapsed", expandedRunIds: new Set<RunId>() },
+    { folds: "expanded", expandedRunIds: new Set<RunId>(runs) },
+  ])("matches a fresh build after every update with $folds runs", ({ expandedRunIds }) => {
+    const cache = createThreadFeedCache();
+    const streamed = steps.map((step) => present(step, expandedRunIds, cache));
+    const fresh = steps.map((step) => present(step, expandedRunIds));
+    // Closures on activities are not part of what a row shows.
+    const values = (rows: ReadonlyArray<ThreadFeedEntry>) => JSON.parse(JSON.stringify(rows));
+    for (const [index, rows] of streamed.entries()) {
+      expect(values(rows), `step ${index}`).toEqual(values(fresh[index]!));
+    }
+  });
+
+  it("hides a delegation once its child reaches back into the earlier run", () => {
+    const showsDelegation = (step: (typeof steps)[number]) =>
+      buildThreadFeed(step.items.map(row)).some(
+        (entry) =>
+          entry.type === "activity-group" &&
+          entry.activities.some((activity) => activity.projectedItem.item.id === "delegation"),
+      );
+    expect(showsDelegation(steps[2]!)).toBe(true);
+    expect(showsDelegation(steps[3]!)).toBe(false);
+  });
+});
+
+// Lecturn rows the incremental cache must reproduce exactly: the import
+// divider, a connected app's tool row and card, and approvals the composer
+// card holds.
+describe("cached feeds with Lecturn rows", () => {
+  const runs = [RunId.make("run-1"), RunId.make("run-2")] as const;
+  const at = (second: number) => `2026-06-20T00:01:${String(second).padStart(2, "0")}.000Z`;
+  const item = (id: string, second: number, run: RunId | null) => ({
+    ...base(id, at(second), second),
+    runId: run,
+  });
+  const user = (id: string, second: number, run: RunId | null): OrchestrationV2TurnItem => ({
+    ...item(id, second, run),
+    type: "user_message",
+    messageId: MessageId.make(`message-${id}`),
+    createdBy: "user",
+    creationSource: "mobile",
+    inputIntent: "turn_start",
+    text: `Prompt ${id}`,
+    attachments: [],
+  });
+  const reply = (
+    id: string,
+    second: number,
+    run: RunId | null,
+    text = "Done",
+    streaming = false,
+  ): OrchestrationV2TurnItem => ({
+    ...item(id, second, run),
+    ...(streaming ? { status: "running" as const, completedAt: null } : {}),
+    type: "assistant_message",
+    messageId: MessageId.make(`message-${id}`),
+    text,
+    streaming,
+  });
+  const shell = (id: string, second: number, run: RunId | null): OrchestrationV2TurnItem => ({
+    ...item(id, second, run),
+    type: "command_execution",
+    input: `echo ${id}`,
+    output: id,
+    exitCode: 0,
+  });
+  const source = appToolSource({ appId: "dev.example", name: "Example", toolPrefix: "ex" });
+  const appCall = (
+    id: string,
+    second: number,
+    run: RunId,
+    done: boolean,
+  ): OrchestrationV2TurnItem =>
+    ({
+      ...item(id, second, run),
+      ...(done ? {} : { status: "running" as const, completedAt: null }),
+      type: "dynamic_tool",
+      toolName: "mcp__lecturn__ex_counter_increment",
+      toolSource: source,
+      input: {},
+      output: done
+        ? {
+            lecturnMcpApp: {
+              attachmentId: `attachment-${id}`,
+              server: "lecturn",
+              tool: "ex_counter_increment",
+              resourceUri: "ui://ex/counter-card",
+            },
+            result: { content: [] },
+          }
+        : null,
+    }) as OrchestrationV2TurnItem;
+  const running = (run: RunId, second: number): ThreadFeedLatestRun => ({
+    runId: run,
+    status: "running",
+    startedAt: at(second),
+    completedAt: null,
+  });
+  const done = (latest: ThreadFeedLatestRun, second: number): ThreadFeedLatestRun => ({
+    ...latest,
+    status: "completed",
+    completedAt: at(second),
+  });
+
+  interface Step {
+    readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+    readonly latestRun: ThreadFeedLatestRun;
+    readonly requests?: ReadonlyArray<OrchestrationV2RuntimeRequest>;
+  }
+
+  function expectCachedMatchesFresh(
+    steps: ReadonlyArray<Step>,
+    importedFrom: ThreadImportOrigin | null = null,
+  ) {
+    // Like the projection reducer, an unchanged item at an unchanged position keeps its row.
+    const rowsByItem = new Map<
+      OrchestrationV2TurnItem,
+      Map<number, OrchestrationV2ProjectedTurnItem>
+    >();
+    const row = (entry: OrchestrationV2TurnItem, position: number) => {
+      const byPosition = rowsByItem.get(entry) ?? new Map();
+      rowsByItem.set(entry, byPosition);
+      const cached = byPosition.get(position) ?? projected(entry, position);
+      byPosition.set(position, cached);
+      return cached;
+    };
+    const values = (rows: ReadonlyArray<ThreadFeedEntry>) => JSON.parse(JSON.stringify(rows));
+    for (const expandedRunIds of [new Set<RunId>(), new Set<RunId>(runs)]) {
+      const cache = createThreadFeedCache();
+      const present = (step: Step, stepCache?: ThreadFeedCache) => {
+        const { approvals } = derivePendingThreadRequests({
+          runtimeRequests: step.requests ?? [],
+          turnItems: step.items,
+        });
+        const feed = buildThreadFeed(step.items.map(row), {
+          cardApprovals: approvals,
+          ...(stepCache ? { cache: stepCache } : {}),
+        });
+        return {
+          feed,
+          rows: deriveThreadFeedPresentation(
+            feed,
+            step.latestRun,
+            expandedRunIds,
+            new Set(),
+            step.latestRun.status === "running" ? step.latestRun.startedAt : null,
+            false,
+            importedFrom,
+            stepCache,
+          ),
+        };
+      };
+      for (const [index, step] of steps.entries()) {
+        const cached = present(step, cache);
+        const fresh = present(step);
+        const label = `step ${index}, ${expandedRunIds.size > 0 ? "expanded" : "collapsed"}`;
+        expect(values(cached.feed), label).toEqual(values(fresh.feed));
+        expect(values(cached.rows), label).toEqual(values(fresh.rows));
+      }
+    }
+  }
+
+  it("keeps the import divider exact while new work streams in", () => {
+    const importedFrom: ThreadImportOrigin = {
+      providerInstanceId: ProviderInstanceId.make("claude"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      sessionId: "session-1",
+      cwd: "/repo",
+      title: "Imported",
+      importedAt: at(9),
+      historyTruncated: false,
+    };
+    // Two imported exchanges, so a restart can land inside imported history.
+    const imported = [
+      user("i-user-1", 1, null),
+      shell("i-shell-1", 2, null),
+      reply("i-reply-1", 3, null),
+      user("i-user-2", 4, null),
+      shell("i-shell-2", 5, null),
+      reply("i-reply-2", 6, null),
+    ];
+    const first = running(runs[0], 10);
+    const second = running(runs[1], 20);
+    const u1 = user("u1", 10, runs[0]);
+    const s1 = shell("s1", 11, runs[0]);
+    const a1 = reply("a1", 12, runs[0]);
+    const u2 = user("u2", 20, runs[1]);
+    const s2 = shell("s2", 21, runs[1]);
+    const steps: Step[] = [
+      { items: imported, latestRun: done({ ...first, startedAt: at(1) }, 6) },
+      { items: [...imported, shell("i-shell-3", 7, null)], latestRun: done(first, 7) },
+      { items: [...imported, u1], latestRun: first },
+      { items: [...imported, u1, reply("a1", 12, runs[0], "Wor", true)], latestRun: first },
+      { items: [...imported, u1, s1, a1], latestRun: done(first, 13) },
+      { items: [...imported, u1, s1, a1, u2], latestRun: second },
+      { items: [...imported, u1, s1, a1, u2, s2], latestRun: second },
+      {
+        items: [...imported, u1, s1, a1, u2, s2, reply("a2", 22, runs[1])],
+        latestRun: done(second, 23),
+      },
+    ];
+    expectCachedMatchesFresh(steps, importedFrom);
+  });
+
+  it("reuses a prefix holding an app tool row and its card", () => {
+    const first = running(runs[0], 1);
+    const second = running(runs[1], 10);
+    const u1 = user("u1", 1, runs[0]);
+    const s1 = shell("s1", 2, runs[0]);
+    const app1 = appCall("app1", 3, runs[0], true);
+    const a1 = reply("a1", 4, runs[0]);
+    const u2 = user("u2", 10, runs[1]);
+    const app2 = appCall("app2", 12, runs[1], true);
+    const s2 = shell("s2", 13, runs[1]);
+    const steps: Step[] = [
+      { items: [u1, s1, appCall("app1", 3, runs[0], false)], latestRun: first },
+      { items: [u1, s1, app1], latestRun: first },
+      // The next row lands right after the card, so the card's restart is the one reused.
+      { items: [u1, s1, app1, a1], latestRun: done(first, 5) },
+      { items: [u1, s1, app1, a1, u2], latestRun: second },
+      { items: [u1, s1, app1, a1, u2, appCall("app2", 12, runs[1], false)], latestRun: second },
+      { items: [u1, s1, app1, a1, u2, app2], latestRun: second },
+      { items: [u1, s1, app1, a1, u2, app2, s2], latestRun: second },
+      {
+        items: [u1, s1, app1, a1, u2, app2, s2, reply("a2", 14, runs[1])],
+        latestRun: done(second, 15),
+      },
+    ];
+    expectCachedMatchesFresh(steps);
+  });
+
+  it("follows approvals the composer card takes over and gives back", () => {
+    const requestId = RuntimeRequestId.make("request-engine");
+    const engineCall = (callDone: boolean): OrchestrationV2TurnItem => ({
+      ...item("engine", 12, runs[1]),
+      ...(callDone ? {} : { status: "running" as const, completedAt: null }),
+      type: "dynamic_tool",
+      title: "Simulate engine",
+      toolName: "mcp__lecturn__ex_engine_simulate",
+      toolSource: source,
+      input: {},
+    });
+    const approval = (answered: boolean): OrchestrationV2TurnItem => ({
+      ...item("approval", 11, runs[1]),
+      status: answered ? "completed" : "waiting",
+      completedAt: answered ? DateTime.makeUnsafe(at(13)) : null,
+      type: "approval_request",
+      requestId,
+      requestKind: "permission",
+      appName: "Example",
+      prompt: "Approve Simulate engine",
+    });
+    const request = (answered: boolean): OrchestrationV2RuntimeRequest => ({
+      id: requestId,
+      nodeId: NodeId.make("node-approval"),
+      providerTurnId: null,
+      nativeRequestRef: null,
+      kind: "permission",
+      status: answered ? "resolved" : "pending",
+      responseCapability: { type: "live", providerSessionId: ProviderSessionId.make("session") },
+      createdAt: DateTime.makeUnsafe(at(11)),
+      resolvedAt: answered ? DateTime.makeUnsafe(at(13)) : null,
+      connectedAppTool: {
+        appId: AppId.make("dev.example"),
+        appName: "Example",
+        toolName: "ex_engine_simulate",
+        reason: "Burn duration not set",
+        source: "app",
+      },
+    });
+    const first = running(runs[0], 1);
+    const second = running(runs[1], 10);
+    const run1 = [user("u1", 1, runs[0]), shell("s1", 2, runs[0]), reply("a1", 3, runs[0])];
+    const run2 = [user("u2", 10, runs[1]), shell("s2", 10, runs[1])];
+    const [waiting, answered] = [approval(false), approval(true)];
+    const [callRunning, callDone] = [engineCall(false), engineCall(true)];
+    const [pending, resolved] = [[request(false)], [request(true)]];
+    const steps: Step[] = [
+      { items: run1, latestRun: done(first, 4) },
+      { items: [...run1, ...run2], latestRun: second },
+      { items: [...run1, ...run2, waiting], latestRun: second, requests: pending },
+      { items: [...run1, ...run2, waiting, callRunning], latestRun: second, requests: pending },
+      { items: [...run1, ...run2, answered, callRunning], latestRun: second, requests: resolved },
+      { items: [...run1, ...run2, answered, callDone], latestRun: second, requests: resolved },
+      {
+        items: [...run1, ...run2, answered, callDone, reply("a2", 14, runs[1])],
+        latestRun: done(second, 15),
+        requests: resolved,
+      },
+    ];
+    expectCachedMatchesFresh(steps);
   });
 });

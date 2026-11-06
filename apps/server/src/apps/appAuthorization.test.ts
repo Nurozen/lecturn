@@ -273,6 +273,8 @@ describe("app RPC allowlist", () => {
         true,
       );
       expect(yield* dispatch({ type: "run.interrupt", threadId: rocketThread })).toBe(true);
+      expect(yield* dispatch({ type: "thread.stop", threadId: rocketThread })).toBe(true);
+      expect(yield* dispatch({ type: "thread.stop", threadId: normalThread })).toBe(false);
       expect(yield* dispatch({ type: "thread.create", threadId: rocketThread })).toBe(false);
       expect(yield* dispatch({ type: "thread.delete", threadId: rocketThread })).toBe(false);
       expect(

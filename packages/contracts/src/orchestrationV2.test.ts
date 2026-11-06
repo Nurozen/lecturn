@@ -28,7 +28,6 @@ import {
   OrchestrationV2CheckpointScope,
   OrchestrationV2AppThreadJson,
   OrchestrationV2Command,
-  OrchestrationV2InternalCommand,
   OrchestrationV2LimitRecoveryUpdate,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderCapabilities,
@@ -637,6 +636,20 @@ describe("orchestration V2 contracts", () => {
       throw new Error(`Expected run.created, received ${event.type}.`);
     }
     expect(event.payload.id).toBe(RunId.make("run-1"));
+  });
+
+  it("accepts a thread Stop without a client-resolved run", () => {
+    expect(
+      decodeOrchestrationV2Command({
+        type: "thread.stop",
+        commandId: "stop-thread",
+        threadId: "thread-1",
+      }),
+    ).toEqual({
+      type: "thread.stop",
+      commandId: "stop-thread",
+      threadId: "thread-1",
+    });
   });
 
   it("decodes app-owned delegated task commands", () => {
@@ -1740,7 +1753,6 @@ describe("Squire contract additions", () => {
   };
   const decodeCreated = Schema.decodeUnknownSync(OrchestrationV2AppThreadJson);
   const encodeCreated = Schema.encodeSync(OrchestrationV2AppThreadJson);
-  const decodeInternalCommand = Schema.decodeUnknownSync(OrchestrationV2InternalCommand);
 
   it("sends no squire key for an unmarked thread and round-trips the marker", () => {
     const unmarked = encodeCreated(decodeCreated(createdThread));
@@ -1768,8 +1780,8 @@ describe("Squire contract additions", () => {
     expect(() => decodeOrchestrationV2Command({ ...interrupt, createdBy: "squire" })).toThrow();
 
     const stop = { type: "thread.stop", commandId: "command-2", threadId: "thread-1" };
-    expect(decodeInternalCommand(stop)).not.toHaveProperty("createdBy");
-    expect(decodeInternalCommand({ ...stop, createdBy: "system" })).toMatchObject({
+    expect(decodeOrchestrationV2Command(stop)).not.toHaveProperty("createdBy");
+    expect(decodeOrchestrationV2Command({ ...stop, createdBy: "system" })).toMatchObject({
       createdBy: "system",
     });
   });

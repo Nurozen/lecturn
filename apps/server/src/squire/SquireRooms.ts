@@ -360,12 +360,11 @@ const make = Effect.gen(function* () {
   );
 
   const membersOf = (roomId: SquireRoomId) => store.listMembers(roomId);
-  const loadRoom = (roomId: SquireRoomId) =>
-    Effect.gen(function* () {
-      const row = yield* store.getRoom(roomId);
-      if (Option.isNone(row)) return Option.none<SquireRoom>();
-      return Option.some(toRoom(row.value, yield* membersOf(roomId)));
-    });
+  const loadRoom = Effect.fn("SquireRooms.loadRoom")(function* (roomId: SquireRoomId) {
+    const row = yield* store.getRoom(roomId);
+    if (Option.isNone(row)) return Option.none<SquireRoom>();
+    return Option.some(toRoom(row.value, yield* membersOf(roomId)));
+  });
   const requireRoomRow = (roomId: SquireRoomId) =>
     Effect.flatMap(store.getRoom(roomId), (row) =>
       Option.match(row, {
@@ -391,37 +390,36 @@ const make = Effect.gen(function* () {
   );
 
   // Room-level rows belong to the Lead when there is one, else to `fallback`.
-  const logRoom = (input: {
+  const logRoom = Effect.fn("SquireRooms.logRoom")(function* (input: {
     readonly fallback: SquireId | null;
     readonly kind: string;
     readonly roomId: SquireRoomId;
     readonly postId?: SquireRoomPostId | null;
     readonly data: Record<string, unknown>;
     readonly now: string;
-  }) =>
-    Effect.gen(function* () {
-      const owner = Option.match(yield* liveLead, {
-        onNone: () => input.fallback,
-        onSome: (lead) => lead.id,
-      });
-      if (owner === null) return;
-      yield* repository.insertActionLog({
-        squire_id: owner,
-        kind: input.kind,
-        room_id: input.roomId,
-        post_id: input.postId ?? null,
-        trigger_id: null,
-        task_id: null,
-        thread_id: null,
-        card_id: null,
-        event_id: null,
-        run_id: null,
-        invocation_key: null,
-        execution_key: null,
-        data_json: encodeLogData(input.data),
-        created_at: input.now,
-      });
+  }) {
+    const owner = Option.match(yield* liveLead, {
+      onNone: () => input.fallback,
+      onSome: (lead) => lead.id,
     });
+    if (owner === null) return;
+    yield* repository.insertActionLog({
+      squire_id: owner,
+      kind: input.kind,
+      room_id: input.roomId,
+      post_id: input.postId ?? null,
+      trigger_id: null,
+      task_id: null,
+      thread_id: null,
+      card_id: null,
+      event_id: null,
+      run_id: null,
+      invocation_key: null,
+      execution_key: null,
+      data_json: encodeLogData(input.data),
+      created_at: input.now,
+    });
+  });
 
   const insertSystemPost = (roomId: SquireRoomId, suffix: string, body: string, now: string) =>
     store.insertPost({
@@ -438,119 +436,120 @@ const make = Effect.gen(function* () {
       created_at: now,
     });
 
-  const addMembers = (input: {
+  const addMembers = Effect.fn("SquireRooms.addMembers")(function* (input: {
     readonly roomId: SquireRoomId;
     readonly squires: ReadonlyArray<SquireId>;
     readonly leadId: SquireId | null;
     readonly user: boolean;
     readonly cursor: number;
-  }) =>
-    Effect.gen(function* () {
-      for (const squireId of input.squires) {
-        yield* store.addMember({
-          room_id: input.roomId,
-          member_kind: "squire",
-          member_id: squireId,
-          read_cursor: input.cursor,
-          user_seen_cursor: null,
-        });
-      }
-      if (input.leadId !== null) {
-        yield* store.addMember({
-          room_id: input.roomId,
-          member_kind: "lead",
-          member_id: input.leadId,
-          read_cursor: input.cursor,
-          user_seen_cursor: null,
-        });
-      }
-      if (input.user) {
-        yield* store.addMember({
-          room_id: input.roomId,
-          member_kind: "user",
-          member_id: SquireRoomStore.USER_MEMBER_ID,
-          read_cursor: input.cursor,
-          user_seen_cursor: input.cursor,
-        });
-      }
-    });
+  }) {
+    for (const squireId of input.squires) {
+      yield* store.addMember({
+        room_id: input.roomId,
+        member_kind: "squire",
+        member_id: squireId,
+        read_cursor: input.cursor,
+        user_seen_cursor: null,
+      });
+    }
+    if (input.leadId !== null) {
+      yield* store.addMember({
+        room_id: input.roomId,
+        member_kind: "lead",
+        member_id: input.leadId,
+        read_cursor: input.cursor,
+        user_seen_cursor: null,
+      });
+    }
+    if (input.user) {
+      yield* store.addMember({
+        room_id: input.roomId,
+        member_kind: "user",
+        member_id: SquireRoomStore.USER_MEMBER_ID,
+        read_cursor: input.cursor,
+        user_seen_cursor: input.cursor,
+      });
+    }
+  });
 
   /**
    * 2 to 6 distinct Squires, none deleting. Members in `kept` stay even when
    * paused, so an edit of a room with a paused member is not refused for it.
    */
-  const checkMembers = (members: ReadonlyArray<SquireId>, kept: ReadonlySet<SquireId>) =>
-    Effect.gen(function* () {
-      const unique = [...new Set(members)];
-      if (unique.length !== members.length) {
-        return refusal("members", "A room lists each Squire once.");
+  const checkMembers = Effect.fn("SquireRooms.checkMembers")(function* (
+    members: ReadonlyArray<SquireId>,
+    kept: ReadonlySet<SquireId>,
+  ) {
+    const unique = [...new Set(members)];
+    if (unique.length !== members.length) {
+      return refusal("members", "A room lists each Squire once.");
+    }
+    if (unique.length < 2 || unique.length > 6) {
+      return refusal("members", "A room has 2 to 6 Squires.");
+    }
+    const rows: Array<SquireRepository.SquireRow> = [];
+    for (const squireId of unique) {
+      const row = yield* repository.getSquire(squireId);
+      if (Option.isNone(row) || row.value.role !== "squire" || row.value.lifecycle === "deleting") {
+        return refusal("members", "Every room member must be a Squire in this environment.");
       }
-      if (unique.length < 2 || unique.length > 6) {
-        return refusal("members", "A room has 2 to 6 Squires.");
+      if (row.value.status !== "active" && !kept.has(squireId)) {
+        return refusal("paused", `${row.value.name} is paused.`);
       }
-      const rows: Array<SquireRepository.SquireRow> = [];
-      for (const squireId of unique) {
-        const row = yield* repository.getSquire(squireId);
-        if (
-          Option.isNone(row) ||
-          row.value.role !== "squire" ||
-          row.value.lifecycle === "deleting"
-        ) {
-          return refusal("members", "Every room member must be a Squire in this environment.");
-        }
-        if (row.value.status !== "active" && !kept.has(squireId)) {
-          return refusal("paused", `${row.value.name} is paused.`);
-        }
-        rows.push(row.value);
-      }
-      return { ok: true as const, rows };
-    });
+      rows.push(row.value);
+    }
+    return { ok: true as const, rows };
+  });
 
-  const checkCaps = (members: ReadonlyArray<SquireRepository.SquireRow>, opening: boolean) =>
-    Effect.gen(function* () {
-      if (opening && (yield* store.countOpenRooms) >= SQUIRE_MAX_OPEN_ROOMS) {
-        return refusal("cap", `At most ${SQUIRE_MAX_OPEN_ROOMS} rooms can be open at once.`);
+  const checkCaps = Effect.fn("SquireRooms.checkCaps")(function* (
+    members: ReadonlyArray<SquireRepository.SquireRow>,
+    opening: boolean,
+  ) {
+    if (opening && (yield* store.countOpenRooms) >= SQUIRE_MAX_OPEN_ROOMS) {
+      return refusal("cap", `At most ${SQUIRE_MAX_OPEN_ROOMS} rooms can be open at once.`);
+    }
+    for (const row of members) {
+      if ((yield* store.countOpenRoomsOf(row.id)) >= SQUIRE_MAX_OPEN_ROOMS_PER_SQUIRE) {
+        return refusal(
+          "cap",
+          `${row.name} is already in ${SQUIRE_MAX_OPEN_ROOMS_PER_SQUIRE} open rooms.`,
+        );
       }
-      for (const row of members) {
-        if ((yield* store.countOpenRoomsOf(row.id)) >= SQUIRE_MAX_OPEN_ROOMS_PER_SQUIRE) {
-          return refusal(
-            "cap",
-            `${row.name} is already in ${SQUIRE_MAX_OPEN_ROOMS_PER_SQUIRE} open rooms.`,
-          );
-        }
-      }
-      return ok;
-    });
+    }
+    return ok;
+  });
 
   /** Of `candidates`, the Squires whose scope covers the ref. */
-  const coverAmong = (ref: RoutingRef, candidates: ReadonlyArray<SquireId>) =>
-    Effect.gen(function* () {
-      if (candidates.length === 0) return [];
-      switch (ref.kind) {
-        case "thread": {
-          const trackers = yield* scope.trackersOf(ref.threadId);
-          return candidates.filter((id) => trackers.includes(id));
-        }
-        case "pullRequest": {
-          const linked = (yield* projections.getThreadsWithPullRequests()).filter((thread) =>
-            (thread.pullRequests ?? []).some(
-              (link) =>
-                link.number === ref.number &&
-                (ref.repository === undefined || link.repository === ref.repository),
-            ),
-          );
-          const covered = new Set<SquireId>();
-          for (const thread of linked) {
-            for (const id of yield* scope.trackersOf(thread.id)) covered.add(id);
-          }
-          return candidates.filter((id) => covered.has(id));
-        }
-        case "project": {
-          const coverers = yield* scope.projectCoverersOf(ref.projectId);
-          return candidates.filter((id) => coverers.includes(id));
-        }
+  const coverAmong = Effect.fn("SquireRooms.coverAmong")(function* (
+    ref: RoutingRef,
+    candidates: ReadonlyArray<SquireId>,
+  ) {
+    if (candidates.length === 0) return [];
+    switch (ref.kind) {
+      case "thread": {
+        const trackers = yield* scope.trackersOf(ref.threadId);
+        return candidates.filter((id) => trackers.includes(id));
       }
-    });
+      case "pullRequest": {
+        const linked = (yield* projections.getThreadsWithPullRequests()).filter((thread) =>
+          (thread.pullRequests ?? []).some(
+            (link) =>
+              link.number === ref.number &&
+              (ref.repository === undefined || link.repository === ref.repository),
+          ),
+        );
+        const covered = new Set<SquireId>();
+        for (const thread of linked) {
+          for (const id of yield* scope.trackersOf(thread.id)) covered.add(id);
+        }
+        return candidates.filter((id) => covered.has(id));
+      }
+      case "project": {
+        const coverers = yield* scope.projectCoverersOf(ref.projectId);
+        return candidates.filter((id) => coverers.includes(id));
+      }
+    }
+  });
 
   const replayed = (row: SquireRoomStore.SquireRoomPostRow): RoomPostWritten => ({
     ok: true,
@@ -580,221 +579,219 @@ const make = Effect.gen(function* () {
       created_at: input.now,
     });
 
-  const postInTransaction: SquireRooms["Service"]["postInTransaction"] = (input) =>
-    Effect.gen(function* () {
-      const existing = yield* store.getPostByKey(input.messageKey);
-      if (Option.isSome(existing)) return replayed(existing.value);
-      const room = yield* store.getRoom(input.roomId);
-      if (Option.isNone(room)) return refusal("not-found", "That room does not exist.");
-      if (room.value.status === "closed") {
-        return refusal("closed", "This room is closed. Reopen it to post.");
-      }
-      const { author } = input;
-      if (author.kind === "system") {
-        return refusal("not-member", "System rows are written by the room itself.");
-      }
-      const members = yield* membersOf(input.roomId);
-      const memberIds = squireMemberIds(members);
-      if (author.kind === "squire" && !memberIds.includes(author.squireId)) {
-        return refusal("not-member", "Only members can post in this room.");
-      }
-      if (author.kind === "user") {
-        yield* addMembers({
-          roomId: input.roomId,
-          squires: [],
-          leadId: null,
-          user: true,
-          cursor: 0,
-        });
-      }
+  const postInTransaction: SquireRooms["Service"]["postInTransaction"] = Effect.fn(
+    "SquireRooms.postInTransaction",
+  )(function* (input) {
+    const existing = yield* store.getPostByKey(input.messageKey);
+    if (Option.isSome(existing)) return replayed(existing.value);
+    const room = yield* store.getRoom(input.roomId);
+    if (Option.isNone(room)) return refusal("not-found", "That room does not exist.");
+    if (room.value.status === "closed") {
+      return refusal("closed", "This room is closed. Reopen it to post.");
+    }
+    const { author } = input;
+    if (author.kind === "system") {
+      return refusal("not-member", "System rows are written by the room itself.");
+    }
+    const members = yield* membersOf(input.roomId);
+    const memberIds = squireMemberIds(members);
+    if (author.kind === "squire" && !memberIds.includes(author.squireId)) {
+      return refusal("not-member", "Only members can post in this room.");
+    }
+    if (author.kind === "user") {
+      yield* addMembers({
+        roomId: input.roomId,
+        squires: [],
+        leadId: null,
+        user: true,
+        cursor: 0,
+      });
+    }
 
-      const routingMembers: Array<{
-        squireId: SquireId;
-        name: string;
-        status: SquireRepository.SquireRow["status"];
-      }> = [];
-      for (const squireId of memberIds) {
-        const row = yield* repository.getSquire(squireId);
-        if (Option.isSome(row) && row.value.lifecycle !== "deleting") {
-          routingMembers.push({ squireId, name: row.value.name, status: row.value.status });
-        }
+    const routingMembers: Array<{
+      squireId: SquireId;
+      name: string;
+      status: SquireRepository.SquireRow["status"];
+    }> = [];
+    for (const squireId of memberIds) {
+      const row = yield* repository.getSquire(squireId);
+      if (Option.isSome(row) && row.value.lifecycle !== "deleting") {
+        routingMembers.push({ squireId, name: row.value.name, status: row.value.status });
       }
-      const leadRow = yield* liveLead;
-      const lead = Option.match(leadRow, {
-        onNone: () => null,
-        onSome: (row) => ({ squireId: row.id, name: row.name }),
+    }
+    const leadRow = yield* liveLead;
+    const lead = Option.match(leadRow, {
+      onNone: () => null,
+      onSome: (row) => ({ squireId: row.id, name: row.name }),
+    });
+    const { botMessages } = yield* roomSettings;
+    const recent = yield* store.listPostsDesc({ roomId: input.roomId, limit: RECENT_POSTS });
+    const repliedPost =
+      input.replyTo === null
+        ? Option.none<SquireRoomStore.SquireRoomPostRow>()
+        : Option.filter(
+            yield* store.getPost(input.replyTo),
+            (post) => post.room_id === input.roomId,
+          );
+    const quotedAuthors = quotedLines(input.body).flatMap((line) => {
+      if (line.length === 0) return [];
+      const source = recent.find(
+        (post) => post.author_kind !== "system" && post.body.includes(line),
+      );
+      return source === undefined ? [] : [participantOf(source)];
+    });
+    const routable = routingMembers.map((member) => member.squireId);
+    const cover = new Map<string, ReadonlyArray<SquireId>>();
+    for (const ref of [...input.refs.filter(isRoutingRef), ...bodyPullRequests(input.body)]) {
+      const key = refKey(ref);
+      if (!cover.has(key)) cover.set(key, yield* coverAmong(ref, routable));
+    }
+    const decision = routeRoomPost({
+      author,
+      body: input.body,
+      refs: input.refs,
+      replyToAuthor: Option.match(repliedPost, { onNone: () => null, onSome: participantOf }),
+      quotedAuthors,
+      members: routingMembers,
+      lead,
+      botMessagingOn: room.value.bot_messaging === "on" && botMessages,
+      coverOf: (ref) => cover.get(refKey(ref)) ?? [],
+      recentMemberPosts: recent.flatMap((post) =>
+        post.author_kind === "squire" &&
+        post.author_id !== null &&
+        routable.some((id) => id === post.author_id)
+          ? [{ squireId: SquireId.make(post.author_id), createdAt: post.created_at }]
+          : [],
+      ),
+      now: input.now,
+    });
+
+    // Only rule (e) delivering to the Lead may go to Jev first.
+    const toLead =
+      decision.jevEligible && lead !== null && decision.recipients.includes(lead.squireId);
+    const availability = toLead ? yield* jev.availability : null;
+    const routing: RuleOrFallback =
+      availability !== null && !availability.available
+        ? {
+            via: { kind: "fallback", reason: availability.reason },
+            recipients: decision.recipients,
+          }
+        : { via: decision.via, recipients: decision.recipients };
+    const pending = availability !== null && availability.available;
+    const inserted = yield* store.insertPost({
+      message_key: input.messageKey,
+      room_id: input.roomId,
+      ...authorColumns(author),
+      body: input.body,
+      reply_to: Option.isSome(repliedPost) ? repliedPost.value.id : null,
+      refs_json: encodeRefs(input.refs),
+      hop: input.hop,
+      routing_json: pending ? SquireRoomStore.PENDING_ROUTING_JSON : encodeRouting(routing),
+      rerouted_from: null,
+      created_at: input.now,
+    });
+    if (Option.isNone(inserted)) {
+      const raced = yield* store.getPostByKey(input.messageKey);
+      if (Option.isSome(raced)) return replayed(raced.value);
+      return refusal("not-found", "The post could not be written.");
+    }
+    const postId = inserted.value;
+    const deferUntil = DateTime.formatIso(
+      DateTime.add(DateTime.makeUnsafe(input.now), {
+        milliseconds: SquireJevRouter.JEV_DEADLINE_MS,
+      }),
+    );
+    const wake: Array<SquireId> = [];
+    for (const recipient of decision.recipients) {
+      const deferred = pending && recipient === lead?.squireId;
+      yield* messageRow({
+        recipient,
+        messageKey: input.messageKey,
+        payload: {
+          type: "message",
+          messageKey: input.messageKey,
+          from: author,
+          roomId: input.roomId,
+          postId,
+          hop: input.hop,
+          body: input.body,
+          ...(input.refs.length > 0 ? { refs: input.refs } : {}),
+          ...(Option.isSome(repliedPost) ? { replyTo: repliedPost.value.message_key } : {}),
+        },
+        now: input.now,
+        deferUntil: deferred ? deferUntil : null,
       });
-      const { botMessages } = yield* roomSettings;
-      const recent = yield* store.listPostsDesc({ roomId: input.roomId, limit: RECENT_POSTS });
-      const repliedPost =
-        input.replyTo === null
-          ? Option.none<SquireRoomStore.SquireRoomPostRow>()
-          : Option.filter(
-              yield* store.getPost(input.replyTo),
-              (post) => post.room_id === input.roomId,
-            );
-      const quotedAuthors = quotedLines(input.body).flatMap((line) => {
-        if (line.length === 0) return [];
-        const source = recent.find(
-          (post) => post.author_kind !== "system" && post.body.includes(line),
-        );
-        return source === undefined ? [] : [participantOf(source)];
-      });
-      const routable = routingMembers.map((member) => member.squireId);
-      const cover = new Map<string, ReadonlyArray<SquireId>>();
-      for (const ref of [...input.refs.filter(isRoutingRef), ...bodyPullRequests(input.body)]) {
-        const key = refKey(ref);
-        if (!cover.has(key)) cover.set(key, yield* coverAmong(ref, routable));
-      }
-      const decision = routeRoomPost({
-        author,
-        body: input.body,
-        refs: input.refs,
-        replyToAuthor: Option.match(repliedPost, { onNone: () => null, onSome: participantOf }),
-        quotedAuthors,
-        members: routingMembers,
-        lead,
-        botMessagingOn: room.value.bot_messaging === "on" && botMessages,
-        coverOf: (ref) => cover.get(refKey(ref)) ?? [],
-        recentMemberPosts: recent.flatMap((post) =>
-          post.author_kind === "squire" &&
-          post.author_id !== null &&
-          routable.some((id) => id === post.author_id)
-            ? [{ squireId: SquireId.make(post.author_id), createdAt: post.created_at }]
-            : [],
-        ),
+      if (!deferred) wake.push(recipient);
+    }
+    yield* store.touchLastPost({ roomId: input.roomId, at: input.now });
+    if (author.kind === "user") {
+      yield* store.advanceUserSeenCursor({ roomId: input.roomId, to: postId });
+    }
+    const fallback = author.kind === "user" ? (memberIds[0] ?? null) : author.squireId;
+    // A pending post's `room.routed` row is the Jev router's to write.
+    if (!pending) {
+      yield* logRoom({
+        fallback,
+        kind: "room.routed",
+        roomId: input.roomId,
+        postId,
+        data: { via: routing.via, recipients: routing.recipients },
         now: input.now,
       });
-
-      // Only rule (e) delivering to the Lead may go to Jev first.
-      const toLead =
-        decision.jevEligible && lead !== null && decision.recipients.includes(lead.squireId);
-      const availability = toLead ? yield* jev.availability : null;
-      const routing: RuleOrFallback =
-        availability !== null && !availability.available
-          ? {
-              via: { kind: "fallback", reason: availability.reason },
-              recipients: decision.recipients,
-            }
-          : { via: decision.via, recipients: decision.recipients };
-      const pending = availability !== null && availability.available;
-      const inserted = yield* store.insertPost({
-        message_key: input.messageKey,
-        room_id: input.roomId,
-        ...authorColumns(author),
-        body: input.body,
-        reply_to: Option.isSome(repliedPost) ? repliedPost.value.id : null,
-        refs_json: encodeRefs(input.refs),
-        hop: input.hop,
-        routing_json: pending ? SquireRoomStore.PENDING_ROUTING_JSON : encodeRouting(routing),
-        rerouted_from: null,
-        created_at: input.now,
+    }
+    if (routing.via.kind === "fallback") {
+      yield* logRoom({
+        fallback,
+        kind: "room.routing-fallback",
+        roomId: input.roomId,
+        postId,
+        data: { reason: routing.via.reason },
+        now: input.now,
       });
-      if (Option.isNone(inserted)) {
-        const raced = yield* store.getPostByKey(input.messageKey);
-        if (Option.isSome(raced)) return replayed(raced.value);
-        return refusal("not-found", "The post could not be written.");
-      }
-      const postId = inserted.value;
-      const deferUntil = DateTime.formatIso(
-        DateTime.add(DateTime.makeUnsafe(input.now), {
-          milliseconds: SquireJevRouter.JEV_DEADLINE_MS,
-        }),
-      );
-      const wake: Array<SquireId> = [];
-      for (const recipient of decision.recipients) {
-        const deferred = pending && recipient === lead?.squireId;
-        yield* messageRow({
-          recipient,
-          messageKey: input.messageKey,
-          payload: {
-            type: "message",
-            messageKey: input.messageKey,
-            from: author,
-            roomId: input.roomId,
-            postId,
-            hop: input.hop,
-            body: input.body,
-            ...(input.refs.length > 0 ? { refs: input.refs } : {}),
-            ...(Option.isSome(repliedPost) ? { replyTo: repliedPost.value.message_key } : {}),
-          },
-          now: input.now,
-          deferUntil: deferred ? deferUntil : null,
-        });
-        if (!deferred) wake.push(recipient);
-      }
-      yield* store.touchLastPost({ roomId: input.roomId, at: input.now });
-      if (author.kind === "user") {
-        yield* store.advanceUserSeenCursor({ roomId: input.roomId, to: postId });
-      }
-      const fallback = author.kind === "user" ? (memberIds[0] ?? null) : author.squireId;
-      // A pending post's `room.routed` row is the Jev router's to write.
-      if (!pending) {
-        yield* logRoom({
-          fallback,
-          kind: "room.routed",
-          roomId: input.roomId,
-          postId,
-          data: { via: routing.via, recipients: routing.recipients },
-          now: input.now,
-        });
-      }
-      if (routing.via.kind === "fallback") {
-        yield* logRoom({
-          fallback,
-          kind: "room.routing-fallback",
-          roomId: input.roomId,
-          postId,
-          data: { reason: routing.via.reason },
-          now: input.now,
-        });
-      }
-      const post = toPost({
-        id: postId,
-        message_key: input.messageKey,
-        room_id: input.roomId,
-        ...authorColumns(author),
-        body: input.body,
-        reply_to: Option.isSome(repliedPost) ? repliedPost.value.id : null,
-        refs_json: encodeRefs(input.refs),
-        hop: input.hop,
-        routing_json: pending ? SquireRoomStore.PENDING_ROUTING_JSON : encodeRouting(routing),
-        rerouted_from: null,
-        created_at: input.now,
-      });
-      return {
-        ok: true,
-        post,
-        wake,
-        afterCommit:
-          availability !== null && availability.available
-            ? jev.begin({ postId, fundingGeneration: availability.fundingGeneration })
-            : Effect.void,
-        replayed: false,
-      } satisfies RoomPostWritten;
+    }
+    const post = toPost({
+      id: postId,
+      message_key: input.messageKey,
+      room_id: input.roomId,
+      ...authorColumns(author),
+      body: input.body,
+      reply_to: Option.isSome(repliedPost) ? repliedPost.value.id : null,
+      refs_json: encodeRefs(input.refs),
+      hop: input.hop,
+      routing_json: pending ? SquireRoomStore.PENDING_ROUTING_JSON : encodeRouting(routing),
+      rerouted_from: null,
+      created_at: input.now,
     });
+    return {
+      ok: true,
+      post,
+      wake,
+      afterCommit:
+        availability !== null && availability.available
+          ? jev.begin({ postId, fundingGeneration: availability.fundingGeneration })
+          : Effect.void,
+      replayed: false,
+    } satisfies RoomPostWritten;
+  });
 
-  const closeInTransaction: SquireRooms["Service"]["closeInTransaction"] = ({
-    roomId,
-    reason,
-    now,
-  }) =>
-    Effect.gen(function* () {
-      const closed = yield* store.updateRoom({
-        id: roomId,
-        patch: { status: "closed", closed_reason: reason },
-        updatedAt: now,
-        fromStatuses: ["open"],
-      });
-      if (Option.isNone(closed)) return false;
-      yield* insertSystemPost(
-        roomId,
-        `closed:${closed.value.revision}`,
-        closeText(reason, closed.value.idle_ttl_seconds),
-        now,
-      );
-      return true;
+  const closeInTransaction: SquireRooms["Service"]["closeInTransaction"] = Effect.fn(
+    "SquireRooms.closeInTransaction",
+  )(function* ({ roomId, reason, now }) {
+    const closed = yield* store.updateRoom({
+      id: roomId,
+      patch: { status: "closed", closed_reason: reason },
+      updatedAt: now,
+      fromStatuses: ["open"],
     });
+    if (Option.isNone(closed)) return false;
+    yield* insertSystemPost(
+      roomId,
+      `closed:${closed.value.revision}`,
+      closeText(reason, closed.value.idle_ttl_seconds),
+      now,
+    );
+    return true;
+  });
 
   // The user saw their own system row, so it does not make the room unread.
   const seenThroughLatest = (roomId: SquireRoomId) =>
@@ -805,368 +802,369 @@ const make = Effect.gen(function* () {
   const touched = <A, E>(now: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(Effect.tap(() => touchUserActivity(repository, now)));
 
-  const create: SquireRooms["Service"]["create"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      return yield* touched(
-        now,
-        withPolicyLock(
-          Effect.gen(function* () {
-            const existing = yield* store.getRoomByCreateRequestId(input.requestId);
-            if (Option.isSome(existing)) {
-              return { room: toRoom(existing.value, yield* membersOf(existing.value.id)) };
-            }
-            const members = yield* checkMembers(input.members, new Set());
-            if (!members.ok) return yield* toError(members);
-            const caps = yield* checkCaps(members.rows, true);
-            if (!caps.ok) return yield* toError(caps);
-            const lead = input.includesLead ? yield* requireLead : null;
-            const { idleTtlHours } = yield* roomSettings;
-            const row: SquireRoomStore.SquireRoomDbRow = {
-              id: roomIdFor(`create:${input.requestId}`),
-              topic: input.topic,
-              about_json: encodeRefs(input.about ?? []),
-              status: "open",
-              muted: 0,
-              bot_messaging: "on",
-              idle_ttl_seconds: (input.idleTtlHours ?? idleTtlHours) * HOUR_SECONDS,
-              creator_kind: "user",
-              proposal_event_id: null,
-              last_post_at: now,
-              closed_reason: null,
-              create_request_id: input.requestId,
-              revision: 0,
-              created_at: now,
-              updated_at: now,
-            };
-            yield* repository.transaction(
-              Effect.gen(function* () {
-                yield* store.insertRoom(row);
-                yield* addMembers({
-                  roomId: row.id,
-                  squires: members.rows.map((member) => member.id),
-                  leadId: lead?.id ?? null,
-                  user: true,
-                  cursor: 0,
-                });
-                yield* logRoom({
-                  fallback: members.rows[0]?.id ?? null,
-                  kind: "room.opened",
-                  roomId: row.id,
-                  data: { by: "user", members: members.rows.map((member) => member.id) },
-                  now,
-                });
-              }),
-            );
-            return { room: toRoom(row, yield* membersOf(row.id)) };
-          }),
-        ),
-      );
-    }).pipe(orSquireError("open the room"));
-
-  const update: SquireRooms["Service"]["update"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      return yield* touched(
-        now,
-        withPolicyLock(
-          Effect.gen(function* () {
-            const current = yield* requireRoomRow(input.roomId);
-            const conflict = failWith(
-              "revision_conflict",
-              "The room changed since you opened it. Reload and try again.",
-            );
-            if (current.revision !== input.expectedRevision) return yield* conflict;
-            const members = yield* membersOf(input.roomId);
-            const currentIds = squireMemberIds(members);
-            let added: ReadonlyArray<SquireId> = [];
-            let removed: ReadonlyArray<SquireId> = [];
-            if (input.members !== undefined) {
-              const next = input.members;
-              const checked = yield* checkMembers(next, new Set(currentIds));
-              if (!checked.ok) return yield* toError(checked);
-              added = next.filter((id) => !currentIds.includes(id));
-              removed = currentIds.filter((id) => !next.includes(id));
-              if (current.status === "open") {
-                const caps = yield* checkCaps(
-                  checked.rows.filter((row) => added.includes(row.id)),
-                  false,
-                );
-                if (!caps.ok) return yield* toError(caps);
-              }
-            }
-            const leadMember = members.find((member) => member.member_kind === "lead");
-            const addLead =
-              input.includesLead === true && leadMember === undefined ? yield* requireLead : null;
-            const removeLead = input.includesLead === false ? leadMember : undefined;
-            const updated = yield* repository.transaction(
-              Effect.gen(function* () {
-                const row = yield* store.updateRoom({
-                  id: input.roomId,
-                  patch: {
-                    ...(input.topic === undefined ? {} : { topic: input.topic }),
-                    ...(input.muted === undefined ? {} : { muted: input.muted ? 1 : 0 }),
-                    ...(input.botMessaging === undefined
-                      ? {}
-                      : { bot_messaging: input.botMessaging ? ("on" as const) : ("off" as const) }),
-                    ...(input.idleTtlHours === undefined
-                      ? {}
-                      : { idle_ttl_seconds: input.idleTtlHours * HOUR_SECONDS }),
-                  },
-                  updatedAt: now,
-                  expectedRevision: input.expectedRevision,
-                });
-                if (Option.isNone(row)) return yield* conflict;
-                // New members start at the present: the room's history is not theirs to act on.
-                yield* addMembers({
-                  roomId: input.roomId,
-                  squires: added,
-                  leadId: addLead?.id ?? null,
-                  user: false,
-                  cursor: yield* store.latestPostId(input.roomId),
-                });
-                for (const squireId of removed) {
-                  yield* store.removeMember({
-                    roomId: input.roomId,
-                    member: { member_kind: "squire", member_id: squireId },
-                  });
-                }
-                if (removeLead !== undefined) {
-                  yield* store.removeMember({ roomId: input.roomId, member: removeLead });
-                }
-                return row.value;
-              }),
-            );
-            return { room: toRoom(updated, yield* membersOf(input.roomId)) };
-          }),
-        ),
-      );
-    }).pipe(orSquireError("update the room"));
-
-  const close: SquireRooms["Service"]["close"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      return yield* touched(
-        now,
+  const create: SquireRooms["Service"]["create"] = Effect.fn("SquireRooms.create")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    return yield* touched(
+      now,
+      withPolicyLock(
         Effect.gen(function* () {
-          const before = yield* requireRoom(input.roomId);
+          const existing = yield* store.getRoomByCreateRequestId(input.requestId);
+          if (Option.isSome(existing)) {
+            return { room: toRoom(existing.value, yield* membersOf(existing.value.id)) };
+          }
+          const members = yield* checkMembers(input.members, new Set());
+          if (!members.ok) return yield* toError(members);
+          const caps = yield* checkCaps(members.rows, true);
+          if (!caps.ok) return yield* toError(caps);
+          const lead = input.includesLead ? yield* requireLead : null;
+          const { idleTtlHours } = yield* roomSettings;
+          const row: SquireRoomStore.SquireRoomDbRow = {
+            id: roomIdFor(`create:${input.requestId}`),
+            topic: input.topic,
+            about_json: encodeRefs(input.about ?? []),
+            status: "open",
+            muted: 0,
+            bot_messaging: "on",
+            idle_ttl_seconds: (input.idleTtlHours ?? idleTtlHours) * HOUR_SECONDS,
+            creator_kind: "user",
+            proposal_event_id: null,
+            last_post_at: now,
+            closed_reason: null,
+            create_request_id: input.requestId,
+            revision: 0,
+            created_at: now,
+            updated_at: now,
+          };
           yield* repository.transaction(
             Effect.gen(function* () {
-              if (!(yield* closeInTransaction({ roomId: input.roomId, reason: "user", now }))) {
-                return;
+              yield* store.insertRoom(row);
+              yield* addMembers({
+                roomId: row.id,
+                squires: members.rows.map((member) => member.id),
+                leadId: lead?.id ?? null,
+                user: true,
+                cursor: 0,
+              });
+              yield* logRoom({
+                fallback: members.rows[0]?.id ?? null,
+                kind: "room.opened",
+                roomId: row.id,
+                data: { by: "user", members: members.rows.map((member) => member.id) },
+                now,
+              });
+            }),
+          );
+          return { room: toRoom(row, yield* membersOf(row.id)) };
+        }),
+      ),
+    );
+  }, orSquireError("open the room"));
+
+  const update: SquireRooms["Service"]["update"] = Effect.fn("SquireRooms.update")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    return yield* touched(
+      now,
+      withPolicyLock(
+        Effect.gen(function* () {
+          const current = yield* requireRoomRow(input.roomId);
+          const conflict = failWith(
+            "revision_conflict",
+            "The room changed since you opened it. Reload and try again.",
+          );
+          if (current.revision !== input.expectedRevision) return yield* conflict;
+          const members = yield* membersOf(input.roomId);
+          const currentIds = squireMemberIds(members);
+          let added: ReadonlyArray<SquireId> = [];
+          let removed: ReadonlyArray<SquireId> = [];
+          if (input.members !== undefined) {
+            const next = input.members;
+            const checked = yield* checkMembers(next, new Set(currentIds));
+            if (!checked.ok) return yield* toError(checked);
+            added = next.filter((id) => !currentIds.includes(id));
+            removed = currentIds.filter((id) => !next.includes(id));
+            if (current.status === "open") {
+              const caps = yield* checkCaps(
+                checked.rows.filter((row) => added.includes(row.id)),
+                false,
+              );
+              if (!caps.ok) return yield* toError(caps);
+            }
+          }
+          const leadMember = members.find((member) => member.member_kind === "lead");
+          const addLead =
+            input.includesLead === true && leadMember === undefined ? yield* requireLead : null;
+          const removeLead = input.includesLead === false ? leadMember : undefined;
+          const updated = yield* repository.transaction(
+            Effect.gen(function* () {
+              const row = yield* store.updateRoom({
+                id: input.roomId,
+                patch: {
+                  ...(input.topic === undefined ? {} : { topic: input.topic }),
+                  ...(input.muted === undefined ? {} : { muted: input.muted ? 1 : 0 }),
+                  ...(input.botMessaging === undefined
+                    ? {}
+                    : { bot_messaging: input.botMessaging ? ("on" as const) : ("off" as const) }),
+                  ...(input.idleTtlHours === undefined
+                    ? {}
+                    : { idle_ttl_seconds: input.idleTtlHours * HOUR_SECONDS }),
+                },
+                updatedAt: now,
+                expectedRevision: input.expectedRevision,
+              });
+              if (Option.isNone(row)) return yield* conflict;
+              // New members start at the present: the room's history is not theirs to act on.
+              yield* addMembers({
+                roomId: input.roomId,
+                squires: added,
+                leadId: addLead?.id ?? null,
+                user: false,
+                cursor: yield* store.latestPostId(input.roomId),
+              });
+              for (const squireId of removed) {
+                yield* store.removeMember({
+                  roomId: input.roomId,
+                  member: { member_kind: "squire", member_id: squireId },
+                });
               }
+              if (removeLead !== undefined) {
+                yield* store.removeMember({ roomId: input.roomId, member: removeLead });
+              }
+              return row.value;
+            }),
+          );
+          return { room: toRoom(updated, yield* membersOf(input.roomId)) };
+        }),
+      ),
+    );
+  }, orSquireError("update the room"));
+
+  const close: SquireRooms["Service"]["close"] = Effect.fn("SquireRooms.close")(function* (input) {
+    const now = yield* nowIso;
+    return yield* touched(
+      now,
+      Effect.gen(function* () {
+        const before = yield* requireRoom(input.roomId);
+        yield* repository.transaction(
+          Effect.gen(function* () {
+            if (!(yield* closeInTransaction({ roomId: input.roomId, reason: "user", now }))) {
+              return;
+            }
+            yield* seenThroughLatest(input.roomId);
+            yield* logRoom({
+              fallback: before.members[0] ?? null,
+              kind: "room.closed",
+              roomId: input.roomId,
+              data: { by: "user", reason: "user" },
+              now,
+            });
+          }),
+        );
+        return { room: yield* requireRoom(input.roomId) };
+      }),
+    );
+  }, orSquireError("close the room"));
+
+  const reopen: SquireRooms["Service"]["reopen"] = Effect.fn("SquireRooms.reopen")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    return yield* touched(
+      now,
+      withPolicyLock(
+        Effect.gen(function* () {
+          const current = yield* requireRoom(input.roomId);
+          if (current.status === "open") return { room: current };
+          if (current.members.length < 2) {
+            return yield* failWith("invalid_request", "A room needs 2 Squires to reopen.");
+          }
+          const members = yield* checkMembers(current.members, new Set(current.members));
+          if (!members.ok) return yield* toError(members);
+          const caps = yield* checkCaps(members.rows, true);
+          if (!caps.ok) return yield* toError(caps);
+          yield* repository.transaction(
+            Effect.gen(function* () {
+              const reopened = yield* store.updateRoom({
+                id: input.roomId,
+                patch: { status: "open", closed_reason: null, last_post_at: now },
+                updatedAt: now,
+                fromStatuses: ["closed"],
+              });
+              if (Option.isNone(reopened)) return;
+              yield* insertSystemPost(
+                input.roomId,
+                `reopened:${reopened.value.revision}`,
+                "Reopened by you",
+                now,
+              );
               yield* seenThroughLatest(input.roomId);
               yield* logRoom({
-                fallback: before.members[0] ?? null,
-                kind: "room.closed",
+                fallback: current.members[0] ?? null,
+                kind: "room.reopened",
                 roomId: input.roomId,
-                data: { by: "user", reason: "user" },
+                data: { by: "user" },
                 now,
               });
             }),
           );
           return { room: yield* requireRoom(input.roomId) };
         }),
-      );
-    }).pipe(orSquireError("close the room"));
+      ),
+    );
+  }, orSquireError("reopen the room"));
 
-  const reopen: SquireRooms["Service"]["reopen"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      return yield* touched(
+  const userPost: SquireRooms["Service"]["userPost"] = Effect.fn("SquireRooms.userPost")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    const written = yield* repository.transaction(
+      postInTransaction({
+        roomId: input.roomId,
+        author: { kind: "user" },
+        body: input.body,
+        refs: input.refs ?? [],
+        replyTo: input.replyTo ?? null,
+        hop: 0,
+        messageKey: input.requestId,
         now,
-        withPolicyLock(
-          Effect.gen(function* () {
-            const current = yield* requireRoom(input.roomId);
-            if (current.status === "open") return { room: current };
-            if (current.members.length < 2) {
-              return yield* failWith("invalid_request", "A room needs 2 Squires to reopen.");
-            }
-            const members = yield* checkMembers(current.members, new Set(current.members));
-            if (!members.ok) return yield* toError(members);
-            const caps = yield* checkCaps(members.rows, true);
-            if (!caps.ok) return yield* toError(caps);
-            yield* repository.transaction(
-              Effect.gen(function* () {
-                const reopened = yield* store.updateRoom({
-                  id: input.roomId,
-                  patch: { status: "open", closed_reason: null, last_post_at: now },
-                  updatedAt: now,
-                  fromStatuses: ["closed"],
-                });
-                if (Option.isNone(reopened)) return;
-                yield* insertSystemPost(
-                  input.roomId,
-                  `reopened:${reopened.value.revision}`,
-                  "Reopened by you",
-                  now,
-                );
-                yield* seenThroughLatest(input.roomId);
-                yield* logRoom({
-                  fallback: current.members[0] ?? null,
-                  kind: "room.reopened",
-                  roomId: input.roomId,
-                  data: { by: "user" },
-                  now,
-                });
-              }),
-            );
-            return { room: yield* requireRoom(input.roomId) };
+      }),
+    );
+    if (!written.ok) return yield* toError(written);
+    yield* Effect.forEach(written.wake, delivery.wake, { discard: true });
+    yield* written.afterCommit;
+    yield* touchUserActivity(repository, now);
+    return { post: written.post };
+  }, orSquireError("post in the room"));
+
+  const reroute: SquireRooms["Service"]["reroute"] = Effect.fn("SquireRooms.reroute")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    const messageKey = `reroute:${input.postId}:${input.requestId}`;
+    const written = yield* repository.transaction(
+      Effect.gen(function* () {
+        const existing = yield* store.getPostByKey(messageKey);
+        if (Option.isSome(existing)) {
+          return { post: toPost(existing.value), wake: [] as ReadonlyArray<SquireId> };
+        }
+        const original = yield* Effect.flatMap(store.getPost(input.postId), (post) =>
+          Option.match(post, {
+            onNone: () => failWith("not_found", "That post does not exist."),
+            onSome: Effect.succeed,
           }),
-        ),
-      );
-    }).pipe(orSquireError("reopen the room"));
-
-  const userPost: SquireRooms["Service"]["userPost"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      const written = yield* repository.transaction(
-        postInTransaction({
-          roomId: input.roomId,
-          author: { kind: "user" },
-          body: input.body,
-          refs: input.refs ?? [],
-          replyTo: input.replyTo ?? null,
-          hop: 0,
-          messageKey: input.requestId,
-          now,
-        }),
-      );
-      if (!written.ok) return yield* toError(written);
-      yield* Effect.forEach(written.wake, delivery.wake, { discard: true });
-      yield* written.afterCommit;
-      yield* touchUserActivity(repository, now);
-      return { post: written.post };
-    }).pipe(orSquireError("post in the room"));
-
-  const reroute: SquireRooms["Service"]["reroute"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      const messageKey = `reroute:${input.postId}:${input.requestId}`;
-      const written = yield* repository.transaction(
-        Effect.gen(function* () {
-          const existing = yield* store.getPostByKey(messageKey);
-          if (Option.isSome(existing)) {
-            return { post: toPost(existing.value), wake: [] as ReadonlyArray<SquireId> };
-          }
-          const original = yield* Effect.flatMap(store.getPost(input.postId), (post) =>
-            Option.match(post, {
-              onNone: () => failWith("not_found", "That post does not exist."),
-              onSome: Effect.succeed,
-            }),
-          );
-          if (original.author_kind === "system") {
-            return yield* failWith("invalid_request", "A system row cannot be rerouted.");
-          }
-          const room = yield* requireRoom(original.room_id);
-          if (room.status === "closed") {
-            return yield* failWith("invalid_request", "This room is closed. Reopen it first.");
-          }
-          const lead = yield* liveLead;
-          const toLead = Option.isSome(lead) && lead.value.id === input.to;
-          if (!toLead && !room.members.includes(input.to)) {
-            return yield* failWith(
-              "invalid_request",
-              "Reroute to a member of the room or the Lead.",
-            );
-          }
-          const target = yield* repository.getSquire(input.to);
-          if (Option.isSome(target) && target.value.status !== "active") {
-            return yield* failWith("paused", `${target.value.name} is paused.`);
-          }
-          const author = participantOf(original);
-          const routingJson = encodeRouting({
-            via: { kind: "rule", rule: "mention", match: "rerouted by you" },
-            recipients: [input.to],
-          });
-          const row = {
-            message_key: messageKey,
-            room_id: original.room_id,
-            author_kind: original.author_kind,
-            author_id: original.author_id,
-            body: original.body,
-            reply_to: original.reply_to,
-            refs_json: original.refs_json,
-            hop: original.hop,
-            routing_json: routingJson,
-            rerouted_from: original.id,
-            created_at: now,
-          };
-          const inserted = yield* store.insertPost(row);
-          if (Option.isNone(inserted)) {
-            return yield* failWith("not_available", "The reroute could not be written. Try again.");
-          }
-          const replied =
-            original.reply_to === null ? Option.none() : yield* store.getPost(original.reply_to);
-          const refs = toPost({ ...row, id: inserted.value }).refs;
-          yield* messageRow({
-            recipient: input.to,
+        );
+        if (original.author_kind === "system") {
+          return yield* failWith("invalid_request", "A system row cannot be rerouted.");
+        }
+        const room = yield* requireRoom(original.room_id);
+        if (room.status === "closed") {
+          return yield* failWith("invalid_request", "This room is closed. Reopen it first.");
+        }
+        const lead = yield* liveLead;
+        const toLead = Option.isSome(lead) && lead.value.id === input.to;
+        if (!toLead && !room.members.includes(input.to)) {
+          return yield* failWith("invalid_request", "Reroute to a member of the room or the Lead.");
+        }
+        const target = yield* repository.getSquire(input.to);
+        if (Option.isSome(target) && target.value.status !== "active") {
+          return yield* failWith("paused", `${target.value.name} is paused.`);
+        }
+        const author = participantOf(original);
+        const routingJson = encodeRouting({
+          via: { kind: "rule", rule: "mention", match: "rerouted by you" },
+          recipients: [input.to],
+        });
+        const row = {
+          message_key: messageKey,
+          room_id: original.room_id,
+          author_kind: original.author_kind,
+          author_id: original.author_id,
+          body: original.body,
+          reply_to: original.reply_to,
+          refs_json: original.refs_json,
+          hop: original.hop,
+          routing_json: routingJson,
+          rerouted_from: original.id,
+          created_at: now,
+        };
+        const inserted = yield* store.insertPost(row);
+        if (Option.isNone(inserted)) {
+          return yield* failWith("not_available", "The reroute could not be written. Try again.");
+        }
+        const replied =
+          original.reply_to === null ? Option.none() : yield* store.getPost(original.reply_to);
+        const refs = toPost({ ...row, id: inserted.value }).refs;
+        yield* messageRow({
+          recipient: input.to,
+          messageKey,
+          payload: {
+            type: "message",
             messageKey,
-            payload: {
-              type: "message",
-              messageKey,
-              from: author,
-              roomId: original.room_id,
-              postId: inserted.value,
-              hop: original.hop,
-              body: original.body,
-              ...(refs.length > 0 ? { refs } : {}),
-              ...(Option.isSome(replied) ? { replyTo: replied.value.message_key } : {}),
-            },
-            now,
-            deferUntil: null,
-          });
-          yield* store.touchLastPost({ roomId: original.room_id, at: now });
-          yield* store.advanceUserSeenCursor({ roomId: original.room_id, to: inserted.value });
-          yield* logRoom({
-            fallback: input.to,
-            kind: "room.rerouted",
+            from: author,
             roomId: original.room_id,
             postId: inserted.value,
-            data: { from: original.id, to: input.to },
-            now,
-          });
-          return { post: toPost({ ...row, id: inserted.value }), wake: [input.to] };
-        }),
-      );
-      yield* Effect.forEach(written.wake, delivery.wake, { discard: true });
-      yield* touchUserActivity(repository, now);
-      return { post: written.post };
-    }).pipe(orSquireError("reroute the post"));
+            hop: original.hop,
+            body: original.body,
+            ...(refs.length > 0 ? { refs } : {}),
+            ...(Option.isSome(replied) ? { replyTo: replied.value.message_key } : {}),
+          },
+          now,
+          deferUntil: null,
+        });
+        yield* store.touchLastPost({ roomId: original.room_id, at: now });
+        yield* store.advanceUserSeenCursor({ roomId: original.room_id, to: inserted.value });
+        yield* logRoom({
+          fallback: input.to,
+          kind: "room.rerouted",
+          roomId: original.room_id,
+          postId: inserted.value,
+          data: { from: original.id, to: input.to },
+          now,
+        });
+        return { post: toPost({ ...row, id: inserted.value }), wake: [input.to] };
+      }),
+    );
+    yield* Effect.forEach(written.wake, delivery.wake, { discard: true });
+    yield* touchUserActivity(repository, now);
+    return { post: written.post };
+  }, orSquireError("reroute the post"));
 
-  const markRead: SquireRooms["Service"]["markRead"] = (input) =>
-    Effect.gen(function* () {
-      const now = yield* nowIso;
-      yield* requireRoomRow(input.roomId);
-      yield* repository.transaction(
-        store.advanceUserSeenCursor({ roomId: input.roomId, to: input.throughPostId }),
-      );
-      yield* touchUserActivity(repository, now);
-      return {};
-    }).pipe(orSquireError("mark the room read"));
+  const markRead: SquireRooms["Service"]["markRead"] = Effect.fn("SquireRooms.markRead")(function* (
+    input,
+  ) {
+    const now = yield* nowIso;
+    yield* requireRoomRow(input.roomId);
+    yield* repository.transaction(
+      store.advanceUserSeenCursor({ roomId: input.roomId, to: input.throughPostId }),
+    );
+    yield* touchUserActivity(repository, now);
+    return {};
+  }, orSquireError("mark the room read"));
 
-  const posts: SquireRooms["Service"]["posts"] = (input) =>
-    Effect.gen(function* () {
-      const room = yield* requireRoom(input.roomId);
-      const limit = input.limit ?? DEFAULT_PAGE;
-      const rows = yield* store.listPostsDesc({
-        roomId: input.roomId,
-        ...(input.before === undefined ? {} : { before: input.before }),
-        limit: limit + 1,
-      });
-      const page = rows.slice(0, limit);
-      return {
-        room,
-        posts: page.map(toPost),
-        nextBefore: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
-      };
-    }).pipe(orSquireError("read the room"));
+  const posts: SquireRooms["Service"]["posts"] = Effect.fn("SquireRooms.posts")(function* (input) {
+    const room = yield* requireRoom(input.roomId);
+    const limit = input.limit ?? DEFAULT_PAGE;
+    const rows = yield* store.listPostsDesc({
+      roomId: input.roomId,
+      ...(input.before === undefined ? {} : { before: input.before }),
+      limit: limit + 1,
+    });
+    const page = rows.slice(0, limit);
+    return {
+      room,
+      posts: page.map(toPost),
+      nextBefore: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
+    };
+  }, orSquireError("read the room"));
 
   const get: SquireRooms["Service"]["get"] = (roomId) =>
     loadRoom(roomId).pipe(orSquireError("read the room"));
 
-  const checkOpen: SquireRooms["Service"]["checkOpen"] = (request) =>
-    Effect.gen(function* () {
+  const checkOpen: SquireRooms["Service"]["checkOpen"] = Effect.fn("SquireRooms.checkOpen")(
+    function* (request) {
       const members = yield* checkMembers(request.members, new Set());
       if (!members.ok) return members;
       if (request.by === "lead") {
@@ -1199,7 +1197,8 @@ const make = Effect.gen(function* () {
         if (!budget.ok) return refusal("budget", `${row.name}: ${budget.text}`);
       }
       return ok;
-    });
+    },
+  );
 
   const applyOpen: SquireRooms["Service"]["applyOpen"] = (intent, options) =>
     withPolicyLock(
@@ -1336,25 +1335,24 @@ const make = Effect.gen(function* () {
       }),
     ).pipe(orSquireError("open the room"));
 
-  const due: SquireRooms["Service"]["due"] = (now) =>
-    Effect.gen(function* () {
-      const at = DateTime.formatIso(now);
-      for (const room of yield* store.listRooms({ status: "open" })) {
-        if (DateTime.isGreaterThan(idleAt(room), now)) continue;
-        yield* repository.transaction(
-          Effect.gen(function* () {
-            if (!(yield* closeInTransaction({ roomId: room.id, reason: "idle", now: at }))) return;
-            yield* logRoom({
-              fallback: squireMemberIds(yield* membersOf(room.id))[0] ?? null,
-              kind: "room.closed",
-              roomId: room.id,
-              data: { by: "clock", reason: "idle" },
-              now: at,
-            });
-          }),
-        );
-      }
-    });
+  const due: SquireRooms["Service"]["due"] = Effect.fn("SquireRooms.due")(function* (now) {
+    const at = DateTime.formatIso(now);
+    for (const room of yield* store.listRooms({ status: "open" })) {
+      if (DateTime.isGreaterThan(idleAt(room), now)) continue;
+      yield* repository.transaction(
+        Effect.gen(function* () {
+          if (!(yield* closeInTransaction({ roomId: room.id, reason: "idle", now: at }))) return;
+          yield* logRoom({
+            fallback: squireMemberIds(yield* membersOf(room.id))[0] ?? null,
+            kind: "room.closed",
+            roomId: room.id,
+            data: { by: "clock", reason: "idle" },
+            now: at,
+          });
+        }),
+      );
+    }
+  });
 
   const nextDueAt: SquireRooms["Service"]["nextDueAt"] = Effect.map(
     store.listRooms({ status: "open" }),

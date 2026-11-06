@@ -16,21 +16,20 @@ import { toPersistenceSqlError } from "../persistence/Errors.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
 
-const makeFloor = (
+const makeFloor = Effect.fn("SquireCompactionFloor.makeFloor")(function* (
   switchOn: (cursor: SquireRepository.SquireReactorCursor) => Effect.Effect<boolean>,
-) =>
-  Effect.gen(function* () {
-    const repository = yield* SquireRepository.SquireRepository;
-    return Effect.gen(function* () {
-      const cursor = yield* repository.readCursor;
-      if (!(yield* switchOn(cursor))) return Option.none<number>();
-      const squires = yield* repository.listSquires;
-      const anyActive = squires.some(
-        (row) => row.status === "active" && row.lifecycle !== "deleting",
-      );
-      return anyActive ? Option.some(cursor.sequence) : Option.none<number>();
-    });
+) {
+  const repository = yield* SquireRepository.SquireRepository;
+  return Effect.gen(function* () {
+    const cursor = yield* repository.readCursor;
+    if (!(yield* switchOn(cursor))) return Option.none<number>();
+    const squires = yield* repository.listSquires;
+    const anyActive = squires.some(
+      (row) => row.status === "active" && row.lifecycle !== "deleting",
+    );
+    return anyActive ? Option.some(cursor.sequence) : Option.none<number>();
   });
+});
 
 // The running server reads its live switch. The cursor's `enabled` is only
 // written by an on or off period's cursor sync, which runs in the background

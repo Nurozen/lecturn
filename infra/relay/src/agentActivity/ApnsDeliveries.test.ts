@@ -61,7 +61,7 @@ const decodeCardPayload = Schema.decodeUnknownEffect(
   ),
 );
 const decodeAccountPayload = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Struct({ accountId: Schema.String })),
+  Schema.fromJsonString(Schema.Struct({ body: Schema.Struct({ accountId: Schema.String }) })),
 );
 
 const config = RelayConfiguration.RelayConfiguration.of({
@@ -278,6 +278,7 @@ function layerFor(input: {
         Layer.succeed(LiveActivities.LiveActivities, {
           register: () => Effect.void,
           listTargets: () => Effect.succeed(input.currentTargets ?? [target]),
+          listIdleArmedTargets: () => Effect.succeed([]),
           markStartQueued: (queued) =>
             Effect.sync(() => {
               input.queuedStarts?.push(queued);
@@ -1023,6 +1024,64 @@ describe("ApnsDeliveries", () => {
     }).pipe(Effect.provide(layerFor({ attempts })));
   });
 
+  it.effect.each([
+    { phase: "running", updatedAt: state.updatedAt, disabled: false, sends: false },
+    { phase: "completed", updatedAt: state.updatedAt, disabled: false, sends: false },
+    { phase: "completed", updatedAt: "1969-12-31T23:44:00.000Z", disabled: false, sends: true },
+    { phase: "running", updatedAt: state.updatedAt, disabled: true, sends: true },
+  ] as const)(
+    "rechecks a queued contentless end: $phase at $updatedAt, disabled=$disabled",
+    ({ phase, updatedAt, disabled, sends }) => {
+      const requests: HttpClientRequest.HttpClientRequest[] = [];
+      const signedEnd = signApnsDeliveryJob({
+        secret: config.apnsDeliveryJobSigningSecret,
+        payload: makeApnsDeliveryJobPayload({
+          kind: "live_activity_end",
+          userId: target.user_id,
+          deviceId: target.device_id,
+          token: "activity-token",
+          aggregate: null,
+          createdAt: state.updatedAt,
+          expiresAt: "1970-01-01T00:10:00.000Z",
+          jobId: "job-end-1",
+        }),
+      });
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        const result = yield* deliveries.processSignedJob(signedEnd);
+        expect(result.ok).toBe(true);
+        expect(requests).toHaveLength(sends ? 1 : 0);
+        if (sends) {
+          const request = requests[0]!;
+          expect(request.url).toBe("https://api.sandbox.push.apple.com/3/device/activity-token");
+          expect(request.body._tag).toBe("Uint8Array");
+          if (request.body._tag === "Uint8Array") {
+            const { aps } = JSON.parse(new TextDecoder().decode(request.body.body));
+            expect(aps.event).toBe("end");
+            expect(aps.alert).toBeUndefined();
+            expect(aps.sound).toBeUndefined();
+          }
+        }
+      }).pipe(
+        Effect.provide(
+          layerFor({
+            attempts: [],
+            config: signingConfig,
+            currentTargets: [
+              { ...target, preferences_json: disabled ? disabledPreferences : enabledPreferences },
+            ],
+            activityStates: [{ ...state, phase, updatedAt }],
+            execute: (request) =>
+              Effect.sync(() => {
+                requests.push(request);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+
   it.effect("skips a queued start when the user no longer has live work", () => {
     const attempts: Array<DeliveryAttempts.DeliveryAttemptInput> = [];
     const clearedStarts: Array<
@@ -1239,7 +1298,7 @@ describe("ApnsDeliveries", () => {
       const result = yield* deliveries.processSignedJob(signed);
 
       const delivered = yield* decodeAccountPayload(sentBody);
-      expect(delivered.accountId).toBe(target.user_id);
+      expect(delivered.body.accountId).toBe(target.user_id);
       expect(sentBody).not.toContain("forged-host-account");
       expect(result.kind).toBe("push_notification");
       expect(result.ok).toBe(true);
@@ -3094,6 +3153,11 @@ describe("paid recipient delivery", () => {
           attempts: [],
           queuedJobs,
           config: signingConfig,
+          // The device turned Live Activities off, so the end goes out even
+          // while content remains.
+          currentTargets: [
+            { ...target, preferences_json: disabledPreferences, push_token: "push-token" },
+          ],
           managedAccess: { check: denied },
           execute: (request) =>
             Effect.sync(() => {
@@ -3452,6 +3516,55 @@ describe("queued delivery entitlement windows", () => {
               Effect.sync(() => {
                 if (request.body._tag === "Uint8Array")
                   body = new TextDecoder().decode(request.body.body);
+                return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+              }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect.each([
+    { access: "revoked", sends: true },
+    { access: "unavailable", sends: false },
+  ] as const)(
+    "a queued contentless end ignores remaining content that is $access",
+    ({ access, sends }) => {
+      let requests = 0;
+      const signedEnd = signApnsDeliveryJob({
+        secret: config.apnsDeliveryJobSigningSecret,
+        payload: makeApnsDeliveryJobPayload({
+          kind: "live_activity_end",
+          userId: target.user_id,
+          deviceId: target.device_id,
+          token: "activity-token",
+          aggregate: null,
+          createdAt: state.updatedAt,
+          expiresAt: "1970-01-01T00:10:00.000Z",
+          jobId: `job-end-${access}`,
+        }),
+      });
+      return Effect.gen(function* () {
+        const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+        expect((yield* deliveries.processSignedJob(signedEnd)).ok).toBe(true);
+        expect(requests).toBe(sends ? 1 : 0);
+      }).pipe(
+        Effect.provide(
+          layerFor({
+            attempts: [],
+            config: signingConfig,
+            currentTargets: [{ ...target, preferences_json: enabledPreferences }],
+            // The user's running row remains, but access to it was lost.
+            activityStates: [state],
+            managedAccess: {
+              check: () =>
+                access === "revoked"
+                  ? Effect.fail(new ManagedAccessRequired({ message: "Company seat removed" }))
+                  : Effect.fail(new ManagedAccessUnavailable({ message: "Billing unavailable" })),
+            },
+            execute: (request) =>
+              Effect.sync(() => {
+                requests++;
                 return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
               }),
           }),

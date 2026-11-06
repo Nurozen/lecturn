@@ -216,15 +216,16 @@ const make = Effect.gen(function* () {
           );
 
   // Never a transcript: the stored summary's goal stands in for the turn.
-  const headlineOf = (shell: OrchestrationV2ThreadShell) =>
-    Effect.gen(function* () {
-      if (Option.isNone(summaries) || shell.latestRunId === null) return undefined;
-      const stored = yield* summaries.value.read({ threadId: shell.id, runId: shell.latestRunId });
-      const summary = Option.isSome(stored) ? stored.value.summary : null;
-      if (summary === null) return undefined;
-      const text = summary.goal.trim() || summary.outcome;
-      return cut(text, 280);
-    });
+  const headlineOf = Effect.fn("SquireLeadOnboarding.headlineOf")(function* (
+    shell: OrchestrationV2ThreadShell,
+  ) {
+    if (Option.isNone(summaries) || shell.latestRunId === null) return undefined;
+    const stored = yield* summaries.value.read({ threadId: shell.id, runId: shell.latestRunId });
+    const summary = Option.isSome(stored) ? stored.value.summary : null;
+    if (summary === null) return undefined;
+    const text = summary.goal.trim() || summary.outcome;
+    return cut(text, 280);
+  });
 
   /** The first-run scan, bounded to the most recently active projects and threads. */
   const scan = Effect.gen(function* () {
@@ -284,23 +285,22 @@ const make = Effect.gen(function* () {
   const validZone = (zone: string | undefined) =>
     zone !== undefined && Option.isSome(DateTime.zoneMakeNamed(zone)) ? zone : null;
 
-  const requireLead = (requestId: string) =>
-    Effect.gen(function* () {
-      const existing = yield* repository.getLead.pipe(orSquireError("read the Lead"));
-      if (Option.isSome(existing)) return existing.value;
-      const ensured = yield* service.ensureLead({ requestId });
-      if (Option.isNone(ensured)) {
-        return yield* new SquireError({
-          code: "not_found",
-          message: "No Lead yet: add a project first.",
-        });
-      }
-      const created = yield* repository.getLead.pipe(orSquireError("read the Lead"));
-      if (Option.isNone(created)) {
-        return yield* new SquireError({ code: "not_found", message: "No Lead yet." });
-      }
-      return created.value;
-    });
+  const requireLead = Effect.fn("SquireLeadOnboarding.requireLead")(function* (requestId: string) {
+    const existing = yield* repository.getLead.pipe(orSquireError("read the Lead"));
+    if (Option.isSome(existing)) return existing.value;
+    const ensured = yield* service.ensureLead({ requestId });
+    if (Option.isNone(ensured)) {
+      return yield* new SquireError({
+        code: "not_found",
+        message: "No Lead yet: add a project first.",
+      });
+    }
+    const created = yield* repository.getLead.pipe(orSquireError("read the Lead"));
+    if (Option.isNone(created)) {
+      return yield* new SquireError({ code: "not_found", message: "No Lead yet." });
+    }
+    return created.value;
+  });
 
   /** The request that queued onboarding; a retry of it reports the same result. */
   const queuedBy = (leadId: SquireRepository.SquireRow["id"]) =>
@@ -314,8 +314,8 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const open: SquireLeadOnboarding["Service"]["open"] = (input) =>
-    Effect.gen(function* () {
+  const open: SquireLeadOnboarding["Service"]["open"] = Effect.fn("SquireLeadOnboarding.open")(
+    function* (input) {
       const lead = yield* requireLead(input.requestId);
       const zone = validZone(input.timezone);
       const now = yield* nowIso;
@@ -393,175 +393,175 @@ const make = Effect.gen(function* () {
           input.requestId,
         );
       return { squireId: lead.id, onboardingQueued: queued || replayed };
-    });
+    },
+  );
 
   // ── squire_propose_squire ──
 
-  const resolveScope = (args: ProposeSquireArgs) =>
-    Effect.gen(function* () {
-      const rows = yield* userProjects;
-      const grants: Array<SquireGrantInput> = [];
-      for (const entry of args.scope) {
-        if (entry.kind === "staveSpace") {
-          let known = false;
-          for (const project of rows) {
-            if ((yield* spaceOf(project.projectId)) === entry.spaceId) known = true;
-          }
-          if (!known)
-            return { ok: false as const, text: `No project is in Stave space ${entry.spaceId}.` };
-          grants.push({ kind: "staveSpace", targetId: entry.spaceId });
-          continue;
+  const resolveScope = Effect.fn("SquireLeadOnboarding.resolveScope")(function* (
+    args: ProposeSquireArgs,
+  ) {
+    const rows = yield* userProjects;
+    const grants: Array<SquireGrantInput> = [];
+    for (const entry of args.scope) {
+      if (entry.kind === "staveSpace") {
+        let known = false;
+        for (const project of rows) {
+          if ((yield* spaceOf(project.projectId)) === entry.spaceId) known = true;
         }
-        const wanted = entry.projectId ?? entry.name;
-        const project =
-          wanted === undefined
-            ? undefined
-            : (rows.find((row) => row.projectId === wanted) ??
-              rows.find((row) => row.title.toLowerCase() === wanted.toLowerCase()));
-        if (project === undefined) {
-          return { ok: false as const, text: `No project named "${wanted ?? ""}".` };
-        }
-        if (
-          !grants.some((grant) => grant.kind === "project" && grant.targetId === project.projectId)
-        ) {
-          grants.push({ kind: "project", targetId: project.projectId });
-        }
+        if (!known)
+          return { ok: false as const, text: `No project is in Stave space ${entry.spaceId}.` };
+        grants.push({ kind: "staveSpace", targetId: entry.spaceId });
+        continue;
       }
-      return { ok: true as const, grants };
-    });
+      const wanted = entry.projectId ?? entry.name;
+      const project =
+        wanted === undefined
+          ? undefined
+          : (rows.find((row) => row.projectId === wanted) ??
+            rows.find((row) => row.title.toLowerCase() === wanted.toLowerCase()));
+      if (project === undefined) {
+        return { ok: false as const, text: `No project named "${wanted ?? ""}".` };
+      }
+      if (
+        !grants.some((grant) => grant.kind === "project" && grant.targetId === project.projectId)
+      ) {
+        grants.push({ kind: "project", targetId: project.projectId });
+      }
+    }
+    return { ok: true as const, grants };
+  });
 
   /**
    * Distinct from every Squire, the Lead included, and every open proposal, so
    * an onboarding batch reads as different Squires. The Lead's own pick stands
    * while its appearance and hood are free; see `squireDistinctChoice`.
    */
-  const proposalCompanion = (
+  const proposalCompanion = Effect.fn("SquireLeadOnboarding.proposalCompanion")(function* (
     asked: SquireCompanion | undefined,
     openProposals: ReadonlyArray<SquireRepository.SquireCardRow>,
-  ) =>
-    Effect.gen(function* () {
-      const squires = yield* repository.listSquires;
-      const taken = [
-        ...squires.flatMap((row) =>
-          row.lifecycle === "deleting"
-            ? []
-            : Option.toArray(decodeCompanionJson(row.companion_json)),
+  ) {
+    const squires = yield* repository.listSquires;
+    const taken = [
+      ...squires.flatMap((row) =>
+        row.lifecycle === "deleting" ? [] : Option.toArray(decodeCompanionJson(row.companion_json)),
+      ),
+      ...openProposals.flatMap((card) =>
+        Option.toArray(decodePayloadJson(card.payload_json)).flatMap((payload) =>
+          !isUnknownUnionMember(payload) && payload.type === "squire-proposal"
+            ? [payload.companion]
+            : [],
         ),
-        ...openProposals.flatMap((card) =>
-          Option.toArray(decodePayloadJson(card.payload_json)).flatMap((payload) =>
-            !isUnknownUnionMember(payload) && payload.type === "squire-proposal"
-              ? [payload.companion]
-              : [],
-          ),
-        ),
-      ];
-      return asked === undefined
-        ? squireDistinctCompanion(taken)
-        : squireDistinctChoice(taken, asked);
-    });
+      ),
+    ];
+    return asked === undefined
+      ? squireDistinctCompanion(taken)
+      : squireDistinctChoice(taken, asked);
+  });
 
-  const proposeSquire = (ctx: SquireToolContext, kit: SquireToolKit) =>
-    Effect.gen(function* () {
-      const decoded = yield* kit.decodeArgs(ProposeSquireArgs, ctx.args);
-      if (!decoded.ok) {
-        return yield* kit.refuse(
-          ctx,
-          "invalid-arguments",
-          `Invalid arguments for ${ctx.tool}: ${decoded.message}`,
-        );
-      }
-      const args = decoded.value;
-      const scope = yield* resolveScope(args);
-      if (!scope.ok) return yield* kit.refuse(ctx, "scope", scope.text);
-      const open = yield* repository.listCards({
-        squireId: ctx.squire.id,
-        kinds: ["proposal"],
-        statuses: ["open"],
-      });
-      const sameName = open.find(
-        (card) =>
-          card.payload_json.includes('"type":"squire-proposal"') &&
-          card.title === titleOf(args.name),
-      );
-      if (sameName !== undefined) {
-        return yield* kit.refuse(
-          ctx,
-          "duplicate",
-          `A proposal for ${args.name} is already open (${sameName.id}).`,
-        );
-      }
-      const permissions = proposalPermissions(args.permissions);
-      const companion = yield* proposalCompanion(args.companion, open);
-      const payload: SquireCardPayload = {
-        type: "squire-proposal",
-        name: args.name,
-        brief: args.brief,
-        grants: scope.grants,
-        permissions,
-        companion,
-      };
-      const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
-      const firstProject = scope.grants.find((grant) => grant.kind === "project");
-      return yield* kit.commit(
+  const proposeSquire = Effect.fn("SquireLeadOnboarding.proposeSquire")(function* (
+    ctx: SquireToolContext,
+    kit: SquireToolKit,
+  ) {
+    const decoded = yield* kit.decodeArgs(ProposeSquireArgs, ctx.args);
+    if (!decoded.ok) {
+      return yield* kit.refuse(
         ctx,
-        null,
-        Effect.gen(function* () {
-          yield* repository.insertCard({
-            id: cardId,
-            squire_id: ctx.squire.id,
-            owner_squire_id: ctx.squire.id,
-            kind: "proposal",
-            status: "open",
-            target_thread_id: null,
-            project_id: firstProject === undefined ? null : ProjectId.make(firstProject.targetId),
-            title: titleOf(args.name),
-            why: args.reason?.trim() || args.brief,
-            payload_json: encodePayload(payload),
-            evidence_json: "{}",
-            trigger_json: encodeTrigger({ runId: RunId.make(ctx.run.runId) }),
-            intent_json: null,
-            origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
-            steer_kind: null,
-            routed_task_id: null,
-            rule_id: null,
-            finding_key: null,
-            escalate_at: null,
-            opened_at: null,
-            executes_at: null,
-            attempt: 0,
-            command_id: null,
-            execution_key: null,
-            dedupe_key: null,
-            replaced_count: 0,
-            ask_json: null,
-            resolution: null,
-            created_at: ctx.now,
-            updated_at: ctx.now,
-          });
-          yield* kit.logRow(
-            ctx,
-            "card.created",
-            { kind: "proposal", origin: ctx.run.origin, caption: null, proposal: "squire" },
-            { cardId },
-          );
-          yield* kit.logRow(
-            ctx,
-            "decision.recorded",
-            { tool: ctx.tool, outcome: "proposal", reason: args.reason ?? null },
-            { cardId },
-          );
-          // The Lead's own proposals never wake it, so nothing to wake.
-          return {
-            result: kit.ok(`Proposed ${args.name} for the user to accept.`, {
-              outcome: "proposal",
-              cardId,
-              grants: scope.grants,
-              permissions,
-            }),
-          };
-        }),
+        "invalid-arguments",
+        `Invalid arguments for ${ctx.tool}: ${decoded.message}`,
       );
+    }
+    const args = decoded.value;
+    const scope = yield* resolveScope(args);
+    if (!scope.ok) return yield* kit.refuse(ctx, "scope", scope.text);
+    const open = yield* repository.listCards({
+      squireId: ctx.squire.id,
+      kinds: ["proposal"],
+      statuses: ["open"],
     });
+    const sameName = open.find(
+      (card) =>
+        card.payload_json.includes('"type":"squire-proposal"') && card.title === titleOf(args.name),
+    );
+    if (sameName !== undefined) {
+      return yield* kit.refuse(
+        ctx,
+        "duplicate",
+        `A proposal for ${args.name} is already open (${sameName.id}).`,
+      );
+    }
+    const permissions = proposalPermissions(args.permissions);
+    const companion = yield* proposalCompanion(args.companion, open);
+    const payload: SquireCardPayload = {
+      type: "squire-proposal",
+      name: args.name,
+      brief: args.brief,
+      grants: scope.grants,
+      permissions,
+      companion,
+    };
+    const cardId = SquireCardId.make(`card:proposal:${ctx.squire.id}:${ctx.key.slice(0, 24)}`);
+    const firstProject = scope.grants.find((grant) => grant.kind === "project");
+    return yield* kit.commit(
+      ctx,
+      null,
+      Effect.gen(function* () {
+        yield* repository.insertCard({
+          id: cardId,
+          squire_id: ctx.squire.id,
+          owner_squire_id: ctx.squire.id,
+          kind: "proposal",
+          status: "open",
+          target_thread_id: null,
+          project_id: firstProject === undefined ? null : ProjectId.make(firstProject.targetId),
+          title: titleOf(args.name),
+          why: args.reason?.trim() || args.brief,
+          payload_json: encodePayload(payload),
+          evidence_json: "{}",
+          trigger_json: encodeTrigger({ runId: RunId.make(ctx.run.runId) }),
+          intent_json: null,
+          origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
+          steer_kind: null,
+          routed_task_id: null,
+          rule_id: null,
+          finding_key: null,
+          escalate_at: null,
+          opened_at: null,
+          executes_at: null,
+          attempt: 0,
+          command_id: null,
+          execution_key: null,
+          dedupe_key: null,
+          replaced_count: 0,
+          ask_json: null,
+          resolution: null,
+          created_at: ctx.now,
+          updated_at: ctx.now,
+        });
+        yield* kit.logRow(
+          ctx,
+          "card.created",
+          { kind: "proposal", origin: ctx.run.origin, caption: null, proposal: "squire" },
+          { cardId },
+        );
+        yield* kit.logRow(
+          ctx,
+          "decision.recorded",
+          { tool: ctx.tool, outcome: "proposal", reason: args.reason ?? null },
+          { cardId },
+        );
+        // The Lead's own proposals never wake it, so nothing to wake.
+        return {
+          result: kit.ok(`Proposed ${args.name} for the user to accept.`, {
+            outcome: "proposal",
+            cardId,
+            grants: scope.grants,
+            permissions,
+          }),
+        };
+      }),
+    );
+  });
 
   yield* registry.register([
     {

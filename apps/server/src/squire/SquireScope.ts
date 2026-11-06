@@ -154,17 +154,19 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const containersOf = (projectId: ProjectId, withStave: boolean) =>
-    Effect.gen(function* () {
-      const stave = withStave
-        ? yield* containers.ofProject(projectId)
-        : { status: "unknown" as const };
-      return {
-        projectId,
-        staveSpaceId: stave.status === "known" ? stave.spaceId : null,
-        staveSagaId: stave.status === "known" ? stave.sagaId : null,
-      } satisfies ContainerTarget;
-    });
+  const containersOf = Effect.fn("SquireScope.containersOf")(function* (
+    projectId: ProjectId,
+    withStave: boolean,
+  ) {
+    const stave = withStave
+      ? yield* containers.ofProject(projectId)
+      : { status: "unknown" as const };
+    return {
+      projectId,
+      staveSpaceId: stave.status === "known" ? stave.spaceId : null,
+      staveSagaId: stave.status === "known" ? stave.sagaId : null,
+    } satisfies ContainerTarget;
+  });
 
   const toTarget = (shell: OrchestrationV2ThreadShell, withStave: boolean) =>
     containersOf(shell.projectId, withStave).pipe(

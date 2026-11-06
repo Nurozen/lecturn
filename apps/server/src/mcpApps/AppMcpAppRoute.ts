@@ -201,8 +201,8 @@ const make = Effect.gen(function* () {
 
   // Live definitions come from the cache whether or not the app is open, so a
   // closed app's card still learns its tools and is told why a call fails.
-  const toolsFor = (card: Card) =>
-    Effect.gen(function* () {
+  const toolsFor = Effect.fn("AppMcpAppRoute.toolsFor")(
+    function* (card: Card) {
       const { registration } = card.record;
       const cached = yield* registry.cachedTools(card.appId);
       const headlessTools =
@@ -225,7 +225,10 @@ const make = Effect.gen(function* () {
         }
       }
       return tools;
-    }).pipe(Effect.mapError((cause) => fail(card.thread.id, "request-failed", cause)));
+    },
+    (effect, card) =>
+      effect.pipe(Effect.mapError((cause) => fail(card.thread.id, "request-failed", cause))),
+  );
 
   const findTool = (card: Card, name: string) =>
     toolsFor(card).pipe(
@@ -292,17 +295,17 @@ const make = Effect.gen(function* () {
    * it. A card in a thread that is not running has nobody to ask, so a call
    * that needs approval is refused rather than run unasked.
    */
-  const ask = (
-    thread: OrchestrationV2AppThread,
-    info: {
-      readonly appId: AppId;
-      readonly appName: string;
-      readonly toolName: string;
-      readonly reason: string | null;
-      readonly source: "static" | "app";
-    },
-  ) =>
-    Effect.gen(function* () {
+  const ask = Effect.fn("AppMcpAppRoute.ask")(
+    function* (
+      thread: OrchestrationV2AppThread,
+      info: {
+        readonly appId: AppId;
+        readonly appName: string;
+        readonly toolName: string;
+        readonly reason: string | null;
+        readonly source: "static" | "app";
+      },
+    ) {
       const running = yield* projection.getRunningTurnContext(thread.id).pipe(Effect.option);
       const providerSessionId = Option.getOrUndefined(running)?.providerThread?.providerSessionId;
       if (providerSessionId == null) {
@@ -322,7 +325,9 @@ const make = Effect.gen(function* () {
               answer.reason,
             ),
           } as const);
-    }).pipe(Effect.catch((error) => Effect.succeed({ refused: error.message } as const)));
+    },
+    Effect.catch((error) => Effect.succeed({ refused: error.message } as const)),
+  );
 
   const callTool: AppMcpAppRoute["callTool"] = Effect.fn("AppMcpAppRoute.callTool")(
     function* (input) {
@@ -371,14 +376,15 @@ const make = Effect.gen(function* () {
           );
       // The user can change the app's ceiling and the thread's mode while a
       // call waits on them or on the app, so later decisions read both again.
-      const gateNow = (stage: AppToolGate.AppToolGateInput["stage"]) =>
-        Effect.gen(function* () {
-          const record = yield* requireGranted;
-          const thread = yield* projection
-            .getThread(card.thread.id)
-            .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
-          return yield* gate(stage, record, thread);
-        });
+      const gateNow = Effect.fn("AppMcpAppRoute.gateNow")(function* (
+        stage: AppToolGate.AppToolGateInput["stage"],
+      ) {
+        const record = yield* requireGranted;
+        const thread = yield* projection
+          .getThread(card.thread.id)
+          .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause)));
+        return yield* gate(stage, record, thread);
+      });
       const approve = (
         decision: AppToolGate.AppToolGateDecision,
         stage: "static" | "app",
@@ -403,52 +409,51 @@ const make = Effect.gen(function* () {
       };
 
       const context = yield* contextMeta(card);
-      const forward = (
+      const forward = Effect.fn("AppMcpAppRoute.forward")(function* (
         approval: AppToolApprovalMeta,
         stage: AppToolGate.AppToolGateInput["stage"],
-      ) =>
-        Effect.gen(function* () {
-          const request: AppToolCallRequest = {
-            name: bare,
-            arguments: input.arguments,
-            meta: { [APP_TOOL_CONTEXT_META_KEY]: context, [APP_TOOL_APPROVAL_META_KEY]: approval },
-          };
-          // As in AppToolkit.call: an approval can wait for minutes, so an app
-          // revoked or closed meanwhile is not contacted, and an approved call
-          // is gated again on the ceiling and mode it has now.
-          if (approval.requestId === undefined) {
-            yield* requireGranted;
-          } else {
-            const decision = yield* gateNow(stage);
-            if (decision.kind === "refuse") return { refused: decision.reason } as const;
-          }
-          if (found.tier === "headless") {
-            return {
-              result: yield* headless
-                .call(card.appId, card.projectId, request)
-                .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause))),
-            };
-          }
-          const current = yield* leases.current(card.appId);
-          if (Option.isNone(current)) {
-            return {
-              result: new McpSchema.CallToolResult({
-                isError: true,
-                content: [
-                  {
-                    type: "text",
-                    text: `${registration.name} is closed; open it to use ${prefixed}.`,
-                  },
-                ],
-              }),
-            };
-          }
+      ) {
+        const request: AppToolCallRequest = {
+          name: bare,
+          arguments: input.arguments,
+          meta: { [APP_TOOL_CONTEXT_META_KEY]: context, [APP_TOOL_APPROVAL_META_KEY]: approval },
+        };
+        // As in AppToolkit.call: an approval can wait for minutes, so an app
+        // revoked or closed meanwhile is not contacted, and an approved call
+        // is gated again on the ceiling and mode it has now.
+        if (approval.requestId === undefined) {
+          yield* requireGranted;
+        } else {
+          const decision = yield* gateNow(stage);
+          if (decision.kind === "refuse") return { refused: decision.reason } as const;
+        }
+        if (found.tier === "headless") {
           return {
-            result: yield* live
-              .call(current.value, request)
+            result: yield* headless
+              .call(card.appId, card.projectId, request)
               .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause))),
           };
-        });
+        }
+        const current = yield* leases.current(card.appId);
+        if (Option.isNone(current)) {
+          return {
+            result: new McpSchema.CallToolResult({
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `${registration.name} is closed; open it to use ${prefixed}.`,
+                },
+              ],
+            }),
+          };
+        }
+        return {
+          result: yield* live
+            .call(current.value, request)
+            .pipe(Effect.mapError((cause) => fail(input.threadId, "request-failed", cause))),
+        };
+      });
 
       const first = yield* approve(yield* gate("static", card.record, card.thread), "static", null);
       if ("refused" in first) return errorResult(first.refused);

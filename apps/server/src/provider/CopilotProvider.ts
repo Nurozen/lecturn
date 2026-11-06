@@ -200,45 +200,42 @@ export const resolveCopilotAuth = Effect.fn("resolveCopilotAuth")(function* (
   return { status: "unknown" };
 });
 
-export function buildInitialCopilotProviderSnapshot(
-  settings: GithubCopilotSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
-    const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
-    return buildServerProvider({
-      presentation: COPILOT_PRESENTATION,
-      enabled: settings.enabled,
-      checkedAt,
-      models: copilotModels(settings.customModels),
-      probe: {
-        installed: settings.enabled,
-        version: null,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: settings.enabled
-          ? "Checking GitHub Copilot CLI availability..."
-          : "GitHub Copilot is disabled in Lecturn settings.",
-      },
-    });
+export const buildInitialCopilotProviderSnapshot = Effect.fn(
+  "CopilotProvider.buildInitialCopilotProviderSnapshot",
+)(function* (settings: GithubCopilotSettings): Effect.fn.Return<ServerProviderDraft> {
+  const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+  return buildServerProvider({
+    presentation: COPILOT_PRESENTATION,
+    enabled: settings.enabled,
+    checkedAt,
+    models: copilotModels(settings.customModels),
+    probe: {
+      installed: settings.enabled,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: settings.enabled
+        ? "Checking GitHub Copilot CLI availability..."
+        : "GitHub Copilot is disabled in Lecturn settings.",
+    },
   });
-}
+});
 
-const runCopilotCliCommand = (
+const runCopilotCliCommand = Effect.fn("CopilotProvider.runCopilotCliCommand")(function* (
   settings: GithubCopilotSettings,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
-) =>
-  Effect.gen(function* () {
-    const command = settings.binaryPath || "copilot";
-    const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: environment,
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+) {
+  const command = settings.binaryPath || "copilot";
+  const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      env: environment,
+      shell: spawnCommand.shell,
+    }),
+  );
+});
 
 export const checkCopilotProviderStatus = Effect.fn("checkCopilotProviderStatus")(function* (
   settings: GithubCopilotSettings,
