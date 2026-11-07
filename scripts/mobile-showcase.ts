@@ -34,9 +34,11 @@ const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, "apps/mobile");
 const ANDROID_PACKAGE = "com.cloudgatherer.lecturn";
 const APP_SCHEME = "lecturn";
-// expo-dev-launcher reads these off the manifest URL and updates the dev menu
-// preferences before the app loads, keeping captures free of dev chrome.
-const DEV_CLIENT_LAUNCH_FLAGS = "disableOnboarding=1&disableFab=1&disableAutoLaunch=1";
+// expo-dev-launcher strips these off the launch URL and applies them to the dev
+// menu before the app loads, keeping captures free of dev chrome. An iOS
+// --initialUrl launch honors only the reserved __expo_ names.
+const DEV_CLIENT_LAUNCH_FLAGS =
+  "__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1";
 const IOS_READY_FILENAME = "LecturnShowcaseReadyScene";
 const SERVER_HOST = "0.0.0.0";
 const IOS_SIMULATOR_ARCH = NodeProcess.arch === "arm64" ? "arm64" : "x86_64";
@@ -65,6 +67,10 @@ const MOBILE_BUILD_ENV = {
   ANDROID_HOME: ANDROID_SDK_ROOT,
   APP_VARIANT: "production",
   EXPO_NO_GIT_STATUS: "1",
+  // Metro resolves the runtime version for every launch manifest. Fingerprinting
+  // the native project overruns the dev launcher's 10s manifest timeout on a
+  // loaded CI host, which leaves the app on the launcher's home screen.
+  MOBILE_VERSION_POLICY: "appVersion",
   // Lets the capture build require full screen on iPad so the app can rotate
   // itself to landscape (see app.config.ts).
   LECTURN_SHOWCASE_CAPTURE_BUILD: "1",
@@ -658,7 +664,19 @@ export function parsePairingCredentialOutput(output: string): string {
 async function issuePairingCredential(baseDir: string): Promise<string> {
   const output = await commandOutput(
     "node",
-    ["apps/server/src/bin.ts", "auth", "pairing", "create", "--base-dir", baseDir, "--json"],
+    // Outlives a slow first launch; the default five minutes can lapse before the
+    // app first runs JS, and it then retries a rejected credential forever.
+    [
+      "apps/server/src/bin.ts",
+      "auth",
+      "pairing",
+      "create",
+      "--base-dir",
+      baseDir,
+      "--ttl",
+      "1h",
+      "--json",
+    ],
     { env: { ...NodeProcess.env, NO_COLOR: "1" } },
   );
   return parsePairingCredentialOutput(output);
@@ -682,19 +700,71 @@ function startMetro(config: ShowcaseConfig): NodeChildProcess.ChildProcess {
       cwd: MOBILE_ROOT,
       env: {
         ...MOBILE_BUILD_ENV,
+        // Each lazy chunk is its own Metro graph, built on demand while the app
+        // starts, which starves the showcase servers on a small CI host.
+        EXPO_NO_METRO_LAZY: "1",
         EXPO_PUBLIC_SHOWCASE: "1",
       },
     },
   );
 }
 
+async function fetchMetroManifest(
+  platform: ShowcaseDevice["platform"],
+  host: string,
+  config: ShowcaseConfig,
+  timeoutMs: number,
+): Promise<unknown> {
+  const manifest = await commandOutput("curl", [
+    "--fail",
+    "--silent",
+    "--show-error",
+    "--max-time",
+    String(timeoutMs / 1_000),
+    "--header",
+    "accept: application/expo+json,application/json",
+    "--header",
+    `expo-platform: ${platform}`,
+    `http://${host}:${config.metroPort}/`,
+  ]);
+  return JSON.parse(manifest);
+}
+
+export function manifestBundleUrl(manifest: unknown): string {
+  const url = (manifest as { readonly launchAsset?: { readonly url?: unknown } } | null)
+    ?.launchAsset?.url;
+  if (typeof url !== "string" || url.length === 0) {
+    throw new Error("Metro manifest has no launch asset URL.");
+  }
+  return url;
+}
+
+// Warms the bundle URL the dev client actually loads. Metro builds a separate
+// graph for any other query, which the device would then wait on.
 async function warmMetroBundle(
   platform: ShowcaseDevice["platform"],
   host: string,
   config: ShowcaseConfig,
 ): Promise<void> {
-  const url = `http://${host}:${config.metroPort}/apps/mobile/index.bundle?platform=${platform}&dev=true&minify=false`;
+  const url = manifestBundleUrl(await fetchMetroManifest(platform, host, config, 120_000));
   await runCommand("curl", ["--fail", "--silent", "--show-error", "--output", "/dev/null", url]);
+}
+
+// The dev launcher gives up after two 10s manifest requests. A freshly booted
+// simulator can starve Metro for minutes, so launch once Metro answers quickly.
+async function waitForResponsiveMetro(host: string, config: ShowcaseConfig): Promise<void> {
+  const deadline = Date.now() + 600_000;
+  while (
+    !(await fetchMetroManifest("ios", host, config, 5_000).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    if (Date.now() > deadline) {
+      throw new Error("Metro did not answer a manifest request within 5s for 10 minutes.");
+    }
+    await delay(5_000);
+  }
 }
 
 async function buildIos(): Promise<string> {
@@ -934,7 +1004,7 @@ async function iosAppContainer(udid: string): Promise<string> {
 async function waitForIosShowcaseScene(
   udid: string,
   scene: ShowcaseScene,
-  timeoutMs = 90_000,
+  timeoutMs = 300_000,
 ): Promise<void> {
   const readyPath = NodePath.join(
     await iosAppContainer(udid),
@@ -952,6 +1022,72 @@ async function waitForIosShowcaseScene(
 
 function iosAxe(): string {
   return NodeProcess.env.AXE_PATH ?? "axe";
+}
+
+async function iosDevLauncherVisible(udid: string): Promise<boolean> {
+  const ui = await commandOutput(iosAxe(), ["describe-ui", "--udid", udid]).catch(() => "");
+  return ui.includes("Enter URL manually");
+}
+
+/**
+ * A bounded failure receipt for hosted runs, where the simulator is gone once
+ * the job ends: what the screen showed, its accessibility tree, the app log,
+ * and what the host was busy with.
+ */
+async function collectIosDiagnostics(udid: string, label: string): Promise<void> {
+  const directory = NodeProcess.env.LECTURN_SHOWCASE_DIAGNOSTICS_DIR;
+  if (!directory) return;
+  await NodeFSP.mkdir(directory, { recursive: true });
+  const record = async (file: string, output: Promise<string>) => {
+    const text = await output.catch((error: unknown) => `failed: ${String(error)}`);
+    await NodeFSP.writeFile(NodePath.join(directory, `${label}-${file}`), text.slice(-1_000_000));
+  };
+  await runCommand("xcrun", [
+    "simctl",
+    "io",
+    udid,
+    "screenshot",
+    NodePath.join(directory, `${label}-screen.png`),
+  ]).catch(() => undefined);
+  await record("ui.json", commandOutput(iosAxe(), ["describe-ui", "--udid", udid]));
+  await record(
+    "app.log",
+    commandOutput(
+      "xcrun",
+      [
+        "simctl",
+        "spawn",
+        udid,
+        "log",
+        "show",
+        "--last",
+        "10m",
+        "--style",
+        "compact",
+        "--predicate",
+        'process == "Lecturn"',
+      ],
+      { maxBuffer: 256 * 1024 * 1024 },
+    ),
+  );
+  await record("host.txt", commandOutput("ps", ["-axo", "pid,pcpu,rss,command", "-r"]));
+}
+
+export function screenshotsMatch(first: Uint8Array, second: Uint8Array): boolean {
+  const a = PNG.sync.read(Buffer.from(first));
+  const b = PNG.sync.read(Buffer.from(second));
+  if (a.width !== b.width || a.height !== b.height) return false;
+  let differing = 0;
+  let sampled = 0;
+  for (let offset = 0; offset < a.data.length; offset += 4 * 97) {
+    sampled += 1;
+    const delta =
+      Math.abs((a.data[offset] ?? 0) - (b.data[offset] ?? 0)) +
+      Math.abs((a.data[offset + 1] ?? 0) - (b.data[offset + 1] ?? 0)) +
+      Math.abs((a.data[offset + 2] ?? 0) - (b.data[offset + 2] ?? 0));
+    if (delta > 48) differing += 1;
+  }
+  return differing / sampled < 0.005;
 }
 
 async function runAxe(udid: string, args: ReadonlyArray<string>): Promise<void> {
@@ -1076,7 +1212,7 @@ async function captureIos(
   outputDirectory: string,
   config: ShowcaseConfig,
   metroHost: string,
-  pairingUrls: ReadonlyArray<string>,
+  issuePairingUrls: () => Promise<ReadonlyArray<string>>,
   registerCleanup: (cleanup: IosCaptureCleanup) => void,
 ): Promise<void> {
   const { simulator, createdByRunner } = await ensureIosSimulator(capture.device);
@@ -1128,6 +1264,8 @@ async function captureIos(
   );
   const firstScene = capture.scenes[0] ?? "threads";
   const launchShowcaseApp = async (terminateRunningProcess: boolean) => {
+    const pairingUrls = await issuePairingUrls();
+    await waitForResponsiveMetro(metroHost, config);
     await runCommand("xcrun", [
       "simctl",
       "launch",
@@ -1161,17 +1299,31 @@ async function captureIos(
         : ready;
     };
     if (sceneIndex === 0) {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const isLastAttempt = attempt === 1;
-        try {
-          // A freshly installed Expo development build can spend well over 30s
-          // applying an already-bundled update after it reaches 100%. Killing it
-          // at that point sends the next capture back to the dev launcher.
-          await waitForScene(120_000);
-          break;
-        } catch (error) {
-          if (isLastAttempt) throw error;
+      // A first launch can strand itself: the dev launcher gives up on a slow
+      // manifest, or a slow server spends the one-time pairing credential after
+      // the app's 10s timeout and the app retries a 401 forever. Only a relaunch
+      // with fresh credentials recovers. Killing a launch that is still loading
+      // sends it back to the launcher, so relaunch only once it has given up.
+      const deadline = Date.now() + 900_000;
+      let launchedAt = Date.now();
+      let relaunches = 0;
+      while (
+        !(await waitForScene(15_000).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        if (Date.now() > deadline) {
+          throw new Error(`iOS showcase scene '${scene}' did not render within 900000ms.`);
+        }
+        const launcherGaveUp = await iosDevLauncherVisible(simulator.udid);
+        if (relaunches < 4 && (launcherGaveUp || Date.now() - launchedAt > 300_000)) {
+          relaunches += 1;
+          NodeProcess.stdout.write(
+            `Relaunching ${capture.device.id} (${launcherGaveUp ? "dev launcher gave up" : "no scene after 5 minutes"}).\n`,
+          );
           await launchShowcaseApp(true);
+          launchedAt = Date.now();
         }
       }
     } else {
@@ -1183,21 +1335,43 @@ async function captureIos(
       showcaseCaptureDirectory(outputDirectory, capture),
       `${scene}.png`,
     );
-    await runCommand("xcrun", [
-      "simctl",
-      "io",
-      simulator.udid,
-      "screenshot",
-      ...(capture.device.fold ? ["--display", capture.device.fold === "closed" ? "1" : "3"] : []),
-      destination,
-    ]);
-    if (capture.device.orientation === "landscape") {
-      // A headless simulator keeps its display portrait while the rotated app
-      // renders sideways inside it; with Simulator.app attached the display
-      // itself rotates. Only post-rotate the former.
-      const { width, height } = readPngDimensions(await NodeFSP.readFile(destination));
-      if (height > width) {
-        await runCommand("sips", ["--rotate", capture.device.fold ? "90" : "270", destination]);
+    const takeScreenshot = async () => {
+      await runCommand("xcrun", [
+        "simctl",
+        "io",
+        simulator.udid,
+        "screenshot",
+        ...(capture.device.fold ? ["--display", capture.device.fold === "closed" ? "1" : "3"] : []),
+        destination,
+      ]);
+      if (capture.device.orientation === "landscape") {
+        // A headless simulator keeps its display portrait while the rotated app
+        // renders sideways inside it; with Simulator.app attached the display
+        // itself rotates. Only post-rotate the former.
+        const { width, height } = readPngDimensions(await NodeFSP.readFile(destination));
+        if (height > width) {
+          await runCommand("sips", ["--rotate", capture.device.fold ? "90" : "270", destination]);
+        }
+      }
+    };
+    await takeScreenshot();
+    // The app reports a scene ready once its route is current, but on a loaded
+    // host the native push can still be drawing the previous screen.
+    const previousScene = capture.scenes[sceneIndex - 1];
+    if (previousScene !== undefined && previousScene !== "agent-activity") {
+      const previous = await NodeFSP.readFile(
+        NodePath.join(showcaseCaptureDirectory(outputDirectory, capture), `${previousScene}.png`),
+      );
+      for (
+        let retake = 0;
+        screenshotsMatch(previous, await NodeFSP.readFile(destination));
+        retake += 1
+      ) {
+        if (retake === 5) {
+          throw new Error(`iOS showcase scene '${scene}' still shows '${previousScene}'.`);
+        }
+        await delay(3_000);
+        await takeScreenshot();
       }
     }
     if (scene === "agent-activity") await unlockIosSimulator(simulator.udid);
@@ -1538,6 +1712,22 @@ async function main(): Promise<void> {
   const androidCleanups: AndroidCaptureCleanup[] = [];
 
   try {
+    // Build before the servers and Metro start so they do not hold memory
+    // through the native build on a small CI host.
+    const iosAppPath = hasIos
+      ? options.skipBuild
+        ? await existingArtifact(IOS_APP_PATH)
+        : await buildIos()
+      : null;
+    const androidAbis = captures.flatMap((capture) =>
+      capture.device.platform === "android" && capture.device.abi ? [capture.device.abi] : [],
+    );
+    const androidApkPath = hasAndroid
+      ? options.skipBuild
+        ? await existingArtifact(ANDROID_APK_PATH)
+        : await buildAndroid([...new Set(androidAbis)])
+      : null;
+
     for (const environment of SHOWCASE_ENVIRONMENTS) {
       const projectId = environment.projectIds[0];
       const project = SHOWCASE_PROJECTS.find((candidate) => candidate.id === projectId);
@@ -1588,28 +1778,15 @@ async function main(): Promise<void> {
       ]);
     }
 
-    const iosAppPath = hasIos
-      ? options.skipBuild
-        ? await existingArtifact(IOS_APP_PATH)
-        : await buildIos()
-      : null;
-    const androidAbis = captures.flatMap((capture) =>
-      capture.device.platform === "android" && capture.device.abi ? [capture.device.abi] : [],
-    );
-    const androidApkPath = hasAndroid
-      ? options.skipBuild
-        ? await existingArtifact(ANDROID_APK_PATH)
-        : await buildAndroid([...new Set(androidAbis)])
-      : null;
-
     for (const capture of captures) {
       const pairingHost = capture.device.platform === "ios" ? "127.0.0.1" : "10.0.2.2";
-      const pairingUrls = await Promise.all(
-        showcaseEnvironments.map(async (environment) => {
-          const credential = await issuePairingCredential(environment.baseDir);
-          return buildShowcasePairingUrl(pairingHost, environment.port, credential);
-        }),
-      );
+      const issuePairingUrls = () =>
+        Promise.all(
+          showcaseEnvironments.map(async (environment) => {
+            const credential = await issuePairingCredential(environment.baseDir);
+            return buildShowcasePairingUrl(pairingHost, environment.port, credential);
+          }),
+        );
       if (capture.device.platform === "ios") {
         await captureIos(
           capture as ShowcaseCapture & { readonly device: ShowcaseIosDevice },
@@ -1617,16 +1794,20 @@ async function main(): Promise<void> {
           outputDirectory,
           showcaseConfig,
           metroHost,
-          pairingUrls,
+          issuePairingUrls,
           (cleanup) => iosCleanups.push(cleanup),
-        );
+        ).catch(async (error: unknown) => {
+          const simulator = iosCleanups.at(-1);
+          if (simulator) await collectIosDiagnostics(simulator.udid, capture.device.id);
+          throw error;
+        });
       } else {
         await captureAndroid(
           capture as ShowcaseCapture & { readonly device: ShowcaseAndroidDevice },
           androidApkPath,
           outputDirectory,
           showcaseConfig,
-          pairingUrls,
+          await issuePairingUrls(),
           (cleanup) => androidCleanups.push(cleanup),
         );
       }
@@ -1635,6 +1816,11 @@ async function main(): Promise<void> {
         outputDirectory,
         capture.scenes.length === capture.device.scenes.length,
       );
+      // A hosted macOS runner cannot hold several booted simulators in memory.
+      const simulator = capture.device.platform === "ios" ? iosCleanups.at(-1) : undefined;
+      if (simulator && !options.keepRunning) {
+        await runCommand("xcrun", ["simctl", "shutdown", simulator.udid]).catch(() => undefined);
+      }
     }
 
     NodeProcess.stdout.write(
