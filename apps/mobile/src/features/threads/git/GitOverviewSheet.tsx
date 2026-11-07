@@ -12,6 +12,7 @@ import {
   requiresDefaultBranchConfirmation,
 } from "@lecturn/client-runtime/state/vcs";
 import { isStaveProject, type ProjectGitTarget } from "@lecturn/client-runtime/state/projectGit";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { EnvironmentId, ThreadId, type ProjectId, WS_METHODS } from "@lecturn/contracts";
 import {
   CommonActions,
@@ -273,14 +274,18 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           }),
   }));
 
+  const { shortLabel, singular } = sourceControlClients.get(
+    gitStatus.data?.sourceControlProvider?.kind,
+  ).changeRequest;
+
   const openExistingPr = async () => {
     const prUrl = gitStatus.data?.pr?.state === "open" ? gitStatus.data.pr.url : null;
     if (!prUrl) {
-      Dialog.alert("No open PR", "This branch does not have an open pull request.");
+      Dialog.alert(`No open ${shortLabel}`, `This branch does not have an open ${singular}.`);
       return;
     }
     if (!(await openPullRequest(prUrl))) {
-      Dialog.alert("Unable to open PR", "The pull request could not be opened.");
+      Dialog.alert(`Unable to open ${shortLabel}`, `The ${singular} could not be opened.`);
     }
   };
 
@@ -355,7 +360,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       return `${ahead} commit${ahead === 1 ? "" : "s"} ahead`;
     }
     if (item.kind === "open_pr" && status.pr?.number != null) {
-      return `PR #${status.pr.number} ${status.pr.state ?? "open"}`;
+      return `${shortLabel} #${status.pr.number} ${status.pr.state ?? "open"}`;
     }
     return undefined;
   };
@@ -485,15 +490,15 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         {linkedPrActions.canLink ? (
           <ListRow
             icon="link"
-            label="Link pull request"
-            description="Attach a pull request by URL or number"
+            label={`Link ${linkedPrActions.terminology.singular}`}
+            description={`Attach a ${linkedPrActions.terminology.singular} by URL or number`}
             onPress={linkedPrActions.promptLink}
           />
         ) : null}
       </ListSection>
 
       {linkedPrLines.length > 0 ? (
-        <ListSection title="Linked pull requests">
+        <ListSection title={`Linked ${linkedPrActions.terminology.plural}`}>
           {linkedPrLines.map((line, index) => (
             <LinkedPullRequestRow
               key={linkedPullRequestKey(line)}

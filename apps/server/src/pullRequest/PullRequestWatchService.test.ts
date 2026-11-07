@@ -235,7 +235,7 @@ it.layer(SqlitePersistence.layerMemory)("durable PR watch", (it) => {
         const identity = (name: string) => ({
           canonicalKey: `github.com/owner/${name}`,
           displayName: `owner/${name}`,
-          provider: "github",
+          provider: SourceControlProviderKind.make("github"),
           locator: {
             source: "git-remote" as const,
             remoteName: "origin",
@@ -1018,7 +1018,7 @@ it.layer(SqlitePersistence.layerMemory)("durable PR watch", (it) => {
           repositoryIdentity: {
             canonicalKey: "github.com/owner/repo",
             displayName: "owner/repo",
-            provider: "github",
+            provider: SourceControlProviderKind.make("github"),
             locator: {
               source: "git-remote",
               remoteName: "origin",

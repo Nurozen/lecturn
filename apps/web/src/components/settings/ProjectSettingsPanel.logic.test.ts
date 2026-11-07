@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { planProjectRemoval } from "@lecturn/client-runtime/state/projects";
 
-import { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@lecturn/contracts";
 import type { Project } from "../../types";
 import { buildSettingsProjectGroups } from "./ProjectSettingsPanel.logic";
 
@@ -23,7 +23,7 @@ describe("settings project scopes", () => {
     updatedAt: "2026-09-01T00:00:00.000Z",
     repositoryIdentity: {
       canonicalKey: "github.com/nurozen/lecturn",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "nurozen",
       name: "lecturn",
       displayName: "Lecturn",

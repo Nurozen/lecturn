@@ -4,7 +4,7 @@ import type {
   ThreadId,
   ThreadPullRequestKey,
 } from "@lecturn/contracts";
-import { normalizeThreadPullRequestKey } from "@lecturn/shared/threadPullRequests";
+import { normalizeThreadPullRequestKey } from "./threadPullRequests.ts";
 
 type LinkingCapabilities = Pick<
   ExecutionEnvironmentCapabilities,

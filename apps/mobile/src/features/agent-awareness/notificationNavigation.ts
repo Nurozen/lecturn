@@ -76,10 +76,7 @@ export function useAgentNotificationNavigation(pathname: string): void {
           requestSignIn: (accountId: string) => {
             if (requestedSignIns.current.has(accountId)) return;
             requestedSignIns.current.add(accountId);
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsAddAccount",
-              params: { accountId },
-            });
+            navigation.navigate("SettingsAddAccount", { accountId });
           },
         },
       });

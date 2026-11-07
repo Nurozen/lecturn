@@ -7,7 +7,7 @@ import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { useSagaSidebarTree } from "./stave/useSagaSidebarTree";
 import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { resolveThreadCurrentPullRequestLink } from "@lecturn/shared/threadPullRequests";
+import { resolveThreadCurrentPullRequestLink } from "@lecturn/client-runtime/thread-pull-requests";
 import { Spinner } from "~/components/ui/spinner";
 import {
   flattenSagaSidebarTree,
@@ -17,8 +17,6 @@ import {
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
 import { readStaveSpaceLifecycleMenuEntry } from "./stave/staveSpaceLifecycle";
 import { openStaveWizard } from "../staveWizard";
-import { appAtomRegistry } from "../rpc/atomRegistry";
-import { serverEnvironment } from "../state/server";
 import { staveStatus } from "../state/stave";
 import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
@@ -246,7 +244,10 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
 import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
-import { primaryServerKeybindingsAtom } from "../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { canShareWithGuestAtom, isGuestShareableThread } from "./chat/guestShareAvailability";
+import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import {
   derivePhysicalProjectKey,
   deriveProjectGroupingOverrideKey,
@@ -2372,6 +2373,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               ]
             : []),
           { id: "rename", label: "Rename thread", disabled: !canOperateThread },
+          ...(appAtomRegistry.get(canShareWithGuestAtom(thread.environmentId)) &&
+          isGuestShareableThread(thread, threadProject)
+            ? [{ id: "share-guest", label: "Share with guest" }]
+            : []),
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -2429,6 +2434,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
+      if (clicked === "share-guest") {
+        openGuestShareDialog(threadRef);
+        return;
+      }
       if (clicked === "mark-unread") {
         markThreadUnread(threadRef);
         return;

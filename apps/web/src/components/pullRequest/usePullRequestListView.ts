@@ -1,13 +1,12 @@
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { parsePullRequestQuery } from "@lecturn/client-runtime/pull-request-query";
 import {
-  pullRequestHostOf,
   type EnvironmentId,
   type ProjectId,
   type PullRequestInvolvement,
   type PullRequestListFilters,
   type PullRequestListResult,
   type PullRequestListState,
-  type SourceControlProviderKind,
 } from "@lecturn/contracts";
 import { useState } from "react";
 
@@ -188,9 +187,9 @@ export function usePullRequestScope(search: PullRequestsSearch) {
     const byHost = new Map<string, PullRequestExpectedHost>();
     for (const project of projects) {
       for (const target of resolveProjectGitTargets({ project })) {
-        const kind = target.repositoryIdentity?.provider as SourceControlProviderKind | undefined;
+        const kind = target.repositoryIdentity?.provider;
         if (kind === undefined) continue;
-        const host = pullRequestHostOf(target.repositoryIdentity, kind);
+        const host = sourceControlClients.changeRequestHost(target.repositoryIdentity, kind);
         if (!byHost.has(host)) byHost.set(host, { host, kind });
       }
     }

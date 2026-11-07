@@ -3,9 +3,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { GitHubRoutingPermissions } from "@lecturn/client-runtime/connection";
+import { PullRequestRoutingPermissions } from "@lecturn/client-runtime/connection";
 import {
-  makeBrowserGitHubRoutingPermissions,
+  makeBrowserPullRequestRoutingPermissions,
   makeCatalogServices,
   makeCatalogStore,
 } from "../connection/storage";
@@ -41,7 +41,7 @@ export const layer = Layer.effectContext(
   Effect.gen(function* () {
     const catalog = yield* makeCatalogStore(MEMORY_CATALOG_BACKEND);
     return makeCatalogServices(catalog).pipe(
-      Context.add(GitHubRoutingPermissions, makeBrowserGitHubRoutingPermissions()),
+      Context.add(PullRequestRoutingPermissions, makeBrowserPullRequestRoutingPermissions()),
       Context.add(Persistence.EnvironmentCacheStore, NO_CACHE),
     );
   }),

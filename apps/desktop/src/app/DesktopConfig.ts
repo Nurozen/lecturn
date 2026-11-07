@@ -55,6 +55,7 @@ export const DesktopConfig = Config.all({
   otlpProtocol: Config.schema(OtlpProtocol, "LECTURN_OTLP_PROTOCOL").pipe(
     Config.withDefault("http/json"),
   ),
+  desktopLauncherPath: trimmedString("LECTURN_DESKTOP_LAUNCHER_PATH"),
   appImagePath: trimmedString("APPIMAGE"),
   disableAutoUpdate: optionalBoolean("LECTURN_DISABLE_AUTO_UPDATE"),
   mockUpdates: optionalBoolean("LECTURN_DESKTOP_MOCK_UPDATES"),

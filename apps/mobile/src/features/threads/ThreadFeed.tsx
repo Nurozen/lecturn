@@ -17,6 +17,8 @@ import {
 } from "../../lib/enrichedLinkPresentation";
 import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffDivider, ThreadHandoffRow } from "./thread-handoff-row";
+import { GuestBubbleTint, GuestMessageName } from "./guestMessageStyle";
+import { ThreadGuestPendingMessage, useThreadGuestShare } from "./ThreadGuestShareBar";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import {
@@ -29,7 +31,10 @@ import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { HandoffEndpoints } from "@lecturn/client-runtime/handoff";
-import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
+import {
+  IDLE_COMPACTING_LABELS,
+  resolveUserMessagePresentation,
+} from "@lecturn/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
 import {
   resolveMessageForkPoints,
@@ -41,6 +46,7 @@ import { formatDiffCount } from "@lecturn/client-runtime/diff-count";
 import type { WorkflowOpening } from "@lecturn/client-runtime/state/subagentRuntime";
 import {
   AuthFilesystemReadScope,
+  idleCompactionOf,
   type OrchestrationMessageContext,
   ThreadId,
   type ChatAttachment,
@@ -188,7 +194,6 @@ import { setReviewSelectedSectionId } from "../review/reviewState";
 import { Menu } from "../../components/ui/Menu";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
-import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
 import {
   ReviewCommentCard,
   useReviewCommentColors,
@@ -215,16 +220,15 @@ import {
   useThreadAppRefPrefixes,
 } from "../apps/useThreadAppReferences";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
-import { markdownLinkIconSource } from "../../lib/markdownLinkIcons";
 import {
   normalizeNativeMarkdownUrl,
   resolveMarkdownInlineCodePresentation,
-  resolveMarkdownLinkIcon,
   resolveMarkdownLinkPresentation,
 } from "../../lib/markdownLinks";
 import {
   deriveTerminalAssistantMessageIds,
   createThreadFeedCache,
+  threadFeedCompactionLabels,
   failedFeedRunIds,
   deriveThreadFeedPresentation,
   shouldShowImportTruncatedNote,
@@ -257,14 +261,18 @@ import {
   ThreadWorkLog,
   WORK_GROUP_TOGGLE_HEIGHT,
 } from "./thread-work-log";
-import { appendPendingThreadMessages, type PendingThreadFeedEntry } from "./pending-thread-feed";
+import {
+  appendGuestPendingMessages,
+  appendPendingThreadMessages,
+  isCompactionCommandFeedEntry,
+  type ThreadFeedRow,
+} from "./pending-thread-feed";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
 import { groupSquireUpdates } from "./ThreadFeed.logic";
 import { htmlRenderFrameHeight } from "@lecturn/shared/htmlRender";
 import { htmlRenderRowHeight, ThreadHtmlRender } from "./HtmlRenderWebView";
 import { ThreadMcpApp } from "./McpAppWebView";
-import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import {
   assetEnvironment,
   useAssetUrl,
@@ -305,12 +313,14 @@ import { waitForThreadShellReady } from "./threadForkNavigation";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
+import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import {
   MarkdownImageAvailableWidthContext,
   ThreadMarkdownImage,
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
+import { openSettings } from "../settings/settings-navigation";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // Native iOS blockquotes and adjacent selectable text are separate layout
@@ -815,6 +825,38 @@ function MessageAttachmentFile(props: {
   );
 }
 
+/** A message's files as its bubble shows them; a guest's waiting message uses it too. */
+function MessageAttachmentList(props: {
+  readonly attachments: ReadonlyArray<ChatAttachment>;
+  readonly environmentId: EnvironmentId;
+  readonly onPressPreview: (source: FilePreviewSource) => void;
+  readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
+}) {
+  return props.attachments.map((attachment) =>
+    isImageAttachment(attachment) ? (
+      <MessageAttachmentImage
+        key={attachment.id}
+        environmentId={props.environmentId}
+        attachmentId={attachment.id}
+        name={attachment.name}
+        mimeType={attachment.mimeType}
+        className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-subtle-strong"
+        onPressPreview={props.onPressPreview}
+      />
+    ) : isFileAttachment(attachment) ? (
+      <MessageAttachmentFile
+        key={attachment.id}
+        environmentId={props.environmentId}
+        attachment={attachment}
+        onPressPreview={props.onPressPreview}
+        onPressVideo={props.onPressVideo}
+      />
+    ) : (
+      <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
+    ),
+  );
+}
+
 function MessageAttachmentUnknown(props: { readonly name: string }) {
   return (
     <View className="flex-row items-center gap-2 py-1">
@@ -1123,13 +1165,13 @@ function OpenSenderThreadButton(props: {
   readonly environmentId: EnvironmentId;
   readonly senderThreadId: ThreadId;
 }) {
-  const navigation = useNavigation();
+  const openLinkedThread = useOpenLinkedThread();
   return (
     <Pressable
       accessibilityRole="link"
       hitSlop={6}
       onPress={() =>
-        navigation.navigate("Thread", {
+        openLinkedThread({
           environmentId: String(props.environmentId),
           threadId: String(props.senderThreadId),
         })
@@ -1233,12 +1275,7 @@ function ThreadAutomationMessageRow(props: {
             <Pressable
               accessibilityRole="link"
               hitSlop={6}
-              onPress={() =>
-                navigation.navigate("SettingsSheet", {
-                  screen: "SettingsContent",
-                  params: { screen: "SettingsScheduledTasks" },
-                })
-              }
+              onPress={() => openSettings(navigation, "SettingsScheduledTasks")}
             >
               <Text className="font-lecturn-medium text-xs text-foreground-secondary">
                 Open automation
@@ -1259,8 +1296,15 @@ function ThreadAutomationMessageRow(props: {
   );
 }
 
+/** Leads with why Lecturn compacted, when it did so without being asked. */
+function compactionLabel(label: string, title: string | undefined) {
+  return title !== undefined && label.startsWith("Context compacted")
+    ? title + label.slice("Context compacted".length)
+    : label;
+}
+
 function renderFeedEntry(
-  info: { item: PendingThreadFeedEntry; index: number },
+  info: { item: ThreadFeedRow; index: number },
   props: Pick<
     ThreadFeedProps,
     | "environmentId"
@@ -1281,6 +1325,7 @@ function renderFeedEntry(
     /** Lecturn: run-less replies (V1-migrated or imported history) -> their fork cut. */
     readonly runlessForkPoints: ReadonlyMap<MessageId, ThreadForkPoint>;
     readonly unsettledTurnId: RunId | null;
+    readonly compactionLabelsByEntryId: ReadonlyMap<string, { title: string; compacting: string }>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1325,6 +1370,25 @@ function renderFeedEntry(
         </Text>
         <View className="h-px flex-1 bg-adaptive-neutral-200-a80-white-a8" />
       </View>
+    );
+  }
+
+  if (entry.type === "guest-pending") {
+    return (
+      <ThreadGuestPendingMessage
+        threadRef={scopeThreadRef(props.environmentId, props.threadId)}
+        guestName={entry.guestName}
+        message={entry.message}
+        bubbleMaxWidth={props.duoColumns ? "85%" : props.userBubbleMaxWidth}
+        renderAttachments={(attachments) => (
+          <MessageAttachmentList
+            attachments={attachments}
+            environmentId={props.environmentId}
+            onPressPreview={props.onPressPreview}
+            onPressVideo={props.onPressVideo}
+          />
+        )}
+      />
     );
   }
 
@@ -1478,16 +1542,29 @@ function renderFeedEntry(
 
   if (entry.type === "activity-group" && isContextCompactionActivityGroup(entry)) {
     const label = entry.activities[0]!.summary;
+    const item = entry.activities[0]!.projectedItem.item;
     const active =
       props.unsettledTurnId !== null &&
       entry.runId === props.unsettledTurnId &&
-      entry.activities[0]!.projectedItem.item.status === "running";
+      item.status === "running";
+    const labels = props.compactionLabelsByEntryId.get(entry.id);
+    const failure =
+      item.type === "compaction" && item.status === "failed" ? item.summary?.trim() : undefined;
     return (
       <ThreadContextDivider
-        label={label}
-        icon="arrow.down.right.and.arrow.up.left"
+        label={
+          failure
+            ? `${label} · ${failure}`
+            : active && labels
+              ? labels.compacting
+              : compactionLabel(label, labels?.title)
+        }
+        icon={
+          item.status === "failed" ? "exclamationmark.circle" : "arrow.down.right.and.arrow.up.left"
+        }
         iconColor={iconSubtleColor}
         active={active}
+        failed={item.status === "failed"}
       />
     );
   }
@@ -1523,6 +1600,25 @@ function renderFeedEntry(
           environmentId={props.environmentId}
           threadId={props.threadId}
           opening={props.workflowOpening}
+        />
+      );
+    }
+    if (isCompactionCommandFeedEntry(entry)) {
+      // Stands in for the compaction item until the provider reports it.
+      const active = props.unsettledTurnId !== null && message.runId === props.unsettledTurnId;
+      const reason = idleCompactionOf(message);
+      return (
+        <ThreadContextDivider
+          label={
+            !active
+              ? "Context compaction"
+              : reason === undefined
+                ? "Compacting context"
+                : IDLE_COMPACTING_LABELS[reason]
+          }
+          icon="arrow.down.right.and.arrow.up.left"
+          iconColor={iconSubtleColor}
+          active={active}
         />
       );
     }
@@ -1578,6 +1674,9 @@ function renderFeedEntry(
               Sent by Lecturn
             </Text>
           ) : null}
+          {presentation.guestName !== undefined ? (
+            <GuestMessageName name={presentation.guestName} />
+          ) : null}
           <GlassCard
             sheen="regular"
             radius={22}
@@ -1594,6 +1693,7 @@ function renderFeedEntry(
                     : null),
             }}
           >
+            {presentation.attribution === "guest" ? <GuestBubbleTint /> : null}
             {foldRowId !== null ? (
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
@@ -1759,7 +1859,7 @@ function renderFeedEntry(
                 <UserMessageCopyButton
                   text={presentation.text}
                   onCopy={
-                    message.context
+                    message.context && presentation.attribution !== "guest"
                       ? () =>
                           writeComposerContextClipboard(message.text, {
                             version: 1,
@@ -1817,29 +1917,12 @@ function renderFeedEntry(
               />
             </MarkdownImageAvailableWidthContext>
           ) : null}
-          {attachments.map((attachment) => {
-            return isImageAttachment(attachment) ? (
-              <MessageAttachmentImage
-                key={attachment.id}
-                environmentId={props.environmentId}
-                attachmentId={attachment.id}
-                name={attachment.name}
-                mimeType={attachment.mimeType}
-                className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-subtle-strong"
-                onPressPreview={props.onPressPreview}
-              />
-            ) : isFileAttachment(attachment) ? (
-              <MessageAttachmentFile
-                key={attachment.id}
-                environmentId={props.environmentId}
-                attachment={attachment}
-                onPressPreview={props.onPressPreview}
-                onPressVideo={props.onPressVideo}
-              />
-            ) : (
-              <MessageAttachmentUnknown key={attachment.id} name={attachment.name} />
-            );
-          })}
+          <MessageAttachmentList
+            attachments={attachments}
+            environmentId={props.environmentId}
+            onPressPreview={props.onPressPreview}
+            onPressVideo={props.onPressVideo}
+          />
         </GlassCard>
         {showAssistantMeta && message.checkpointSummary ? (
           <TurnDiffStat
@@ -1941,6 +2024,7 @@ type UserMessageContentProps = {
 function UserMessageContent(props: UserMessageContentProps) {
   const [selected, setSelected] = useState<{ contextId: string; label: string } | null>(null);
   const navigation = useNavigation();
+  const openLinkedThread = useOpenLinkedThread();
   const { selectedThread } = useThreadSelection();
   const liveText = useLiveThreadLinkLabels(props.text, props.environmentId);
   const threadIcons = useThreadChipIcons(props.environmentId, liveText, props.context?.records);
@@ -1959,7 +2043,7 @@ function UserMessageContent(props: UserMessageContentProps) {
       return;
     }
     if (record?.kind === "thread" && "threadId" in record) {
-      navigation.navigate("Thread", {
+      openLinkedThread({
         environmentId: String(record.environmentId),
         threadId: String(record.threadId),
       });
@@ -2182,10 +2266,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 function ThreadFeedView(props: ThreadFeedProps) {
   const { listRef, onEndFollowEnabledChange, onHeaderMaterialVisibilityChange } = props;
   const workflowOpening = useWorkflowOpening(props.environmentId, props.threadId);
+  const guestThreadRef = useMemo(
+    () => scopeThreadRef(props.environmentId, props.threadId),
+    [props.environmentId, props.threadId],
+  );
+  const guestShare = useThreadGuestShare(guestThreadRef);
   const deviceType = useDeviceType();
   const duoColumns = useNativeWorkspaceColumnsSupported() && isDuoDevice(deviceType);
   const openPullRequest = useOpenPullRequest();
   const navigation = useNavigation();
+  const openLinkedThread = useOpenLinkedThread();
   const onOpenTurnDiff = useCallback(
     (checkpoint: ThreadCheckpointSummary) => {
       setReviewSelectedSectionId(
@@ -2378,7 +2468,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     }
     const target = resolveLinkedThread(href);
     if (target) {
-      navigation.navigate("Thread", {
+      openLinkedThread({
         environmentId: String(target.environmentId),
         threadId: String(target.threadId),
       });
@@ -2691,6 +2781,10 @@ function ThreadFeedView(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
+  const compactionLabelsByEntryId = useMemo(
+    () => threadFeedCompactionLabels(props.feed),
+    [props.feed],
+  );
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
@@ -2805,12 +2899,15 @@ function ThreadFeedView(props: ThreadFeedProps) {
     reportHeaderMaterialVisibility(false);
   }, [feedThreadKey, reportHeaderMaterialVisibility]);
 
-  const presentedFeed = useThreadFeedPresentation(
-    props,
-    expandedTurnIds,
-    expandedWorkGroups,
-    unsettledTurnId,
-    expandedSquireUpdates,
+  const presentedFeed = appendGuestPendingMessages(
+    useThreadFeedPresentation(
+      props,
+      expandedTurnIds,
+      expandedWorkGroups,
+      unsettledTurnId,
+      expandedSquireUpdates,
+    ),
+    guestShare,
   );
   const presentedFeedRef = useRef(presentedFeed);
   useLayoutEffect(() => {
@@ -3098,7 +3195,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     }
   };
 
-  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedEntry) => {
+  const shouldRestoreVisibleContentPosition = (entry: ThreadFeedRow) => {
     const disclosureAnchorKey = disclosureAnchorKeyRef.current;
     return disclosureAnchorKey === null || entry.id === disclosureAnchorKey;
   };
@@ -3194,7 +3291,8 @@ function ThreadFeedView(props: ThreadFeedProps) {
   // Without this, every row above the viewport is assumed to be
   // estimatedItemSize tall, and scrolling up through unmeasured content
   // corrects each row's height as it mounts — the feed visibly jumps.
-  const getFixedItemSize = (entry: ThreadFeedEntry) => {
+  const getFixedItemSize = (entry: ThreadFeedRow) => {
+    if (entry.type === "guest-pending") return undefined;
     if (entry.type === "html-render") {
       return htmlRenderRowHeight(htmlRenderFrameHeight(entry.render, contentWidth));
     }
@@ -3242,7 +3340,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     if (hasHtmlRenders) listRef.current?.clearCaches({ mode: "sizes" });
   }, [beginReflow, contentWidth, hasHtmlRenders, listRef]);
 
-  const renderItem = (info: { item: PendingThreadFeedEntry; index: number }) => (
+  const renderItem = (info: { item: ThreadFeedRow; index: number }) => (
     <Animated.View
       key={info.item.id}
       entering={disclosureToggleSettling ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION : undefined}
@@ -3269,6 +3367,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
             terminalAssistantMessageIds,
             runlessForkPoints,
             unsettledTurnId,
+            compactionLabelsByEntryId,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,
@@ -3413,6 +3512,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
             keyExtractor={(entry) => entry.id}
             getItemType={(entry) => {
               if (entry.type !== "message") return entry.type;
+              if (isCompactionCommandFeedEntry(entry)) return "message:compaction";
               const { attribution } = resolveUserMessagePresentation(entry.message);
               return attribution === "automation" || attribution === "agent"
                 ? `message:${attribution}`
@@ -3547,7 +3647,7 @@ function ThreadFeedLoadEarlierControl(props: ThreadFeedHistoryControls) {
 }
 
 function MessageImageGalleryScope(props: {
-  entry: PendingThreadFeedEntry;
+  entry: ThreadFeedRow;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   workspaceRoot: string | null | undefined;

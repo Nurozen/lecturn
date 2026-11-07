@@ -3,8 +3,8 @@ import {
   type ProjectGitTarget,
   resolveRepositoryPullRequestSelector,
 } from "@lecturn/client-runtime/state/projectGit";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import {
-  pullRequestHostOf,
   type SourceControlProviderKind,
   type OrchestrationProjectShell,
   type ScopedThreadRef,
@@ -68,7 +68,10 @@ function RepoRow({
     identity && repository
       ? {
           repository,
-          host: pullRequestHostOf(identity, identity.provider as SourceControlProviderKind),
+          host: sourceControlClients.changeRequestHost(
+            identity,
+            identity.provider as SourceControlProviderKind,
+          ),
         }
       : undefined;
   const editable = target.mode === "edit" && project.stave?.state !== "archived";

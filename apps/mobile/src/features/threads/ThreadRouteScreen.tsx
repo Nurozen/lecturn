@@ -89,7 +89,7 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { resolveMergeBackTargetThreadId } from "@lecturn/client-runtime/state/thread-relationships";
 import { resolveLatestMergeBackRun } from "@lecturn/client-runtime/state/thread-workflows";
-import { threadEnvironment } from "../../state/threads";
+import { threadEnvironment, useThreadFamily } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
@@ -121,6 +121,7 @@ import {
   type ThreadRouteControl,
   type ThreadRouteControls,
 } from "./threadRouteControls";
+import { openSettings } from "../settings/settings-navigation";
 
 interface ThreadInspectorSelection {
   readonly routeThreadIdentity: string | null;
@@ -259,12 +260,7 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
     return (
       <ThreadUnavailableScreen
         actionLabel="Manage environments"
-        onAction={() =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsEnvironments" },
-          })
-        }
+        onAction={() => openSettings(navigation, "SettingsEnvironments")}
       />
     );
   if (decision.kind === "sign-in")
@@ -276,10 +272,7 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
             detail="Sign in to this thread's Connect account to continue."
             actionLabel="Sign in again"
             onAction={() =>
-              navigation.navigate("SettingsSheet", {
-                screen: "SettingsAddAccount",
-                params: { accountId: decision.accountId },
-              })
+              navigation.navigate("SettingsAddAccount", { accountId: decision.accountId })
             }
           />
         </View>
@@ -291,6 +284,12 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();
+  // Subagent rows, the open child's own row and its ancestors come from the family when the
+  // shell leaves idle children out.
+  useThreadFamily(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.lineage.rootThreadId ?? null,
+  );
   const params = props.route.params ?? {};
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const threadIdRaw = firstRouteParam(params.threadId);
@@ -343,10 +342,7 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
           onReconnectEnvironment(environmentId);
           return;
         }
-        navigation.navigate("SettingsSheet", {
-          screen: "SettingsContent",
-          params: { screen: "SettingsEnvironments" },
-        });
+        openSettings(navigation, "SettingsEnvironments");
       }}
     />
   );

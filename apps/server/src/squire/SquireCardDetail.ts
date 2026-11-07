@@ -13,10 +13,7 @@ import {
   ThreadId,
   type ThreadPullRequestLink,
 } from "@lecturn/contracts";
-import {
-  threadPullRequestKeyOf,
-  visibleThreadPullRequests,
-} from "@lecturn/shared/threadPullRequests";
+import { visibleThreadPullRequests } from "@lecturn/shared/threadPullRequests";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -28,6 +25,7 @@ import type {
   SquireEventRow,
   SquireRepository,
 } from "./SquireRepository.ts";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import { isHeadShaRevision } from "./squireEvents.ts";
 
 export const SQUIRE_TIMELINE_LIMIT = 12;

@@ -79,6 +79,7 @@ import {
 } from "../ui/alert-dialog";
 import { ConnectSubscriptionGate } from "../cloud/ConnectSubscriptionGate";
 import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
+import { useLecturnConnectAuthPrompt } from "../clerk/useLecturnConnectAuthPrompt";
 
 type SavedBackendListRowProps = {
   environment: EnvironmentPresentation;
@@ -497,16 +498,30 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     subscriptionRequired,
     checkSubscription,
   } = useCloudLinkController({ accountId: account.accountId, onSelectAccount: account.select });
+  const { openAuthPrompt } = useLecturnConnectAuthPrompt();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
 
-  const disabledReason = !isSignedIn
-    ? "Sign in to Lecturn Connect to manage this environment."
-    : !canManageRelay
-      ? "Your session does not have permission to manage Lecturn Connect access."
-      : null;
+  const disabledReason = canManageRelay
+    ? null
+    : "Your session does not have permission to manage Lecturn Connect access.";
   const isBusy = isUpdating || isUpdatingPreference;
+  const switchDisabled =
+    !canManageRelay ||
+    !isSignedIn ||
+    primaryCloudLinkState.data === null ||
+    primaryCloudLinkState.isPending ||
+    isBusy;
+  // `isSignedIn` is undefined until Clerk loads. Signed out, one row shows a
+  // sign-in button instead of its switch; the onboarding dialog that opens after
+  // a fresh sign-in offers both linking and publishing.
+  const signedOut = isSignedIn === false;
+  const signInButton = (
+    <Button size="sm" variant="outline" onClick={openAuthPrompt}>
+      Sign in
+    </Button>
+  );
   const refreshLinkState = useEffectEvent(primaryCloudLinkState.refresh);
   // The server rechecks reachability when the tunnel's 30 s readiness poll changes.
   // Poll while mounted, so a failed read does not stop later ones.
@@ -629,17 +644,19 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       <SettingsRow
         title={searchableSetting("lecturn-connect").title}
         description={
-          linkRevoked
-            ? "This environment was removed from Lecturn Connect. Turn it on to link it again."
-            : managedTunnelActive
-              ? reachability?.status === "unreachable"
-                ? "Lecturn Connect is on, but other devices cannot reach this environment."
-                : reachability?.status === "reachable"
-                  ? "This environment is available to your other devices through Lecturn Connect."
-                  : "Lecturn Connect is on. Reachability has not been checked yet."
-              : managedTunnelOutOfSync
-                ? "Lecturn Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn Lecturn Connect on to repair it."
-                : "Make this environment available to your other devices through Lecturn Connect."
+          signedOut
+            ? "Sign in to make this environment available to your other devices through Lecturn Connect."
+            : linkRevoked
+              ? "This environment was removed from Lecturn Connect. Turn it on to link it again."
+              : managedTunnelActive
+                ? reachability?.status === "unreachable"
+                  ? "Lecturn Connect is on, but other devices cannot reach this environment."
+                  : reachability?.status === "reachable"
+                    ? "This environment is available to your other devices through Lecturn Connect."
+                    : "Lecturn Connect is on. Reachability has not been checked yet."
+                : managedTunnelOutOfSync
+                  ? "Lecturn Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn Lecturn Connect on to repair it."
+                  : "Make this environment available to your other devices through Lecturn Connect."
         }
         status={
           operationError ??
@@ -649,18 +666,16 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           reachabilityStatus
         }
         control={
-          <CloudLinkSwitch
-            checked={managedTunnelActive}
-            disabled={
-              !canManageRelay ||
-              !isSignedIn ||
-              primaryCloudLinkState.data === null ||
-              primaryCloudLinkState.isPending ||
-              isBusy
-            }
-            disabledReason={disabledReason}
-            onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
-          />
+          signedOut ? (
+            signInButton
+          ) : (
+            <CloudLinkSwitch
+              checked={managedTunnelActive}
+              disabled={switchDisabled}
+              disabledReason={disabledReason}
+              onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
+            />
+          )
         }
       />
       {linked &&
@@ -750,26 +765,22 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      <SettingsRow
-        title={searchableSetting("publish-agent-activity").title}
-        description="Send activity to mobile notifications and Live Activities without Lecturn Connect."
-        control={
-          <CloudLinkSwitch
-            ariaLabel="Publish agent activity to mobile clients"
-            checked={publishAgentActivity}
-            disabled={
-              !canManageRelay ||
-              !isSignedIn ||
-              primaryCloudLinkState.data === null ||
-              primaryCloudLinkState.isPending ||
-              isBusy
-            }
-            disabledReason={disabledReason}
-            onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
-          />
-        }
-      />
-      {managedTunnelActive ? (
+      {signedOut ? null : (
+        <SettingsRow
+          title={searchableSetting("publish-agent-activity").title}
+          description="Send activity to mobile notifications and Live Activities without Lecturn Connect."
+          control={
+            <CloudLinkSwitch
+              ariaLabel="Publish agent activity to mobile clients"
+              checked={publishAgentActivity}
+              disabled={switchDisabled}
+              disabledReason={disabledReason}
+              onCheckedChange={(enabled) => void updatePublishAgentActivity(enabled)}
+            />
+          }
+        />
+      )}
+      {managedTunnelActive && !signedOut ? (
         <SettingsRow
           title={searchableSetting("hold-webhooks-while-offline").title}
           description="Keep webhook requests for up to 24 hours while this environment is offline, then deliver them. Off: Lecturn Connect only forwards requests and stores nothing."
@@ -777,13 +788,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             <CloudLinkSwitch
               ariaLabel="Hold webhook requests while this environment is offline"
               checked={holdWebhooksWhileOffline}
-              disabled={
-                !canManageRelay ||
-                !isSignedIn ||
-                primaryCloudLinkState.data === null ||
-                primaryCloudLinkState.isPending ||
-                isBusy
-              }
+              disabled={switchDisabled}
               disabledReason={disabledReason}
               onCheckedChange={(enabled) => void updateHoldWebhooks(enabled)}
             />

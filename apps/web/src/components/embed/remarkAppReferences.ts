@@ -4,7 +4,12 @@ import {
   wholeAppReference,
 } from "@lecturn/shared/appReferences";
 
-import type { MarkdownNode } from "~/vendor/mdast-find-and-replace";
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+  url?: string;
+};
 
 // A reference inside a link is that link's text; fenced code is not a `text` node, so it stays literal.
 const IGNORED_TYPES = new Set(["link", "linkReference"]);

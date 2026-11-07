@@ -1178,6 +1178,84 @@ from upstream's side.
   snapshots and every thread event. `apps/appStreamFilter.ts` strips `picks` for app and embed
   sessions; any new surface returning a thread needs the same filter.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream e19fe083).**
+
+- **Forge definitions (#23992-#24288).** Fork code reads hosts through the registry:
+  `sourceControlDefinitions` on the server (`sourceControl/sourceControlDefinitions.ts`),
+  `sourceControlClients` in client-runtime. Removed helpers map as follows:
+  `detectSourceControlProviderFrom{Git,}RemoteUrl` to `recognizeRemote`, `pullRequestHostOf`
+  to `changeRequestHost(identity, kind)`, `normalizeGitRemoteUrl` in host-aware code to
+  `repositoryKeyFromRemote`, the `dev.azure.com` checks to `canonicalRepositoryKey` and
+  `findByRepositoryKey`, the public-host fallback to `findByPublicHost` plus
+  `readsPublicHostWithoutCheckout`, and server `threadPullRequestKeyOf` to
+  `sourceControl/threadPullRequests.ts`. Port callers; never stub a removed helper.
+  - `PullRequestService` keeps its own `repositorySelector` (the full Azure path) and its
+    multi-checkout targets. Stave checkout matching lives in client-runtime
+    `changeRequestLinks.findChangeRequestTarget`; `openPullRequestLink.ts` only lends hosts.
+  - `source-control-github` keeps six `./server/*` exports that only fork tests import
+    (Squire CI excerpt, Saga evidence); drop each when its test moves into the package.
+  - Provider kinds are branded: fork fixtures use `SourceControlProviderKind.make(...)`.
+- **Guest links (#24104, beta).** Fork gates around upstream's guest surface:
+  - `GuestShareService.create` refuses Squire threads and threads in an app-bound project
+    (`not_shareable`). Web hides Share with guest for them (`isGuestShareableThread`).
+  - Guests get only `GUEST_THREAD_FIELDS` (`guest/guestView.ts`) in snapshots and thread
+    events: no `opens`, Lecturn Apps metadata, Squire marker, `importedFrom` or `forkOrigin`.
+    A new thread field is withheld until listed; a new whole-thread event fails typecheck in
+    `THREAD_RECORD_EVENTS` until listed. Decision data never enters the guest stream.
+  - App and embed sessions cannot send (`message.dispatch` with `guestMessageId`) or dismiss
+    a guest's pending message; that is the owner's approval. `guestShare.create` needs
+    `access:write` and is in no `APP_RPC_RULES` row.
+  - A fork never inherits `guestShare` or `opens`, run-full (`plan`) or run-less
+    (`planRunlessThreadFork`, which also drops PR watches like `plan`).
+  - Squire classifies the five guest commands as `squire` and `runtime-request.delivery.fail`
+    as `plumbing` (it follows a user's answer).
+- **Socket tickets (#24554).** Clients mint `/api/auth/websocket-ticket/rpc`; it is in
+  `appHttpAuthorization` `SESSION_PATHS` with the bare route, so Lecturn Apps and embeds
+  reach `/ws`. `/media` stays out: app sessions never open device streams.
+- **New ws RPCs and app sessions.** App and embed sessions get a new RPC only through
+  `APP_RPC_RULES`; withhold capability flags for RPCs they cannot call
+  (`shellThreadFamilies` goes to non-app sessions only).
+- **LAN default (#24588).** A managed background service binds `0.0.0.0` unless
+  `LECTURN_HOST` (env, flag or bootstrap) is set; `LECTURN_HOST=127.0.0.1` in `service.env`
+  keeps it local. Connect link proofs are unaffected: the endpoint origin is fixed at
+  `127.0.0.1`, which the wildcard bind also serves.
+- **Background work (#24610).** Commands and monitors hold completion only when awaited, in
+  Squire scheduling too; pass `awaited` with `kind`.
+- **`lecturn-highlights` (#23178, #24544).** Package `@lecturn/mobile-highlights-native`,
+  module dir `modules/lecturn-highlights`, `System.loadLibrary("lecturnhighlights")`, JNI
+  symbols `Java_expo_modules_lecturnhighlights_*`. `Vendor/` stays byte-identical. The
+  sweep misses symbols with no separator, so scan C and JNI names in renamed modules.
+- **Mobile.**
+  - `SettingsSheet` and `SettingsContent` are gone: Settings pages are root routes via
+    `openSettings` or `navigate`, sign-in routes are root modals, and `SettingsAddAccount`
+    is in `SETTINGS_MODAL_ROUTES` and the overlay list.
+  - Home and sidebar build through `useThreadListV2` with fork inputs `allThreads` and
+    `moveScopes`, then `buildHomeHierarchyV2Items`.
+  - A new thread-route control needs a `ThreadRouteControl` entry; the guest bar reuses
+    `thread-actions`. New upstream imports in `ThreadFeed` or `AdaptiveWorkspaceLayout`
+    need a stub in `threadRouteControls.test`, whose proxy treats unknown imports as truthy.
+  - Scroll views over an `ArcaneBackdrop` stay `bg-transparent` on every platform; do not
+    take upstream's `bg-screen`/`bg-drawer` scroll surface (UIKit scroll-edge note) on the
+    Settings list, Home or Pull requests.
+- **Web.** Upstream additions to `__root`'s shell go in the lazy `AppShell.tsx`; guest,
+  embed and billing branches return before it loads. The Lecturn Connect row shows on web
+  and desktop (upstream's `isElectron` gate stays out).
+- **Server.** `ThreadMessageIntake.dispatchCommand` runs `refuseClientThreadAppMetadata`
+  before upstream's `withGuestAttachments`. A fork object literal that restates every field
+  of an upstream-extended type merges clean and drops the new fields (`shell.ts` lost
+  `generation`); spread instead.
+- **Deps.** The `@pierre/diffs` patch has no fork delta: take upstream's on each bump. The
+  pnpm 12 lock holds two YAML documents; lock tools read the last `packages:`. Vendored names
+  and third-party paths in `apps/mobile/deps/README.md` and the `allowBuilds` tgz key stay
+  untranslated.
+- **Sweep artifacts to check.** Mixed-case owners (`PingDotGG/T3Code`) become
+  `Nurozen/Lecturn` where parsers expect `nurozen/lecturn`; `T3-code.<tool>` labels become
+  `Lecturn-code.<tool>` (the alias is `lecturn.<tool>`); `t3_code_orchestration_` keys are
+  `lecturn_orchestration_`; `/opt/T3 Code/` loses the space its quoting test needs (use
+  `/opt/Lecturn App/`); `com.t3tools.T3Code.desktop` is `com.cloudgatherer.lecturn.desktop`;
+  `useT3Connect`, `mcp__t3-code__` and `EXPO_PUBLIC_T3_` escape the sweep. A renamed fork
+  test title reads as a dropped test: add a new test instead.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

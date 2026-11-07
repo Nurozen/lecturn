@@ -30,7 +30,7 @@ describe("PullRequestsUnavailableState", () => {
       <PullRequestsUnavailableState
         error="GitHub did not answer."
         onRetry={() => {}}
-        gitHubUrl="https://github.com/nurozen/lecturn/pull/42"
+        host={{ url: "https://github.com/nurozen/lecturn/pull/42", openLabel: "Open on GitHub" }}
       />,
     );
 
@@ -45,7 +45,7 @@ describe("PullRequestsUnavailableState", () => {
     const html = renderToStaticMarkup(
       <PullRequestsUnavailableState
         error="This server cannot read the pull request."
-        gitHubUrl="https://github.com/nurozen/lecturn/pull/9"
+        host={{ url: "https://github.com/nurozen/lecturn/pull/9", openLabel: "Open on GitHub" }}
       />,
     );
 

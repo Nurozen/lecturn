@@ -1,7 +1,7 @@
 import * as Dialog from "../../components/ui/Dialog";
 import { useClerk } from "@clerk/expo";
 import { AuthView } from "@clerk/expo/native-components";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,7 +14,7 @@ import { AppText } from "../../components/ui/AppText";
 export function SettingsAddAccountRouteScreen(props: StaticScreenProps<{ accountId?: string }>) {
   const navigation = useNavigation();
   useEffect(() => {
-    if (!hasCloudPublicConfig()) navigation.dispatch(StackActions.popTo("SettingsContent"));
+    if (!hasCloudPublicConfig()) navigation.goBack();
   }, [navigation]);
   return hasCloudPublicConfig() ? (
     <SettingsAddAccountAuthContent expectedAccountId={props.route.params?.accountId} />
@@ -66,7 +66,7 @@ export function SettingsAddAccountAuthContent({
       );
       Dialog.alert("Account not added", "Sign in with the account you selected.");
     }
-    navigation.dispatch(StackActions.popTo("SettingsContent"));
+    navigation.goBack();
   }, [accounts, clerk, expectedAccountId, entry, navigation]);
   return (
     <View className="flex-1 bg-sheet">
@@ -80,10 +80,7 @@ export function SettingsAddAccountAuthContent({
               </AppText>
             </View>
           </SafeAreaView>
-          <AuthView
-            isDismissible={false}
-            onHostBack={() => navigation.dispatch(StackActions.popTo("SettingsContent"))}
-          />
+          <AuthView isDismissible={false} onHostBack={() => navigation.goBack()} />
         </>
       ) : (
         <AppText className="p-5 text-foreground">

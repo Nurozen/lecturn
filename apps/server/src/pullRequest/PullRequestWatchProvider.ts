@@ -1,5 +1,5 @@
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
-import { detectSourceControlProviderFromRemoteUrl } from "@lecturn/shared/sourceControl";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { StaveWorkspaceReader } from "../stave/StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "../stave/staveIncarnation.ts";
 import { SourceControlRateLimit } from "@lecturn/source-control-core/server/SourceControlRateLimit";
@@ -7,7 +7,6 @@ import { stableStringify } from "@lecturn/shared/relaySigning";
 import {
   PullRequestWatchError,
   SourceControlProviderKind,
-  pullRequestHostOf,
   type PullRequestRef,
   type PullRequestWatchObservation,
 } from "@lecturn/contracts";
@@ -66,7 +65,7 @@ export const make = Effect.gen(function* () {
     identity && isProviderKind(identity.provider) && identity.provider !== "unknown"
       ? identity.provider
       : identity
-        ? (detectSourceControlProviderFromRemoteUrl(identity.locator.remoteUrl)?.kind ??
+        ? (sourceControlDefinitions.recognizeRemote(identity.locator.remoteUrl)?.kind ??
           unknownKind)
         : unknownKind;
   const observe = Effect.fn("PullRequestWatchProvider.observe")(function* (
@@ -115,13 +114,13 @@ export const make = Effect.gen(function* () {
       ({ identity }) =>
         repositorySelector(identity)?.toLowerCase() === reference.repository.toLowerCase() &&
         (reference.host === undefined ||
-          pullRequestHostOf(identity, kindOf(identity)).toLowerCase() ===
+          sourceControlDefinitions.changeRequestHost(identity, kindOf(identity)).toLowerCase() ===
             reference.host.toLowerCase()),
     );
     const keys = new Set(
       matches.map(({ identity }) =>
         stableStringify([
-          pullRequestHostOf(identity, kindOf(identity)),
+          sourceControlDefinitions.changeRequestHost(identity, kindOf(identity)),
           repositorySelector(identity)?.toLowerCase(),
         ]),
       ),
@@ -134,7 +133,7 @@ export const make = Effect.gen(function* () {
       });
     let kind = kindOf(target.identity);
     if (kind === "unknown" && Option.isSome(sourceProviders)) {
-      const detected = detectSourceControlProviderFromRemoteUrl(target.identity.locator.remoteUrl);
+      const detected = sourceControlDefinitions.recognizeRemote(target.identity.locator.remoteUrl);
       const handle = yield* sourceProviders.value
         .resolveHandle({
           cwd: target.cwd,
@@ -157,7 +156,7 @@ export const make = Effect.gen(function* () {
         code: "unavailable",
         message: "Pull request tracking is not supported for this repository provider.",
       });
-    const host = pullRequestHostOf(target.identity, rawApi.kind);
+    const host = sourceControlDefinitions.changeRequestHost(target.identity, rawApi.kind);
     const api = withRateLimitBackoff(rawApi, host, limits);
     const repository = repositorySelector(target.identity)!;
     const ref = { cwd: target.cwd, host, repository, number: reference.number };

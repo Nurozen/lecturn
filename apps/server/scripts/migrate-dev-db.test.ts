@@ -111,6 +111,12 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
         (squire_id, thread_id, kind, state_key, status, not_before, created_at)
         VALUES ('squire-1', 'stopped-thread', 'turn-finished', 'run-1', 'pending', '2026-08-01', '2026-08-01')`;
       yield* sql`UPDATE squire_reactor_cursor SET sequence = 99, enabled = 1`;
+      yield* sql`INSERT INTO scheduled_task_webhook_replay_keys
+        (task_id, replay_key, delivery_id, expires_at)
+        VALUES ('task-1', 'replay-1', 'delivery-1', 1900000000000)`;
+      yield* sql`INSERT INTO scheduled_task_webhook_pending
+        (delivery_id, task_id, coalesce_key, due_at, task_json, request_json, delivery_ids_json)
+        VALUES ('delivery-1', 'task-1', 'key-1', 1900000000000, '{}', '{}', '[]')`;
       yield* sql`INSERT INTO auth_sessions (session_id, subject, scopes, method, issued_at, expires_at)
         VALUES ('session-1', 'user', '[]', 'pairing', '2026-08-01', '2027-08-01')`;
     }),
@@ -143,10 +149,17 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
             SELECT stream_id FROM orchestration_events ORDER BY stream_id`;
           const sessions = yield* sql<{ provider_session_id: string }>`
             SELECT provider_session_id FROM orchestration_v2_projection_provider_sessions`;
-          const [leftovers] = yield* sql<{ auth: number; tasks: number; transfers: number }>`
+          const [leftovers] = yield* sql<{
+            auth: number;
+            tasks: number;
+            webhooks: number;
+            transfers: number;
+          }>`
             SELECT
               (SELECT COUNT(*) FROM auth_sessions) AS auth,
               (SELECT COUNT(*) FROM scheduled_tasks) AS tasks,
+              (SELECT COUNT(*) FROM scheduled_task_webhook_replay_keys) +
+                (SELECT COUNT(*) FROM scheduled_task_webhook_pending) AS webhooks,
               (SELECT COUNT(*) FROM orchestration_v2_projection_context_transfers) AS transfers`;
           return { threads, events, sessions, leftovers };
         }),
@@ -163,7 +176,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         kept.sessions.map((row) => row.provider_session_id),
         ["session-shared"],
       );
-      assert.deepStrictEqual(kept.leftovers, { auth: 0, tasks: 0, transfers: 0 });
+      assert.deepStrictEqual(kept.leftovers, { auth: 0, tasks: 0, webhooks: 0, transfers: 0 });
     }),
   );
 

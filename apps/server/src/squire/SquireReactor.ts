@@ -27,7 +27,7 @@ import {
   TurnItemId,
 } from "@lecturn/contracts";
 import { backgroundWorkHoldsCompletion } from "@lecturn/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

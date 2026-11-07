@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -85,7 +85,7 @@ const repositoryIdentity = {
     remoteName: "upstream",
     remoteUrl: "https://github.com/nurozen/lecturn.git",
   },
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   owner: "nurozen",
   name: "lecturn",
   displayName: "Lecturn",

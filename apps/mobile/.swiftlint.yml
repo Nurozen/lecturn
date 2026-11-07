@@ -1,6 +1,7 @@
 included:
   - ios/Lecturn
   - modules/lecturn-composer-editor/ios
+  - modules/lecturn-highlights/ios
   - modules/lecturn-native-controls/ios
   - modules/lecturn-terminal/ios
   - modules/lecturn-review-diff/ios

@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   ContextTransferId,
+  GuestShareId,
   MessageId,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -12,6 +13,7 @@ import {
   RunId,
   ThreadId,
   type ThreadPullRequestLink,
+  TurnItemId,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -241,4 +243,42 @@ it.effect("rejects in-progress and rolled-back fork sources", () =>
       assert.equal(error.cause, ThreadForkService.forkableSourceRunStatusError(sourceRun));
     }
   }),
+);
+
+it.effect(
+  "never carries the source's guest link or open stats into a fork, with or without runs",
+  () =>
+    Effect.gen(function* () {
+      const sourceRun = makeSourceRun("completed");
+      const shared: OrchestrationV2AppThread = {
+        ...makeSourceThread(),
+        guestShare: {
+          id: GuestShareId.make("guest-share-source"),
+          host: "env.lecturn.test",
+          createdAt: DateTime.formatIso(sourceCreatedAt),
+          expiresAt: DateTime.formatIso(snoozedUntil),
+          guestName: "Sam",
+          messages: [],
+        },
+        opens: { openedAt: 1, score: 1, picks: [{ query: "source", at: 1 }] },
+      };
+      const runFull = yield* planFork(sourceRun, {
+        ...makeSourceProjection(sourceRun),
+        thread: shared,
+      });
+      const runless = ThreadForkService.planRunlessThreadFork({
+        sourceThread: shared,
+        lastSourceItemId: TurnItemId.make("turn-item:runless-last"),
+        transferId: ContextTransferId.make("context-transfer:runless"),
+        targetThreadId,
+        createdBy: "user",
+        creationSource: "web",
+        createdAt: forkCreatedAt,
+      });
+      for (const { targetThread } of [runFull, runless]) {
+        assert.isNull(targetThread.guestShare);
+        assert.isNull(targetThread.opens);
+      }
+      assert.isNotNull(shared.guestShare);
+    }),
 );

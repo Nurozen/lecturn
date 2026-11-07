@@ -4,6 +4,7 @@ import {
   GitCommandError,
   ProjectId,
   SquireId,
+  SourceControlProviderKind,
   ThreadId,
   type OrchestrationProjectShell,
   type PullRequestListEntry,
@@ -39,7 +40,7 @@ const discoveryCandidates = (
 const projectId = ProjectId.make("space");
 const identity = (name: string) => ({
   canonicalKey: `github.com/owner/${name}`,
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   displayName: `owner/${name}`,
   locator: {
     source: "git-remote" as const,

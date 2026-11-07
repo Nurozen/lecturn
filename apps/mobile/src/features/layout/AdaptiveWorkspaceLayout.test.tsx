@@ -6,10 +6,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import * as Layout from "../../lib/layout";
 import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
+import * as RootStackReset from "../../lib/root-stack-reset";
 import * as ThreadRouteState from "../threads/thread-route-state";
 import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 import * as DeferredNavigation from "./deferred-navigation";
+import * as WorkspaceOverlayRoutes from "./workspace-overlay-routes";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
 // derived objects keep their identity between renders. So this suite runs the layout module
@@ -18,7 +20,13 @@ let layoutRenders = 0;
 let screenRenders = 0;
 let readerRenders = 0;
 let navigationState: unknown = undefined;
-const navigation = { navigate: vi.fn(), dispatch: vi.fn(), getState: () => navigationState };
+const navigation = {
+  navigate: vi.fn(),
+  dispatch: vi.fn(),
+  getParent: () => undefined,
+  getState: () => navigationState,
+};
+const workspaceTabNavigationState = vi.fn(() => ({ index: 0, routes: [{ name: "Home" }] }));
 let threadSelectionAction = "push";
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
 const selectWorkspace = vi.fn();
@@ -28,6 +36,7 @@ const openPendingTaskStub = vi.fn();
 const preferences = { value: { threadListFilters: undefined } };
 // Stable like the real atom's value, so it never changes the context value's identity.
 const noProjects: readonly never[] = [];
+const noInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
   return <>{props.children}</>;
@@ -165,6 +174,19 @@ const stubModules: Record<string, unknown> = {
       return null;
     },
   },
+  "react-native-safe-area-context": {
+    SafeAreaInsetsContext: React.createContext(noInsets),
+    useSafeAreaInsets: () => noInsets,
+  },
+  "../workspace/AndroidWorkspaceTabsProvider": { useAndroidWorkspaceRoot: () => null },
+  "../settings/settings-navigation": { openSettings: vi.fn() },
+  "../../lib/root-stack-reset": RootStackReset,
+  "../workspace/workspace-selection-store": {
+    currentWorkspaceSelections: () => ({}),
+    workspaceSelectionCheck: { thread: () => false, pullRequest: () => false },
+  },
+  "../workspace/workspace-tab-navigation": { workspaceTabNavigationState },
+  "./workspace-overlay-routes": WorkspaceOverlayRoutes,
   "../../native/AndroidHingeObserver": { AndroidHingeObserver: () => null },
   "../../native/window-hinge-context": { WindowHingeContext: React.createContext(null) },
 };
@@ -349,5 +371,46 @@ describe("adaptive workspace thread selection", () => {
       environmentId: "e",
       threadId: "t",
     });
+  });
+});
+
+describe("adaptive workspace tabs", () => {
+  afterEach(() => {
+    navigationState = undefined;
+    navigation.dispatch.mockClear();
+    workspaceTabNavigationState.mockClear();
+  });
+
+  it("opens a tab under open sheets unless the sheet's own link asks to close them", async () => {
+    let openWorkspaceTab: ReturnType<typeof layout.useAdaptiveWorkspaceLayout>["openWorkspaceTab"];
+    function TabReader() {
+      ({ openWorkspaceTab } = layout.useAdaptiveWorkspaceLayout());
+      return null;
+    }
+    await renderWorkspace(<TabReader />);
+    const sheet = { key: "connections", name: "Connections" };
+    navigationState = {
+      key: "root",
+      index: 1,
+      routes: [{ key: "home", name: "Home" }, sheet],
+    };
+    const overlaysOfCall = (call: number) =>
+      (
+        workspaceTabNavigationState.mock.calls[call] as unknown as [
+          unknown,
+          unknown,
+          unknown,
+          { readonly overlays: readonly unknown[] },
+        ]
+      )[3].overlays;
+
+    await React.act(async () => openWorkspaceTab!("settings"));
+    expect(overlaysOfCall(0)).toEqual([sheet]);
+
+    await React.act(async () => openWorkspaceTab!("settings", { closeSheets: true }));
+    expect(overlaysOfCall(1)).toEqual([]);
+    expect(navigation.dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "RESET", target: "root" }),
+    );
   });
 });

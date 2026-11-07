@@ -7,8 +7,8 @@ import { useState } from "react";
 import { threadPullRequestLinkMode } from "@lecturn/client-runtime/thread-pull-request-compatibility";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 
-import { parseChangeRequestUrl } from "~/lib/openPullRequestLink";
-import { normalizeThreadPullRequestKey } from "@lecturn/shared/threadPullRequests";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
+import { normalizeThreadPullRequestKey } from "@lecturn/client-runtime/thread-pull-requests";
 import {
   useProjects,
   useServerConfigs,
@@ -54,7 +54,10 @@ function EnabledPullRequestThreadLinks({
   display,
   onPickerOpenChange,
 }: PullRequestThreadLinksProps) {
-  const parsed = parseChangeRequestUrl(url);
+  const parsedUrl = sourceControlClients.parseChangeRequestUrl(url);
+  const parsed = parsedUrl?.link ?? null;
+  const term = (parsedUrl?.definition ?? sourceControlClients.get(undefined)).changeRequest
+    .singular;
   const thread = useThreadShell(threadRef?.environmentId === environmentId ? threadRef : null);
   const currentThreadRef = thread === null ? null : threadRef;
   const linking = usePullRequestLinking(environmentId);
@@ -89,7 +92,7 @@ function EnabledPullRequestThreadLinks({
       const error = squashAtomCommandFailure(result);
       toastManager.add({
         type: "error",
-        title: remove ? "Could not unlink the pull request" : "Could not link the pull request",
+        title: remove ? `Could not unlink the ${term}` : `Could not link the ${term}`,
         description: error instanceof Error ? error.message : String(error),
       });
       return;
@@ -165,7 +168,7 @@ function EnabledPullRequestThreadLinks({
       {display === "picker" ? (
         <Dialog open onOpenChange={onPickerOpenChange}>
           <DialogPopup className="max-w-md" showCloseButton={false}>
-            <DialogTitle className="sr-only">Link pull request to a thread</DialogTitle>
+            <DialogTitle className="sr-only">Link {term} to a thread</DialogTitle>
             <ThreadPicker
               environmentId={environmentId}
               url={url}

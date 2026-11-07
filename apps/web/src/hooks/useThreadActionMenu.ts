@@ -3,6 +3,7 @@ import { useSquireTrack } from "../components/squire/track/useSquireTrack";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { staveAdmissionErrorMessage } from "@lecturn/client-runtime/errors";
+import { openGuestShareDialog } from "../components/chat/guestShareDialogState";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -68,8 +69,9 @@ export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
+  readonly canShareWithGuest: boolean;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename, canShareWithGuest } = input;
   const router = useRouter();
   const squireTrack = useSquireTrack();
   const projects = useProjects();
@@ -156,6 +158,7 @@ export function useThreadActionMenu(input: {
         squireTrack: squireTrackMenu
           ? { isSquireThread: thread.squire != null, menu: squireTrackMenu.state }
           : null,
+        canShareWithGuest,
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -262,6 +265,9 @@ export function useThreadActionMenu(input: {
           return;
         case "mark-unread":
           markThreadUnread(threadRef);
+          return;
+        case "share-guest":
+          openGuestShareDialog(threadRef);
           return;
         case "copy-path": {
           const workspacePath = thread.worktreePath ?? projectCwd;

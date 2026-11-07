@@ -6,8 +6,8 @@ import {
   type RepositoryScopeTarget,
 } from "@lecturn/client-runtime/state/repositoryScope";
 import { resolveRepositoryPullRequestSelector } from "@lecturn/client-runtime/state/projectGit";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import {
-  pullRequestHostOf,
   type ScopedProjectRef,
   type ScopedThreadRef,
   type SourceControlProviderKind,
@@ -38,7 +38,10 @@ function RepositoryRow({
       ? {
           projectId,
           repository,
-          host: pullRequestHostOf(identity, identity.provider as SourceControlProviderKind),
+          host: sourceControlClients.changeRequestHost(
+            identity,
+            identity.provider as SourceControlProviderKind,
+          ),
           number: pr.number,
         }
       : null;

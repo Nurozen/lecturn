@@ -3,6 +3,7 @@ import {
   ProjectId,
   type SagaWorkbenchSnapshot,
   type SagaWorkbenchWorkflow,
+  SourceControlProviderKind,
   type StaveSagaStatus,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -25,7 +26,7 @@ const project = (id: string, isSaga = false, environmentId = env): EnvironmentPr
   workspaceRoot: `/spaces/${id}`,
   repositoryIdentity: {
     canonicalKey: "github.com/org/repo",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "org",
     name: "repo",
     displayName: "org/repo",

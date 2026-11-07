@@ -136,6 +136,9 @@ import { threadEnvironment } from "../state/threads";
 import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { canShareWithGuestAtom, isGuestShareableThread } from "./chat/guestShareAvailability";
+import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import { buildThreadRouteParams, resolveActiveThreadRouteRef } from "../threadRoutes";
 import type { SidebarThreadSummary } from "../types";
 import { isScratchProject } from "@lecturn/client-runtime/state/projects";
@@ -1966,6 +1969,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               isRegeneratingTitle,
               isRunning: !threadRuntimeCanArchive(thread.runtime),
               canForkNow: readForkAtLatestTurn(threadRef).blockReason === null,
+              canShareWithGuest:
+                appAtomRegistry.get(canShareWithGuestAtom(threadRef.environmentId)) &&
+                isGuestShareableThread(
+                  thread,
+                  projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
+                ),
               supports: {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2070,6 +2079,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           }
           case "rename":
             startThreadRename(threadRef, thread.title);
+            return;
+          case "share-guest":
+            openGuestShareDialog(threadRef);
             return;
           case "regenerate-title": {
             if (isRegeneratingTitle) return;

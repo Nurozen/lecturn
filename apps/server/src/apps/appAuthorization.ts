@@ -191,6 +191,9 @@ const commandTargets = (command: OrchestrationV2Command): ReadonlyArray<AccessTa
   ) {
     return null;
   }
+  // Sending a guest's pending message is the owner's approval of it, so an embed on its own
+  // shared thread cannot do it; dismissing (`thread.guest-message.dismiss`) is not listed above.
+  if (command.type === "message.dispatch" && command.guestMessageId !== undefined) return null;
   return [{ threadId: command.threadId }, ...commandReferences(command)];
 };
 

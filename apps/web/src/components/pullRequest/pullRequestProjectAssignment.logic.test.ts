@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { type EnvironmentId, type ProjectId, SourceControlProviderKind } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -172,7 +172,7 @@ describe("where a pull request can be acted on", () => {
 describe("spaces with several repositories", () => {
   const identity = (host: string, name: string) => ({
     canonicalKey: `${host}/acme/${name}`,
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "acme",
     name,
     locator: {
@@ -255,13 +255,13 @@ describe("spaces with several repositories", () => {
 describe("provider-native PR checkout selection", () => {
   it.each([
     {
-      provider: "gitlab",
+      provider: SourceControlProviderKind.make("gitlab"),
       host: "gitlab.com",
       displayName: "acme/platform/api",
       repository: "acme/platform/api",
     },
     {
-      provider: "azure-devops",
+      provider: SourceControlProviderKind.make("azure-devops"),
       host: "dev.azure.com",
       displayName: "acme/platform/_git/api",
       repository: "acme/platform/_git/api",

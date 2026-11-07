@@ -134,6 +134,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
           TMPDIR: scratch,
           TEMP: scratch,
           LECTURN_HOME: home,
+          // The archive has a release channel built in, so its events would
+          // look like a real new install.
+          LECTURN_TELEMETRY_ENABLED: "false",
         },
         extendEnv: false,
       },

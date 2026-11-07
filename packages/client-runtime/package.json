@@ -479,6 +479,18 @@
       "types": "./src/pullRequestLinkInput.ts",
       "default": "./src/pullRequestLinkInput.ts"
     },
+    "./change-request-links": {
+      "types": "./src/changeRequestLinks.ts",
+      "default": "./src/changeRequestLinks.ts"
+    },
+    "./thread-pull-requests": {
+      "types": "./src/threadPullRequests.ts",
+      "default": "./src/threadPullRequests.ts"
+    },
+    "./thread-reference": {
+      "types": "./src/threadReference.ts",
+      "default": "./src/threadReference.ts"
+    },
     "./thread-pull-request-compatibility": {
       "types": "./src/threadPullRequestCompatibility.ts",
       "default": "./src/threadPullRequestCompatibility.ts"
@@ -547,6 +559,18 @@
       "types": "./src/pullRequestMarkdown.ts",
       "default": "./src/pullRequestMarkdown.ts"
     },
+    "./pull-request-checks": {
+      "types": "./src/pullRequestChecks.ts",
+      "default": "./src/pullRequestChecks.ts"
+    },
+    "./pull-request-editing": {
+      "types": "./src/pullRequestEditing.ts",
+      "default": "./src/pullRequestEditing.ts"
+    },
+    "./pull-request-reactions": {
+      "types": "./src/pullRequestReactions.ts",
+      "default": "./src/pullRequestReactions.ts"
+    },
     "./pull-request-query": {
       "types": "./src/pullRequestQuery.ts",
       "default": "./src/pullRequestQuery.ts"
@@ -563,13 +587,8 @@
   "dependencies": {
     "@lecturn/contracts": "workspace:*",
     "@lecturn/shared": "workspace:*",
-    "@lecturn/source-control-azure-devops": "workspace:*",
-    "@lecturn/source-control-bitbucket": "workspace:*",
     "@lecturn/source-control-core": "workspace:*",
-    "@lecturn/source-control-forgejo": "workspace:*",
-    "@lecturn/source-control-gitcafe": "workspace:*",
-    "@lecturn/source-control-github": "workspace:*",
-    "@lecturn/source-control-gitlab": "workspace:*",
+    "@lecturn/source-control-definitions": "workspace:*",
     "@pierre/diffs": "catalog:",
     "effect": "catalog:",
     "three": "0.180.0"

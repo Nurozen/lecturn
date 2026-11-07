@@ -48,6 +48,7 @@
     "@lecturn/source-control-azure-devops": "workspace:*",
     "@lecturn/source-control-bitbucket": "workspace:*",
     "@lecturn/source-control-core": "workspace:*",
+    "@lecturn/source-control-definitions": "workspace:*",
     "@lecturn/source-control-forgejo": "workspace:*",
     "@lecturn/source-control-gitcafe": "workspace:*",
     "@lecturn/source-control-github": "workspace:*",

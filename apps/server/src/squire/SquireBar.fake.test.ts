@@ -17,7 +17,7 @@ import {
   type SquireId,
   ThreadId,
 } from "@lecturn/contracts";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

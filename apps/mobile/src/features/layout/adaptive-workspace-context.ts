@@ -1,3 +1,4 @@
+import type { WorkspaceTab } from "../workspace/workspace-tabs-state";
 import { createContext, use, type ReactNode } from "react";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import {
@@ -26,6 +27,14 @@ interface AdaptiveWorkspaceContextValue {
   readonly toggleAuxiliaryPane: () => void;
   readonly togglePrimarySidebar: () => void;
   readonly setPrimarySidebarVisible: (visible: boolean) => void;
+  /**
+   * Opens a workspace tab with its list and, with columns, the page it last showed. Open sheets
+   * stay on top unless `closeSheets` is set, as for a sheet's own link to another tab.
+   */
+  readonly openWorkspaceTab: (
+    tab: WorkspaceTab | "settings",
+    options?: { readonly columns?: boolean; readonly closeSheets?: boolean },
+  ) => void;
   readonly setAuxiliaryPaneWidth: (width: number) => void;
   /**
    * Android split view while the thread composer has the soft keyboard: the
@@ -63,6 +72,7 @@ export const AdaptiveWorkspaceContext = createContext<AdaptiveWorkspaceContextVa
   toggleAuxiliaryPane: () => undefined,
   togglePrimarySidebar: () => undefined,
   setPrimarySidebarVisible: () => undefined,
+  openWorkspaceTab: () => undefined,
   setAuxiliaryPaneWidth: () => undefined,
   composerKeyboardActive: false,
   setComposerEditing: () => undefined,

@@ -1,4 +1,5 @@
 import { resolveDefaultBranchActionDialogCopy } from "@lecturn/client-runtime/state/vcs";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { resolveAutoFeatureBranchName } from "@lecturn/shared/git";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
@@ -15,6 +16,7 @@ import { AppText as Text } from "../../../components/ui/AppText";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
+import { useThreadSelection } from "../../../state/use-thread-selection";
 import { SheetActionButton } from "./gitSheetComponents";
 
 type GitConfirmSheetProps = StaticScreenProps<{
@@ -35,6 +37,10 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   const gitState = useSelectedThreadGitState(props.route.params.repoKey);
   const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
+  const { selectedThreadProject } = useThreadSelection();
+  const terminology = sourceControlClients.get(
+    selectedThreadProject?.repositoryIdentity?.provider,
+  ).changeRequest;
 
   const params = props.route.params;
   const { selectedThreadGitRepository } = useSelectedThreadWorktree(params.repoKey);
@@ -57,9 +63,10 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
             action: confirmAction,
             branchName,
             includesCommit,
+            terminology,
           })
         : null,
-    [branchName, confirmAction, includesCommit],
+    [branchName, confirmAction, includesCommit, terminology],
   );
 
   const continuePendingAction = useCallback(async () => {
