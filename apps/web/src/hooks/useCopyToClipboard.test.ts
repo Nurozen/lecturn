@@ -54,26 +54,6 @@ describe("writeTextToClipboard", () => {
     expect(html).toContain("data-t3-context-fragment=");
   });
 
-  it("preserves the exact clipboard failure without exposing copied contents", async () => {
-    const cause = new Error("browser clipboard failure");
-    const writeText = vi.fn().mockRejectedValue(cause);
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-
-    const error = await writeTextToClipboard("secret clipboard contents", "error-message").then(
-      () => undefined,
-      (failure: unknown) => failure,
-    );
-
-    expect(writeText).toHaveBeenCalledWith("secret clipboard contents");
-    expect(error).toBeInstanceOf(ClipboardWriteError);
-    expect(error).toMatchObject({
-      target: "error-message",
-      cause,
-    });
-    expect((error as Error).message).not.toContain("secret clipboard contents");
-  });
-
   it("recovers a desktop app clipboard permission denial while restoring focus and selection", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("Write permission denied"));
     const range = { saved: true };

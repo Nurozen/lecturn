@@ -1,5 +1,3 @@
-"use client";
-
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { cn } from "~/lib/utils";
@@ -10,8 +8,15 @@ import {
   DIALOG_SURFACE_CLASS,
   type DialogSurface,
 } from "~/components/ui/dialog-styles";
+import { ControlledOpenContext, renderRetainedPopup } from "~/components/ui/dialog";
 
-const AlertDialog = AlertDialogPrimitive.Root;
+function AlertDialog<Payload>(props: AlertDialogPrimitive.Root.Props<Payload>) {
+  return (
+    <ControlledOpenContext value={props.open}>
+      <AlertDialogPrimitive.Root {...props} />
+    </ControlledOpenContext>
+  );
+}
 
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
 
@@ -66,6 +71,7 @@ function AlertDialogPopup({
             className,
           )}
           data-slot="alert-dialog-popup"
+          render={renderRetainedPopup}
           {...props}
         />
       </AlertDialogViewport>

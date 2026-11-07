@@ -29,6 +29,7 @@ function harness(overrides: Partial<EmbedHostSessionDeps> = {}) {
     ...overrides,
   });
   // Requests settle on the microtask queue; one macrotask drains them.
+  // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
   const settled = () => new Promise((resolve) => setImmediate(resolve));
   return { session, sent, events, errors, settled };
 }

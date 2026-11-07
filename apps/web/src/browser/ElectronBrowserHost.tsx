@@ -1,5 +1,3 @@
-"use client";
-
 import { parseScopedThreadKey } from "@lecturn/client-runtime/environment";
 import {
   AuthPreviewOperateScope,

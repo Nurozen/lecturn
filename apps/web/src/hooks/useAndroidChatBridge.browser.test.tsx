@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vite-plus/test";
 
-import { act, render } from "../../test/render";
+import { act, fakeTimers, render } from "../../test/render";
 import { useAndroidChatBridge } from "./useAndroidChatBridge";
 import type { AndroidHost } from "../lib/androidHostAccess";
 
@@ -23,7 +23,7 @@ function Chat({ scope, ready = true }: { scope: string; ready?: boolean }) {
 }
 // Fake timers, the host bridge and frame stubs live for one test; disposing restores them.
 function setup(): Disposable {
-  vi.useFakeTimers();
+  const timers = fakeTimers();
   vi.clearAllMocks();
   publishChatWidget.mockReset().mockResolvedValue({ published: true });
   Object.assign(target, {
@@ -42,7 +42,7 @@ function setup(): Disposable {
     [Symbol.dispose]() {
       delete target.symbaHost;
       delete target.__lecturnComposeRequested;
-      vi.useRealTimers();
+      timers[Symbol.dispose]();
       vi.unstubAllGlobals();
     },
   };

@@ -243,6 +243,7 @@ const plantUserHomes = (root: string) => {
 };
 
 describe.runIf(enabled)("S0a2 Grok Squire isolation live", () => {
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.live(
     "home and probe reach only Lecturn's Squire tools on start and resume",
     () =>

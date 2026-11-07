@@ -315,6 +315,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(identity?.displayName).toBe("Nurozen/lecturn");
       expect(identity?.origin).toEqual({
         canonicalKey: "github.com/julius/lecturn-fork",
+        remoteUrl: "git@github.com:julius/lecturn-fork.git",
         displayName: "julius/lecturn-fork",
       });
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),

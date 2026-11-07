@@ -1,6 +1,11 @@
+import { hasAppToolApproval } from "@lecturn/client-runtime/state/thread-requests";
+
 import type { PendingApproval } from "../../session-logic";
 
 export const APP_TOOL_APPROVAL_SEND_BLOCK_REASON = "Approve or decline the app tool above to send.";
+/** The card on top is another approval, so "above" would point at the wrong one. */
+export const QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON =
+  "Answer this approval and the app tool waiting behind it to send.";
 
 /**
  * Provider approvals take over the composer; an app tool approval sits above
@@ -11,8 +16,16 @@ export function approvalReplacesComposer(approval: PendingApproval | null): bool
   return approval !== null && approval.connectedAppTool === undefined;
 }
 
-export function approvalSendBlockReason(approval: PendingApproval | null): string | null {
-  return approval?.connectedAppTool ? APP_TOOL_APPROVAL_SEND_BLOCK_REASON : null;
+/**
+ * A send declines every shown approval, so any app tool among them blocks it, whatever order they
+ * arrived in. `shownApprovals` leaves out what the typing guard holds, which a send leaves pending.
+ */
+export function approvalSendBlockReason(
+  activeApproval: PendingApproval | null,
+  shownApprovals: ReadonlyArray<PendingApproval>,
+): string | null {
+  if (activeApproval?.connectedAppTool) return APP_TOOL_APPROVAL_SEND_BLOCK_REASON;
+  return hasAppToolApproval(shownApprovals) ? QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON : null;
 }
 
 export type AppApprovalPart = "card" | "icon" | "more";

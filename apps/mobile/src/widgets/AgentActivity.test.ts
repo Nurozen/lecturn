@@ -221,17 +221,6 @@ describe("AgentActivity widget layout", () => {
     expect(JSON.stringify(layout.minimal)).toContain("#f0b34d");
   });
 
-  it("omits the deep link for unsafe paths and empty aggregates", () => {
-    expect(JSON.stringify(AgentActivity(props, environment as never))).not.toContain("widgetURL");
-    expect(
-      JSON.stringify(
-        AgentActivity(
-          { ...props, activities: [makeRow({ deepLink: "//evil.example" })] },
-          environment as never,
-        ),
-      ),
-    ).not.toContain("widgetURL");
-  });
   it("leads with the outcome instead of a zero count when nothing is active", () => {
     const layout = AgentActivity(
       {

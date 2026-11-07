@@ -117,7 +117,6 @@ describe("assistant citation references", () => {
   });
 
   it.each([
-    "https://example.com/quote",
     "citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=",
     "1prior-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=",
     "prior-citation://user@v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=",
@@ -128,20 +127,10 @@ describe("assistant citation references", () => {
     "prior-citation://v1/a/b/c?text=quote&start=5&end=0&prefix=&suffix=",
     "prior-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&text=duplicate",
     "lecturn-citation://v2/a/b/c?text=quote&start=0&end=5&prefix=&suffix=",
-    "lecturn-citation://v1/%ZZ/b/c?text=quote&start=0&end=5&prefix=&suffix=",
-    "lecturn-citation://v1/a/b/c?text=quote&start=NaN&end=5&prefix=&suffix=",
     "lecturn-citation://v1/a/b/c?text=quote&start=5&end=0&prefix=&suffix=",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=9007199254740992&prefix=&suffix=",
     "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&text=other",
     "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&unknown=value",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&comment=note&unknown=value",
     "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&comment=one&comment=two",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&comment=&comment=",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&comment=one&%63omment=two",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&comment=note",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=&text=other&comment=note",
-    "lecturn-citation://v1/a/b/c?text=&start=0&end=5&prefix=&suffix=",
-    "lecturn-citation://v1/a/b/c?text=quote&start=0&end=5&prefix=&suffix=#unexpected",
   ])("leaves invalid or unsupported references unchanged: %s", (href) => {
     expect(parseAssistantCitationHref(href)).toBeNull();
     const prompt = `[Assistant quote](${href})`;

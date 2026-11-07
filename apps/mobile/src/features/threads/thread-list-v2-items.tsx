@@ -9,17 +9,29 @@ import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { useVisibleSecondClock } from "./use-visible-second-clock";
 import type { ThreadMoveDestination } from "./threadOrder";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
 import type { EnvironmentThreadSearchMatch } from "@lecturn/client-runtime/state/thread-search";
+import { formatWorkingDurationLabel } from "@lecturn/client-runtime/state/models";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@lecturn/contracts";
 import { useRecyclingState, useViewabilityAmount } from "@legendapp/list/react-native";
 import { canSnooze, resolveSnoozePresets } from "@lecturn/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
-import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -67,8 +79,18 @@ import {
   type ThreadStatusLabel,
 } from "./thread-status-badge";
 
+const WOKE_STATUS_LABEL: ThreadStatusLabel = {
+  label: "Woke",
+  icon: "bell.badge",
+  className: "text-warning-foreground",
+  iconTintClassName: "accent-warning-foreground",
+};
+
 /** The status a row shows in place of its age, shared by the thread list and the Apps tab. */
-export function ThreadStatusBadge(props: { readonly label: ThreadStatusLabel }) {
+export function ThreadStatusBadge(props: {
+  readonly label: ThreadStatusLabel;
+  readonly detail?: ReactNode;
+}) {
   return (
     <View className="flex-row items-center gap-1">
       <SymbolView
@@ -78,11 +100,25 @@ export function ThreadStatusBadge(props: { readonly label: ThreadStatusLabel }) 
         type="monochrome"
         weight="semibold"
       />
-      <Text className={cn("text-xs font-lecturn-bold", props.label.className)}>
+      <Text
+        className={cn(
+          "text-xs font-lecturn-bold",
+          props.detail ? "tabular-nums" : null,
+          props.label.className,
+        )}
+      >
         {props.label.label}
+        {props.detail}
       </Text>
     </View>
   );
+}
+
+function ThreadListV2Duration(props: { readonly startedAt: string | null }) {
+  const startedAtMs = Date.parse(props.startedAt ?? "");
+  const nowMs = useVisibleSecondClock(Number.isFinite(startedAtMs));
+  if (!Number.isFinite(startedAtMs)) return null;
+  return ` ${formatWorkingDurationLabel(nowMs - startedAtMs)}`;
 }
 
 const CARD_MENU_ACTIONS: MenuAction[] = [
@@ -400,6 +436,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly hasQueuedMessages?: boolean;
   readonly snoozed?: boolean;
   readonly pinned?: boolean;
+  readonly wokeAt: string | null;
   readonly snoozeWakeLabelText?: string;
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
@@ -498,12 +535,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleOpenPullRequests = useCallback(() => {
     if (pr) onOpenThreadPullRequests(thread, pr);
   }, [onOpenThreadPullRequests, pr, thread]);
-  // VoiceOver cannot focus the badge inside the accessible row, so the row
-  // exposes the same action.
-  const rowAccessibilityActions = useMemo(
-    () => (prBadgeLabel ? [{ name: "openPullRequests", label: prBadgeLabel }] : undefined),
-    [prBadgeLabel],
-  );
 
   const theme = useUniwindTheme();
   const selectedBackgroundColor = theme["--color-card"];
@@ -513,6 +544,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const providerIconSurfaceColor = selectedBackgroundColor;
 
   const status = resolveThreadListV2Status(thread);
+  const showsWoke = status === "ready" && props.wokeAt !== null;
   const statusLabel = resolveThreadStatusLabel(thread);
   const visibleStatusLabel = resolveThreadStatusBadge(thread);
   const recede = shouldRecedeThreadRow({ status, selected });
@@ -522,6 +554,23 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     props.timeLabel === "" && status === "working"
       ? relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)
       : props.timeLabel;
+
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const handleAcknowledgeWoke = useCallback(() => {
+    if (props.wokeAt === null) return;
+    void visitThread({
+      environmentId: thread.environmentId,
+      input: { threadId: thread.id, visitedAt: props.wokeAt },
+    });
+  }, [props.wokeAt, thread.environmentId, thread.id, visitThread]);
+  // VoiceOver cannot focus buttons inside the accessible row.
+  const rowAccessibilityActions = useMemo(
+    () => [
+      ...(prBadgeLabel ? [{ name: "openPullRequests", label: prBadgeLabel }] : []),
+      ...(showsWoke ? [{ name: "dismissWoke", label: "Dismiss Woke notification" }] : []),
+    ],
+    [prBadgeLabel, showsWoke],
+  );
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleFork = useCallback(() => onForkThread(thread), [onForkThread, thread]);
@@ -900,8 +949,26 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             type="monochrome"
           />
         ) : null}
-        {visibleStatusLabel ? (
-          <ThreadStatusBadge label={visibleStatusLabel} />
+        {showsWoke ? (
+          <Pressable
+            className="-m-2.5 p-2.5"
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss Woke notification"
+            onPress={handleAcknowledgeWoke}
+            onLongPress={() => undefined}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+          >
+            <ThreadStatusBadge label={WOKE_STATUS_LABEL} />
+          </Pressable>
+        ) : visibleStatusLabel ? (
+          <ThreadStatusBadge
+            label={visibleStatusLabel}
+            detail={
+              status === "waiting" ? (
+                <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
+              ) : null
+            }
+          />
         ) : (
           <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
         )}
@@ -1053,6 +1120,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityActions={rowAccessibilityActions}
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
+          if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
         }}
         onPress={() => {
           close();

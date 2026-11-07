@@ -72,7 +72,9 @@ describe.runIf(provider)("summary latency and isolation (live)", () => {
     prefix: "lecturn-squire-s0d-",
   }).pipe(Layer.provideMerge(NodeServices.layer));
 
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.layer(layer, { timeout: 1_800_000, excludeTestServices: true })(`${driverKind}`, (it) => {
+    // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
     it.effect(
       `${turns} isolated summaries, p95 under ${P95_LIMIT_MS} ms`,
       () =>

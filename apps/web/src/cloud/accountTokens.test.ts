@@ -71,6 +71,7 @@ describe("readToken", () => {
         started.push(session.user.id);
         inFlight += 1;
         mostInFlight = Math.max(mostInFlight, inFlight);
+        // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
         await new Promise<void>((resolve) => setImmediate(resolve));
         inFlight -= 1;
         return jwt(session.user.id);

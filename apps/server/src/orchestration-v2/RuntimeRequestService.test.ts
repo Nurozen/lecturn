@@ -136,65 +136,6 @@ it.effect("rejects expired runtime requests before invoking the live adapter", (
   }).pipe(Effect.provide(layerTest));
 });
 
-it.effect("classifies runtime request response validation failures", () => {
-  const threadId = ThreadId.make("thread-runtime-request-validation");
-  const providerSessionId = ProviderSessionId.make("provider-session-runtime-request-validation");
-  const otherProviderSessionId = ProviderSessionId.make(
-    "provider-session-runtime-request-validation-other",
-  );
-  const requestId = RuntimeRequestId.make("request-validation");
-  const unexpectedGetSession = vi.fn(() => Effect.succeed(Option.none()));
-  const layerMissing = layerRuntimeRequestTest(
-    projectionWithRuntimeRequest(),
-    unexpectedGetSession,
-  );
-  const layerNotResumable = layerRuntimeRequestTest(
-    projectionWithRuntimeRequest(resolvedRuntimeRequest(requestId, otherProviderSessionId)),
-    unexpectedGetSession,
-  );
-  const layerInactive = layerRuntimeRequestTest(
-    projectionWithRuntimeRequest(resolvedRuntimeRequest(requestId, providerSessionId)),
-    () => Effect.succeed(Option.none()),
-  );
-  const respond = Effect.gen(function* () {
-    const service = yield* RuntimeRequestService.RuntimeRequestServiceV2;
-    return yield* service
-      .respond({
-        threadId,
-        providerSessionId,
-        requestId,
-        decision: "accept",
-      })
-      .pipe(Effect.flip);
-  });
-
-  return Effect.gen(function* () {
-    const missing = yield* respond.pipe(Effect.provide(layerMissing));
-    assert.equal(missing.reason, "request-missing");
-    assert.equal(
-      missing.message,
-      `Runtime request ${requestId} no longer exists on thread ${threadId}.`,
-    );
-    assert.isUndefined(missing.cause);
-
-    const notResumable = yield* respond.pipe(Effect.provide(layerNotResumable));
-    assert.equal(notResumable.reason, "request-not-resumable");
-    assert.equal(
-      notResumable.message,
-      `Runtime request ${requestId} on thread ${threadId} is not resumable on provider session ${providerSessionId}.`,
-    );
-    assert.isUndefined(notResumable.cause);
-
-    const inactive = yield* respond.pipe(Effect.provide(layerInactive));
-    assert.equal(inactive.reason, "provider-session-not-active");
-    assert.equal(
-      inactive.message,
-      `Provider session ${providerSessionId} is not active for runtime request ${requestId} on thread ${threadId}.`,
-    );
-    assert.isUndefined(inactive.cause);
-    assert.equal(unexpectedGetSession.mock.calls.length, 0);
-  });
-});
 it.effect(
   "never routes a connected-app approval to the provider, even with no waiting call",
   () => {

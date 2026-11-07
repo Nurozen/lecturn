@@ -562,6 +562,5 @@ describe("archive runner script", () => {
         );
         assert.isFalse(yield* fs.exists(`${home}/.lecturn/runtime`));
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 });

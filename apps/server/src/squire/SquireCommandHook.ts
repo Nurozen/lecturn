@@ -92,6 +92,7 @@ export const SQUIRE_COMMAND_RULES = {
   "run.interrupt": "user",
   "queued-message.promote-to-steer": "squire",
   "queue.resume": "user",
+  "queued-run.start": "user",
   "queued-run.reorder": "squire",
   "queued-run.cancel": "squire",
   "queued-run.edit": "squire",

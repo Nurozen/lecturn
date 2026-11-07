@@ -1,5 +1,3 @@
-"use client";
-
 import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@lecturn/contracts";
 import { previewPdfAssetUrl } from "@lecturn/shared/preview";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";

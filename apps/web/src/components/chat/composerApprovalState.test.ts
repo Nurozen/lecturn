@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { PendingApproval } from "../../session-logic";
 import {
   APP_TOOL_APPROVAL_SEND_BLOCK_REASON,
+  QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON,
   appApprovalReasonLine,
   appApprovalTestId,
   approvalReplacesComposer,
@@ -33,13 +34,13 @@ const appApproval = (reason: string | null, source: "static" | "app"): PendingAp
 describe("composer approval state", () => {
   it("leaves the composer alone with nothing pending", () => {
     expect(approvalReplacesComposer(null)).toBe(false);
-    expect(approvalSendBlockReason(null)).toBeNull();
+    expect(approvalSendBlockReason(null, [])).toBeNull();
     expect(appApprovalTestId(null, "card")).toBeUndefined();
   });
 
   it("lets a provider approval take over the composer without its own send reason", () => {
     expect(approvalReplacesComposer(providerApproval)).toBe(true);
-    expect(approvalSendBlockReason(providerApproval)).toBeNull();
+    expect(approvalSendBlockReason(providerApproval, [providerApproval])).toBeNull();
     expect(appApprovalTestId(providerApproval, "card")).toBeUndefined();
     expect(appApprovalTestId(providerApproval, "more")).toBeUndefined();
   });
@@ -47,7 +48,17 @@ describe("composer approval state", () => {
   it("keeps the composer live under an app tool approval but blocks send with a reason", () => {
     const approval = appApproval("Monte Carlo 500 samples > 100", "app");
     expect(approvalReplacesComposer(approval)).toBe(false);
-    expect(approvalSendBlockReason(approval)).toBe(APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
+    expect(approvalSendBlockReason(approval, [approval])).toBe(APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
+  });
+
+  it("blocks send in either arrival order, naming the app tool only when its card is on top", () => {
+    const approval = appApproval(null, "static");
+    expect(approvalSendBlockReason(providerApproval, [providerApproval, approval])).toBe(
+      QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON,
+    );
+    expect(approvalSendBlockReason(approval, [approval, providerApproval])).toBe(
+      APP_TOOL_APPROVAL_SEND_BLOCK_REASON,
+    );
   });
 
   it("gives test ids to the app approval card's parts only", () => {

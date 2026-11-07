@@ -1,14 +1,20 @@
+import { isHiddenSquireThread } from "@lecturn/client-runtime/state/thread-shell";
 import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useVisibleThreadShells } from "../state/entities";
+import { useProjects, useQuietThreadShells, useThreadListingCapabilities } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
 export function useSidebarProjectGroups() {
   const projects = useProjects();
-  const threads = useVisibleThreadShells();
+  // Activity order lags a running thread's streaming ticks until its next
+  // real change; reading every tick re-rendered the whole sidebar with it.
+  const listing = useThreadListingCapabilities();
+  const threads = useQuietThreadShells().filter(
+    (thread) => !isHiddenSquireThread(thread, listing.get(thread.environmentId)),
+  );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);

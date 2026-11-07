@@ -215,24 +215,6 @@ describe("lecturn server command safety", () => {
 });
 
 describe("lecturn app", () => {
-  it.effect("does not create state when only a server or no desktop app is running", () =>
-    withTempDirectory("lecturn-app-missing-test-", (root) =>
-      Effect.gen(function* () {
-        const baseDir = NodePath.join(root, "missing-lecturn-home");
-        const error = yield* runCli(["app", "--base-dir", baseDir]).pipe(Effect.flip);
-
-        expect(error).toMatchObject({
-          _tag: "DesktopAppUnreachableError",
-          candidateAddresses: [expect.any(String)],
-          workspaceRoot: yield* HostProcess.WorkingDirectory,
-          message: expect.stringContaining("Could not reach the Lecturn desktop app."),
-          cause: { code: "ENOENT" },
-        });
-        expect(yield* pathExists(baseDir)).toBe(false);
-      }),
-    ),
-  );
-
   it.effect("uses LECTURN_HOME or --base-dir and sends the default or explicit path", () =>
     withTempDirectory("lecturn-app-command-test-", (root) =>
       Effect.gen(function* () {

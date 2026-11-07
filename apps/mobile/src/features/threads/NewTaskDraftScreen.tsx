@@ -30,7 +30,7 @@ import {
   KeyboardStickyView,
   useKeyboardState,
 } from "react-native-keyboard-controller";
-import Animated from "react-native-reanimated";
+import Animated, { FadeInDown, ReduceMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 
@@ -78,6 +78,7 @@ import { hasProviderUsageLimits, isUsageLimitsCommand } from "@lecturn/shared/us
 import { threadContextsOutsideEnvironment } from "@lecturn/shared/composerContextReferences";
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from "./ThreadComposer";
 import { ComposerCommandPopover } from "./ComposerCommandPopover";
+import { ComposerPopoverAnchor } from "./ComposerPopoverAnchor";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
   ComposerDictationCancelAction,
@@ -154,6 +155,8 @@ import { fileRoutePathSegments } from "../files/filePath";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 
 const STAVE_WORKSPACE_MODE_HINT = "Stave spaces always run in the space root";
+
+const COMPOSER_POPOVER_ENTERING = FadeInDown.duration(180).reduceMotion(ReduceMotion.System);
 
 function NewTaskWorkspaceIcon(props: {
   readonly workspaceMode: "local" | "worktree";
@@ -1637,6 +1640,15 @@ export function NewTaskDraftScreen(props: {
     </View>
   );
 
+  const composerPopover = composerMenu.trigger ? (
+    <ComposerCommandPopover
+      items={composerMenu.items}
+      triggerKind={composerMenu.trigger.kind}
+      isLoading={composerMenu.isLoading}
+      error={composerMenu.error}
+      onSelect={composerMenu.onSelect}
+    />
+  ) : null;
   const composerDock = (
     <View
       className={
@@ -1647,15 +1659,15 @@ export function NewTaskDraftScreen(props: {
       {!voiceInput.isBusy &&
       composerMenu.trigger &&
       (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
-        <View className="mb-2">
-          <ComposerCommandPopover
-            items={composerMenu.items}
-            triggerKind={composerMenu.trigger.kind}
-            isLoading={composerMenu.isLoading}
-            error={composerMenu.error}
-            onSelect={composerMenu.onSelect}
-          />
-        </View>
+        Platform.OS === "ios" ? (
+          <View>
+            <ComposerPopoverAnchor>
+              <Animated.View entering={COMPOSER_POPOVER_ENTERING}>{composerPopover}</Animated.View>
+            </ComposerPopoverAnchor>
+          </View>
+        ) : (
+          <View className="mb-2">{composerPopover}</View>
+        )
       ) : null}
       {projectClone && projectClone.phase !== "done" && selectedProject ? (
         <View className="px-1 pb-2">

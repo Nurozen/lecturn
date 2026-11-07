@@ -61,7 +61,9 @@ describe.runIf(live)("Codex Squire summary home (live)", () => {
     prefix: "lecturn-squire-codex-summary-home-",
   }).pipe(Layer.provideMerge(NodeServices.layer));
 
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.layer(layer, { timeout: 600_000, excludeTestServices: true })("codex", (it) => {
+    // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
     it.effect(
       "keeps the source home's AGENTS.md out of a Squire summary request",
       () =>

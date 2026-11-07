@@ -210,7 +210,7 @@ user through normal provider approvals; Android grants remain independent.
    shared toybox mount operation. This step and first guest apt/npm need network.
 4. For a **new guest**, stage the three pinned downloads in the root host context
    and run `python3 /usr/local/share/symba-runtime/guest-seed.py --sources
-/usr/local/share/symba-runtime --downloads /root/pinned-downloads` there. It verifies digests, creates fresh SSH client/guest host
+   /usr/local/share/symba-runtime --downloads /root/pinned-downloads` there. It verifies digests, creates fresh SSH client/guest host
    keys and native agent token, generates cloud-init media and a persistent qcow2
    overlay. Optional `--allow-guest-sudo` grants guest-only NOPASSWD sudo. No secrets
    print. Existing disk/key/token paths cause refusal, never overwrite.

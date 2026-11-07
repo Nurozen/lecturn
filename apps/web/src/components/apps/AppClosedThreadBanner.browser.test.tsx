@@ -13,7 +13,7 @@ import type { LegendListRef } from "@legendapp/list/react";
 import { createRef, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
-import { act, render as renderUi, type Screen } from "../../../test/render";
+import { act, fakeTimers, render as renderUi, type Screen } from "../../../test/render";
 
 const MAC = EnvironmentId.make("mac");
 const PROJECT = ProjectId.make("hopper-38mm");
@@ -42,7 +42,7 @@ vi.mock(import("../../state/apps"), async (original) => ({
   useAppEmbedContext: ((ref: unknown) => (ref === null ? null : embedContext)) as never,
 }));
 
-import { ChatBannerLane } from "../chat/ChatBannerLane";
+import { ChatBannerLaneFrame } from "../chat/ChatBannerLane";
 import { MessagesTimeline } from "../chat/MessagesTimeline";
 import { ThreadErrorBanner } from "../chat/ThreadErrorBanner";
 
@@ -88,9 +88,9 @@ function ChatCanvas({
   // The chat canvas as ChatView lays it out: the banner lane over the timeline.
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      <ChatBannerLane>
+      <ChatBannerLaneFrame>
         <ThreadErrorBanner error={error} onDismiss={() => setError(null)} />
-      </ChatBannerLane>
+      </ChatBannerLaneFrame>
       <div className="relative flex min-h-0 flex-1 flex-col">
         <MessagesTimeline {...timeline} />
       </div>
@@ -164,11 +164,11 @@ const SLIGHTLY_OVERFLOWING_THREAD = Array.from({ length: 10 }, (_, index) => rep
 
 const banner = () => container.querySelector<HTMLElement>('[data-testid="app-closed-banner"]');
 const threadErrorAlert = () => container.querySelector<HTMLElement>('[data-slot="alert"]');
-const nextFrames = async (count: number) => {
-  for (let frame = 0; frame < count; frame += 1) {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  }
-};
+// The caller holds `fakeTimers()`, so these frames run now instead of racing the renderer.
+const nextFrames = (count: number) =>
+  act(async () => {
+    for (let frame = 0; frame < count; frame += 1) vi.advanceTimersToNextFrame();
+  });
 const placeholder = () =>
   [...container.querySelectorAll<HTMLElement>("p")].find((node) =>
     node.textContent?.includes("Send a message to start the conversation."),
@@ -249,6 +249,11 @@ describe("AppClosedThreadBanner when the thread error is dismissed", () => {
   async function dismissThreadError() {
     await userEvent.click(container.querySelector<HTMLElement>('[aria-label="Dismiss error"]')!);
     await vi.waitFor(() => expect(threadErrorAlert()).toBeNull());
+    // Published from the same resize delivery the list re-measures in.
+    const canvas = container.querySelector(".chat-banner-lane")!.parentElement!;
+    await vi.waitFor(() =>
+      expect(canvas.style.getPropertyValue("--chat-banner-lane-height")).toBe("0px"),
+    );
     // The list re-pins to the end from an animation frame after it re-measures.
     await nextFrames(4);
   }
@@ -257,6 +262,7 @@ describe("AppClosedThreadBanner when the thread error is dismissed", () => {
     await using _setup = await setup();
     const viewport = await renderRevokedThreadWithError();
     await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
+    using _timers = fakeTimers();
     await act(async () => viewport.scrollTo({ top: 0 }));
     await nextFrames(2);
     expect(viewport.scrollTop).toBe(0);
@@ -274,6 +280,7 @@ describe("AppClosedThreadBanner when the thread error is dismissed", () => {
     await using _setup = await setup();
     const viewport = await renderRevokedThreadWithError();
     await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
+    using _timers = fakeTimers();
 
     await dismissThreadError();
 

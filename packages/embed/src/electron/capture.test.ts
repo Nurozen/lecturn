@@ -367,6 +367,7 @@ function fromGuest(
 const toGuest = (wc: { sent: Array<{ channel: string; message: any }> }) =>
   wc.sent.filter((entry) => entry.channel === TO_GUEST).map((entry) => entry.message);
 
+// oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("mountEmbedView bridge", () => {

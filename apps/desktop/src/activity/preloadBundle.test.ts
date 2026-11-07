@@ -39,6 +39,7 @@ function bundleRequires(source: string): string[] {
   return requires;
 }
 
+// oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound real bundle build, not a hidden wait.
 it("bundles the sandboxed activity preload without runtime requires beyond electron", async () => {
   const packConfig = (Array.isArray(desktopConfig.pack) ? desktopConfig.pack : []).find(
     (config) => Array.isArray(config.entry) && config.entry.includes("src/activity-preload.ts"),

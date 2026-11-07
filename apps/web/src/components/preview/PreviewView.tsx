@@ -1,5 +1,3 @@
-"use client";
-
 import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
 import { settlePromise } from "@lecturn/client-runtime/state/runtime";
 import { previewStreamDownloadUrl } from "@lecturn/client-runtime/preview/server-browser-stream";

@@ -75,7 +75,7 @@ vi.mock(import("../state/use-atom-command"), async (original) => ({
   useAtomCommand: (() => mocks.command) as never,
 }));
 
-import { act, render as renderUi, type Screen } from "../../test/render";
+import { act, fakeTimers, render as renderUi, type Screen } from "../../test/render";
 import { ExtensionsFunding } from "./ExtensionsFunding";
 import {
   FUNDING_OBSERVATION_LIMIT,
@@ -121,7 +121,7 @@ function calls(operation: string) {
   return mocks.command.mock.calls.filter(([input]) => input.input.operation === operation);
 }
 function setup(): AsyncDisposable {
-  vi.useFakeTimers();
+  const timers = fakeTimers();
   vi.setSystemTime(new Date("2026-09-26T12:00:00.000Z"));
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.command.mockReset();
@@ -150,7 +150,7 @@ function setup(): AsyncDisposable {
       const current = view;
       view = undefined;
       await current?.[Symbol.asyncDispose]();
-      vi.useRealTimers();
+      timers[Symbol.dispose]();
       vi.restoreAllMocks();
     },
   };

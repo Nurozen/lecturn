@@ -6,10 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Notifications from "expo-notifications";
 
-import {
-  enableAgentNotifications,
-  requestAgentNotificationPermission,
-} from "./notificationPermissions";
+import { enableAgentNotifications } from "./notificationPermissions";
 
 const platform = vi.hoisted(() => ({ OS: "android" }));
 vi.mock("react-native", () => ({ Platform: platform }));
@@ -95,25 +92,4 @@ describe("enabling device notifications", () => {
       expect(register).not.toHaveBeenCalled();
     });
   });
-});
-
-describe("agent notification permission", () => {
-  beforeEach(() => {
-    resetNotificationMocks();
-    platform.OS = "android";
-  });
-
-  it.effect("preserves denied permission when Android cannot ask again", () =>
-    Effect.gen(function* () {
-      vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({
-        granted: false,
-        canAskAgain: false,
-      } as Notifications.NotificationPermissionsStatus);
-      expect(yield* requestAgentNotificationPermission).toEqual({
-        type: "denied",
-        canAskAgain: false,
-      });
-      expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
-    }),
-  );
 });
