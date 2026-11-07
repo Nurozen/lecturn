@@ -7,7 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { AppRegistration } from "@lecturn/contracts/apps";
 import * as Schema from "effect/Schema";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { isProcessAlive, serverRuntimeStatePath } from "./discovery.ts";
 import {
@@ -317,7 +317,10 @@ describe("startSidecar", () => {
       () => null,
       (cause: unknown) => cause,
     );
-    while (!NodeFS.existsSync(out)) await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(NodeFS.existsSync(out)).toBe(true), {
+      timeout: 10_000,
+      interval: 20,
+    });
     const { pid } = await received();
     expect(isProcessAlive(pid)).toBe(true);
 

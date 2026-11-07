@@ -107,10 +107,7 @@ const buttons = (view: View) => [...view.container.querySelectorAll("button")];
 async function click(view: View, text: string) {
   const button = buttons(view).find((b) => b.textContent === text);
   expect(button).toBeDefined();
-  await act(async () => {
-    button!.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  await act(async () => button!.click());
 }
 async function setup(): Promise<AsyncDisposable> {
   // Both funding views are lazy chunks; load them first so a cold transform cannot outlast a render.

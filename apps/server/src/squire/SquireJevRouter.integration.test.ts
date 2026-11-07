@@ -12,6 +12,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { EnvironmentId, type SquireRoutingRequest } from "@lecturn/contracts";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -133,7 +134,7 @@ describe.skipIf(env.LECTURN_SQUIRE_JEV_LIVE !== "1")("Jev routing (live)", () =>
       const samples = [];
       for (const [index, body] of posts.entries()) {
         const requestId = `squire-route:live-${run}-${index}`;
-        const started = performance.now();
+        const started = yield* Clock.currentTimeMillis;
         const outcome = yield* Effect.result(
           client.route({
             featureId: "squires",
@@ -145,7 +146,7 @@ describe.skipIf(env.LECTURN_SQUIRE_JEV_LIVE !== "1")("Jev routing (live)", () =>
             post: { body },
           }),
         );
-        const ms = performance.now() - started;
+        const ms = (yield* Clock.currentTimeMillis) - started;
         samples.push(
           outcome._tag === "Success"
             ? { body, ms, ...outcome.success.judgments[0]! }

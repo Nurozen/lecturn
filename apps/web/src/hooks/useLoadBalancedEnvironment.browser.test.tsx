@@ -81,8 +81,10 @@ describe("automatic environment selection", () => {
 
   it("keeps capacity exhaustion distinct from failure and selects a recovered machine", async () => {
     await using fixture = await mount();
+    const sampledAt = 1_800_000_000_000;
+    using _now = vi.spyOn(Date, "now").mockReturnValue(sampledAt);
     const snapshot = {
-      sampledAt: Date.now(),
+      sampledAt,
       cpuCount: 8,
       cpuUtilization: 0.99,
       totalMemoryBytes: 16_000_000_000,

@@ -13,7 +13,7 @@ import { relayEnvironmentDiscovery } from "~/state/relay";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
-import { CloudLinkRow } from "./ConnectionsSettings";
+import { CloudLinkRow } from "./SavedEnvironmentRows";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { relayHealthStatus } from "./RelaySettings.logic";
 

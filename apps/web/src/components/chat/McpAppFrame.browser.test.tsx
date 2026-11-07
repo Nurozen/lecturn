@@ -125,6 +125,11 @@ vi.mock(import("../../hooks/useHtmlRenderTheme"), async (original) => ({
 import { render as renderUi } from "../../../test/render";
 import { McpAppFrame } from "./McpAppFrame";
 
+// Playwright evaluates with a user gesture, and the provider evaluates when the first vi.mock
+// registers, so this file starts with activation no one gave the page until it lapses.
+const idlePage = () =>
+  vi.waitFor(() => expect(navigator.userActivation.isActive).toBe(false), { timeout: 10_000 });
+
 function setup() {
   let skew = 0;
   appHtml = APP_HTML;
@@ -188,6 +193,7 @@ function setup() {
 }
 
 it("keeps load and idle retries inline even after the page-input cooldown", async () => {
+  await idlePage();
   using fixture = setup();
   await using screens = new AsyncDisposableStack();
   const { renderApp, nextAnswer, retry, isFullscreen, advance } = fixture;
@@ -203,6 +209,7 @@ it("keeps load and idle retries inline even after the page-input cooldown", asyn
 });
 
 it("allows an app click immediately after loading on an idle page", async () => {
+  await idlePage();
   using fixture = setup();
   await using screens = new AsyncDisposableStack();
   const { renderApp, nextAnswer, isFullscreen } = fixture;

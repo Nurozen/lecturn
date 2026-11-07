@@ -128,72 +128,63 @@ describe.skipIf(!url)("PostgreSQL relink ownership", () => {
         ).toEqual([]);
       }).pipe(Effect.ensuring(f.cleanup), Effect.provide(f.services));
     },
-    30_000,
   );
-  it.effect(
-    "commits the sole new recipient while failed cleanup remains retryable",
-    () => {
-      const f = fixture();
-      f.fail(true);
-      return Effect.gen(function* () {
-        const relinks = yield* EnvironmentRelinks;
-        const links = yield* EnvironmentLinks;
-        const { $client: sql } = yield* RelayDb;
-        yield* f.insert(f.users[0]!, "2026-01-01T00:00:00.000Z");
-        yield* relinks.withLinkLock(
-          f.environmentId,
-          Effect.gen(function* () {
-            yield* relinks.displace({ userId: f.users[1]!, environmentId: f.environmentId });
-            yield* f.insert(f.users[1]!, "2026-01-02T00:00:00.000Z");
-          }),
-        );
-        expect(
-          yield* links.listDeliveryUsersForEnvironment({
-            environmentId: f.environmentId,
-            environmentPublicKey: "shared-key",
-          }),
-        ).toHaveLength(1);
-        expect(
-          yield* sql`SELECT 1 FROM relay_environment_link_cleanup WHERE environment_id=${f.environmentId}`,
-        ).toHaveLength(1);
-        f.fail(false);
-        yield* relinks.drain(f.environmentId);
-        expect(f.events).toEqual(["credential", "endpoint", "team"]);
-        expect(f.decisionRevocations).toContain(f.environmentId);
-        expect(
-          yield* sql`SELECT 1 FROM relay_environment_link_cleanup WHERE environment_id=${f.environmentId}`,
-        ).toEqual([]);
-      }).pipe(Effect.ensuring(f.cleanup), Effect.provide(f.services));
-    },
-    30_000,
-  );
-  it.effect(
-    "concurrent relinks commit only one live owner",
-    () => {
-      const f = fixture();
-      return Effect.gen(function* () {
-        const relinks = yield* EnvironmentRelinks;
-        const links = yield* EnvironmentLinks;
-        yield* Effect.forEach(
-          f.users,
-          (userId) =>
-            relinks.withLinkLock(
-              f.environmentId,
-              Effect.gen(function* () {
-                yield* relinks.displace({ userId, environmentId: f.environmentId });
-                yield* f.insert(userId, "2026-01-02T00:00:00.000Z");
-              }),
-            ),
-          { concurrency: 2 },
-        );
-        expect(
-          yield* links.listDeliveryUsersForEnvironment({
-            environmentId: f.environmentId,
-            environmentPublicKey: "shared-key",
-          }),
-        ).toHaveLength(1);
-      }).pipe(Effect.ensuring(f.cleanup), Effect.provide(f.services));
-    },
-    30_000,
-  );
+  it.effect("commits the sole new recipient while failed cleanup remains retryable", () => {
+    const f = fixture();
+    f.fail(true);
+    return Effect.gen(function* () {
+      const relinks = yield* EnvironmentRelinks;
+      const links = yield* EnvironmentLinks;
+      const { $client: sql } = yield* RelayDb;
+      yield* f.insert(f.users[0]!, "2026-01-01T00:00:00.000Z");
+      yield* relinks.withLinkLock(
+        f.environmentId,
+        Effect.gen(function* () {
+          yield* relinks.displace({ userId: f.users[1]!, environmentId: f.environmentId });
+          yield* f.insert(f.users[1]!, "2026-01-02T00:00:00.000Z");
+        }),
+      );
+      expect(
+        yield* links.listDeliveryUsersForEnvironment({
+          environmentId: f.environmentId,
+          environmentPublicKey: "shared-key",
+        }),
+      ).toHaveLength(1);
+      expect(
+        yield* sql`SELECT 1 FROM relay_environment_link_cleanup WHERE environment_id=${f.environmentId}`,
+      ).toHaveLength(1);
+      f.fail(false);
+      yield* relinks.drain(f.environmentId);
+      expect(f.events).toEqual(["credential", "endpoint", "team"]);
+      expect(f.decisionRevocations).toContain(f.environmentId);
+      expect(
+        yield* sql`SELECT 1 FROM relay_environment_link_cleanup WHERE environment_id=${f.environmentId}`,
+      ).toEqual([]);
+    }).pipe(Effect.ensuring(f.cleanup), Effect.provide(f.services));
+  });
+  it.effect("concurrent relinks commit only one live owner", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const relinks = yield* EnvironmentRelinks;
+      const links = yield* EnvironmentLinks;
+      yield* Effect.forEach(
+        f.users,
+        (userId) =>
+          relinks.withLinkLock(
+            f.environmentId,
+            Effect.gen(function* () {
+              yield* relinks.displace({ userId, environmentId: f.environmentId });
+              yield* f.insert(userId, "2026-01-02T00:00:00.000Z");
+            }),
+          ),
+        { concurrency: 2 },
+      );
+      expect(
+        yield* links.listDeliveryUsersForEnvironment({
+          environmentId: f.environmentId,
+          environmentPublicKey: "shared-key",
+        }),
+      ).toHaveLength(1);
+    }).pipe(Effect.ensuring(f.cleanup), Effect.provide(f.services));
+  });
 });

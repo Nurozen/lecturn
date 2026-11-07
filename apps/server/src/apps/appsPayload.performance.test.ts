@@ -355,38 +355,35 @@ const meanBytes = (updates: WorldMeasurement["updates"]) =>
   updates.reduce((sum, update) => sum + update.bytes, 0) / updates.length;
 
 describe("shell payload for a client that is not an app", () => {
-  it.live(
-    `grows at most ${MAX_GROWTH * 100}% per update with the fixture app registered`,
-    () =>
-      Effect.gen(function* () {
-        const without = yield* measureWorld(false);
-        const withApp = yield* measureWorld(true);
+  it.live(`grows at most ${MAX_GROWTH * 100}% per update with the fixture app registered`, () =>
+    Effect.gen(function* () {
+      const without = yield* measureWorld(false);
+      const withApp = yield* measureWorld(true);
 
-        // The fixture really is there: its imported threads reach this client's snapshot.
-        assert.strictEqual(without.appThreadsInSnapshot, 0);
-        assert.isAtLeast(withApp.appThreadsInSnapshot, 7);
+      // The fixture really is there: its imported threads reach this client's snapshot.
+      assert.strictEqual(without.appThreadsInSnapshot, 0);
+      assert.isAtLeast(withApp.appThreadsInSnapshot, 7);
 
-        // An idle app adds no updates: the client hears only about the threads the workload changed.
-        const userThreadIds = new Set<string>(userThreads.map(({ threadId }) => threadId));
-        for (const world of [without, withApp]) {
-          assert.lengthOf(world.updates, WORKLOAD_STEPS);
-          for (const update of world.updates) {
-            assert.strictEqual(update.kind, "thread.updated");
-            assert.isTrue(userThreadIds.has(update.id), `unexpected update for ${update.id}`);
-          }
+      // An idle app adds no updates: the client hears only about the threads the workload changed.
+      const userThreadIds = new Set<string>(userThreads.map(({ threadId }) => threadId));
+      for (const world of [without, withApp]) {
+        assert.lengthOf(world.updates, WORKLOAD_STEPS);
+        for (const update of world.updates) {
+          assert.strictEqual(update.kind, "thread.updated");
+          assert.isTrue(userThreadIds.has(update.id), `unexpected update for ${update.id}`);
         }
+      }
 
-        // App fields are optional keys, omitted on every non-app row.
-        assert.deepEqual([...withApp.userRowBytes], [...without.userRowBytes]);
+      // App fields are optional keys, omitted on every non-app row.
+      assert.deepEqual([...withApp.userRowBytes], [...without.userRowBytes]);
 
-        const before = meanBytes(without.updates);
-        const after = meanBytes(withApp.updates);
-        const growth = (after - before) / before;
-        yield* Effect.logInfo(
-          `Shell bytes per update for a non-app client: ${before.toFixed(1)} without the fixture app, ${after.toFixed(1)} with it (${(growth * 100).toFixed(2)}%)`,
-        );
-        assert.isAtMost(growth, MAX_GROWTH);
-      }),
-    60_000,
+      const before = meanBytes(without.updates);
+      const after = meanBytes(withApp.updates);
+      const growth = (after - before) / before;
+      yield* Effect.logInfo(
+        `Shell bytes per update for a non-app client: ${before.toFixed(1)} without the fixture app, ${after.toFixed(1)} with it (${(growth * 100).toFixed(2)}%)`,
+      );
+      assert.isAtMost(growth, MAX_GROWTH);
+    }),
   );
 });

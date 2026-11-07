@@ -193,7 +193,9 @@ describe.runIf(liveProvider)("B3 summary gold (live)", () => {
   }).pipe(Layer.provideMerge(NodeServices.layer));
 
   // Live clock: durationMs is wall time, and the provider timeouts can fire.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.layer(layer, { timeout: 600_000, excludeTestServices: true })(`${driverKind}`, (it) => {
+    // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
     it.effect(
       `writes ${liveRuns} runs of the gold summary for the critics`,
       () =>

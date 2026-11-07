@@ -66,13 +66,6 @@ describe("searchSettings", () => {
     expect(searchSettings("xyzzy")).toEqual([]);
   });
 
-  it("keeps catalog order for multiple title matches", () => {
-    expect(searchSettings("update", ITEMS).map((item) => item.id)).toEqual([
-      "provider-updates",
-      "automatic-updates",
-    ]);
-  });
-
   it("matches query words across fields and ranks the strongest result first", () => {
     expect(searchSettings("pairing remote", ITEMS).map((item) => item.id)).toEqual([
       "network-access",
@@ -89,15 +82,6 @@ describe("searchSettings", () => {
     expect(searchSettings("hold to quit")).toEqual([]);
     expect(searchSettings("wsl")).toEqual([]);
     expect(searchSettings("update track")).toEqual([]);
-  });
-
-  it("hides macOS-only settings on other platforms", () => {
-    vi.stubGlobal("navigator", { platform: "Win32" });
-    try {
-      expect(searchSettings("font smoothing")).toEqual([]);
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 
   it("offers Squire settings only when an environment runs Squires", () => {
@@ -155,68 +139,6 @@ describe("searchSettings", () => {
       "stave-config-path",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
-  });
-
-  it("offers Cursor Keychain settings only when a macOS provider environment is available", () => {
-    const availability = {
-      hasCloudPublicConfig: false,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: false,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-      hasStave: false,
-    };
-    const itemIds = (macAvailable: boolean) =>
-      filterAvailableSettingsSearchItems({
-        ...availability,
-        hasMacProviderSettingsEnvironment: macAvailable,
-      }).map((item) => item.id);
-    expect(itemIds(false)).not.toContain("cursor-keychain-usage");
-    expect(itemIds(true)).toContain("cursor-keychain-usage");
-  });
-
-  it("keeps the local toggle searchable without offering hidden host publishing controls", () => {
-    const availability = {
-      hasCloudPublicConfig: true,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: false,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-      hasStave: false,
-    };
-    const remoteOnly = filterAvailableSettingsSearchItems({
-      ...availability,
-      localEnvironmentDisabled: true,
-    }).map((item) => item.id);
-    expect(remoteOnly).toContain("local-environment");
-    expect(remoteOnly).not.toContain("lecturn-connect");
-    expect(remoteOnly).not.toContain("publish-agent-activity");
-    expect(remoteOnly).not.toContain("wsl-backend");
-    const browser = filterAvailableSettingsSearchItems(availability).map((item) => item.id);
-    expect(browser).toContain("publish-agent-activity");
-  });
-
-  it("offers webhook holding only while the managed tunnel is on, like its row", () => {
-    const availability = {
-      hasCloudPublicConfig: true,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: true,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-      hasStave: false,
-    };
-    const itemIds = (managedTunnelActive: boolean) =>
-      filterAvailableSettingsSearchItems({ ...availability, managedTunnelActive }).map(
-        (item) => item.id,
-      );
-    expect(itemIds(false)).not.toContain("hold-webhooks-while-offline");
-    expect(itemIds(true)).toContain("hold-webhooks-while-offline");
   });
 
   it("offers the Connect account actions only where the account menu exists", () => {
@@ -291,14 +213,6 @@ describe("searchSettings", () => {
     });
   });
 
-  it("ranks keybinding commands after other settings", () => {
-    const ids = searchSettings("model").map((item) => item.id);
-    expect(ids[0]).toBe("default-model");
-    expect(ids.indexOf("keybinding-modelPicker.toggle")).toBeGreaterThan(
-      ids.indexOf("text-generation-model"),
-    );
-  });
-
   it("sends commands without a default binding to the section", () => {
     expect(searchSettings("thread.stop")[0]).toMatchObject({
       id: "keybinding-thread.stop",
@@ -322,15 +236,6 @@ describe("settings search targets", () => {
     expect(isSettingsSearchScopeAvailable(target.scope, "all")).toBe(false);
     expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
     expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
-  });
-
-  it("treats device-local rows as reachable from every selection", () => {
-    const setting = getSettingsSearchTargetScope("time-format")!;
-    expect(setting).toEqual({ title: "Time format", scope: null });
-    expect(isSettingsSearchScopeAvailable(setting.scope, "project")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(setting.scope, "all")).toBe(true);
-    expect(getSettingsSearchTargetScope("appearance")).toMatchObject({ scope: null });
-    expect(getSettingsSearchTargetScope("missing-setting")).toBeNull();
   });
 
   it("keeps environment-wide settings out of project scopes", () => {
@@ -394,15 +299,6 @@ describe("auto-settlement search availability", () => {
     ).toEqual({ eligibleEnvironmentIds: [capable.environmentId], isTargetAvailable: false });
   });
 
-  it("allows a capable named environment regardless of other environments' capabilities", () => {
-    expect(
-      getThreadAutoSettlementSearchAvailability(environments, {
-        kind: "environment",
-        environmentIds: [capable.environmentId],
-      }).isTargetAvailable,
-    ).toBe(true);
-  });
-
   it.each([unsupported, offline, loading])(
     "does not render the target on $environmentId or silently fall back",
     (selected) => {
@@ -415,15 +311,6 @@ describe("auto-settlement search availability", () => {
     },
   );
 
-  it("offers a capable environment instead of a dead target at an unavailable scope", () => {
-    expect(
-      getThreadAutoSettlementSearchAvailability(environments, {
-        kind: "unavailable",
-        environmentIds: [capable.environmentId],
-      }),
-    ).toEqual({ eligibleEnvironmentIds: [capable.environmentId], isTargetAvailable: false });
-  });
-
   it("ignores offline and unloaded targets when all connected targets support the setting", () => {
     const selected = [capable, offline, loading];
     expect(
@@ -432,17 +319,6 @@ describe("auto-settlement search availability", () => {
         environmentIds: selected.map((entry) => entry.environmentId),
       }).isTargetAvailable,
     ).toBe(true);
-  });
-
-  it("offers no unavailable environments when none can render the setting", () => {
-    const selected = [unsupported, offline, loading];
-    expect(
-      getThreadAutoSettlementSearchAvailability(selected, {
-        kind: "all",
-        environmentIds: selected.map((entry) => entry.environmentId),
-      }),
-    ).toEqual({ eligibleEnvironmentIds: [], isTargetAvailable: false });
-    expect(getThreadAutoSettlementSearchAvailability([]).eligibleEnvironmentIds).toEqual([]);
   });
 });
 

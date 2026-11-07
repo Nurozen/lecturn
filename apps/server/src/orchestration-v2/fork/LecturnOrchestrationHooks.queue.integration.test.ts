@@ -318,6 +318,7 @@ const eventually = <E, R>(label: string, done: () => Effect.Effect<boolean, E, R
   Effect.gen(function* () {
     for (let step = 0; step < 2_000; step++) {
       if (yield* done()) return;
+      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
       yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
     }
     assert.fail(`timed out waiting for: ${label}`);

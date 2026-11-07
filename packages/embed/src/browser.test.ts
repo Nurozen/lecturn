@@ -68,6 +68,7 @@ function harness(overrides: Partial<MountEmbedOptions> = {}) {
         origin: from.origin ?? GUEST_ORIGIN,
       }),
     );
+  // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
   const settled = () => new Promise((resolve) => setImmediate(resolve));
   const handshake = async (id = "guest-1") => {
     fromGuest(initialize(id));

@@ -113,6 +113,7 @@ const sentinelsIn = (text: string) => SENTINEL_STRINGS.filter((token) => text.in
 const results = new Map<string, Array<{ run: number; pass: boolean; failures: Array<string> }>>();
 
 describe.runIf(providerEnv)(`B2-live on ${provider} (${model})`, () => {
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.live.each(cases)(
     "$id run $run",
     ({ id, run, scenario }) =>
@@ -176,6 +177,7 @@ describe.runIf(providerEnv)(`B2-live on ${provider} (${model})`, () => {
     { timeout: 900_000 },
   );
 
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.live.each(holdCases)(
     "$id run $run (informational)",
     ({ id, run, scenario }) =>
@@ -195,6 +197,7 @@ describe.runIf(providerEnv)(`B2-live on ${provider} (${model})`, () => {
               );
               if (dues.length > 0) {
                 const now = yield* Clock.currentTimeMillis;
+                // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- held cards fire on the live provider run's real clock.
                 yield* Effect.sleep(Duration.millis(Math.max(0, Math.max(...dues) - now) + 1_000));
               }
               yield* barSettle(loaded.squireId);

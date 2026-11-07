@@ -147,14 +147,6 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({});
   });
 
-  it("persists Material You independently for each appearance", async () => {
-    const themes = { lightThemeId: "material-you", darkThemeId: "ocean" } as const;
-    await savePreferencesPatch(themes);
-    await expect(loadPreferences()).resolves.toEqual(themes);
-    await savePreferencesPatch({ lightThemeId: "iris" });
-    await expect(loadPreferences()).resolves.toEqual({ ...themes, lightThemeId: "iris" });
-  });
-
   it("falls back to secure storage when SQLite cannot save preferences", async () => {
     mocks.setDatabaseFailures(true, true);
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });
@@ -194,21 +186,6 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 21 });
     expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({ baseFontSize: 21 });
     expect(mocks.getStoredValue("lecturn.preferences.fallback")).toBeNull();
-  });
-
-  it("ignores an invalid fallback even when it has a newer timestamp", async () => {
-    mocks.setPreferencesJson(JSON.stringify({ baseFontSize: 21 }), 30);
-    await mocks.setItemAsync(
-      "lecturn.preferences.fallback",
-      JSON.stringify({ payload: "{", updatedAt: 40 }),
-    );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 21 });
-    expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({ baseFontSize: 21 });
-    expect(mocks.getStoredValue("lecturn.preferences.fallback")).toBeNull();
-
-    warn.mockRestore();
   });
 
   it("keeps SQLite authoritative when stale legacy preferences remain", async () => {

@@ -30,7 +30,7 @@ async function render(focused: boolean) {
 async function nextFrame() {
   const callbacks = frames;
   frames = [];
-  await act(() => callbacks.forEach((callback) => callback(Date.now())));
+  await act(() => callbacks.forEach((callback) => callback(0)));
 }
 
 beforeEach(() => {

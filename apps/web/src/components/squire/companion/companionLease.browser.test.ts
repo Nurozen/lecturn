@@ -215,6 +215,7 @@ describe("gesture player", () => {
         // One at a time: a gesture starts only after the previous one finished.
         expect(running).toBe(0);
         running += 1;
+        // oxlint-disable-next-line lecturn/no-frame-waits-in-browser-tests -- the fake gesture's own duration, so an overlapping play would be seen.
         await new Promise((resolve) => setTimeout(resolve, 5));
         played.push(name);
         running -= 1;

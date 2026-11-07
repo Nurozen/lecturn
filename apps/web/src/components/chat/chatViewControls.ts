@@ -1,5 +1,6 @@
 import type { KeybindingCommand } from "@lecturn/contracts";
 
+import { composerShortcutCommands } from "./composerShortcuts";
 import { useChatShortcuts, type ChatShortcutsInput } from "./useChatShortcuts";
 
 /**
@@ -113,17 +114,26 @@ export function useChatViewShortcuts(
   controls: ChatViewControls | undefined,
   input: ChatShortcutsInput,
 ): void {
+  const allowed = (command: string) => {
+    const control = SHORTCUT_CONTROLS[command as KeybindingCommand];
+    return control !== undefined && controls?.has(control) === true;
+  };
   useChatShortcuts(
     controls === undefined
       ? input
       : {
           ...input,
-          commands: Object.fromEntries(
-            Object.entries(input.commands).filter(([command]) => {
-              const control = SHORTCUT_CONTROLS[command as KeybindingCommand];
-              return control !== undefined && controls.has(control);
-            }),
-          ),
+          commands: {
+            // useChatShortcuts adds the composer's chords itself; a denied one passes the key on.
+            ...Object.fromEntries(
+              Object.keys(composerShortcutCommands(input.composerRef, input.branchToolbarRef))
+                .filter((command) => !allowed(command))
+                .map((command) => [command, () => false]),
+            ),
+            ...Object.fromEntries(
+              Object.entries(input.commands).filter(([command]) => allowed(command)),
+            ),
+          },
         },
   );
 }

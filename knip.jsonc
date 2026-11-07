@@ -82,6 +82,8 @@
     "apps/marketing": {
       // The fork's legal pages are hand-written and do not use this layout.
       "ignore": ["src/components/LegalPage.astro"],
+      // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.
+      "ignoreDependencies": ["@astrojs/check"],
     },
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.

@@ -1,5 +1,3 @@
-"use client";
-
 import type { DesktopPreviewColorScheme } from "@lecturn/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 

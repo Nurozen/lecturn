@@ -45,7 +45,7 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
   ...(await original()),
   useAtomCommand: ((kind: string) => (input: unknown) => mocks.command(kind, input)) as never,
 }));
-import { act, render, type Screen } from "../../../test/render";
+import { act, fakeTimers, render, type Screen } from "../../../test/render";
 import { ContextualArchive } from "./ContextualArchive";
 const environmentId = EnvironmentId.make("host");
 let view: Screen | undefined;
@@ -130,7 +130,7 @@ describe("administrator archive management", () => {
     vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
       tag === "a" ? anchor : createElement(tag)) as never);
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fixture");
-    vi.useFakeTimers();
+    using _timers = fakeTimers();
     try {
       await renderAndSelect();
       await click("Export this source");
@@ -145,7 +145,6 @@ describe("administrator archive management", () => {
       expect(anchor.download).toBe("lecturn-contextual-artifact-one.ndjson");
     } finally {
       vi.clearAllTimers();
-      vi.useRealTimers();
     }
   });
   it("does not present a running export as downloadable or complete", async () => {

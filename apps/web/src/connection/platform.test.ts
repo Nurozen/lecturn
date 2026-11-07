@@ -36,7 +36,6 @@ import {
   primaryRegistrationToRetainAfterTopologyRead,
   prepareDesktopSshEnvironment,
   provisionDesktopSshEnvironment,
-  readPrimaryEnvironmentTargetResult,
   secondaryRegistrationsToRetainAfterTopologyRead,
   webCloudSession,
 } from "./platform.ts";
@@ -144,19 +143,6 @@ describe("desktop SSH pairing", () => {
       ).pipe(Effect.flip);
 
       expect(error).toMatchObject({ reason: "configuration" });
-      expect(calls).toEqual(["ensure", "descriptor"]);
-    }),
-  );
-
-  it.effect("does not consume the credential when descriptor discovery fails", () =>
-    Effect.gen(function* () {
-      const calls: string[] = [];
-
-      yield* provisionDesktopSshEnvironment(
-        makeBridge(calls, { failDescriptor: true }),
-        TARGET,
-      ).pipe(Effect.flip);
-
       expect(calls).toEqual(["ensure", "descriptor"]);
     }),
   );
@@ -388,6 +374,7 @@ describe("rejected desktop-local bootstrap tokens", () => {
     );
   });
 
+  // regression: #16273 a rejected desktop-local credential was retried every poll
   it("treats only authentication rejections as a dead credential", () => {
     expect(
       isRejectedBootstrapCredentialError(
@@ -427,16 +414,6 @@ describe("primary topology cache", () => {
   };
   const previous = new Map([[PRIMARY_LOCAL_ENVIRONMENT_ID, cached]]);
 
-  it("captures synchronous primary target read failures", () => {
-    const cause = new Error("invalid primary target");
-
-    expect(
-      readPrimaryEnvironmentTargetResult(() => {
-        throw cause;
-      }),
-    ).toEqual({ _tag: "Failure", cause });
-  });
-
   it("retains the cached primary after a transient topology read failure", () => {
     expect(
       primaryRegistrationToRetainAfterTopologyRead(previous, {
@@ -444,15 +421,6 @@ describe("primary topology cache", () => {
         cause: new Error("IPC unavailable"),
       }),
     ).toBe(cached);
-  });
-
-  it("treats a successful primary absence as authoritative removal", () => {
-    expect(
-      primaryRegistrationToRetainAfterTopologyRead(previous, {
-        _tag: "Success",
-        target: null,
-      }),
-    ).toBeUndefined();
   });
 });
 

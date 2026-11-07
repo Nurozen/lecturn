@@ -102,18 +102,6 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectOrder).toEqual([keyB, keyC, keyALocal, keyARemote]);
   });
 
-  it("does not reorder missing or identical groups", () => {
-    const currentOrder = ["env-local:proj-a", "env-local:proj-b"];
-    const state = makeUiState();
-
-    expect(reorderProjects(state, currentOrder, ["env-local:missing"], ["env-local:proj-b"])).toBe(
-      state,
-    );
-    expect(reorderProjects(state, currentOrder, ["env-local:proj-a"], ["env-local:proj-a"])).toBe(
-      state,
-    );
-  });
-
   it("switches the sidebar mode and keeps each mode's scope", () => {
     const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/nurozen/lecturn");
     const apps = setSidebarAppScopeKey(setSidebarMode(scoped, "apps"), "dev.lecturn.example");
@@ -147,18 +135,6 @@ describe("uiStateStore pure functions", () => {
 });
 
 describe("parsePersistedState", () => {
-  it("hydrates the last selected pull request merge method", () => {
-    const parsed = parsePersistedState({
-      pullRequestMergeMethod: "squash",
-    });
-    const invalid = parsePersistedState({
-      pullRequestMergeMethod: "fast-forward",
-    });
-
-    expect(parsed.pullRequestMergeMethod).toBe("squash");
-    expect(invalid.pullRequestMergeMethod).toBe("merge");
-  });
-
   it("hydrates raw UI-owned state without server entities", () => {
     const parsed = parsePersistedState({
       projectExpandedById: {

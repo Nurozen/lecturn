@@ -576,6 +576,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 363 + 382: structural distinctness (serialized rendered DOM, hrefs and cloth palette
   // included), not pixel hashes; the decoded layers are checked for colour by canvas readback.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "renders every combination with the right decoded layers, all structurally distinct",
     { timeout: 120_000 },
@@ -662,6 +663,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 384: texture-level pixel readback (the rig's cloth is pre-tinted, so the texture is what
   // reaches the screen), plus the pre-tint reproducing v5's SVG filter in the browser.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "palettes visibly change cloth while warm skin and gold stay put, and the head is untouched",
     { timeout: 60_000 },
@@ -728,6 +730,7 @@ describe("<squire-rig> v5 contract", () => {
     },
   );
 
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "pre-tinted cloth matches v5's SVG cloth filter rendered by the browser",
     { timeout: 30_000 },
@@ -1319,6 +1322,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 713 (every gesture resolves and visibly moves: deviation above 3x baseline noise + 0.3),
   // across idle seeds and both motion levels: a gesture must read whatever the idle is doing.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "play(): each gesture resolves, emits squire-gesture-end, reports activeGesture and visibly moves",
     { timeout: 240_000 },
@@ -1410,6 +1414,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // Seam sweep: lively gestures in every state, on every grip, appearance, and hood, stay
   // inside the seam limits with the neck and elbow registered to the torso on every frame.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "seam sweep: lively gestures on all grips, appearances, and hoods stay inside the seam limits",
     { timeout: 300_000 },
@@ -1473,6 +1478,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // Each gesture's peak is its own still: the head and item offsets at peak (panel px) differ
   // between every pair of the six gestures by at least PEAK_DISTANCE_PX.
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "the six gesture peak poses are pairwise distinct at panel size",
     { timeout: 120_000 },
@@ -1508,6 +1514,7 @@ describe("<squire-rig> v5 contract", () => {
   );
 
   // 739 (lively gestures inside the seam limits)
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "lively scales gestures up and every pose stays inside the measured seam limits",
     { timeout: 90_000 },
@@ -1616,6 +1623,7 @@ describe("<squire-rig> v5 contract", () => {
   });
 
   // 801
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- CPU-bound rendering of many real rigs, not a hidden wait.
   it(
     "animated transitions: events, overlap (no empty forearm, face never fades out), palette tween, FX burst",
     { timeout: 30_000 },
@@ -1951,8 +1959,10 @@ describe("<squire-rig> v5 contract", () => {
     expect(live).toEqual([rigs.at(-1)]);
     for (const r of rigs.slice(0, 3)) expect(r.debugState.reason).toBe("yielded");
     const before = rigs.map((r) => r.debugState.frameCount);
+    // oxlint-disable-next-line lecturn/no-wall-clock-in-tests -- this test is the per-frame script budget; elapsed time is what it measures.
     const t0 = performance.now();
     clock.advance(5000);
+    // oxlint-disable-next-line lecturn/no-wall-clock-in-tests -- this test is the per-frame script budget; elapsed time is what it measures.
     const ms = performance.now() - t0;
     const rendered = rigs.map((r, i) => r.debugState.frameCount - (before[i] ?? 0));
     expect(rendered.slice(0, 3)).toEqual([0, 0, 0]);
