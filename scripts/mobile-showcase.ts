@@ -1327,7 +1327,33 @@ async function captureIos(
         }
       }
     } else {
-      await waitForScene();
+      // A request that times out while the host is starved leaves the scene on a
+      // sticky error (for example "Could not check terminal access"), which the
+      // app's render signal rightly never reports. Leaving and re-entering the
+      // scene mounts it again and retries.
+      let reentries = 0;
+      while (
+        !(await waitForScene(120_000).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        if (reentries === 2 || scene === "agent-activity") {
+          throw new Error(
+            `iOS showcase scene '${scene}' did not render after ${reentries} re-entries.`,
+          );
+        }
+        reentries += 1;
+        NodeProcess.stdout.write(
+          `Re-entering ${capture.device.id} ${scene} (not drawn after 120s).\n`,
+        );
+        const away = scene === "threads" ? "environments" : "threads";
+        await NodeFSP.rm(readyPath, { force: true });
+        await NodeFSP.writeFile(scenePath, away);
+        await waitForIosShowcaseScene(simulator.udid, away, 120_000);
+        await NodeFSP.rm(readyPath, { force: true });
+        await NodeFSP.writeFile(scenePath, scene);
+      }
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
