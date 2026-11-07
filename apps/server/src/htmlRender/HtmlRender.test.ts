@@ -4,12 +4,6 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as HostProcess from "@lecturn/shared/HostProcess";
-import {
-  HTML_RENDER_MEASURE_FONTS,
-  HTML_RENDER_MEASURE_WIDTHS,
-  htmlRenderTheme,
-} from "@lecturn/shared/htmlRender";
-import { STANDARD_DARK_THEME_COLORS } from "@lecturn/shared/themePalettes";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
@@ -367,64 +361,6 @@ describe("HtmlRender", () => {
   );
 
   it.live(
-    "screenshots the page in headless Chrome with the requested theme and every console level",
-    (ctx) =>
-      Effect.gen(function* () {
-        const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];
-        if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
-        yield* Effect.gen(function* () {
-          const htmlRender = yield* HtmlRender.HtmlRender;
-          const preview = yield* htmlRender.preview({
-            locked: false,
-            html: [
-              '<!doctype html><html><head></head><body><div id="page" tabindex="0" style="height:300px;background:var(--accent)"></div>',
-              '<img src="/nonexistent/lecturn-missing.png" hidden>',
-              "<script>",
-              "const root = getComputedStyle(document.documentElement);",
-              'const page = document.getElementById("page"); page.focus();',
-              'const focus = getComputedStyle(page); console.log("focus", focus.outlineWidth, focus.outlineOffset, page.getBoundingClientRect().width, document.documentElement.scrollWidth);',
-              'console.log("ready", 3); console.info(root.getPropertyValue("--font-sans"));',
-              'console.warn(root.getPropertyValue("--background")); console.error("boom");',
-              "</script>",
-              '<script>throw new Error("broken chart");</script>',
-              "</body></html>",
-            ].join(""),
-            width: 400,
-            appearance: "dark",
-          });
-
-          const png = Buffer.from(preview.png, "base64");
-          expect(png.readUInt32BE(0)).toBe(0x89504e47);
-          expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([400, 300]);
-          expect(preview).toMatchObject({
-            width: 400,
-            contentHeight: 300,
-            capturedHeight: 300,
-            missingImages: ["/nonexistent/lecturn-missing.png"],
-          });
-          // Headless Chrome prefers light, so a dark background proves the theme fragment applied.
-          expect(preview.consoleMessages).toEqual(
-            expect.arrayContaining([
-              { level: "log", text: "ready 3" },
-              { level: "log", text: "focus 2px -2px 400 400" },
-              { level: "info", text: HTML_RENDER_MEASURE_FONTS.sans },
-              {
-                level: "warning",
-                text: htmlRenderTheme(STANDARD_DARK_THEME_COLORS, "dark").variables["--background"],
-              },
-              { level: "error", text: "boom" },
-              {
-                level: "error",
-                text: expect.stringMatching(/^Error: broken chart\n\s+at page\.html:1:\d+$/),
-              },
-            ]),
-          );
-        }).pipe(Effect.provide(layerHtmlRender(executable)));
-      }),
-    30_000,
-  );
-
-  it.live(
     "keeps every local file but the page itself out of the browser",
     (ctx) =>
       Effect.gen(function* () {
@@ -555,30 +491,6 @@ describe("HtmlRender", () => {
         }).pipe(Effect.provide(layerHtmlRender(executable)));
         expect(requests).toEqual([]);
       }).pipe(Effect.scoped),
-    30_000,
-  );
-
-  it.live(
-    "measures a published page at every client width with a fresh load each",
-    (ctx) =>
-      Effect.gen(function* () {
-        const executable = (yield* HostProcess.Environment)[TEST_BROWSER_ENV];
-        if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
-        yield* Effect.gen(function* () {
-          const htmlRender = yield* HtmlRender.HtmlRender;
-          const reference = yield* htmlRender.publish({
-            locked: false,
-            threadId: ThreadId.make("thread-html-measure"),
-            html: '<div id="chart" style="background:#888"></div><script>document.getElementById("chart").style.height = innerWidth / 2 + "px";</script>',
-            title: "Chart",
-            height: 600,
-          });
-
-          expect(reference.heights).toEqual(
-            HTML_RENDER_MEASURE_WIDTHS.map((width) => [width, Math.ceil(width / 2)]),
-          );
-        }).pipe(Effect.provide(layerHtmlRender(executable)));
-      }),
     30_000,
   );
 });

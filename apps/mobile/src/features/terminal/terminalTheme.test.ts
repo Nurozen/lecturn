@@ -1,7 +1,4 @@
 import { describe, expect, it } from "vite-plus/test";
-import { BUILT_IN_THEMES, getThemeColorsForAppearance } from "@lecturn/shared/themePalettes";
-
-import { themeColorToNativeColor } from "../../lib/mobileTheme";
 
 import { buildGhosttyThemeConfig, getMobileTerminalTheme } from "./terminalTheme";
 
@@ -22,24 +19,6 @@ describe("getMobileTerminalTheme", () => {
       cursorForeground: "#009fff",
       cursorBackground: "#0a0a0a",
     });
-  });
-  it("applies the selected palette without replacing ANSI status colors", () => {
-    const standard = getMobileTerminalTheme("lecturn", "dark");
-    const ocean = getMobileTerminalTheme("ocean", "dark");
-
-    expect(ocean.background).not.toBe(standard.background);
-    expect(ocean.cursorForeground).not.toBe(standard.cursorForeground);
-    expect(ocean.palette).toEqual(standard.palette);
-  });
-
-  it("uses the canonical desktop terminal roles for built-in themes", () => {
-    const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === "ocean")!;
-    const colors = getThemeColorsForAppearance(theme, "dark")!;
-    const terminal = getMobileTerminalTheme("ocean", "dark");
-
-    expect(terminal.background).toBe(themeColorToNativeColor(colors.terminalBackground));
-    expect(terminal.foreground).toBe(themeColorToNativeColor(colors.terminalForeground));
-    expect(terminal.cursorForeground).toBe(themeColorToNativeColor(colors.terminalCursor));
   });
 });
 

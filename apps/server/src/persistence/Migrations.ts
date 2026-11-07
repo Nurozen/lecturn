@@ -184,7 +184,7 @@ const selfRepairingMigrationIds: ReadonlySet<number> = new Set(
   selfRepairingMigrations.map(([id]) => id),
 );
 
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],

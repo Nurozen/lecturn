@@ -98,6 +98,13 @@ it("closes with the close button or Escape", async () => {
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it("keeps a gap between the full-screen page and the dialog edge", async () => {
+  setup();
+  await using _screen = await renderDialog();
+  const scroller = document.querySelector("iframe")!.parentElement!.parentElement!;
+  expect(getComputedStyle(scroller).padding).toBe("16px");
+});
+
 async function renderInline() {
   return renderUi(
     <HtmlRenderFrame

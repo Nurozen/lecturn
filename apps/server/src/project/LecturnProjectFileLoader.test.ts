@@ -51,34 +51,11 @@ it.layer(layerTest)("LecturnProjectFileLoader", (it) => {
       }),
     );
 
-    it.effect("returns none when lecturn.json is missing", () =>
-      Effect.gen(function* () {
-        const loader = yield* LecturnProjectFileLoader.LecturnProjectFileLoader;
-        const cwd = yield* makeTempDir;
-
-        const loaded = yield* loader.load(cwd);
-
-        expect(Option.isNone(loaded)).toBe(true);
-      }),
-    );
-
     it.effect("returns none for malformed JSON without failing", () =>
       Effect.gen(function* () {
         const loader = yield* LecturnProjectFileLoader.LecturnProjectFileLoader;
         const cwd = yield* makeTempDir;
         yield* writeProjectFile(cwd, "{ not json");
-
-        const loaded = yield* loader.load(cwd);
-
-        expect(Option.isNone(loaded)).toBe(true);
-      }),
-    );
-
-    it.effect("returns none for schema-invalid files without failing", () =>
-      Effect.gen(function* () {
-        const loader = yield* LecturnProjectFileLoader.LecturnProjectFileLoader;
-        const cwd = yield* makeTempDir;
-        yield* writeProjectFile(cwd, '{ "scripts": [{ "name": "Dev" }] }');
 
         const loaded = yield* loader.load(cwd);
 

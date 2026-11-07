@@ -254,6 +254,7 @@ describe("single-account guard in front of account transitions", () => {
     openConnectSignIn({ isSignedIn: false, openSignIn }, {});
     expect(openSignIn).toHaveBeenCalledTimes(2);
   });
+
   describe("multi-account lifecycle", () => {
     it("lets a second account join the first and follows Clerk's active user", async () => {
       await observe([sessionA], sessionA);

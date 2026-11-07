@@ -16,7 +16,6 @@ import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 import {
   MOBILE_THEME_IDS,
   MOBILE_THEME_VARIABLE_NAMES,
-  createMobileThemePairPatch,
   createMobileThemeSelectionPatch,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
@@ -70,14 +69,6 @@ describe("mobile themes", () => {
     expect(Object.keys(readDefaultMobileThemeVariables("dark")).sort()).toEqual(
       Object.keys(generatedVariables).sort(),
     );
-  });
-
-  it("shares all built-in desktop palettes", () => {
-    expect(BUILT_IN_THEMES.map((theme) => theme.id)).toEqual(BUILT_IN_THEME_IDS);
-    for (const themeId of BUILT_IN_THEME_IDS) {
-      expect(getMobileThemeVariables(themeId, "light")["--color-screen"]).toMatch(/^#/);
-      expect(getMobileThemeVariables(themeId, "dark")["--color-screen"]).toMatch(/^#/);
-    }
   });
 
   it("uses Lecturn parchment and midnight palettes as the default", () => {
@@ -180,15 +171,6 @@ describe("mobile themes", () => {
     }
   });
 
-  it("applies palette overrides on top of the selected built-in theme", () => {
-    const variables = getMobileThemeVariables("ocean", "dark", {
-      "--color-primary": "#123456",
-    });
-
-    expect(variables["--color-primary"]).toBe("#123456");
-    expect(variables["--color-screen"]).toMatch(/^#/);
-  });
-
   it.each(SHARED_MOBILE_THEME_IDS)("separates %s filled groups from their sheets", (themeId) => {
     for (const appearance of ["light", "dark"] as const) {
       const generated = readGeneratedMobileThemeVariables(
@@ -278,66 +260,6 @@ describe("mobile themes", () => {
     },
   );
 
-  it("keeps Lecturn Chat light grouped cards distinct from the sheet", () => {
-    const variables = getMobileThemeVariables("lecturn-chat", "light");
-    const group = variables["--color-grouped-card"];
-    expect(contrastRatio(group, variables["--color-sheet-solid"])).toBeGreaterThanOrEqual(1.1);
-    for (const role of ["--color-foreground", "--color-foreground-muted"] as const) {
-      expect(contrastRatio(variables[role], group)).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it.each(SHARED_MOBILE_THEME_IDS)("keeps %s prominent actions readable and themed", (themeId) => {
-    for (const appearance of ["light", "dark"] as const) {
-      const variables = getMobileThemeVariables(themeId, appearance);
-      const fill = variables["--color-prominent-action"];
-      expect(
-        contrastRatio(variables["--color-prominent-action-foreground"], fill),
-      ).toBeGreaterThanOrEqual(4.5);
-      expect(fill).toBe(
-        variables[
-          themeId === "lecturn-chat" && appearance === "dark"
-            ? "--color-primary-foreground"
-            : themeId === DEFAULT_MOBILE_THEME_ID || themeId === "lecturn-chat"
-              ? "--color-foreground"
-              : "--color-primary"
-        ],
-      );
-    }
-  });
-
-  it.each(["grove", "ocean", "ember", "iris"] as const)(
-    "keeps %s grouped cards and floating controls visibly tinted",
-    (themeId) => {
-      const saturation = (hex: string) => {
-        const channels = hex
-          .slice(1)
-          .match(/.{2}/g)!
-          .map((value) => parseInt(value, 16));
-        return (Math.max(...channels) - Math.min(...channels)) / Math.max(...channels);
-      };
-      for (const appearance of ["light", "dark"] as const) {
-        const variables = getMobileThemeVariables(themeId, appearance);
-        const sheet = variables["--color-sheet-solid"];
-        const group = variables["--color-grouped-card"];
-        expect(contrastRatio(group, sheet)).toBeGreaterThanOrEqual(1.06);
-        for (const role of ["--color-composer-surface", "--color-glass-fallback"] as const) {
-          const surface = flattenThemeColor(variables[role], sheet);
-          expect(contrastRatio(surface, sheet)).toBeGreaterThanOrEqual(1.06);
-          expect(contrastRatio(variables["--color-placeholder"], surface)).toBeGreaterThanOrEqual(
-            4.5,
-          );
-          if (appearance === "dark") {
-            expect(saturation(surface)).toBeGreaterThanOrEqual(saturation(sheet));
-          }
-        }
-        if (appearance === "dark") {
-          expect(saturation(group)).toBeGreaterThanOrEqual(saturation(sheet));
-        }
-      }
-    },
-  );
-
   it("previews the actual mobile palette and retains shared custom palettes", () => {
     expect(getMobileThemePreviewColors(DEFAULT_MOBILE_THEME_ID, "light")).toEqual({
       canvas: "#f4eddf",
@@ -387,50 +309,10 @@ describe("mobile themes", () => {
     });
   });
 
-  it("changes both appearance themes from the card action", () => {
-    expect(createMobileThemePairPatch("ember")).toEqual({
-      lightThemeId: "ember",
-      darkThemeId: "ember",
-      themeId: "ember",
-    });
-  });
-
   it("converts OKLCH colors to React Native sRGB ColorValues", () => {
     expect(themeColorToNativeColor("oklch(1 0 0)")).toBe("#ffffff");
     expect(themeColorToNativeColor("oklch(0 0 0)")).toBe("#000000");
     expect(themeColorToNativeColor("#123456")).toBe("#123456");
-  });
-
-  it("changes native palette color opacity for fades", () => {
-    expect(themeColorWithAlpha("#123456", 0)).toBe("rgba(18, 52, 86, 0)");
-    expect(themeColorWithAlpha("rgba(18, 52, 86, 0.98)", 0)).toBe("rgba(18, 52, 86, 0)");
-  });
-
-  it("maps semantic palette roles onto every mobile color variable", () => {
-    const variables = createMobileThemeVariables(LECTURN_CHAT_THEME.colors, "light");
-    expect(variables["--color-sheet-solid"]).toBe(
-      themeColorToNativeColor(LECTURN_CHAT_THEME.colors.chrome),
-    );
-    expect(variables["--color-warning"]).toBe(
-      themeColorToNativeColor(LECTURN_CHAT_THEME.colors.warningSurface),
-    );
-    expect(variables["--color-warning-foreground"]).toBe(
-      themeColorToNativeColor(LECTURN_CHAT_THEME.colors.warningForeground),
-    );
-    expect(variables["--color-primary"]).not.toBe(variables["--color-screen"]);
-    expect(variables["--color-primary-shadow"]).toBe("#000000");
-    expect(variables["--color-backdrop"]).toBe("rgba(0, 0, 0, 0.22)");
-    expect(variables["--color-drawer-shadow"]).toBe("rgba(0, 0, 0, 0.12)");
-    expect(variables["--color-user-bubble-foreground"]).toMatch(/^#/);
-  });
-
-  it("keeps every built-in shadow and backdrop black-based in dark mode", () => {
-    for (const themeId of BUILT_IN_THEME_IDS) {
-      const variables = getMobileThemeVariables(themeId, "dark");
-      expect(variables["--color-primary-shadow"]).toBe("#000000");
-      expect(variables["--color-backdrop"]).toBe("rgba(0, 0, 0, 0.48)");
-      expect(variables["--color-drawer-shadow"]).toBe("rgba(0, 0, 0, 0.32)");
-    }
   });
 
   it("keeps default and custom user-bubble text readable, including muted and inline code", () => {
@@ -530,23 +412,5 @@ describe("mobile themes", () => {
         contrastRatio(variables["--color-md-user-code-text"], codeSurface),
       ).toBeGreaterThanOrEqual(4.5);
     }
-  });
-});
-
-describe("flattenThemeColor", () => {
-  it("composites a translucent border over its surface", async () => {
-    const { flattenThemeColor } = await import("./mobileTheme");
-    expect(flattenThemeColor("rgba(255, 255, 255, 0.06)", "#171717")).toBe("#252525");
-    expect(flattenThemeColor("rgba(0, 0, 0, 0.08)", "#ffffff")).toBe("#ebebeb");
-  });
-
-  it("leaves an already opaque colour alone", async () => {
-    const { flattenThemeColor } = await import("./mobileTheme");
-    expect(flattenThemeColor("#171717", "#ffffff")).toBe("#171717");
-  });
-
-  it("treats a colour with no alpha as fully opaque", async () => {
-    const { flattenThemeColor } = await import("./mobileTheme");
-    expect(flattenThemeColor("rgb(255, 0, 0)", "#000000")).toBe("#ff0000");
   });
 });

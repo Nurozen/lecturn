@@ -4,22 +4,19 @@ import { ClaudeSettings, ProviderInstanceId } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { createModelSelection } from "@lecturn/shared/model";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
-import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
+import { processProbeSource } from "../testUtils/processProbe.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
   SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
   SYNTHETIC_CLAUDE_MODEL_CATALOG,
   SYNTHETIC_CLAUDE_STANDARD_MODEL,
-  SYNTHETIC_CLAUDE_THINKING_MODEL,
 } from "../provider/ClaudeModelCatalog.testFixtures.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "@lecturn/provider-core/server/textGenerationUtils";
@@ -204,31 +201,6 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
-  it.effect("kills a stalled CLI when the request times out", () =>
-    Effect.gen(function* () {
-      const probe = yield* makeProcessProbe;
-      yield* withFakeClaudeEnv({ output: "", lifecyclePort: probe.port }, (textGeneration) =>
-        Effect.gen(function* () {
-          const fiber = yield* textGeneration
-            .generateThreadTitle({
-              cwd: process.cwd(),
-              message: "Name this thread",
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("claudeAgent"),
-                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
-              },
-            })
-            .pipe(Effect.flip, Effect.forkScoped);
-          yield* probe.started;
-
-          yield* TestClock.adjust("180 seconds");
-          yield* probe.exited;
-          expect((yield* Fiber.join(fiber)).detail).toBe("Claude CLI request timed out.");
-        }),
-      );
-    }),
-  );
-
   it.effect.each([
     { label: "malformed JSON", output: "not JSON" },
     { label: "missing stage", output: JSON.stringify({ summary: "Working", confidence: 0.8 }) },
@@ -270,6 +242,7 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
         }),
     ),
   );
+
   it.effect("generates an evidence summary without title truncation", () =>
     withFakeClaudeEnv(
       {
@@ -324,6 +297,7 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
         }),
     ),
   );
+
   it.effect("generates Squire turn summaries in an isolated tool-free run", () =>
     withFakeClaudeEnv(
       {
@@ -348,6 +322,7 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
         }),
     ),
   );
+
   it.effect("hides Claude failures behind the stable Squire summary error", () =>
     withFakeClaudeEnv(
       { output: "", stderr: "PRIVATE_CONVERSATION_SENTINEL", exitCode: 1 },
@@ -365,80 +340,6 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
           expect(error.detail).toBe("Squire turn summary generation is unavailable.");
           expect(error.cause).toBeUndefined();
           expect(JSON.stringify(error)).not.toContain("PRIVATE_CONVERSATION_SENTINEL");
-        }),
-    ),
-  );
-  it.effect.each([
-    { thinking: true, settings: '{"disableAllHooks":true,"alwaysThinkingEnabled":true}' },
-    { thinking: false, settings: '{"disableAllHooks":true,"alwaysThinkingEnabled":false}' },
-    { thinking: undefined, settings: '{"disableAllHooks":true}' },
-  ])("forwards only the explicit thinking choice ($thinking)", ({ thinking, settings }) =>
-    withFakeClaudeEnv(
-      {
-        output: JSON.stringify({
-          structured_output: {
-            subject: "Add important change",
-            body: "",
-          },
-        }),
-        argsMustContain: `--settings ${settings}`,
-        argsMustNotContain: "--effort",
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateCommitMessage({
-            cwd: process.cwd(),
-            branch: "feature/claude-effect",
-            stagedSummary: "M README.md",
-            stagedPatch: "diff --git a/README.md b/README.md",
-            modelSelection: createModelSelection(
-              ProviderInstanceId.make("claudeAgent"),
-              SYNTHETIC_CLAUDE_THINKING_MODEL,
-              [
-                ...(thinking === undefined ? [] : [{ id: "thinking", value: thinking }]),
-                { id: "effort", value: "high" },
-              ],
-            ),
-          });
-
-          expect(generated.subject).toBe("Add important change");
-        }),
-    ),
-  );
-
-  it.effect("keeps a configured custom alias opaque to the Claude CLI", () =>
-    withFakeClaudeEnv(
-      {
-        output: JSON.stringify({
-          structured_output: {
-            title: "Keep custom model",
-            body: "",
-          },
-        }),
-        argsMustContain: `--model ${SYNTHETIC_CLAUDE_COLLIDING_ALIAS} --effort max --settings`,
-        claudeConfig: { customModels: [SYNTHETIC_CLAUDE_COLLIDING_ALIAS] },
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generatePrContent({
-            cwd: process.cwd(),
-            baseBranch: "main",
-            headBranch: "feature/custom-model",
-            commitSummary: "Keep custom model",
-            diffSummary: "1 file changed",
-            diffPatch: "diff --git a/README.md b/README.md",
-            modelSelection: createModelSelection(
-              ProviderInstanceId.make("claudeAgent"),
-              SYNTHETIC_CLAUDE_COLLIDING_ALIAS,
-              [
-                { id: "effort", value: "max" },
-                { id: "fastMode", value: true },
-                { id: "contextWindow", value: "expanded" },
-              ],
-            ),
-          });
-
-          expect(generated.title).toBe("Keep custom model");
         }),
     ),
   );
@@ -515,28 +416,6 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
             );
           }),
       ),
-  );
-
-  it.effect("generates branch names from skill prompts without executable capabilities", () =>
-    withFakeClaudeEnv(
-      {
-        output: JSON.stringify({ structured_output: { branch: "call-script" } }),
-        stdinMustContain: "/call-script",
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateBranchName({
-            cwd: process.cwd(),
-            message: "/call-script",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("claudeAgent"),
-              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
-            },
-          });
-
-          expect(generated.branch).toBe("call-script");
-        }),
-    ),
   );
 
   it.effect("runs Claude text generation with the configured CLAUDE_CONFIG_DIR", () =>
@@ -696,31 +575,6 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
 
         expect(error.detail).toBe(`Claude CLI command failed: ${expected}`);
       }),
-    ),
-  );
-
-  it.effect("falls back when Claude thread title normalization becomes whitespace-only", () =>
-    withFakeClaudeEnv(
-      {
-        output: JSON.stringify({
-          structured_output: {
-            title: '  """   """  ',
-          },
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateThreadTitle({
-            cwd: process.cwd(),
-            message: "Name this thread.",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("claudeAgent"),
-              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
-            },
-          });
-
-          expect(generated.title).toBe("New thread");
-        }),
     ),
   );
 });

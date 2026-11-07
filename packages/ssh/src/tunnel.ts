@@ -2,10 +2,7 @@ import type {
   DesktopSshEnvironmentBootstrap,
   DesktopSshEnvironmentTarget,
 } from "@lecturn/contracts";
-import {
-  describeReadinessCause,
-  waitForHttpReady as waitForHttpReadyShared,
-} from "@lecturn/shared/httpReadiness";
+import { waitForHttpReady as waitForHttpReadyShared } from "@lecturn/shared/httpReadiness";
 import {
   CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS,
   cliReleaseDownloadBaseUrl,
@@ -254,9 +251,7 @@ function applyScriptPlaceholders(
   return result;
 }
 
-export { describeReadinessCause };
-
-export const REMOTE_PICK_PORT_SCRIPT = `const fs = require("node:fs");
+const REMOTE_PICK_PORT_SCRIPT = `const fs = require("node:fs");
 const net = require("node:net");
 const filePath = process.argv[2] ?? "";
 const defaultPort = Number.parseInt(process.argv[3] ?? "", 10);
@@ -926,17 +921,14 @@ export function buildRemoteLaunchScript(input?: RemoteLecturnRunnerOptions): str
   });
 }
 
-export function buildRemotePairingScript(
-  stateKey: string,
-  input?: RemoteLecturnRunnerOptions,
-): string {
+function buildRemotePairingScript(stateKey: string, input?: RemoteLecturnRunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     LECTURN_STATE_KEY: stateKey,
     LECTURN_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteLecturnRunnerScript(input)),
   });
 }
 
-export function buildRemoteStopScript(stateKey: string): string {
+function buildRemoteStopScript(stateKey: string): string {
   return applyScriptPlaceholders(REMOTE_STOP_SCRIPT, {
     LECTURN_STATE_KEY: stateKey,
   });
@@ -1111,7 +1103,7 @@ const readRemoteServerLogTail = Effect.fn("ssh/tunnel.readRemoteServerLogTail")(
   return result.stdout.trim();
 });
 
-export const waitForHttpReady = (input: {
+const waitForHttpReady = (input: {
   readonly baseUrl: string;
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
