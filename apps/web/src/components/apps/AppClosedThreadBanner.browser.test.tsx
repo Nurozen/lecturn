@@ -10,10 +10,10 @@ import {
   ThreadId,
 } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { act, createRef, useState, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createRef, useState, type ComponentProps } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 const MAC = EnvironmentId.make("mac");
 const PROJECT = ProjectId.make("hopper-38mm");
@@ -60,21 +60,20 @@ const context = (overrides: Partial<AppEmbedContext> = {}): AppEmbedContext => (
 
 const REVOKED_TURN_ERROR = "Turn failed: Rocket was revoked (approval cancelled).";
 let threadCount = 0;
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.body.appendChild(document.createElement("div"));
   container.style.cssText = "height: 900px; width: 900px; display: flex; flex-direction: column;";
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 type TimelineProps = ComponentProps<typeof MessagesTimeline>;
 
@@ -140,7 +139,7 @@ async function renderAppThread({
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
-  await act(async () => root.render(<ChatCanvas timeline={props} threadError={threadError} />));
+  await testScreen.rerender(<ChatCanvas timeline={props} threadError={threadError} />);
   return listRef;
 }
 
@@ -188,6 +187,7 @@ function concealer(element: HTMLElement | null) {
 
 describe("AppClosedThreadBanner on an empty app thread", () => {
   it("heads a thread with no messages yet when its app is closed", async () => {
+    await using _setup = await setup();
     embedContext = context();
     await renderAppThread();
 
@@ -197,6 +197,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
   });
 
   it("heads it when the app's access was revoked", async () => {
+    await using _setup = await setup();
     embedContext = context({ state: "revoked" });
     await renderAppThread();
 
@@ -205,6 +206,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
   });
 
   it("keeps a thread error from covering the revoked notice", async () => {
+    await using _setup = await setup();
     embedContext = context({ state: "revoked" });
     await renderAppThread({ threadError: REVOKED_TURN_ERROR });
 
@@ -218,6 +220,7 @@ describe("AppClosedThreadBanner on an empty app thread", () => {
   });
 
   it("keeps the start placeholder while the app is running", async () => {
+    await using _setup = await setup();
     embedContext = context({ live: { expiresAt: "2026-10-26T12:00:00.000Z" } });
     await renderAppThread();
 
@@ -251,6 +254,7 @@ describe("AppClosedThreadBanner when the thread error is dismissed", () => {
   }
 
   it("keeps the revoked notice in view for a reader at the top", async () => {
+    await using _setup = await setup();
     const viewport = await renderRevokedThreadWithError();
     await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
     await act(async () => viewport.scrollTo({ top: 0 }));
@@ -267,6 +271,7 @@ describe("AppClosedThreadBanner when the thread error is dismissed", () => {
   });
 
   it("keeps a reader at the end at the end", async () => {
+    await using _setup = await setup();
     const viewport = await renderRevokedThreadWithError();
     await vi.waitFor(() => expect(distanceFromEnd(viewport)).toBeLessThanOrEqual(1));
 

@@ -1,4 +1,8 @@
-import { settlePromise, squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@lecturn/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
@@ -8,7 +12,13 @@ import {
   useThreadShell,
 } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
+import {
+  effectiveSnoozed,
+  threadWokeAt,
+  isThreadWokeUnseen,
+  snoozeWakeLabel,
+} from "@lecturn/client-runtime/state/thread-settled";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/LecturnComposerEditor.types";
 import { ContextualPreparationNotice } from "../contextual/ContextualControls";
@@ -625,6 +635,95 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     }
   })();
   const threadSyncLabel = useDelayedStatus(selectedThreadKey, realThreadSyncLabel);
+  const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const unsnoozeThread = useAtomCommand(threadEnvironment.unsnooze, { reportFailure: false });
+  const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const [statusRequest, setStatusRequest] = useState<{ threadKey: string } | null>(null);
+  const statusPending = statusRequest?.threadKey === selectedThreadKey;
+  const [lifecycleNow, setLifecycleNow] = useState(() => new Date().toISOString());
+  useFocusEffect(
+    useCallback(() => {
+      setLifecycleNow(new Date().toISOString());
+      const timer = setInterval(() => setLifecycleNow(new Date().toISOString()), 60_000);
+      return () => clearInterval(timer);
+    }, []),
+  );
+  const snoozed =
+    props.serverConfig?.environment.capabilities.threadSnooze === true &&
+    effectiveSnoozed(props.selectedThread, { now: lifecycleNow });
+  const snoozedUntil = props.selectedThread.snoozedUntil;
+  useEffect(() => {
+    if (!snoozed || snoozedUntil === null) return;
+    const timer = setTimeout(
+      () => setLifecycleNow(new Date().toISOString()),
+      Math.min(Math.max(0, Date.parse(snoozedUntil) - Date.now()) + 50, 2_147_483_647),
+    );
+    return () => clearTimeout(timer);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-arm if timer clamping fires before the wake time.
+  }, [snoozed, snoozedUntil, lifecycleNow]);
+  // Lecturn: the settled card above the composer owns Unsettle, so the floating status only
+  // reports snoozed and woke threads; settlement still decides whether a wake is unseen.
+  const lifecycleSettled =
+    props.serverConfig?.environment.capabilities.threadSettlement === true &&
+    props.selectedThread.settledOverride === "settled";
+  const wokeAt =
+    props.serverConfig?.environment.capabilities.threadSnooze === true
+      ? threadWokeAt(props.selectedThread, { now: lifecycleNow })
+      : null;
+  const woke = isThreadWokeUnseen({
+    wokeAt,
+    settled: lifecycleSettled,
+    lastVisitedAt: props.selectedThread.lastVisitedAt,
+    latestRunCompletedAt: props.selectedThread.latestRun?.completedAt ?? null,
+  });
+  const runStatusAction = async (action: "stop" | "wake" | "dismiss") => {
+    if (statusPending || !props.canOperateThread) return;
+    const request = { threadKey: selectedThreadKey };
+    setStatusRequest(request);
+    const target = {
+      environmentId: props.environmentId,
+      input: { threadId: props.selectedThread.id },
+    };
+    const recovery = props.selectedThread.limitRecovery;
+    const recoveryOwnsSnooze =
+      recovery?.snooze === true &&
+      recovery.runId === props.selectedThread.latestRun?.runId &&
+      snoozedUntil !== null &&
+      Date.parse(snoozedUntil) === Date.parse(recovery.resetAt);
+    const result =
+      action === "stop"
+        ? await interruptThreadTurn(target)
+        : action === "wake"
+          ? recoveryOwnsSnooze
+            ? await updateMetadata({
+                ...target,
+                input: {
+                  ...target.input,
+                  limitRecovery: {
+                    runId: recovery.runId,
+                    resetAt: recovery.resetAt,
+                    snooze: false,
+                  },
+                },
+              })
+            : await unsnoozeThread({ ...target, input: { ...target.input, reason: "user" } })
+          : await visitThread({
+              ...target,
+              input: { ...target.input, visitedAt: wokeAt ?? lifecycleNow },
+            });
+    // An accepted interrupt can leave tasks running. Release the action for retry.
+    setStatusRequest((current) => (current === request ? null : current));
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      Dialog.alert(
+        "Could not update thread",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    }
+  };
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
   );
@@ -685,6 +784,39 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
           .map((item) => item.label)
           .join(", ")}`,
         waiting: pendingBackgroundWork.waiting,
+        onPress: () => {
+          Keyboard.dismiss();
+          navigation.navigate("ThreadBackgroundWork", {
+            environmentId: props.environmentId,
+            threadId: props.selectedThread.id,
+          });
+        },
+        action: allows("stop")
+          ? {
+              label: statusPending ? "Stopping..." : "Stop",
+              accessibilityLabel: "Stop background work",
+              disabled: !props.canOperateThread || statusPending,
+              onPress: () => void runStatusAction("stop"),
+            }
+          : null,
+      };
+    }
+    if (contentPresentationKind === "ready" && allows("thread-actions") && (snoozed || woke)) {
+      const label =
+        snoozed && snoozedUntil !== null
+          ? `Snoozed, wakes in ${snoozeWakeLabel(snoozedUntil, { now: lifecycleNow })}`
+          : "Woke from snooze";
+      const actionLabel = snoozed ? "Wake now" : "Dismiss";
+      return {
+        kind: "lifecycle",
+        state: snoozed ? "snoozed" : "woke",
+        label,
+        action: {
+          label: statusPending ? (snoozed ? "Waking..." : "Dismissing...") : actionLabel,
+          accessibilityLabel: actionLabel,
+          disabled: !props.canOperateThread || statusPending,
+          onPress: () => void runStatusAction(snoozed ? "wake" : "dismiss"),
+        },
       };
     }
     if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {
@@ -1261,6 +1393,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                   : handleEditPendingMessage
               }
               forkEnabled={allows("fork-from-response")}
+              planSaveEnabled={allows("files")}
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}

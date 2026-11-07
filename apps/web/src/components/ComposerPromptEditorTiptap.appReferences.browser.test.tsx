@@ -1,48 +1,45 @@
 import type { Editor } from "@tiptap/core";
-import { act, createRef } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { createRef } from "react";
+import { expect, it } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../test/render";
 
 import { serializeEditorDoc } from "~/composer-rich-text-doc";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { AppReferencesContext, type AppReferences } from "./embed/AppReferencesContext";
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 const appReferences: AppReferences = { refPrefixes: ["rw:"], iconUrl: null, activate: null };
 
 async function mountEditor(value: string, references: AppReferences | null) {
-  await act(async () =>
-    root.render(
-      <AppReferencesContext value={references}>
-        <ComposerPromptEditor
-          editorRef={createRef<ComposerPromptEditorHandle>()}
-          value={value}
-          cursor={0}
-          richTextEnabled
-          contextRecords={new Map()}
-          skills={[]}
-          disabled={false}
-          placeholder=""
-          onChange={() => {}}
-          onPaste={() => {}}
-        />
-      </AppReferencesContext>,
-    ),
+  await testScreen.rerender(
+    <AppReferencesContext value={references}>
+      <ComposerPromptEditor
+        editorRef={createRef<ComposerPromptEditorHandle>()}
+        value={value}
+        cursor={0}
+        richTextEnabled
+        contextRecords={new Map()}
+        skills={[]}
+        disabled={false}
+        placeholder=""
+        onChange={() => {}}
+        onPaste={() => {}}
+      />
+    </AppReferencesContext>,
   );
   const element = container.querySelector<HTMLElement & { editor: Editor }>(".tiptap");
   if (!element) throw new Error("Composer did not mount");
@@ -55,6 +52,7 @@ const decorated = (editor: Editor) =>
   );
 
 it("draws typed app references as chips without changing the prompt text", async () => {
+  await using _setup = await setup();
   const value = "Check rw:c/fins and `rw:c/nose`.";
   const editor = await mountEditor(value, appReferences);
   expect(decorated(editor)).toEqual(["rw:c/fins"]);
@@ -68,6 +66,7 @@ it("draws typed app references as chips without changing the prompt text", async
 });
 
 it("leaves reference-like text plain outside an app's threads", async () => {
+  await using _setup = await setup();
   const editor = await mountEditor("Check rw:c/fins", null);
   expect(decorated(editor)).toEqual([]);
 });

@@ -1,6 +1,7 @@
-import { act, type ReactNode, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { ReactNode, ReactElement } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { act, render as renderUi, type Screen } from "../../../test/render";
 import {
   EnvironmentId,
   ThreadId,
@@ -134,21 +135,17 @@ const conflict = {
     },
   },
 } as unknown as ContextualConflict;
-type View = { root: Root; container: HTMLDivElement };
+type View = Screen;
 let renderer: View | undefined;
 async function render(node: ReactElement) {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const view = { root: createRoot(container), container };
+  const view = await renderUi(node, { router: false });
   renderer = view;
-  await act(async () => view.root.render(node));
   return view;
 }
 const textOf = (view: View) => view.container.textContent ?? "";
 const buttons = (view: View) => [...view.container.querySelectorAll("button")];
 const button = (view: View, label: string) => buttons(view).find((b) => b.textContent === label)!;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup(): AsyncDisposable {
   mocks.operate = true;
   mocks.data = {
     status: {
@@ -164,19 +161,18 @@ beforeEach(() => {
   };
   mocks.execute.mockReset().mockResolvedValue({ _tag: "Success", value: {} });
   vi.spyOn(console, "error").mockImplementation(() => {});
-});
-afterEach(async () => {
-  const current = renderer;
-  renderer = undefined;
-  if (current) {
-    await act(async () => current.root.unmount());
-    current.container.remove();
-  }
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      const current = renderer;
+      renderer = undefined;
+      await current?.[Symbol.asyncDispose]();
+      vi.restoreAllMocks();
+    },
+  };
+}
 describe("Contextual interaction boundaries", () => {
   it("shows only receipt-confirmed evidence and keeps original decision attribution", async () => {
+    await using _setup = setup();
     const view = await render(
       <ContextualDisclosureCard
         environmentId={environmentId}
@@ -202,6 +198,7 @@ describe("Contextual interaction boundaries", () => {
     expect(textOf(view)).toContain("cannot retract text already sent");
   });
   it("does not expose mutation actions on a read-only remote connection", async () => {
+    await using _setup = setup();
     mocks.operate = false;
     const view = await render(
       <>
@@ -218,6 +215,7 @@ describe("Contextual interaction boundaries", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
   it("binds a conflict choice to exact task and both claim revisions", async () => {
+    await using _setup = setup();
     const view = await render(
       <ContextualConflictCard environmentId={environmentId} conflict={conflict} />,
     );
@@ -239,6 +237,7 @@ describe("Contextual interaction boundaries", () => {
     });
   });
   it("requires explicit skip while a material conflict holds the submitted message", async () => {
+    await using _setup = setup();
     const view = await render(
       <ContextualPreparationPanel environmentId={environmentId} threadId={threadId} />,
     );
@@ -255,6 +254,7 @@ describe("Contextual interaction boundaries", () => {
     });
   });
   it("labels inherited and forgotten disclosures without inventing a new delivery", async () => {
+    await using _setup = setup();
     const view = await render(
       <ContextualDisclosureCard
         environmentId={environmentId}
@@ -275,6 +275,7 @@ describe("Contextual interaction boundaries", () => {
 });
 
 it("presents a distinct Contextual summary with unchanged original evidence", async () => {
+  await using _setup = setup();
   const messageId = MessageId.make("message");
   mocks.data.status = { thread: { exclusionRevision: 4 }, preparation: null };
   mocks.data.disclosures = {
@@ -316,6 +317,7 @@ it("presents a distinct Contextual summary with unchanged original evidence", as
   expect(textOf(view)).not.toContain("Keep this deployment in one region.");
 });
 it("explains a skipped message without inferring cause from current settings", async () => {
+  await using _setup = setup();
   const messageId = MessageId.make("message");
   mocks.data.status = {
     preparation: { task: { messageId }, state: "skipped", skipReason: "unavailable" },

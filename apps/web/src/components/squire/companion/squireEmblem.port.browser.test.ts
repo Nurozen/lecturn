@@ -1,6 +1,6 @@
 // Behavior the port adds to v5, on an injected
 // clock. The ported v5 contract checks live in squireEmblem.browser.test.ts.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createManualCompanionClock, setCompanionClockForTests } from "./companionClock";
 import { defineSquireEmblem, type SquireEmblemElement } from "./squireEmblem";
@@ -45,19 +45,22 @@ function pointerOver(rig: HTMLElement) {
   );
 }
 
-beforeEach(() => {
+// A manual clock for one test; disposing removes what it mounted and restores the real clock.
+function setup(): Disposable {
   clock = createManualCompanionClock({ frameMs: 1000 / 120 });
   setCompanionClockForTests(clock);
-});
-
-afterEach(() => {
-  for (const element of mounted) element.remove();
-  mounted = [];
-  setCompanionClockForTests(null);
-});
+  return {
+    [Symbol.dispose]() {
+      for (const element of mounted) element.remove();
+      mounted = [];
+      setCompanionClockForTests(null);
+    },
+  };
+}
 
 describe("<squire-emblem> port behavior", () => {
   it("renders at most 30 frames per second on a 120 Hz display", async () => {
+    using _env = setup();
     const rig = await mountEmblem();
     clock.advance(500);
     const start = frames(rig);
@@ -69,6 +72,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("settles to a still pose within 20.55 s and renders nothing afterwards", async () => {
+    using _env = setup();
     const rig = await mountEmblem({ state: "attentive" });
     clock.advance(20_550);
     expect(rig.debugState.reason).toBe("settled");
@@ -82,6 +86,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("wakes a settled rig for a gesture and for a state change, and both move", async () => {
+    using _env = setup();
     const rig = await mountEmblem();
     clock.advance(21_000);
     expect(rig.debugState.reason).toBe("settled");
@@ -104,6 +109,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("restarts the settle deadline on pointer movement and wakes a settled rig on pointer", async () => {
+    using _env = setup();
     const rig = await mountEmblem();
     clock.advance(15_000);
     pointerOver(rig);
@@ -122,6 +128,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("pauses while the window is unfocused, and pointer or play() resume nothing", async () => {
+    using _env = setup();
     const rig = await mountEmblem();
     clock.advance(300);
     clock.setFocused(false);
@@ -140,6 +147,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("runs one live rig: the later panel or an overlay holds, the other yields its last frame", async () => {
+    using _env = setup();
     const first = await mountEmblem();
     clock.advance(300);
     const second = await mountEmblem();
@@ -167,6 +175,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("keeps the attentive halo at constant opacity and scale with no beacon, ring, or pulse nodes", async () => {
+    using _env = setup();
     const rig = await mountEmblem({ state: "attentive" });
     clock.advance(2500);
     const root = rig.shadowRoot!;
@@ -195,6 +204,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("holds the knots still in every state (no knot pulse)", async () => {
+    using _env = setup();
     const emblem = await mountEmblem({ state: "idle" });
     clock.advance(1500);
     const knots = [...emblem.shadowRoot!.querySelectorAll<SVGElement>('[data-fx~="knot"]')];
@@ -211,6 +221,7 @@ describe("<squire-emblem> port behavior", () => {
   });
 
   it("offers the Lead's gold palette", async () => {
+    using _env = setup();
     const brass = await mountEmblem({ palette: "brass" });
     const gold = await mountEmblem({ palette: "gold" });
     expect(gold.getConfiguration().palette).toBe("gold");

@@ -127,7 +127,15 @@ const stubModules: Record<string, unknown> = {
   },
   "./workspace-pane-animation": { WORKSPACE_PANE_TIMING: { duration: 0 } },
   "./workspace-inspector-pane": { WorkspaceInspectorPane: InspectorPaneStub },
-  "./workspace-content-width": { WorkspaceContentWidthContext: React.createContext(null) },
+  "./workspace-content-width": {
+    WorkspaceContentWidthContext: React.createContext(null),
+    WorkspaceSettledContentWidthContext: React.createContext(null),
+  },
+  "react-native-keyboard-controller": {
+    KeyboardController: { dismiss: () => Promise.resolve() },
+    useKeyboardState: (select: (state: { readonly isVisible: boolean }) => unknown) =>
+      select({ isVisible: false }),
+  },
   "../../native/v5-workspace-context": {
     NativeWorkspaceModeContext: React.createContext(false),
     NativeWorkspaceInspectorContext: React.createContext(null),

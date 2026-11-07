@@ -2,16 +2,7 @@
 // check by check, on an injected clock. Comments name the validate.cjs line each block ports.
 // Per-frame step bounds are scaled by the frame interval (30 fps renders half as many frames as
 // v5's 60 Hz runs, so each frame carries twice the motion); amplitude and seam bounds are v5's.
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createManualCompanionClock, setCompanionClockForTests } from "./companionClock";
 import { RIG_ART } from "./rigArt";
@@ -82,32 +73,30 @@ let clock: Clock;
 let mounted: HTMLElement[] = [];
 const consoleProblems: string[] = [];
 
-beforeAll(() => {
-  for (const method of ["error", "warn"] as const) {
-    const original = console[method].bind(console);
-    vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
-      const text = args.map(String).join(" ");
-      if (method === "error" || /squire/i.test(text)) consoleProblems.push(`${method}: ${text}`);
-      original(...args);
-    });
-  }
-});
+// File-wide capture, checked by the last test; this file's page goes away with it.
+for (const method of ["error", "warn"] as const) {
+  const original = console[method].bind(console);
+  vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+    const text = args.map(String).join(" ");
+    if (method === "error" || /squire/i.test(text)) consoleProblems.push(`${method}: ${text}`);
+    original(...args);
+  });
+}
 
-afterAll(() => {
-  vi.restoreAllMocks();
-});
-
-beforeEach(() => {
+// A manual clock for one test; disposing removes the rigs it mounted, its stubbed globals,
+// and restores the real clock.
+function setup(): Disposable {
   clock = createManualCompanionClock({ frameMs: FRAME_MS });
   setCompanionClockForTests(clock);
-});
-
-afterEach(() => {
-  for (const element of mounted) element.remove();
-  mounted = [];
-  vi.unstubAllGlobals();
-  setCompanionClockForTests(null);
-});
+  return {
+    [Symbol.dispose]() {
+      for (const element of mounted) element.remove();
+      mounted = [];
+      vi.unstubAllGlobals();
+      setCompanionClockForTests(null);
+    },
+  };
+}
 
 const q = <T extends Element = SVGElement>(rig: Rig, selector: string) => {
   const node = rig.shadowRoot?.querySelector<T>(selector);
@@ -500,6 +489,7 @@ async function pixelsOf(href: string, size?: { width: number; height: number }) 
 describe("<squire-rig> v5 contract", () => {
   // 308 (one live rig plus stills): SVG artwork and populated FX layers.
   it("loads one live rig plus stills with SVG artwork and populated FX layers", async () => {
+    using _env = setup();
     const stills: Rig[] = [];
     for (const appearance of ["male", "female", "male"])
       stills.push(await mountRig({ appearance, motion: "still", hood: "up" }));
@@ -521,6 +511,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 327
   it("configuration: defaults, every listed value, normalization, invalid fallback, defensive copy, label", async () => {
+    using _env = setup();
     const r = await mountRig();
     expect(r.getConfiguration()).toEqual(DEFAULTS);
     const copy = r.configuration;
@@ -564,6 +555,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 351
   it("debugState exposes the contract fields", async () => {
+    using _env = setup();
     const r = await mountRig();
     r.setPose({ time: 1 });
     const ds = r.debugState;
@@ -588,6 +580,7 @@ describe("<squire-rig> v5 contract", () => {
     "renders every combination with the right decoded layers, all structurally distinct",
     { timeout: 120_000 },
     async () => {
+      using _env = setup();
       const r = await mountRig({ transitions: "off" });
       const decodedCache = new Map<
         string,
@@ -673,6 +666,7 @@ describe("<squire-rig> v5 contract", () => {
     "palettes visibly change cloth while warm skin and gold stay put, and the head is untouched",
     { timeout: 60_000 },
     async () => {
+      using _env = setup();
       const parts = [RIG_ART.torso.src, RIG_ART.grips.helmet.src, RIG_ART.hood.src];
       for (const src of parts) {
         const base = await pixelsOf(src);
@@ -738,6 +732,7 @@ describe("<squire-rig> v5 contract", () => {
     "pre-tinted cloth matches v5's SVG cloth filter rendered by the browser",
     { timeout: 30_000 },
     async () => {
+      using _env = setup();
       const src = RIG_ART.torso.src;
       const blob = await (await fetch(src)).blob();
       const dataUrl = await new Promise<string>((resolve) => {
@@ -788,6 +783,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 422
   it("anatomy hierarchy, FX layer placement and fixed torso across gear", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     await config(r, { appearance: "female", hood: "up", equipment: "helmet", palette: "brass" });
     const svg = q<SVGSVGElement>(r, "svg");
@@ -857,6 +853,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 458
   it("hood toggles keep the same head node and artwork", async () => {
+    using _env = setup();
     const r = await mountRig();
     for (const transitions of ["off", "on"])
       for (const appearance of CHOICES.appearance) {
@@ -881,6 +878,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 473
   it("every grip moves rigidly with the forearm bone across arbitrary scrubs", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     for (const equipment of CHOICES.equipment) {
       await config(r, { equipment, hood: "down", appearance: "female" });
@@ -930,6 +928,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 501 (neck and elbow registration = seams)
   it("neck and elbow joints stay registered to the torso across scrubs", async () => {
+    using _env = setup();
     const r = await mountRig();
     for (const [appearance, hood, equipment] of [
       ["female", "down", "helmet"],
@@ -967,6 +966,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // _testChannels seam sweep: every grip held at its forearm limits keeps the elbow registered.
   it("keeps the elbow registered on all six grips with channels forced to their seam limits", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     for (const equipment of CHOICES.equipment) {
       await config(r, { equipment });
@@ -1001,6 +1001,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 526
   it("setPose: clamping, TypeErrors leave state untouched, fixed gaze values, state override", async () => {
+    using _env = setup();
     const r = await mountRig();
     r.setAttribute("gaze", "auto");
     r.setAttribute("state", "idle");
@@ -1045,6 +1046,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 549
   it("setPose determinism: identical SVG (bones + FX) after unrelated poses, states and gaze", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "on" });
     await config(r, {
       appearance: "female",
@@ -1077,6 +1079,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 563 (DOM-level: identical serialized frames instead of screenshots)
   it("setPose determinism: identical frames incl. FX after live motion, gestures and transitions", async () => {
+    using _env = setup();
     const r = await mountRig();
     await config(r, {
       appearance: "male",
@@ -1124,6 +1127,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 584
   it("setPose determinism across instances (same inputs, separate rigs)", async () => {
+    using _env = setup();
     const a = await mountRig({ hood: "up", equipment: "grimoire", palette: "moonstone" });
     const attrs = Object.fromEntries(
       a
@@ -1152,6 +1156,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 608
   it("setPose works in still mode and still renders distinct held state poses with FX at rest", async () => {
+    using _env = setup();
     const r = await mountRig();
     await config(r, {
       appearance: "female",
@@ -1188,6 +1193,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 629
   it("resume preserves scrub time and starts exactly one animation chain", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     r.setPose({ time: 3.2, gaze: 0.2 });
     r.resume();
@@ -1203,6 +1209,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 638 replaced: the 30 fps gate, keeping "visibly alive channels, no abrupt steps".
   it("live motion: 30 fps gate, visibly alive channels, no abrupt steps", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     await config(
       r,
@@ -1263,6 +1270,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 659
   it("state changes blend smoothly through springs (no pops)", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     r.setPose({ time: 20 });
     r.resume();
@@ -1290,6 +1298,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 673 (no pops mid-gesture)
   it("no pops when state, gaze, motion and attributes change mid-gesture", async () => {
+    using _env = setup();
     const r = await mountRig({ motion: "lively", transitions: "on" });
     clock.advance(700);
     const samples = record(r, 3000, [
@@ -1314,6 +1323,7 @@ describe("<squire-rig> v5 contract", () => {
     "play(): each gesture resolves, emits squire-gesture-end, reports activeGesture and visibly moves",
     { timeout: 240_000 },
     async () => {
+      using _env = setup();
       const failures: string[] = [];
       let margin = Infinity;
       let tightest = "";
@@ -1374,6 +1384,7 @@ describe("<squire-rig> v5 contract", () => {
   // this many pixels at the 340 px panel (minimum over grips and times: attentive 10.6;
   // thinking 19.5, up from v5's 14.7).
   it("held states read apart from idle in one still at panel size", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     const shift: Record<string, number> = {};
     for (const equipment of CHOICES.equipment) {
@@ -1403,6 +1414,7 @@ describe("<squire-rig> v5 contract", () => {
     "seam sweep: lively gestures on all grips, appearances, and hoods stay inside the seam limits",
     { timeout: 300_000 },
     async () => {
+      using _env = setup();
       // validate.cjs:501 bounds neck drift at 12 units on scrubs; under lively gestures v5 itself
       // reaches 12.01 (thinking + nod), and the stronger nod 12.2. Head angle, headX, and headY
       // all stay inside RIG_ART.limits, which are what the collar hides.
@@ -1465,6 +1477,7 @@ describe("<squire-rig> v5 contract", () => {
     "the six gesture peak poses are pairwise distinct at panel size",
     { timeout: 120_000 },
     async () => {
+      using _env = setup();
       const tight: string[] = [];
       let closest = Infinity;
       for (const equipment of ["astrolabe", "none"] as const)
@@ -1499,6 +1512,7 @@ describe("<squire-rig> v5 contract", () => {
     "lively scales gestures up and every pose stays inside the measured seam limits",
     { timeout: 90_000 },
     async () => {
+      using _env = setup();
       const r = await mountRig();
       const amp: Record<string, number> = {};
       for (const motion of ["subtle", "lively"]) {
@@ -1540,6 +1554,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 757
   it("play(): interruption resolves the earlier gesture; unknown names do not throw synchronously", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     r.setPose({ time: 50 });
     r.resume();
@@ -1570,6 +1585,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 780
   it("play() is ignored (resolves immediately, no motion) in still, reduced motion and scrub holds", async () => {
+    using _env = setup();
     const setReduced = stubReducedMotion();
     const r = await mountRig({ transitions: "off" });
     const ignored = async () => {
@@ -1604,6 +1620,7 @@ describe("<squire-rig> v5 contract", () => {
     "animated transitions: events, overlap (no empty forearm, face never fades out), palette tween, FX burst",
     { timeout: 30_000 },
     async () => {
+      using _env = setup();
       const r = await mountRig({ transitions: "on" });
       await Promise.all(
         [RIG_ART.torso.src, RIG_ART.hood.src, RIG_ART.grips.lance.src].map((src) =>
@@ -1684,6 +1701,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 839 (entrance)
   it("entrance plays once when first shown live, skipped with transitions=off", async () => {
+    using _env = setup();
     const run = async (transitions: string) => {
       const r = await mountRig({ transitions, motion: "subtle" });
       const events: string[] = [];
@@ -1707,6 +1725,7 @@ describe("<squire-rig> v5 contract", () => {
   });
 
   it("still, reduced-motion, and held rigs never take the lease from a live rig", async () => {
+    using _env = setup();
     const setReduced = stubReducedMotion();
     const live = await mountRig({ transitions: "off" });
     const still = await mountRig({ motion: "still" });
@@ -1744,6 +1763,7 @@ describe("<squire-rig> v5 contract", () => {
   });
 
   it("a rig mounted while another holds the lease skips its entrance and is visible", async () => {
+    using _env = setup();
     await mountRig({ placement: "overlay" });
     const r = await mountRig({ transitions: "on" });
     await vi.waitFor(() => expect(r.debugState.reason).toBe("yielded"));
@@ -1753,6 +1773,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 851
   it("instant swaps with transitions=off, still mode, reduced motion and scrub holds", async () => {
+    using _env = setup();
     const setReduced = stubReducedMotion();
     const r = await mountRig({ transitions: "off", motion: "subtle" });
     await Promise.all(
@@ -1803,6 +1824,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 879
   it("pause: still stops frames; resume cannot override still; scrub holds", async () => {
+    using _env = setup();
     const r = await mountRig({ motion: "subtle", transitions: "off" });
     liveAgain(r, "initial");
     r.setAttribute("motion", "still");
@@ -1815,6 +1837,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 885 (+ pointer resumes nothing under reduced motion)
   it("pause: reduced motion stops frames and resumes when the preference clears", async () => {
+    using _env = setup();
     const setReduced = stubReducedMotion();
     const r = await mountRig({ motion: "subtle", transitions: "off" });
     liveAgain(r, "subtle");
@@ -1829,6 +1852,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 892
   it("pause: hidden document stops and restores animation", async () => {
+    using _env = setup();
     const r = await mountRig({ motion: "subtle", transitions: "off" });
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
     try {
@@ -1843,6 +1867,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 899 (+ pointer resumes nothing while offscreen)
   it("pause: offscreen stops frames and restores one chain when visible; offscreen attribute changes still render", async () => {
+    using _env = setup();
     const r = await mountRig({ motion: "subtle", transitions: "off" });
     r.style.top = "3000px";
     await vi.waitFor(() => expect(r.debugState.reason).toBe("offscreen"));
@@ -1860,6 +1885,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 906
   it("pause: disconnect stops frames; repeated reconnect keeps at most one pending frame", async () => {
+    using _env = setup();
     const r = await mountRig({ motion: "subtle", transitions: "off" });
     r.remove();
     expect(r.debugState.reason).toBe("disconnected");
@@ -1883,6 +1909,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 919
   it("pointer gaze follows the pointer, pitches vertically, eases back when the pointer leaves", async () => {
+    using _env = setup();
     const r = await mountRig({ transitions: "off" });
     r.setAttribute("gaze", "pointer");
     r.resume();
@@ -1915,6 +1942,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 938 replaced: four rigs on one page run one loop, inside a one-rig frame budget.
   it("runs a single live rig among four, inside a one-rig frame budget", async () => {
+    using _env = setup();
     const rigs: Rig[] = [];
     for (const equipment of ["helmet", "lance", "grimoire", "armillary"])
       rigs.push(await mountRig({ equipment, transitions: "off" }));
@@ -1936,6 +1964,7 @@ describe("<squire-rig> v5 contract", () => {
 
   // 999
   it("logs no console errors or squire warnings", () => {
+    using _env = setup();
     expect(consoleProblems).toEqual([]);
   });
 });

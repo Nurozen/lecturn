@@ -1,17 +1,14 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { render } from "../../test/render";
 import { useWorkspaceViewport } from "./useWorkspaceViewport";
 
-let root: Root;
-afterEach(async () => {
-  await act(async () => root?.unmount());
+function restoreGlobals() {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-});
+}
 
 async function mount({ top = 0, visual = true, enabled = true } = {}) {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const viewport = Object.assign(new EventTarget(), { height: 806.56, offsetTop: 0, scale: 1 });
   // Both are [Replaceable] on window, so the real window takes the synthetic viewport.
   vi.stubGlobal("visualViewport", visual ? viewport : null);
@@ -19,24 +16,35 @@ async function mount({ top = 0, visual = true, enabled = true } = {}) {
   vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockReturnValue(
     DOMRect.fromRect({ x: 0, y: top, width: 0, height: 0 }),
   );
-  const container = document.createElement("div");
   function Fixture({ enabled }: { enabled: boolean }) {
     return <div ref={useWorkspaceViewport(enabled)} />;
   }
-  root = createRoot(container);
-  await act(async () => root.render(<Fixture enabled={enabled} />));
-  const element = () => container.firstElementChild as HTMLDivElement;
+  const screen = await render(<Fixture enabled={enabled} />, { router: false }).catch(
+    (error: unknown) => {
+      restoreGlobals();
+      throw error;
+    },
+  );
+  const element = () => screen.container.firstElementChild as HTMLDivElement;
   return {
     viewport,
     setInnerHeight: (height: number) => vi.stubGlobal("innerHeight", height),
     height: () => element().style.getPropertyValue("--workspace-viewport-height") || undefined,
-    disable: () => act(async () => root.render(<Fixture enabled={false} />)),
+    disable: () => screen.rerender(<Fixture enabled={false} />),
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen[Symbol.asyncDispose]();
+      } finally {
+        restoreGlobals();
+      }
+    },
   };
 }
 
 describe("mobile workspace viewport", () => {
   it("reserves existing top chrome once and follows native banner resize in both directions", async () => {
-    const { height, viewport } = await mount({ top: 67 });
+    await using fixture = await mount({ top: 67 });
+    const { height, viewport } = fixture;
     expect(height()).toBe("739.56px");
     viewport.height -= 33;
     viewport.dispatchEvent(new Event("resize"));
@@ -47,7 +55,8 @@ describe("mobile workspace viewport", () => {
   });
 
   it("tracks a short keyboard viewport and its pan, then restores the available space", async () => {
-    const { height, viewport } = await mount({ top: 24 });
+    await using fixture = await mount({ top: 24 });
+    const { height, viewport } = fixture;
     viewport.height = 280;
     viewport.dispatchEvent(new Event("resize"));
     expect(height()).toBe("256px");
@@ -64,7 +73,8 @@ describe("mobile workspace viewport", () => {
   });
 
   it("leaves pinch zoom alone and removes sizing/listeners on desktop or unmount", async () => {
-    const { height, viewport, disable } = await mount();
+    await using fixture = await mount();
+    const { height, viewport, disable } = fixture;
     viewport.scale = 2;
     viewport.height = 200;
     viewport.dispatchEvent(new Event("resize"));
@@ -77,7 +87,8 @@ describe("mobile workspace viewport", () => {
   });
 
   it("supports WebViews without VisualViewport and clamps exhausted space", async () => {
-    const { height, setInnerHeight } = await mount({ top: 67, visual: false });
+    await using fixture = await mount({ top: 67, visual: false });
+    const { height, setInnerHeight } = fixture;
     expect(height()).toBe("739px");
     setInnerHeight(60);
     window.dispatchEvent(new Event("resize"));
@@ -85,7 +96,8 @@ describe("mobile workspace viewport", () => {
   });
 
   it("does not override desktop sizing", async () => {
-    const { height, viewport } = await mount({ enabled: false });
+    await using fixture = await mount({ enabled: false });
+    const { height, viewport } = fixture;
     viewport.dispatchEvent(new Event("resize"));
     expect(height()).toBeUndefined();
   });

@@ -15,10 +15,10 @@ import {
 } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import * as DateTime from "effect/DateTime";
-import { act, createRef } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createRef } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { deriveTimelineEntriesFromVisibleTurnItems } from "../../session-logic";
@@ -130,24 +130,23 @@ const visibleTurnItems: OrchestrationV2ProjectedTurnItem[] = items.map((item, po
 }));
 
 let threadCount = 0;
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   document.documentElement.classList.add("dark");
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  document.documentElement.classList.remove("dark");
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+      document.documentElement.classList.remove("dark");
+    },
+  };
+}
 
 async function renderTimeline(embedded: boolean, width: number) {
   await page.viewport(width, 900);
@@ -190,18 +189,16 @@ async function renderTimeline(embedded: boolean, width: number) {
       })}
     />
   );
-  await act(async () =>
-    root.render(
-      <RegistryProvider
-        initialValues={[[serverEnvironment.providersValueAtom(ENVIRONMENT_ID), providers]]}
-      >
-        {embedded ? (
-          <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
-        ) : (
-          timeline
-        )}
-      </RegistryProvider>,
-    ),
+  await testScreen.rerender(
+    <RegistryProvider
+      initialValues={[[serverEnvironment.providersValueAtom(ENVIRONMENT_ID), providers]]}
+    >
+      {embedded ? (
+        <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
+      ) : (
+        timeline
+      )}
+    </RegistryProvider>,
   );
   await act(async () => document.fonts.ready);
   if (embedded) return;
@@ -266,6 +263,7 @@ async function expectReadableRows() {
 
 describe("app tool row titles and summaries", () => {
   it("reads the tool's title and the app's summary in the 352 px embed", async () => {
+    await using _setup = await setup();
     await renderTimeline(true, 352);
     const motors = await expectReadableRows();
 
@@ -276,6 +274,7 @@ describe("app tool row titles and summaries", () => {
   });
 
   it("reads the same in full Lecturn", async () => {
+    await using _setup = await setup();
     await renderTimeline(false, 1280);
     await expectReadableRows();
   });

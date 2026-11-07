@@ -2,10 +2,9 @@ import "../../index.css";
 
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { AppId, EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { render as renderUi, type Screen } from "../../../test/render";
 
 const MAC = EnvironmentId.make("mac");
 const PROJECT = ProjectId.make("hopper-38mm");
@@ -30,23 +29,22 @@ vi.mock(import("../../state/entities"), async (original) => ({
 
 import { AppThreadTitleBeside } from "./AppThreadTitle";
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   appBound = true;
   container = document.createElement("div");
   container.className = "dark";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 // The user row as the timeline draws it: a right-aligned column holding the bubble.
 const userRow = (
@@ -64,14 +62,12 @@ const userRow = (
 
 async function renderOpening(width: number) {
   await page.viewport(1440, 900);
-  await act(async () =>
-    root.render(
-      <div className="chat-content-lane" style={{ width }}>
-        <AppThreadTitleBeside threadRef={THREAD} shown>
-          {userRow}
-        </AppThreadTitleBeside>
-      </div>,
-    ),
+  await testScreen.rerender(
+    <div className="chat-content-lane" style={{ width }}>
+      <AppThreadTitleBeside threadRef={THREAD} shown>
+        {userRow}
+      </AppThreadTitleBeside>
+    </div>,
   );
 }
 
@@ -83,6 +79,7 @@ function rect(testId: string) {
 
 describe("AppThreadTitleBeside", () => {
   it("sets an app thread's title level with its opening message", async () => {
+    await using _setup = await setup();
     await renderOpening(736);
 
     const title = rect("app-thread-title");
@@ -98,27 +95,25 @@ describe("AppThreadTitleBeside", () => {
   });
 
   it("wraps a long title in its half rather than running under the message", async () => {
+    await using _setup = await setup();
     await renderOpening(736);
-    await act(async () =>
-      root.render(
-        <div className="chat-content-lane" style={{ width: 736 }}>
-          <AppThreadTitleBeside threadRef={THREAD} shown>
-            <div className="group flex flex-col items-end gap-1">
-              <div data-testid="bubble" className="max-w-[80%] p-3">
-                <p className="text-sm">
-                  {"Simulate the baseline and check the design. ".repeat(4)}
-                </p>
-              </div>
+    await testScreen.rerender(
+      <div className="chat-content-lane" style={{ width: 736 }}>
+        <AppThreadTitleBeside threadRef={THREAD} shown>
+          <div className="group flex flex-col items-end gap-1">
+            <div data-testid="bubble" className="max-w-[80%] p-3">
+              <p className="text-sm">{"Simulate the baseline and check the design. ".repeat(4)}</p>
             </div>
-          </AppThreadTitleBeside>
-        </div>,
-      ),
+          </div>
+        </AppThreadTitleBeside>
+      </div>,
     );
 
     expect(rect("app-thread-title").right).toBeLessThan(rect("bubble").left);
   });
 
   it("leaves a thread that is not an app's as it was", async () => {
+    await using _setup = await setup();
     appBound = false;
     await renderOpening(736);
 

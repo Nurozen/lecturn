@@ -5,9 +5,9 @@ import {
   createRouter,
   RouterContextProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import { act, render } from "../../../test/render";
 import { PhoneSettingsCategorySelect } from "./PhoneSettingsCategorySelect";
 import { SettingsNavigationProvider, useBackToChat } from "./SettingsNavigation";
 
@@ -17,26 +17,13 @@ vi.mock(import("../ui/sidebar"), async (original) => ({
   useSidebar: (() => ({ setOpenMobile: close })) as never,
 }));
 
-let reactRoot: Root | null = null;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.clearAllMocks();
-  container = document.createElement("div");
-  document.body.append(container);
-});
-afterEach(async () => {
-  await act(async () => reactRoot?.unmount());
-  reactRoot = null;
-  container.remove();
-  vi.unstubAllGlobals();
-});
-
 function Back() {
   return <button onClick={useBackToChat()}>Chat</button>;
 }
 
+// Renders under the test's own router (not the helper's), which disposing unmounts.
 async function fixture(initialEntries = ["/earlier", "/local/thread-1"]) {
+  vi.clearAllMocks();
   const root = createRootRoute();
   const chat = createRoute({ getParentRoute: () => root, id: "_chat" });
   const routeTree = root.addChildren([
@@ -50,17 +37,16 @@ async function fixture(initialEntries = ["/earlier", "/local/thread-1"]) {
   const history = createMemoryHistory({ initialEntries });
   const router = createRouter({ routeTree, history, isServer: false });
   await router.load();
-  reactRoot = createRoot(container);
-  await act(async () => {
-    reactRoot!.render(
-      <RouterContextProvider router={router}>
-        <SettingsNavigationProvider>
-          <PhoneSettingsCategorySelect />
-          <Back />
-        </SettingsNavigationProvider>
-      </RouterContextProvider>,
-    );
-  });
+  const screen = await render(
+    <RouterContextProvider router={router}>
+      <SettingsNavigationProvider>
+        <PhoneSettingsCategorySelect />
+        <Back />
+      </SettingsNavigationProvider>
+    </RouterContextProvider>,
+    { router: false },
+  );
+  const { container } = screen;
   const choose = async (label: string) => {
     const option = [...container.querySelectorAll("option")].find(
       (item) => item.textContent === label,
@@ -79,11 +65,18 @@ async function fixture(initialEntries = ["/earlier", "/local/thread-1"]) {
       await router.load();
     });
   };
-  return { history, router, choose, back };
+  return {
+    history,
+    router,
+    choose,
+    back,
+    [Symbol.asyncDispose]: () => screen[Symbol.asyncDispose](),
+  };
 }
 
 it("opens Connections and Providers without adding history, then Chat and Back reach their original entries", async () => {
-  const { history, router, choose, back } = await fixture();
+  await using view = await fixture();
+  const { history, router, choose, back } = view;
   await act(async () => {
     await router.navigate({ to: "/settings/general", hash: "about" });
   });
@@ -106,7 +99,8 @@ it("opens Connections and Providers without adding history, then Chat and Back r
 });
 
 it("returns a direct Settings visit to chat landing without leaving a settings history loop", async () => {
-  const { history, router, choose, back } = await fixture(["/earlier", "/settings/general"]);
+  await using view = await fixture(["/earlier", "/settings/general"]);
+  const { history, router, choose, back } = view;
   await choose("Providers");
   await choose("Connections");
   await back();

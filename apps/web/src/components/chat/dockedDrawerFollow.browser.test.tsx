@@ -1,27 +1,25 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { render as renderUi, type Screen } from "../../../test/render";
 
 import { useFollowEndWhenDrawerDocks } from "./dockedDrawerFollow";
 
-let root: Root;
 let container: HTMLDivElement;
-let overlays: Array<HTMLElement> = [];
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  for (const overlay of overlays) overlay.remove();
-  overlays = [];
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      for (const overlay of overlays) overlay.remove();
+      overlays = [];
+    },
+  };
+}
+let overlays: Array<HTMLElement> = [];
 
 function Harness(props: {
   overlay: HTMLElement;
@@ -58,13 +56,12 @@ function overlayWith(drawerHeight: number | null) {
 
 describe("useFollowEndWhenDrawerDocks", () => {
   it("re-pins a following timeline when a drawer docks, and again only when it grows", async () => {
+    await using _setup = await setup();
     const scrollToEnd = vi.fn();
     const overlay = overlayWith(null);
     const render = (inset: number) =>
-      act(async () =>
-        root.render(
-          <Harness overlay={overlay} inset={inset} following scrollToEnd={scrollToEnd} />,
-        ),
+      testScreen.rerender(
+        <Harness overlay={overlay} inset={inset} following scrollToEnd={scrollToEnd} />,
       );
     await render(120);
     expect(scrollToEnd).not.toHaveBeenCalled();
@@ -92,12 +89,11 @@ describe("useFollowEndWhenDrawerDocks", () => {
   });
 
   it("leaves a timeline the user scrolled away from where it is", async () => {
+    await using _setup = await setup();
     const scrollToEnd = vi.fn();
     const overlay = overlayWith(64);
-    await act(async () =>
-      root.render(
-        <Harness overlay={overlay} inset={184} following={false} scrollToEnd={scrollToEnd} />,
-      ),
+    await testScreen.rerender(
+      <Harness overlay={overlay} inset={184} following={false} scrollToEnd={scrollToEnd} />,
     );
     expect(scrollToEnd).not.toHaveBeenCalled();
   });

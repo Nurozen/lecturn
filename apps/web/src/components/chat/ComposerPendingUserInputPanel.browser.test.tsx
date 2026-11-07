@@ -1,7 +1,6 @@
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "@lecturn/contracts";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import type { PendingUserInput } from "../../session-logic";
 
@@ -34,8 +33,22 @@ const prompt: PendingUserInput = {
 };
 
 const onDismiss = vi.fn();
-let root: Root;
 let container: HTMLDivElement;
+
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
+  onDismiss.mockClear();
+  container = document.createElement("div");
+  document.body.append(container);
+  testScreen = await renderUi(null, { container, router: false });
+  await testScreen.rerender(panel());
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 function panel(responding = false, pendingUserInputs: PendingUserInput[] = [prompt]) {
   return (
@@ -62,36 +75,24 @@ function toggleControl() {
   return container.querySelector<HTMLButtonElement>("button[data-pending-user-input-toggle]");
 }
 
-beforeEach(async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  onDismiss.mockClear();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(panel()));
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
-
 describe("ComposerPendingUserInputPanel", () => {
   it("offers dismiss only for async questions", async () => {
+    await using _setup = await setup();
     expect(dismissControl()).not.toBeNull();
-    await act(async () => root.render(panel(false, [{ ...prompt, dismissible: false }])));
+    await testScreen.rerender(panel(false, [{ ...prompt, dismissible: false }]));
     expect(dismissControl()).toBeNull();
   });
 
   it("removes the panel when no question is pending", async () => {
-    await act(async () => root.render(panel(false, [])));
+    await using _setup = await setup();
+    await testScreen.rerender(panel(false, []));
     expect(container.childElementCount).toBe(0);
   });
 
   it.each(["click", "Enter", " "])(
     "blocks %j dismissal while responding and restores it after the response settles",
     async (activation) => {
+      await using _setup = await setup();
       const activate = async () => {
         const event =
           activation === "click"
@@ -112,7 +113,7 @@ describe("ComposerPendingUserInputPanel", () => {
       expect(onDismiss).toHaveBeenCalledExactlyOnceWith(prompt.requestId);
       onDismiss.mockClear();
 
-      await act(async () => root.render(panel(true)));
+      await testScreen.rerender(panel(true));
       expect(dismissControl()!.getAttribute("aria-disabled")).toBe("true");
       expect(dismissControl()!.tabIndex).toBe(-1);
       await activate();
@@ -120,7 +121,7 @@ describe("ComposerPendingUserInputPanel", () => {
       expect(onDismiss).not.toHaveBeenCalled();
       expect(toggleControl()!.getAttribute("aria-expanded")).toBe("true");
 
-      await act(async () => root.render(panel()));
+      await testScreen.rerender(panel());
       expect(dismissControl()!.getAttribute("aria-disabled")).toBe("false");
       expect(dismissControl()!.tabIndex).toBe(0);
       await activate();

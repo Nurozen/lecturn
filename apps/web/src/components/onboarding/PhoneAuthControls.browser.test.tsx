@@ -1,6 +1,6 @@
-import { act, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ReactElement } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 import {
   terminalOutputText,
   type TerminalOutputState,
@@ -26,8 +26,21 @@ function terminalOutput(data: string): TerminalOutputState {
   };
 }
 const output = terminalOutput(`${url}\r\nPaste code here if prompted > `);
-let root: Root | null = null;
 let container: HTMLDivElement;
+
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
+  vi.clearAllMocks();
+  container = document.createElement("div");
+  document.body.append(container);
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 const writeInput = vi.fn(async (_data: string) => true);
 const refresh = vi.fn(async () => true);
 const props = {
@@ -45,25 +58,11 @@ const contents = () => container.textContent ?? "";
 const press = (label: string) => act(async () => button(label).click());
 const codeInput = () => container.querySelector("input")!;
 const link = () => container.querySelector("a")!.getAttribute("href");
-const render = (element: ReactElement) => act(async () => root!.render(element));
+const render = (element: ReactElement) => testScreen.rerender(element);
 const submit = () =>
   container
     .querySelector("form")!
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.clearAllMocks();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  root = null;
-  container.remove();
-  vi.unstubAllGlobals();
-});
 
 async function mount(next = props) {
   await render(<PhoneAuthControls {...next} />);
@@ -79,6 +78,7 @@ async function typeCode(code: string) {
 
 describe("phone authentication controls", () => {
   it("shows and copies a Codex device code without terminal selection or sending input", async () => {
+    await using _setup = await setup();
     copy.mockResolvedValueOnce(true);
     const codexProps = {
       ...props,
@@ -101,6 +101,7 @@ describe("phone authentication controls", () => {
   });
 
   it("copies the complete reconstructed Claude link outside the terminal", async () => {
+    await using _setup = await setup();
     await mount({
       ...props,
       output: terminalOutput(
@@ -115,6 +116,7 @@ describe("phone authentication controls", () => {
     expect(writeInput.mock.calls).toEqual([["synthetic#state\r"]]);
   });
   it("waits for a user action, sends Enter once, and prevents a duplicate pending command", async () => {
+    await using _setup = await setup();
     let finish: (value: boolean) => void = () => {};
     writeInput.mockImplementationOnce(
       () =>
@@ -136,6 +138,7 @@ describe("phone authentication controls", () => {
   });
 
   it("opens/copies the actual printed URL and does not send auth material during refresh", async () => {
+    await using _setup = await setup();
     copy.mockResolvedValueOnce(true);
     await mount();
     expect(link()).toBe(url);
@@ -147,6 +150,7 @@ describe("phone authentication controls", () => {
   });
 
   it("rejects input that is not one code#state token, clears a submitted code immediately, and blocks double submit", async () => {
+    await using _setup = await setup();
     await mount();
     // A browser input drops line breaks, so a second command arrives space-separated.
     await typeCode("synthetic#state whoami");
@@ -172,6 +176,7 @@ describe("phone authentication controls", () => {
   });
 
   it("discards the input when the CLI leaves the prompt or prints a replacement login URL", async () => {
+    await using _setup = await setup();
     await mount();
     await typeCode("synthetic#state");
     const ended = terminalOutput(terminalOutputText(output) + "\r\nLogin successful.\r\n$ ");
@@ -186,6 +191,7 @@ describe("phone authentication controls", () => {
   });
 
   it("keeps ended sign-in visible, removes stale auth inputs, and reports refresh failures", async () => {
+    await using _setup = await setup();
     await mount();
     await typeCode("synthetic#state");
     await render(<PhoneAuthControls {...props} sessionEnded />);
@@ -201,6 +207,7 @@ describe("phone authentication controls", () => {
   });
 
   it("offers explicit recovery without silently rerunning or sending the old code", async () => {
+    await using _setup = await setup();
     await mount();
     await typeCode("synthetic#state");
     await press("Start sign-in again");
@@ -210,6 +217,7 @@ describe("phone authentication controls", () => {
   });
 
   it("shows generic failures without logging exception messages containing auth material", async () => {
+    await using _setup = await setup();
     const error = vi.spyOn(console, "error");
     await mount();
     error.mockClear();

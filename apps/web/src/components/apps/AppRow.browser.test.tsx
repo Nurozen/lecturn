@@ -13,10 +13,10 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@lecturn/contracts";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ReactNode } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { makeThreadFixture } from "../../test-fixtures";
 
@@ -172,27 +172,26 @@ const context: AppTreeContext = {
   onNewThread: noop,
 };
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   container.className = "dark";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 async function render(width: number, children: ReactNode) {
   await page.viewport(1440, 900);
   await act(async () =>
-    root.render(
+    testScreen.rerender(
       <TooltipProvider>
         {/* Clear of the page's corner, where the test pointer rests, so nothing is hovered. */}
         <div style={{ width, margin: 200 }}>{children}</div>
@@ -236,6 +235,7 @@ const appRow = (subject: AppsSidebarApp) => (
 
 describe("Apps sidebar rows at the default sidebar width", () => {
   it("shows the chip, the working count and both actions at rest, as a project header does", async () => {
+    await using _setup = await setup();
     const subject = app();
     expect(subject.workingCount).toBe(3);
     await render(SIDEBAR_GROUP_WIDTH, appRow(subject));
@@ -260,6 +260,7 @@ describe("Apps sidebar rows at the default sidebar width", () => {
   });
 
   it("keeps a pending app's name whole beside its pairing chip", async () => {
+    await using _setup = await setup();
     const subject = pendingApp();
     expect(subject.pairing).toHaveLength(1);
     await render(
@@ -287,6 +288,7 @@ describe("Apps sidebar rows at the default sidebar width", () => {
   });
 
   it("keeps the empty-tree note inside its row when it wraps", async () => {
+    await using _setup = await setup();
     const subject = { ...app(), workspaces: [], pairing: [] };
     await render(
       SIDEBAR_GROUP_WIDTH,
@@ -301,6 +303,7 @@ describe("Apps sidebar rows at the default sidebar width", () => {
   });
 
   it("shows New thread, Open in and settings at rest in the selected app's one-row header", async () => {
+    await using _setup = await setup();
     await render(SIDEBAR_GROUP_WIDTH, <AppHeader app={app()} onBack={noop} onNewThread={noop} />);
 
     const header = container.querySelector('[data-testid="app-header"]')!;
@@ -330,6 +333,7 @@ describe("Apps sidebar rows at the default sidebar width", () => {
   });
 
   it("reads a truncated app name whole in the same tooltip on its row and its selected header", async () => {
+    await using _setup = await setup();
     const name = "RocketWright Motor Bench";
     const openPopup = () =>
       document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null;
@@ -351,6 +355,7 @@ describe("Apps sidebar rows at the default sidebar width", () => {
   });
 
   it("reads the selected and unselected thread titles whole under a workspace", async () => {
+    await using _setup = await setup();
     await render(
       SIDEBAR_GROUP_WIDTH,
       <AppsGroup>

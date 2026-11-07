@@ -19,9 +19,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import "~/index.css";
 
@@ -91,6 +89,7 @@ vi.mock(import("../../state/session"), async (original) => ({
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../../test-fixtures";
 import ChatView from "../ChatView";
+import { render } from "../../../test/render";
 import {
   SQUIRE_THREAD_CONTROLS,
   type ChatViewControl,
@@ -322,14 +321,9 @@ function seedHomeThread() {
   ]);
 }
 
-let root: Root | null = null;
-let host: HTMLDivElement | null = null;
-
 async function mount(controls?: ChatViewControls) {
-  host = document.createElement("div");
+  const host = document.createElement("div");
   host.style.cssText = "position:fixed;inset:0;display:flex;";
-  document.body.append(host);
-  root = createRoot(host);
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
@@ -344,26 +338,13 @@ async function mount(controls?: ChatViewControls) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
-  await act(async () => {
-    root!.render(
-      <AppAtomRegistryProvider>
-        <RouterProvider router={router} />
-      </AppAtomRegistryProvider>,
-    );
-  });
+  return render(
+    <AppAtomRegistryProvider>
+      <RouterProvider router={router} />
+    </AppAtomRegistryProvider>,
+    { container: host, router: false },
+  );
 }
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-});
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  host?.remove();
-  root = null;
-  host = null;
-  vi.unstubAllGlobals();
-});
 
 /** Every control a user can reach in the mounted view, by accessible name. */
 function interactiveNames(): string[] {
@@ -420,7 +401,7 @@ const SQUIRE_PLACEHOLDER = "Ask Release about anything it watches…";
 describe("ChatView controls", () => {
   it("shows only the Squire allowlist on a home thread", async () => {
     seedHomeThread();
-    await mount(SQUIRE_THREAD_CONTROLS);
+    await using _screen = await mount(SQUIRE_THREAD_CONTROLS);
     await waitForTimeline();
 
     const names = interactiveNames();
@@ -438,7 +419,7 @@ describe("ChatView controls", () => {
 
   it("keeps today's controls when no allowlist is given", async () => {
     seedHomeThread();
-    await mount();
+    await using _screen = await mount();
     await waitForTimeline();
 
     const names = interactiveNames();
@@ -462,14 +443,14 @@ describe("ChatView controls", () => {
 
   it("prompts with the Squire's name on its home thread, with or without the allowlist", async () => {
     seedHomeThread();
-    await mount(SQUIRE_THREAD_CONTROLS);
-    await vi.waitFor(() => expect(document.body.innerHTML).toContain(SQUIRE_PLACEHOLDER));
-    await act(async () => root?.unmount());
-    host?.remove();
+    {
+      await using _squireScreen = await mount(SQUIRE_THREAD_CONTROLS);
+      await vi.waitFor(() => expect(document.body.innerHTML).toContain(SQUIRE_PLACEHOLDER));
+    }
 
     seedHomeThread();
     fixture.shell = { ...(fixture.shell as object), squire: undefined };
-    await mount();
+    await using _screen = await mount();
     await waitForTimeline();
     expect(document.body.innerHTML).not.toContain(SQUIRE_PLACEHOLDER);
   });
