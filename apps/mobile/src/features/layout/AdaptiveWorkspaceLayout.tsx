@@ -64,6 +64,7 @@ import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSe
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { newTaskDestination } from "../threads/new-task-project-selection";
+import { threadRouteSelectionParams } from "../threads/thread-route-state";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { ThreadNavigationSidebar } from "../threads/ThreadNavigationSidebar";
 import { useOpenThreadPullRequests } from "../threads/use-open-thread-pull-requests";
@@ -507,12 +508,7 @@ function AdaptiveWorkspaceLayoutContent(
       const route = state?.routes.find((candidate) => candidate.key === props.workspaceRouteKey);
       if (route?.name === "Thread") {
         navigation.dispatch({
-          ...CommonActions.setParams({
-            environmentId: undefined,
-            threadId: undefined,
-            draft: undefined,
-            ...params,
-          }),
+          ...CommonActions.setParams(threadRouteSelectionParams(params)),
           source: route.key,
         });
       } else {

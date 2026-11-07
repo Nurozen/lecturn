@@ -1,11 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  AppId,
   AuthSessionId,
   EnvironmentId,
+  ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
+  RpcScopeAuthorization,
   ThreadId,
   WS_METHODS,
+  WsRpcGroup,
   WsSubscribeServerConfigRpc,
   type OrchestrationV2StoredEvent,
   type OrchestrationProjectShell,
@@ -115,6 +119,7 @@ import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import { formatEmbedSubject } from "./apps/subjects.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -581,6 +586,125 @@ it.effect(
       ),
       Effect.scoped,
     ),
+);
+
+it.effect("keeps palette picks out of an embed session's thread RPCs", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread-picks");
+    const opens = { openedAt: 1, score: 2, picks: [{ query: "secret plan", at: 1 }] };
+    const scrubbed = { ...opens, picks: [] };
+    const appThread = { id: threadId, projectId: "project", opens };
+    const projection = {
+      thread: appThread,
+      runs: [],
+      attempts: [],
+      nodes: [],
+      subagents: [],
+      providerSessions: [],
+      providerThreads: [],
+      providerTurns: [],
+      runtimeRequests: [],
+      messages: [],
+      plans: [],
+      turnItems: [],
+      checkpointScopes: [],
+      checkpoints: [],
+      contextHandoffs: [],
+      contextTransfers: [],
+      visibleTurnItems: [],
+    };
+    const responses = yield* Queue.unbounded<any>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        ensureLegacyTranscript: () => Effect.void,
+        getThreadSnapshot: () => Effect.succeed({ projection, snapshotSequence: 1 } as never),
+        getThreadSnapshotWindow: () =>
+          Effect.succeed({ projection, snapshotSequence: 1, truncated: false } as never),
+        streamStoredEventsFrom: () =>
+          Stream.make({
+            sequence: 2,
+            event: { type: "thread.visited", threadId, payload: appThread },
+          } as never),
+      }),
+      Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({
+        enqueueCommand: () => Effect.succeed({ threadId, projection, resumed: true } as never),
+      }),
+      Layer.mock(AnalyticsService.AnalyticsService)({ record: () => Effect.void }),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: process.cwd(),
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) => Queue.offer(responses, response),
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("embed-session"),
+            subject: formatEmbedSubject(AppId.make("dev.example.app"), ProjectId.make("project")),
+            method: "bearer-access-token",
+            scopes: [],
+          },
+          {},
+          {},
+          yield* PreviewAutomationBroker.PreviewAutomationBroker,
+          yield* ServerBrowser.ServerBrowser,
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(Layer.succeed(RpcScopeAuthorization)((effect) => effect)),
+        ),
+      ),
+    );
+    const call = (id: string, tag: string, payload: object) =>
+      server.write(0, {
+        _tag: "Request",
+        id: RpcMessage.RequestId(id),
+        tag: tag as never,
+        payload,
+        headers: Headers.empty,
+      });
+
+    yield* call("get", ORCHESTRATION_V2_WS_METHODS.getThreadProjection, { threadId });
+    const got = yield* Queue.take(responses);
+    assert.deepEqual(got.exit.value.thread.opens, scrubbed);
+
+    yield* call("launch", ORCHESTRATION_V2_WS_METHODS.launchThread, {
+      commandId: "command",
+      projectId: "project",
+    });
+    const launched = yield* Queue.take(responses);
+    assert.deepEqual(launched.exit.value.projection.thread.opens, scrubbed);
+
+    yield* server.write(0, { _tag: "Ack", requestId: RpcMessage.RequestId("subscribe") });
+    yield* call("subscribe", ORCHESTRATION_V2_WS_METHODS.subscribeThread, { threadId });
+    const items: Array<any> = [];
+    while (items.length < 2) {
+      const response = yield* Queue.take(responses);
+      assert.equal(response._tag, "Chunk");
+      items.push(...response.values);
+      yield* server.write(0, { _tag: "Ack", requestId: RpcMessage.RequestId("subscribe") });
+    }
+    assert.deepEqual(items[0].projection.thread.opens, scrubbed);
+    assert.deepEqual(items[1].event.payload.opens, scrubbed);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
 );
 
 // Compaction keeps the oldest and newest event per message, so a cursor older

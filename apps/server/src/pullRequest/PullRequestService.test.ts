@@ -855,9 +855,9 @@ it.effect("offers each label once across repositories, despite one that cannot b
           id: "p2",
           title: "uploadthing",
           workspaceRoot: "/b",
-          repository: "pingdotgg/ut",
+          repository: "nurozen/ut",
         }),
-        project({ id: "p3", title: "broken", workspaceRoot: "/c", repository: "pingdotgg/broken" }),
+        project({ id: "p3", title: "broken", workspaceRoot: "/c", repository: "nurozen/broken" }),
         project({
           id: "p4",
           title: "elsewhere",
@@ -870,7 +870,7 @@ it.effect("offers each label once across repositories, despite one that cannot b
         fakeProvider(SourceControlProviderKind.make("github"), {
           listRepositoryLabels: (input) => {
             reads.push(input.repository);
-            return input.repository === "pingdotgg/broken"
+            return input.repository === "nurozen/broken"
               ? Effect.fail(requestFailed)
               : Effect.succeed({
                   items:

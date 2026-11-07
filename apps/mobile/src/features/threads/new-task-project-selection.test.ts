@@ -139,6 +139,27 @@ describe("newTaskDestination", () => {
       draft: { requestId: "request", environmentId: "environment", projectId: "first" },
     });
   });
+  it("falls back to a listed project, past app workspaces and archived spaces", () => {
+    const appWorkspace = { ...makeProject("app"), appBinding: { appId: "dev.example" } };
+    const archived = {
+      ...makeProject("archived"),
+      stave: { spaceId: "space", isSaga: false, repos: [], state: "archived" },
+    };
+    const projects = [appWorkspace, archived, makeProject("listed")] as EnvironmentProject[];
+    expect(newTaskDestination(true, projects, undefined, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "listed" },
+    });
+    expect(
+      newTaskDestination(true, [appWorkspace] as EnvironmentProject[], undefined, "r"),
+    ).toEqual({ draft: { requestId: "r" } });
+  });
+  it("still finds a current project that only the Apps tab lists", () => {
+    const appWorkspace = { ...makeProject("app"), appBinding: { appId: "dev.example" } };
+    const projects = [makeProject("listed"), appWorkspace] as EnvironmentProject[];
+    expect(newTaskDestination(true, projects, appWorkspace, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "app" },
+    });
+  });
   it("keeps the picker when there are no projects", () => {
     expect(newTaskDestination(true, [], undefined, "request")).toEqual({
       draft: { requestId: "request" },

@@ -5,9 +5,12 @@ import {
   ProjectId,
   ThreadId,
   type OrchestrationProjectShell,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ShellStreamItem,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
+  type OrchestrationV2ThreadStreamItem,
   type ProjectSnapshot,
   ServerSettings,
 } from "@lecturn/contracts";
@@ -25,6 +28,8 @@ import {
   filterServerSettingsForSubject,
   filterShellItem,
   filterShellSnapshotForSubject,
+  filterThreadProjectionForSubject,
+  filterThreadStream,
   filterShellStream,
 } from "./appStreamFilter.ts";
 import { AppAuthorization } from "./services.ts";
@@ -192,6 +197,89 @@ describe("app shell filter", () => {
     expect(
       filterProjectSnapshotForSubject(formatAppSubject(rocketwright))(projects).projects,
     ).toEqual([]);
+  });
+});
+
+describe("palette picks", () => {
+  const opens = { openedAt: 1, score: 2, picks: [{ query: "secret plan", at: 1 }] };
+  const scrubbed = { ...opens, picks: [] };
+  const picked = (id: string, projectId: ProjectId) =>
+    ({ ...thread(id, projectId), opens }) as unknown as OrchestrationV2ThreadShell;
+  const pickedSnapshot: OrchestrationV2ShellSnapshot = {
+    ...snapshot,
+    threads: [picked("rocket-thread", rocketProject)],
+    archivedThreads: [picked("rocket-archived", rocketProject)],
+  };
+  const threadUpdate: OrchestrationV2ShellStreamItem = {
+    kind: "thread.updated",
+    sequence: 9,
+    location: "active",
+    thread: picked("t", rocketProject),
+  };
+  const projection = {
+    thread: picked("t", rocketProject),
+  } as unknown as OrchestrationV2ThreadProjection;
+  const visited = {
+    type: "thread.visited",
+    payload: picked("t", rocketProject),
+  } as unknown as OrchestrationV2DomainEvent;
+  const threadItems: ReadonlyArray<OrchestrationV2ThreadStreamItem> = [
+    { kind: "snapshot", snapshotSequence: 1, projection },
+    { kind: "event", sequence: 2, event: visited },
+    {
+      kind: "event",
+      sequence: 3,
+      event: {
+        type: "turn-item.updated",
+        payload: { id: "item" },
+      } as unknown as OrchestrationV2DomainEvent,
+    },
+    { kind: "synchronized" },
+  ];
+
+  it.effect("stays out of an app or embed session's shell, keeping the ranking", () =>
+    Effect.gen(function* () {
+      for (const subject of [appSubject, embedSubject]) {
+        const item = Option.getOrThrow(
+          yield* filterShellItem(subject, threadUpdate, ownedByRocketwright),
+        );
+        expect(item.kind === "thread.updated" && item.thread.opens).toEqual(scrubbed);
+        const first = Option.getOrThrow(
+          yield* filterShellItem(
+            subject,
+            { kind: "snapshot", snapshot: pickedSnapshot },
+            ownedByRocketwright,
+          ),
+        );
+        if (first.kind !== "snapshot") throw new Error("expected a snapshot");
+        expect(first.snapshot.threads[0]?.opens).toEqual(scrubbed);
+        expect(first.snapshot.archivedThreads[0]?.opens).toEqual(scrubbed);
+      }
+      const http = filterShellSnapshotForSubject(formatEmbedSubject(rocketwright, rocketProject))(
+        pickedSnapshot,
+      );
+      expect(http.threads[0]?.opens).toEqual(scrubbed);
+    }),
+  );
+
+  it.effect("stays out of an embed session's thread stream and projections", () =>
+    Effect.gen(function* () {
+      const embed = formatEmbedSubject(rocketwright, rocketProject);
+      const [first, second, third, fourth] = yield* filterThreadStream(session(embed))(
+        Stream.fromIterable(threadItems),
+      ).pipe(Stream.runCollect);
+      expect(first?.kind === "snapshot" && first.projection.thread.opens).toEqual(scrubbed);
+      expect(second?.kind === "event" && second.event.payload).toMatchObject({ opens: scrubbed });
+      expect(third).toEqual(threadItems[2]);
+      expect(fourth).toEqual({ kind: "synchronized" });
+      expect(filterThreadProjectionForSubject(embed)(projection).thread.opens).toEqual(scrubbed);
+    }),
+  );
+
+  it("leaves other sessions' thread payloads untouched", () => {
+    const source = Stream.fromIterable(threadItems);
+    expect(filterThreadStream(session("owner"))(source)).toBe(source);
+    expect(filterThreadProjectionForSubject("owner")(projection)).toBe(projection);
   });
 });
 

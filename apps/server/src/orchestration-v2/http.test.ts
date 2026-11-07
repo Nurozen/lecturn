@@ -1,4 +1,5 @@
 import {
+  AppId,
   AuthSessionId,
   type AuthEnvironmentScope,
   EnvironmentAuthenticatedAuth,
@@ -38,6 +39,7 @@ import { EventSinkV2 } from "./EventSink.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import { formatEmbedSubject } from "../apps/subjects.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 
@@ -96,67 +98,117 @@ const items = Schema.decodeUnknownSync(Schema.Array(OrchestrationV2TurnItem))(
   })),
 );
 
-it.effect("exports full history with size, scope, and missing-thread checks", () =>
-  Effect.gen(function* () {
-    let allowed = true;
-    const runtime = ProviderReplayHarness.layerWithRegistry(
-      { name: "thread-transcript" },
-      ProviderAdapterRegistry.layerFromAdapters([]),
-      { runEffectWorker: false },
-    );
-    const services = yield* Layer.build(
-      Layer.mergeAll(
-        runtime,
-        ThreadManagementService.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(runtime, CommandReceiptStore.layer, ServerSettings.layerTest({})),
+const makeThreadRoutes = Effect.fnUntraced(function* (
+  principal: () => { readonly subject: string; readonly scopes: ReadonlySet<AuthEnvironmentScope> },
+) {
+  const runtime = ProviderReplayHarness.layerWithRegistry(
+    { name: "thread-transcript" },
+    ProviderAdapterRegistry.layerFromAdapters([]),
+    { runEffectWorker: false },
+  );
+  const services = yield* Layer.build(
+    Layer.mergeAll(
+      runtime,
+      ThreadManagementService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(runtime, CommandReceiptStore.layer, ServerSettings.layerTest({})),
+        ),
+      ),
+      OrchestrationEventStore.layer,
+      ProjectStore.layer,
+    ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  );
+  const eventSink = Context.get(services, EventSinkV2);
+  yield* eventSink.write({
+    events: [
+      {
+        id: EventId.make("create-source"),
+        type: "thread.created",
+        threadId: thread.id,
+        occurredAt: now,
+        payload: thread,
+      },
+    ],
+  });
+  const routes = HttpApiBuilder.layer(TranscriptTestApi).pipe(
+    Layer.provide(OrchestrationHttp.layer),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(environmentId),
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
+        Effect.suspend(() =>
+          effect.pipe(
+            Effect.provideService(EnvironmentAuthenticatedPrincipal, {
+              sessionId: AuthSessionId.make("test-session"),
+              method: "bearer-access-token",
+              ...principal(),
+            }),
           ),
         ),
-        OrchestrationEventStore.layer,
-        ProjectStore.layer,
-      ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
-    );
-    const eventSink = Context.get(services, EventSinkV2);
+      ),
+    ),
+    Layer.provide(Layer.succeedContext(services)),
+    Layer.provide(Layer.mock(ProjectEnrichmentService)({})),
+    Layer.provide(HttpPlatform.layer),
+    Layer.provide(Etag.layerWeak),
+    Layer.provide(NodeServices.layer),
+  );
+  const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  yield* Effect.addFinalizer(() => Effect.promise(dispose));
+  return { services, eventSink, handler };
+});
+
+it.effect("keeps palette picks out of an embed session's thread snapshots", () =>
+  Effect.gen(function* () {
+    const opens = { openedAt: 1, score: 2, picks: [{ query: "secret plan", at: 1 }] };
+    let subject = formatEmbedSubject(AppId.make("dev.example.app"), thread.projectId);
+    const { eventSink, handler } = yield* makeThreadRoutes(() => ({
+      subject,
+      scopes: new Set<AuthEnvironmentScope>(["orchestration:read"]),
+    }));
     yield* eventSink.write({
       events: [
         {
-          id: EventId.make("create-source"),
-          type: "thread.created",
+          id: EventId.make("visit-source"),
+          type: "thread.visited",
           threadId: thread.id,
           occurredAt: now,
-          payload: thread,
+          payload: { ...thread, opens },
         },
       ],
     });
-    const routes = HttpApiBuilder.layer(TranscriptTestApi).pipe(
-      Layer.provide(OrchestrationHttp.layer),
-      Layer.provide(
-        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-          getEnvironmentId: Effect.succeed(environmentId),
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
-          Effect.suspend(() =>
-            effect.pipe(
-              Effect.provideService(EnvironmentAuthenticatedPrincipal, {
-                sessionId: AuthSessionId.make("test-session"),
-                subject: "test",
-                method: "bearer-access-token",
-                scopes: new Set<AuthEnvironmentScope>(allowed ? ["orchestration:read"] : []),
-              }),
-            ),
-          ),
-        ),
-      ),
-      Layer.provide(Layer.succeedContext(services)),
-      Layer.provide(Layer.mock(ProjectEnrichmentService)({})),
-      Layer.provide(HttpPlatform.layer),
-      Layer.provide(Etag.layerWeak),
-      Layer.provide(NodeServices.layer),
-    );
-    const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-    yield* Effect.addFinalizer(() => Effect.promise(dispose));
+    const readOpens = (suffix: string) =>
+      Effect.promise(async () => {
+        const response = await handler(
+          new Request(`http://localhost/api/orchestration/threads/${thread.id}${suffix}`, {
+            headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
+          }),
+        );
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as {
+          readonly projection: { readonly thread: { readonly opens: unknown } };
+        };
+        return body.projection.thread.opens;
+      });
+
+    for (const suffix of ["", "/bounded"]) {
+      expect(yield* readOpens(suffix)).toEqual({ ...opens, picks: [] });
+    }
+    subject = "owner";
+    expect(yield* readOpens("/bounded")).toEqual(opens);
+  }),
+);
+
+it.effect("exports full history with size, scope, and missing-thread checks", () =>
+  Effect.gen(function* () {
+    let allowed = true;
+    const { services, eventSink, handler } = yield* makeThreadRoutes(() => ({
+      subject: "test",
+      scopes: new Set<AuthEnvironmentScope>(allowed ? ["orchestration:read"] : []),
+    }));
     const read = (threadId: ThreadId) =>
       Effect.promise(() =>
         handler(

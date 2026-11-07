@@ -191,7 +191,7 @@ vi.mock("../../state/use-composer-attachment-actions", () => ({
   useComposerAttachmentActions: () => ({}),
 }));
 vi.mock("../workspace/useAndroidWorkspaceNavigation", () => ({
-  useWorkspaceBackNavigation: () => vi.fn(),
+  useDraftBackNavigation: () => vi.fn(),
 }));
 vi.mock("../connection/connectionTone", () => ({ connectionTone: () => null }));
 vi.mock("./DraftEnvironmentControl", () => ({ DraftEnvironmentControl: native.noop }));

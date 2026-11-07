@@ -205,6 +205,26 @@ describe("createHomeThreadNavigationAction", () => {
 });
 
 describe("draft and live thread selection", () => {
+  it("drops a linked route's account and app when another thread is selected", () => {
+    const linked = apply(
+      initialState(),
+      StackActions.push("Thread", {
+        accountId: "account-a",
+        appId: "dev.example",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+      }),
+    );
+
+    const selected = selectThread(linked, thread("thread-2"));
+
+    expect(selected.routes.at(-1)?.key).toBe(linked.routes.at(-1)?.key);
+    expect(selected.routes.at(-1)?.params).toEqual({
+      environmentId: "environment-1",
+      threadId: "thread-2",
+    });
+  });
+
   it("keeps the screen key and clears old identity when switching both ways", () => {
     const live = selectThread(initialState(), thread("thread-a"));
     const key = live.routes[live.index]!.key;

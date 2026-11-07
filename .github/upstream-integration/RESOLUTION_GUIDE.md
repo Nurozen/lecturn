@@ -1165,6 +1165,18 @@ from upstream's side.
   fake-clock frame steppers and the live-provider s0a2 loop suppress with a reason.
 - **Vendored screens.** `t3-fork.json` in the `t3.43` tarball names `juliusmarminge` while
   upstream links PixPMusic; tag `t3-v5.0.0-t3.43` resolves to the same object on both.
+- **The identity sweep must not map hostnames.** `t3.codes` became a dead `lecturn.codes` in a
+  curl-to-shell installer line: an unregistered name is remote code execution once someone
+  registers it. Scan URLs on added lines vs `main`; the installer URL is in
+  `docs/user/install.md`. An identity scan cannot catch this, since the output has no T3 name.
+- **`setParams` merges.** Where upstream replaced `navigate("Thread")` with it, route resets must
+  also clear `accountId` and `appId` (`threadRouteSelectionParams`), or a stale
+  notification account marks the next thread unavailable.
+- **Folded rows must open on citations.** Upstream has no user-row citation source, so its tests
+  miss this: decision sources, thread notes and citation links target folded agent rows.
+- **Palette `picks` stay out of app streams.** Upstream's `thread.opens` ships in the shell, thread
+  snapshots and every thread event. `apps/appStreamFilter.ts` strips `picks` for app and embed
+  sessions; any new surface returning a thread needs the same filter.
 
 ## Recurring mechanical conflicts
 

@@ -15,6 +15,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "../../state/vcs";
 import { useVcsActionState } from "../../state/use-vcs-action-state";
+import { resolveDraftHeaderGitCwd } from "./new-task-context-presentation";
 import { ThreadHeader } from "./ThreadHeader";
 
 export function DraftThreadHeader(props: {
@@ -27,10 +28,11 @@ export function DraftThreadHeader(props: {
   const environmentId = props.thread.environmentId;
   const canReadFiles = useEnvironmentScope(environmentId, AuthFilesystemReadScope);
   const canWriteGit = useEnvironmentScope(environmentId, AuthSourceControlWriteScope);
+  const gitCwd = resolveDraftHeaderGitCwd(props.project, props.cwd);
   const status = useEnvironmentQuery(
-    props.cwd ? vcsEnvironment.status({ environmentId, input: { cwd: props.cwd } }) : null,
+    gitCwd ? vcsEnvironment.status({ environmentId, input: { cwd: gitCwd } }) : null,
   );
-  const target = { environmentId, cwd: props.cwd };
+  const target = { environmentId, cwd: gitCwd };
   const progress = useVcsActionState(target);
   const runAction = useAtomCommand(vcsActionManager.runStackedAction(target), {
     reportFailure: false,
@@ -82,13 +84,13 @@ export function DraftThreadHeader(props: {
           requiresThread();
         },
         onPull: async () => {
-          if (!canWriteGit || !props.cwd) return;
-          const result = await pull({ environmentId, input: { cwd: props.cwd } });
+          if (!canWriteGit || !gitCwd) return;
+          const result = await pull({ environmentId, input: { cwd: gitCwd } });
           if (AsyncResult.isFailure(result))
             Dialog.alert("Could not pull", String(Cause.squash(result.cause)));
         },
         onRunAction: async (input) => {
-          if (!canWriteGit || !props.cwd) return null;
+          if (!canWriteGit || !gitCwd) return null;
           const result = await runAction({ ...input, actionId: uuidv4() });
           if (AsyncResult.isFailure(result)) {
             Dialog.alert("Git action failed", String(Cause.squash(result.cause)));

@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
+import { threadRouteSelectionParams } from "../threads/thread-route-state";
 import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";
 
 type ThreadSelection = Pick<EnvironmentThreadShell, "environmentId" | "id">;
@@ -24,12 +25,7 @@ export function createHomeThreadRouteAction(input: {
   }
   if (currentRoute?.name === "Thread") {
     return {
-      ...CommonActions.setParams({
-        environmentId: undefined,
-        threadId: undefined,
-        draft: undefined,
-        ...input.params,
-      }),
+      ...CommonActions.setParams(threadRouteSelectionParams(input.params)),
       source: currentRoute.key,
     };
   }

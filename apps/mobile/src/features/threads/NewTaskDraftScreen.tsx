@@ -6,7 +6,7 @@ import { DraftThreadHeader } from "./DraftThreadHeader";
 import { threadHeaderAppearance } from "./thread-header-appearance";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { useComposerAttachmentActions } from "../../state/use-composer-attachment-actions";
-import { useWorkspaceBackNavigation } from "../workspace/useAndroidWorkspaceNavigation";
+import { useDraftBackNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 import { submittedThreadParams } from "./thread-route-state";
 import { ThreadScreenBinding, ThreadScreenFallback } from "./ThreadScreenHost";
 import { draftThreadShell } from "./draft-thread-shell";
@@ -163,7 +163,7 @@ export function NewTaskDraftScreen(props: {
   const projects = useNewThreadTargetProjects();
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
-  const goBack = useWorkspaceBackNavigation("threads");
+  const goBack = useDraftBackNavigation();
   const {
     consumeShare,
     getShare,

@@ -1,6 +1,7 @@
 import { CommonActions, type NavigationState, type ParamListBase } from "@react-navigation/native";
 
 import { uuidv4 } from "../../lib/uuid";
+import { isDraftThreadRoute } from "../threads/thread-route-state";
 
 const NEW_TASK_FLOW_ROUTES = new Set(["NewTaskProject", "AddProject"]);
 
@@ -17,10 +18,10 @@ export function replaceNewTaskFlowWithThread(
 ) {
   const state = navigation.getState();
   if (!state) return;
-  const threadIndex = state.routes.findLastIndex((route) => route.name === "Thread");
+  const draftIndex = state.routes.findLastIndex(isDraftThreadRoute);
   const flowStart =
-    threadIndex >= 0
-      ? threadIndex
+    draftIndex >= 0
+      ? draftIndex
       : state.routes.findIndex((route) => NEW_TASK_FLOW_ROUTES.has(route.name));
   const routes = [
     ...state.routes.slice(0, flowStart < 0 ? state.index : flowStart),

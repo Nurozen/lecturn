@@ -24,8 +24,23 @@ export function isDraftThreadRoute(
   );
 }
 
+/**
+ * `setParams` merges, so a thread selection clears what it does not name: a stale `accountId`
+ * from a notification link would mark the next thread unavailable.
+ */
+export function threadRouteSelectionParams<Params extends object | undefined>(params: Params) {
+  return {
+    environmentId: undefined,
+    threadId: undefined,
+    draft: undefined,
+    accountId: undefined,
+    appId: undefined,
+    ...params,
+  };
+}
+
 export function submittedThreadParams(environmentId: string, threadId: string) {
-  return { draft: undefined, environmentId, threadId };
+  return threadRouteSelectionParams({ environmentId, threadId });
 }
 
 export function draftRouteIdentity(draft: NewTaskDraftRouteParams): string {

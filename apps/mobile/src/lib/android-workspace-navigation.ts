@@ -103,6 +103,18 @@ export function returnToAndroidWorkspaceList(
   resetAndroidWorkspace(navigation);
 }
 
+/**
+ * A draft opens over where it started: Home on any tab, an app's threads, or another thread.
+ * Back returns there. Only a draft with nothing below it, from a link, needs the workspace list.
+ */
+export function returnFromDraft(
+  navigation: { readonly canGoBack: () => boolean; readonly goBack: () => void },
+  returnToList: () => void,
+) {
+  if (navigation.canGoBack()) navigation.goBack();
+  else returnToList();
+}
+
 // In the split view these destinations swap the detail pane beside the sidebar instead of
 // stacking over Home, so the default slide-in would show a layer that is not there.
 export function androidWorkspaceDestinationAnimation(routeName: string, usesSplitView: boolean) {

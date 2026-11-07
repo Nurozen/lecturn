@@ -45,6 +45,30 @@ describe("draft thread handoff", () => {
     });
     expect(isDraftThreadRoute(submitted.routes.at(-1))).toBe(false);
   });
+
+  it("drops the draft route's account and app when the thread is submitted", () => {
+    const router = StackRouter({});
+    const options = { routeNames: ["Home", "Thread"], routeParamList: {}, routeGetIdList: {} };
+    const draft = router.getStateForAction(
+      router.getInitialState(options),
+      CommonActions.navigate("Thread", {
+        accountId: "account-a",
+        appId: "dev.example",
+        draft: { projectId: "project" },
+      }),
+      options,
+    )!;
+    if (!draft || draft.stale !== false) throw new Error("Draft route was not initialized");
+    const submitted = router.getStateForAction(
+      draft,
+      CommonActions.setParams(submittedThreadParams("environment", "thread")),
+      options,
+    )!;
+    expect(submitted.routes.at(-1)?.params).toEqual({
+      environmentId: "environment",
+      threadId: "thread",
+    });
+  });
 });
 
 describe("missing shared-content project recovery", () => {

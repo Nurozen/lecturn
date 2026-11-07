@@ -2289,6 +2289,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
                   }).projection,
                 ),
               ),
+              Effect.map(AppStreamFilter.filterThreadProjectionForSubject(currentSession.subject)),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationV2GetThreadProjectionError({
@@ -2357,7 +2358,9 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
               ),
               Effect.map((result) => ({
                 ...result,
-                projection: projectThreadProjectionForWire(result.projection),
+                projection: AppStreamFilter.filterThreadProjectionForSubject(
+                  currentSession.subject,
+                )(projectThreadProjectionForWire(result.projection)),
               })),
               Effect.catchTags({
                 AttachmentClaimError: (cause) =>
@@ -2404,7 +2407,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(subscribeOrchestrationV2Thread(input)),
         ),
-      ),
+      ).pipe(AppStreamFilter.filterThreadStream(currentSession)),
     [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
       Stream.unwrap(
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(

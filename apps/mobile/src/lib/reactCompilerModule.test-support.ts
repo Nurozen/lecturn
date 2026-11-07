@@ -27,6 +27,8 @@ export function loadCompiledMobileModule(input: {
   readonly file: string;
   readonly modules: Readonly<Record<string, unknown>>;
   readonly expose?: readonly string[];
+  /** Metro inlines `Platform.OS`, so a stubbed Platform cannot pick the other platform's path. */
+  readonly platform?: "android" | "ios";
 }): CompiledMobileModule {
   const babel: {
     transformFileSync: (file: string, options: Record<string, unknown>) => { code: string };
@@ -58,7 +60,7 @@ export function loadCompiledMobileModule(input: {
     caller: {
       name: "metro",
       bundler: "metro",
-      platform: "android",
+      platform: input.platform ?? "android",
       isDev: false,
       isServer: false,
       isNodeModule: false,

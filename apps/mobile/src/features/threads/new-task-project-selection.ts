@@ -2,6 +2,7 @@ import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { repositoryGroupingKeyOf, type EnvironmentId, type ProjectId } from "@lecturn/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
+import { listedProjects } from "../../state/listed-entities";
 import type { HomeProjectScope } from "../home/homeThreadList";
 
 type DraftProjectSelectionResolution =
@@ -129,7 +130,7 @@ export function newTaskDestination(
       (candidate) =>
         candidate.environmentId === currentProject?.environmentId &&
         candidate.id === currentProject.id,
-    ) ?? projects[0];
+    ) ?? listedProjects(projects)[0];
   return project
     ? {
         draft: {

@@ -472,6 +472,39 @@ describe("MessagesTimeline agent messages", () => {
     expect(screen.text()).not.toContain("drops the index");
   });
 
+  it("opens a folded agent message for a citation that targets it", async () => {
+    setup();
+    const cited = "drops the index";
+    const start = AGENT_MESSAGE.indexOf(cited);
+    await using screen = await renderTimeline(
+      [message(AGENT_MESSAGE, { createdBy: "agent", senderThreadId: SENDER_THREAD_ID })],
+      {
+        citationRequest: {
+          key: "citation-1",
+          citation: {
+            version: 1,
+            coordinateSpace: "raw-message",
+            environmentId: ENVIRONMENT_ID,
+            threadId: SENDER_THREAD_ID,
+            messageId: MessageId.make("message-1"),
+            text: cited,
+            start,
+            end: start + cited.length,
+            prefix: "",
+            suffix: "",
+          },
+        },
+      },
+    );
+    await vi.waitFor(() => {
+      expect(screen.container.querySelector("[data-citation-source-role]")).not.toBeNull();
+    });
+    expect(screen.button(/^Agent/).getAttribute("aria-expanded")).toBe("true");
+
+    await click(screen.button(/^Agent/));
+    expect(screen.button(/^Agent/).getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("leaves messages sent by Lecturn as full bubbles", async () => {
     setup();
     await using screen = await renderTimeline([

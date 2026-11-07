@@ -21,6 +21,17 @@ export function resolveNewTaskGitCwd(
   return resolveProjectGitCwd({ project }) || null;
 }
 
+/**
+ * Directory a draft's header reads git status from. `cwd` is the composer's directory: a worktree
+ * path answers for itself, but a Stave space root is not a repository, so its primary repo does.
+ */
+export function resolveDraftHeaderGitCwd(
+  project: NewTaskProjectLike,
+  cwd: string | null,
+): string | null {
+  return cwd === project.workspaceRoot ? resolveNewTaskGitCwd(project) : cwd;
+}
+
 export function resolveNewTaskWorkspaceSelection(input: {
   readonly selection: ComposerDraftWorkspaceSelection | undefined;
   readonly fallback: ComposerDraftWorkspaceSelection;

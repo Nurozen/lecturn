@@ -304,6 +304,15 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const folded = userMessage.attribution === "agent";
   const [expanded, setExpanded] = useState(false);
   const revealFoldRef = findRevealRef(() => setExpanded(true));
+  // A citation's source mounts inside the body, so a request for this message opens the fold.
+  // Once per request: the user can still fold it again while the request stays active.
+  const citationKey =
+    ctx.citationRequest?.citation.messageId === row.message.id ? ctx.citationRequest.key : null;
+  const [openedCitationKey, setOpenedCitationKey] = useState<string | null>(null);
+  if (citationKey !== openedCitationKey) {
+    setOpenedCitationKey(citationKey);
+    if (citationKey !== null) setExpanded(true);
+  }
   const senderShell = useQuietThreadShell(
     folded && senderThreadId
       ? { environmentId: ctx.activeThreadEnvironmentId, threadId: senderThreadId }
