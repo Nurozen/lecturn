@@ -167,6 +167,7 @@ const stubs: Record<string, unknown> = {
   "./userMessageIntentBadge": UserMessageIntentBadge,
   "./CopyTextButton": { CopyTextButton },
   "./thread-work-log": { ThreadWorkLog },
+  "./pending-thread-feed": { isCompactionCommandFeedEntry: () => false },
   "../../lib/threadActivity": {
     isContextCompactionActivityGroup: () => false,
     isContextHandoffActivityGroup: () => false,

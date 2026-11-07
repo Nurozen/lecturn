@@ -1,5 +1,6 @@
 package expo.modules.lecturnreviewdiff
 
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -54,6 +55,9 @@ class LecturnReviewDiffModule : Module() {
       Prop("initialRowIndex") { view: LecturnReviewDiffView, initialRowIndex: Double ->
         view.setInitialRowIndex(initialRowIndex)
       }
+      Prop("initialFileId") { view: LecturnReviewDiffView, fileId: String ->
+        view.setInitialFileId(fileId)
+      }
 
       Events(
         "onDebug",
@@ -80,8 +84,12 @@ class LecturnReviewDiffModule : Module() {
       AsyncFunction("setTokensJson") { view: LecturnReviewDiffView, tokensJson: String ->
         view.setTokensJson(tokensJson)
       }
-      AsyncFunction("setTokensPatchJson") { view: LecturnReviewDiffView, tokensPatchJson: String ->
-        view.setTokensPatchJson(tokensPatchJson)
+      AsyncFunction("setTokensPatchJson") {
+          view: LecturnReviewDiffView,
+          tokensPatchJson: String,
+          promise: Promise
+        ->
+        view.setTokensPatchJson(tokensPatchJson) { accepted -> promise.resolve(accepted) }
       }
 
       OnViewDestroys { view: LecturnReviewDiffView ->

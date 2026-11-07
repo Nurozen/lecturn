@@ -963,6 +963,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           ...(acceptBoundedSnapshot
             ? { acceptBoundedSnapshot: true as const, acceptCompactTurnItems: true as const }
             : {}),
+          acceptDedupedBodies: true as const,
         };
       }),
       {
@@ -1047,5 +1048,6 @@ export * from "./composerPathSearch.ts";
 export * from "./threadCommands.ts";
 export * from "./threadFeedback.ts";
 export * from "./threadDetail.ts";
+export * from "./threadFamilies.ts";
 export * from "./threadShell.ts";
 export * from "./threadState.ts";

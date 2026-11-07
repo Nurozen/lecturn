@@ -46,6 +46,7 @@ import { BrowserChromeThemeSync, DocumentTitleSync } from "./RootDocumentSync";
 import { SlowRpcRequestToastCoordinator } from "./SlowRpcRequestToastCoordinator";
 import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
 import { AppPairingPromptCoordinator } from "./apps/AppPairingPromptCoordinator";
+import { GuestShareDialogHost } from "./chat/GuestShareControls";
 import { ConnectOnboardingDialog } from "./cloud/ConnectOnboardingDialog";
 import { RelayClientInstallDialog } from "./cloud/RelayClientInstallDialog";
 import { DesktopAppActivationCoordinator } from "./desktop/DesktopAppActivationCoordinator";
@@ -92,6 +93,7 @@ export default function AppShell({
           <FontAppearanceSync />
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
+          <GuestShareDialogHost />
           <CommandPalette>
             <AppSidebarLayout>
               <Outlet />
@@ -143,6 +145,7 @@ export default function AppShell({
           <SquireKnockCoordinator />
           <ImportFolderSessionsDialog />
           <CustomSnoozeDialogHost />
+          <GuestShareDialogHost />
           <SlowRpcRequestToastCoordinator />
           <HostFreezeToastCoordinator />
           <PermissionUpdateNotice />

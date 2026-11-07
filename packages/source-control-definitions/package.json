@@ -1,0 +1,23 @@
+{
+  "name": "@lecturn/source-control-definitions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./registry": {
+      "types": "./src/registry.ts",
+      "import": "./src/registry.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lecturn/source-control-azure-devops": "workspace:*",
+    "@lecturn/source-control-bitbucket": "workspace:*",
+    "@lecturn/source-control-core": "workspace:*",
+    "@lecturn/source-control-forgejo": "workspace:*",
+    "@lecturn/source-control-gitcafe": "workspace:*",
+    "@lecturn/source-control-github": "workspace:*",
+    "@lecturn/source-control-gitlab": "workspace:*"
+  }
+}

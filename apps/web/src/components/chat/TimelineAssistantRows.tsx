@@ -98,6 +98,8 @@ function AssistantForkButton({
   // provider turn; the server copies its history into the child as portable
   // context, so no provider capability applies (same as mobile).
   const runlessPoint = ctx.forkPointByRunlessReplyId.get(messageId);
+  const onForkFromRun = ctx.onForkFromRun;
+  if (onForkFromRun === undefined) return null;
   const runId = projectedItem.item.runId;
   const canFork =
     ctx.forkFromRunEnabled &&
@@ -125,9 +127,9 @@ function AssistantForkButton({
                 return;
               }
               setBusy(true);
-              void ctx
-                .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
-                .finally(() => setBusy(false));
+              void onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId }).finally(
+                () => setBusy(false),
+              );
             }}
             aria-label="Fork from this response"
           />
@@ -265,6 +267,9 @@ export function HtmlRenderTimelineRow({
   const { onAppFullscreenChange } = ctx;
   const onFullscreenChange = (fullscreen: boolean) => onAppFullscreenChange(row.id, fullscreen);
 
+  if (ctx.renderHtmlRender) {
+    return <div className="min-w-0 px-1">{ctx.renderHtmlRender(row)}</div>;
+  }
   return (
     <div className="min-w-0 px-1">
       <HtmlRenderFrame

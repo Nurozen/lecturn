@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@lecturn/contracts";
 import { parseAccountScopedKey } from "@lecturn/client-runtime/relay";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -45,7 +45,7 @@ function makeProject(id: string, environmentId: EnvironmentId, repository = "lec
         remoteName: "origin",
         remoteUrl: `https://github.com/nurozen/${repository}.git`,
       },
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "nurozen",
       name: repository,
       displayName: repository,

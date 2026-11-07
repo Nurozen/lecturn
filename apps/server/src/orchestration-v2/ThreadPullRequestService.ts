@@ -1,8 +1,4 @@
 import {
-  canonicalRepositoryKey,
-  sourceControlRepositorySelector,
-} from "@lecturn/shared/sourceControl";
-import {
   CommandId,
   type OrchestrationProjectShell,
   type OrchestrationV2DomainEvent,
@@ -31,6 +27,7 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { forkParked } from "../serverActivation.ts";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { StaveProjectShells } from "../stave/StaveProjectShells.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 
@@ -65,8 +62,8 @@ function pullRequestMatchesProject(
   return (
     pullRequest.repositoryKey !== null &&
     identity != null &&
-    canonicalRepositoryKey(pullRequest.repositoryKey) ===
-      canonicalRepositoryKey(identity.canonicalKey)
+    sourceControlDefinitions.canonicalRepositoryKey(pullRequest.repositoryKey) ===
+      sourceControlDefinitions.canonicalRepositoryKey(identity.canonicalKey)
   );
 }
 
@@ -123,7 +120,7 @@ const resolveProjectForPullRequestDiscovery = Effect.fn(
   });
   return {
     project: { ...project, repositoryIdentity },
-    repository: sourceControlRepositorySelector(repositoryIdentity),
+    repository: sourceControlDefinitions.repositorySelector(repositoryIdentity),
   };
 });
 
@@ -413,8 +410,8 @@ export const make = Effect.gen(function* () {
             if (
               currentIdentity === null ||
               identity == null ||
-              canonicalRepositoryKey(currentIdentity.canonicalKey) !==
-                canonicalRepositoryKey(identity.canonicalKey) ||
+              sourceControlDefinitions.canonicalRepositoryKey(currentIdentity.canonicalKey) !==
+                sourceControlDefinitions.canonicalRepositoryKey(identity.canonicalKey) ||
               current?.number !== detected?.number ||
               current?.url !== detected?.url ||
               current?.state !== detected?.state ||

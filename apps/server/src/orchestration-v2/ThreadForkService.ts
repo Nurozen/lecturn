@@ -71,6 +71,8 @@ export function planRunlessThreadFork(input: {
   const source = input.sourceThread;
   const targetThread: OrchestrationV2AppThread = {
     ...source,
+    // As `plan` does: PR context follows the conversation, watching stays with the source.
+    pullRequests: source.pullRequests?.map(({ watch: _watch, ...link }) => link),
     createdBy: input.createdBy,
     creationSource: input.creationSource,
     id: input.targetThreadId,
@@ -89,7 +91,10 @@ export function planRunlessThreadFork(input: {
     settledAt: null,
     snoozedUntil: null,
     snoozedAt: null,
+    // A guest link belongs to the thread it was made for.
+    guestShare: null,
     lastVisitedAt: null,
+    opens: null,
     deletedAt: null,
   };
   const transfer: OrchestrationV2ContextTransfer = {
@@ -173,6 +178,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         settledAt: null,
         snoozedUntil: null,
         snoozedAt: null,
+        // A guest link belongs to the thread it was made for.
+        guestShare: null,
         lastVisitedAt: null,
         // A fork is a new thread; it does not inherit how often the source was opened.
         opens: null,

@@ -16,7 +16,7 @@ import {
 } from "@lecturn/shared/lecturnMcpToolPresentation";
 import { classifyMarkdownImageSource } from "@lecturn/client-runtime/markdown-images";
 import { resolveMediaSource } from "@lecturn/client-runtime/media-source";
-import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
 import { formatTokens } from "@lecturn/shared/usageFormat";
 import { classifyToolActivity } from "@lecturn/shared/toolActivity";
@@ -192,15 +192,18 @@ function resolveLecturnMcpToolPresentation(
   const payload = asRecord(data);
   const input =
     asRecord(payload?.arguments) ?? asRecord(payload?.input) ?? asRecord(payload?.rawInput);
-  const urlTarget = typeof input?.url === "string" ? parseChangeRequestUrl(input.url) : null;
-  const number = urlTarget?.number ?? input?.number;
+  const urlTarget =
+    typeof input?.url === "string" ? sourceControlClients.parseChangeRequestUrl(input.url) : null;
+  const number = urlTarget?.link.number ?? input?.number;
+  const { shortLabel } = (urlTarget?.definition ?? sourceControlClients.get(undefined))
+    .changeRequest;
   const target =
     actionKind !== undefined &&
     actionKind !== "list-prs" &&
     typeof number === "number" &&
     Number.isSafeInteger(number) &&
     number > 0
-      ? `PR #${number}`
+      ? `${shortLabel} #${number}`
       : detail;
   return {
     displayName: `${verb} ${target}`,
@@ -495,6 +498,7 @@ function summaryActionPriority(action: ToolGroupAction | LecturnMcpToolSummaryAc
     case "thread-send":
     case "thread-interrupt":
     case "workflow-stop":
+    case "background-wait":
     case "schedule-create":
     case "schedule-update":
     case "schedule-delete":

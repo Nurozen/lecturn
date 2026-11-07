@@ -18,6 +18,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
 import { cn } from "../lib/utils";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
+import { GUEST_PAGE_PATH } from "../guestPage";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { useHostedPromptLinkLanding } from "../components/promptLinks/HostedPromptLinkLanding";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
@@ -36,6 +37,17 @@ export const Route = createRootRoute({
     if (location.pathname === "/account/billing" || isEmbedLocation(location)) {
       return { authGateState: { status: "hosted-static" } as const };
     }
+
+    // Guest links open on the owner's tunnel host in a browser with no Lecturn session, and must
+    // not trigger pairing or an environment connection, or load the app shell.
+    if (location.pathname === GUEST_PAGE_PATH) {
+      return {
+        authGateState: {
+          status: "guest",
+        } as const,
+      };
+    }
+
     void loadAppShell();
 
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
@@ -100,6 +112,8 @@ function RootRouteView() {
   const hostedPromptLinkLanding = useHostedPromptLinkLanding(
     authGateState.status === "hosted-static",
   );
+
+  if (pathname === GUEST_PAGE_PATH) return <Outlet />;
 
   if (
     pathname === "/account/billing" ||

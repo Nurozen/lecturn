@@ -56,6 +56,16 @@ and asking once. Your projects, threads, and settings under
 `~/.lecturn/userdata` are kept, along with `service.env` under Lecturn home.
 Pass `--yes` from a script.
 
+## Local network access
+
+The service listens on your local network and Tailscale addresses, so the
+desktop and mobile apps on the same network connect directly instead of through
+Lecturn Connect. The hosted web app at lecturn.cloudgatherer.net stays on Lecturn Connect, because
+browsers block plain HTTP from an HTTPS page. The service does not answer on
+public addresses, and every device still needs to pair or sign in. To keep the service reachable from this machine only, set
+`LECTURN_HOST=127.0.0.1` in `service.env` (below). Any `LECTURN_HOST` value
+replaces this default.
+
 ## Configure the service environment
 
 Put custom environment variables in `service.env` under the service's Lecturn

@@ -44,7 +44,7 @@ import {
 } from "@lecturn/contracts";
 import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import { stableStringify } from "@lecturn/shared/relaySigning";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

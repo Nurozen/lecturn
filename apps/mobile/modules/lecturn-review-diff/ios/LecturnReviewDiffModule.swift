@@ -61,6 +61,10 @@ public class LecturnReviewDiffModule: Module {
         view.setInitialRowIndex(initialRowIndex)
       }
 
+      Prop("initialFileId") { (view: LecturnReviewDiffView, fileId: String) in
+        view.setInitialFileId(fileId)
+      }
+
       Prop("scrollEnabled") { (view: LecturnReviewDiffView, enabled: Bool) in
         view.setScrollEnabled(enabled)
       }
@@ -106,8 +110,10 @@ public class LecturnReviewDiffModule: Module {
         view.setTokensJson(tokensJson)
       }
 
-      AsyncFunction("setTokensPatchJson") { (view: LecturnReviewDiffView, tokensPatchJson: String) in
-        view.setTokensPatchJson(tokensPatchJson)
+      AsyncFunction("setTokensPatchJson") { (view: LecturnReviewDiffView, tokensPatchJson: String, promise: Promise) in
+        view.setTokensPatchJson(tokensPatchJson) { accepted in
+          promise.resolve(accepted)
+        }
       }
     }
   }

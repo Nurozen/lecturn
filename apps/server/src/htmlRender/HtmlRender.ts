@@ -575,6 +575,7 @@ const make = Effect.gen(function* () {
         width,
         urlFragment: htmlRenderThemeFragment(theme),
         offline: input.locked,
+        appearance,
       }).pipe(Effect.provideContext(services)),
     );
     return {

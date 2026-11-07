@@ -344,6 +344,10 @@ export const createDevRunnerEnv = Effect.fn("dev-runner.createDevRunnerEnv")(fun
   delete output.LECTURN_SERVICE_LAUNCHER_CONTEXT;
   delete output.LECTURN_BOOT_SERVICE_UNIT;
 
+  // Each worktree has its own state, so a dev server would count as a new
+  // install of the developer's real accounts. Set it explicitly to opt in.
+  output.LECTURN_TELEMETRY_ENABLED = baseEnv.LECTURN_TELEMETRY_ENABLED ?? "false";
+
   if (!isDesktopMode) {
     output.LECTURN_PORT = String(serverPort);
     // HOST is Vite's own bind address, and the desktop branch below is the

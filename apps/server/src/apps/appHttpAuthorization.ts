@@ -33,9 +33,12 @@ export type AppHttpRoute =
 
 type AppHttpRouteKind = AppHttpRoute["kind"];
 
+// Socket tickets: the unbound route and the `rpc` one current clients mint for `/ws`. The
+// `media` ticket opens device streams, which app and embed sessions never reach.
 const SESSION_PATHS: ReadonlySet<string> = new Set([
   "/api/auth/session",
   "/api/auth/websocket-ticket",
+  "/api/auth/websocket-ticket/rpc",
   "/oauth/token",
 ]);
 

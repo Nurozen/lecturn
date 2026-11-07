@@ -7,10 +7,7 @@ import {
   type SagaWorkbenchRequirement,
   type SourceControlProviderKind,
 } from "@lecturn/contracts";
-import {
-  detectSourceControlProviderFromGitRemoteUrl,
-  normalizeGitRemoteUrl,
-} from "@lecturn/shared/git";
+import { normalizeGitRemoteUrl } from "@lecturn/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -20,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ProcessRunner } from "../processRunner.ts";
 import { PullRequestProviderRegistry } from "../pullRequest/PullRequestProviderRegistry.ts";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import type { ProviderAcceptanceEvidence } from "@lecturn/source-control-core/server/PullRequestProvider";
 import { readManifest } from "./StaveWorkspaceReader.ts";
 import { sameManifestIncarnation } from "./staveIncarnation.ts";
@@ -221,9 +219,7 @@ export const make = Effect.gen(function* () {
           remoteName === undefined ? null : yield* readGit(["remote", "get-url", remoteName]);
         const identityKey = remote === null ? null : normalizeGitRemoteUrl(remote);
         const provider =
-          remote === null
-            ? null
-            : (detectSourceControlProviderFromGitRemoteUrl(remote)?.kind ?? null);
+          remote === null ? null : (sourceControlDefinitions.recognizeRemote(remote)?.kind ?? null);
         const host = identityKey?.split("/")[0] || null;
         const repository = identityKey?.split("/").slice(1).join("/") || null;
         if (provider === null || host === null || repository === null)
@@ -273,7 +269,7 @@ export const make = Effect.gen(function* () {
           sourceRepository === null ||
           sourceHost !== host ||
           sourceUrl === null ||
-          detectSourceControlProviderFromGitRemoteUrl(sourceUrl)?.kind !== provider ||
+          sourceControlDefinitions.recognizeRemote(sourceUrl)?.kind !== provider ||
           pushRefspec !== null
         )
           blockers.push(

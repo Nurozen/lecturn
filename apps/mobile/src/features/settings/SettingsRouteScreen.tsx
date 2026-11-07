@@ -15,7 +15,8 @@ import {
 } from "../../components/ui/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText as Text } from "../../components/ui/AppText";
-import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import { useNavigation, useNavigationState, type NavigationProp } from "@react-navigation/native";
+import { use, useMemo } from "react";
 import { Platform, View } from "react-native";
 import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
 import { useDeviceType } from "../../native/native-layout-metrics";
@@ -32,7 +33,7 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
 import { ConnectBillingStatus } from "./components/ConnectBillingStatus";
 import { SettingsRow } from "./components/SettingsRow";
-import { SettingsSection } from "./components/SettingsSection";
+import { SettingsSection, SettingsSidebarContext } from "./components/SettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
 import {
   AndroidSettingsEnvironmentFilter,
@@ -40,11 +41,20 @@ import {
 } from "./components/SettingsEnvironmentFilterHeader";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { useSettingsConnectAccount } from "./useSettingsConnectAccount";
+import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 
 export function SettingsRouteScreen() {
   const surface = useWorkspaceSurface();
   const deviceType = useDeviceType();
   const compactTabs = useCompactWorkspaceTabs();
+  const { layout } = useAdaptiveWorkspaceLayout();
+  const inSidebar = use(NativePrimaryColumnContext) !== null && layout.usesSplitView;
+  // The page open beside the list: the route right above the Settings tab's route.
+  const selected = useNavigationState((state) => {
+    const list = state.routes.findIndex((route) => route.name === "Settings");
+    return list < 0 ? null : (state.routes[list + 1]?.name ?? null);
+  });
+  const sidebar = useMemo(() => (inSidebar ? { selected } : null), [inSidebar, selected]);
   const content = hasCloudPublicConfig() ? (
     <ConfiguredSettingsRouteScreen />
   ) : (
@@ -52,22 +62,27 @@ export function SettingsRouteScreen() {
   );
 
   return (
-    <View className={`flex-1 ${surface.className}`}>
-      <SettingsEnvironmentFilterHeader />
-      <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
-        {Platform.OS === "android" ? (
-          <SettingsScreen title="Settings" trailing={<AndroidSettingsEnvironmentFilter />}>
-            {content}
-          </SettingsScreen>
-        ) : (
-          content
-        )}
-      </ScreenScrollViewBottomInset>
-    </View>
+    <SettingsSidebarContext value={sidebar}>
+      <View className={`flex-1 ${surface.className}`}>
+        <SettingsEnvironmentFilterHeader />
+        <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
+          {Platform.OS === "android" ? (
+            <SettingsScreen title="Settings" trailing={<AndroidSettingsEnvironmentFilter />}>
+              {content}
+            </SettingsScreen>
+          ) : (
+            content
+          )}
+        </ScreenScrollViewBottomInset>
+      </View>
+    </SettingsSidebarContext>
   );
 }
 
 function ConfiguredSettingsRouteScreen() {
+  // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
+  // the sidebar's surface so the bar doesn't darken over content at rest.
+  const listSurface = use(NativePrimaryColumnContext) ? "bg-drawer" : "bg-screen";
   const insets = useSafeAreaInsets();
   const { selectedAccountId, setPickedAccountId } = useSettingsConnectAccount();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -78,7 +93,7 @@ function ConfiguredSettingsRouteScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        className="flex-1"
+        className={`flex-1 ${listSurface}`}
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
@@ -113,6 +128,9 @@ function ConfiguredSettingsRouteScreen() {
 }
 
 function LocalSettingsRouteScreen() {
+  // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
+  // the sidebar's surface so the bar doesn't darken over content at rest.
+  const listSurface = use(NativePrimaryColumnContext) ? "bg-drawer" : "bg-screen";
   const insets = useSafeAreaInsets();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const environmentCount = Object.keys(savedConnectionsById).length;
@@ -123,7 +141,7 @@ function LocalSettingsRouteScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        className="flex-1"
+        className={`flex-1 ${listSurface}`}
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 18) + 18,

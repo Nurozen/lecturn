@@ -66,6 +66,7 @@ import {
   OrchestrationV2ThreadLaunchError,
   type OrchestrationProjectShell,
   type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2ThreadStreamItem,
   type ApplicationStoredEvent,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -95,6 +96,7 @@ import {
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
+  SOURCE_CONTROL_MEDIA_ASSET,
   ChatAttachmentId,
   PersistChatAttachmentsError,
   RpcClientId,
@@ -130,6 +132,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as IdAllocator from "@lecturn/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
+import * as GuestShareService from "./guest/GuestShareService.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -138,6 +141,7 @@ import {
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
+  activeShellRowsForSubscriber,
   loadShellSnapshotParts,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
@@ -164,9 +168,11 @@ import {
   THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
 } from "./orchestration-v2/threadHistoryPaging.ts";
 import {
+  makeLiveBodyDeduper,
   projectDomainEventForWire,
   projectThreadProjectionForWire,
 } from "./orchestration-v2/WireProjection.ts";
+import { dedupeSnapshotBodies } from "@lecturn/shared/orchestrationV2DedupedBodies";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
@@ -237,7 +243,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
-import { featureUsage } from "./telemetry/FeatureUsage.ts";
+import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -281,6 +287,7 @@ import * as AppsRpcHandlers from "./apps/AppsRpcHandlers.ts";
 import type { AppsServices } from "./apps/AppsLayer.ts";
 import * as AppRpcAuthorization from "./apps/appRpcAuthorization.ts";
 import * as AppStreamFilter from "./apps/appStreamFilter.ts";
+import { parseAppSubject } from "./apps/subjects.ts";
 import { StaveBinary } from "./stave/StaveBinary.ts";
 import { StaveCli } from "./stave/StaveCli.ts";
 import { StaveConfigReader } from "./stave/StaveConfigReader.ts";
@@ -949,8 +956,13 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
     readonly requestCompletionMarker?: boolean;
     readonly acceptBoundedSnapshot?: boolean;
     readonly acceptCompactTurnItems?: boolean;
+    readonly acceptDedupedBodies?: boolean;
   }) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const dedupeBodies = input.acceptDedupedBodies === true;
+    // Replay, snapshot, and live tail share one deduper: it must see every delivered record.
+    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
+      dedupeBodies ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper())) : stream;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
 
     yield* Effect.annotateCurrentSpan({
@@ -1049,15 +1061,21 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         ? buildBoundedThreadStreamSnapshot({
             ...snapshot,
             compactTurnItems: input.acceptCompactTurnItems === true,
+            dedupeBodies,
           })
-        : {
-            kind: "snapshot" as const,
-            snapshotSequence,
-            projection: projectThreadProjectionForWire(snapshot.projection),
-          };
-      return Stream.concat(
-        Stream.concat(rpcInitialItems([snapshotItem]), completionMarker),
-        eventStreamFrom(snapshotSequence),
+        : (() => {
+            const projection = projectThreadProjectionForWire(snapshot.projection);
+            return {
+              kind: "snapshot" as const,
+              snapshotSequence,
+              projection: dedupeBodies ? dedupeSnapshotBodies(projection) : projection,
+            };
+          })();
+      return withLiveDedupe(
+        Stream.concat(
+          Stream.concat(rpcInitialItems([snapshotItem]), completionMarker),
+          eventStreamFrom(snapshotSequence),
+        ),
       );
     });
 
@@ -1128,9 +1146,11 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       if (plan.mode === "snapshot") {
         return yield* snapshotThenLive();
       }
-      return Stream.concat(
-        Stream.concat(rpcInitialItems(replay), completionMarker),
-        eventStreamFrom(highWater),
+      return withLiveDedupe(
+        Stream.concat(
+          Stream.concat(rpcInitialItems(replay), completionMarker),
+          eventStreamFrom(highWater),
+        ),
       );
     }
 
@@ -1142,6 +1162,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   function* (input: {
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
+    readonly omitIdleSubagents?: boolean;
   }) {
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1178,14 +1199,15 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
-      subagentThreadIds = new Set(
-        base.threads
-          .filter((thread) => thread.lineage.relationshipToParent === "subagent")
-          .map((thread) => thread.id),
-      );
+      const rows = activeShellRowsForSubscriber(base.threads, input.omitIdleSubagents === true);
+      subagentThreadIds = rows.subagentThreadIds;
       const enriched = yield* enrichProjectShells(base.projects);
       return {
-        snapshot: { ...base, projects: enriched.projects } as OrchestrationV2ShellSnapshot,
+        snapshot: {
+          ...base,
+          threads: rows.threads,
+          projects: enriched.projects,
+        } as OrchestrationV2ShellSnapshot,
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
       };
     });
@@ -1420,6 +1442,17 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
   const analytics = yield* AnalyticsService.AnalyticsService;
   const originProps = clientAnalyticsProps;
+  const recordCommandFeatureUsage = (command: OrchestrationV2Command) => {
+    const usage = commandFeatureUsage(command);
+    return usage === undefined
+      ? Effect.void
+      : analytics
+          .record("feature.used", {
+            ...usage,
+            ...(originProps.surface === undefined ? {} : { surface: originProps.surface }),
+          })
+          .pipe(Effect.ignore);
+  };
   const recordClientCommandAnalytics = (command: OrchestrationV2Command) => {
     switch (command.type) {
       case "message.dispatch":
@@ -1431,16 +1464,16 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
             workspace: command.workspace ?? "inherit",
             atMessage: command.sourceMessageId !== undefined,
           })
-          .pipe(Effect.ignore);
+          .pipe(Effect.ignore, Effect.andThen(recordCommandFeatureUsage(command)));
       case "thread.import":
         return analytics
           .record("client.thread.imported", {
             ...originProps,
             provider: command.providerInstanceId,
           })
-          .pipe(Effect.ignore);
+          .pipe(Effect.ignore, Effect.andThen(recordCommandFeatureUsage(command)));
       default:
-        return Effect.void;
+        return recordCommandFeatureUsage(command);
     }
   };
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
@@ -1448,6 +1481,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
   const secretRequests = yield* SecretRequests.SecretRequests;
+  const guestShares = yield* GuestShareService.GuestShareService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
   const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1962,6 +1996,8 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       },
       settings,
       shellResumeCompletionMarker: true,
+      // Lecturn: app and embed sessions cannot call getThreadFamily, so their shells stay whole.
+      ...(parseAppSubject(currentSession.subject) === null ? { shellThreadFamilies: true } : {}),
       threadResumeCompletionMarker: true,
       threadSnapshotPagination: true,
       threadFind: true,
@@ -2027,6 +2063,22 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         }),
     ),
   );
+
+  // Rows the shell can omit, read with the same snapshot sequence the shell uses.
+  const readOmittableShellRows = Effect.fn("ws.orchestrationV2.readOmittableShellRows")(function* (
+    options: { readonly subagentFamilyOf: ThreadId } | { readonly worktreePath: string },
+    message: string,
+  ) {
+    const { threads, snapshotSequence } = yield* loadShellSnapshotParts({
+      sql,
+      readThreads: threadManagement.readShellSnapshot({ location: "active", ...options }),
+      listProjects: Effect.succeed([]),
+      latestSequence: applicationEvents.latestApplicationSequence,
+    }).pipe(
+      Effect.mapError((cause) => new OrchestrationV2GetShellSnapshotError({ message, cause })),
+    );
+    return { snapshotSequence, threads: threads.threads };
+  });
 
   const subscribeOrchestrationV2ArchivedShell = Effect.fn(
     "ws.orchestrationV2.subscribeArchivedShell",
@@ -2194,7 +2246,9 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
                   ).pipe(Effect.provide(intakeContext)),
                 )
                 .pipe(
-                  Effect.tap(() => recordClientCommandAnalytics(command)),
+                  Effect.tap((result) =>
+                    result.replayed ? Effect.void : recordClientCommandAnalytics(command),
+                  ),
                   Effect.map((result) => ({ sequence: result.sequence })),
                   Effect.mapError((cause) => {
                     const threadImportFailure =
@@ -2271,6 +2325,16 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       ),
     [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>
       getOrchestrationV2ArchivedShellSnapshot,
+    [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
+      readOmittableShellRows(
+        { subagentFamilyOf: input.threadId },
+        "Failed to load the thread family",
+      ),
+    [ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds]: (input) =>
+      readOmittableShellRows(
+        { worktreePath: input.worktreePath },
+        "Failed to load the worktree's threads",
+      ).pipe(Effect.map(({ threads }) => ({ threadIds: threads.map((thread) => thread.id) }))),
     [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: (input) =>
       Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
         Effect.andThen(
@@ -2281,13 +2345,12 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
               rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
             })
             .pipe(
-              Effect.map((snapshot) =>
-                projectThreadProjectionForWire(
+              Effect.map(
+                (snapshot) =>
                   buildBoundedThreadProjection({
-                    projection: snapshot.projection,
+                    projection: projectThreadProjectionForWire(snapshot.projection),
                     snapshotSequence: snapshot.snapshotSequence,
                   }).projection,
-                ),
               ),
               Effect.map(AppStreamFilter.filterThreadProjectionForSubject(currentSession.subject)),
               Effect.mapError(
@@ -2344,17 +2407,23 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
               }).pipe(Effect.provide(intakeContext)),
             )
             .pipe(
-              Effect.tap(() =>
-                analytics
-                  .record("client.thread.started", originProps)
-                  .pipe(
-                    Effect.andThen(
-                      input.initialMessage === undefined
-                        ? Effect.void
-                        : analytics.record("client.turn.requested", originProps),
-                    ),
-                    Effect.ignore,
-                  ),
+              // A resumed launch is a retry of one already counted.
+              Effect.tap((result) =>
+                result.resumed
+                  ? Effect.void
+                  : analytics
+                      .record("client.thread.started", {
+                        ...originProps,
+                        workspaceStrategy: input.workspaceStrategy.type,
+                      })
+                      .pipe(
+                        Effect.andThen(
+                          input.initialMessage === undefined
+                            ? Effect.void
+                            : analytics.record("client.turn.requested", originProps),
+                        ),
+                        Effect.ignore,
+                      ),
               ),
               Effect.map((result) => ({
                 ...result,
@@ -2434,6 +2503,10 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.scheduledTasksRotateWebhookToken]: (input) =>
       Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
         Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
+      ),
+    [WS_METHODS.guestShareCreate]: (input) =>
+      Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+        Effect.andThen(guestShares.create(input)),
       ),
     [WS_METHODS.secretsAnswerRequest]: (input) =>
       Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
@@ -3085,7 +3158,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           input.resource._tag === "attachment" ||
           input.resource._tag === "native-app-icon" ||
           input.resource._tag === "tool-output-image" ||
-          input.resource._tag === "github-media" ||
+          input.resource._tag === SOURCE_CONTROL_MEDIA_ASSET ||
           // A network path is served only from the thread's project, looked up below.
           (input.resource._tag === "media-file" &&
             path.isAbsolute(input.resource.path) &&
@@ -3687,7 +3760,7 @@ export const layer = Layer.unwrap(
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
         const sessions = yield* SessionStore.SessionStore;
         const analytics = yield* AnalyticsService.AnalyticsService;
-        const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
+        const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(
               EnvironmentAuth.serverAuthCredentialReason(error),
@@ -3701,7 +3774,6 @@ export const layer = Layer.unwrap(
         const clientOrigin = readClientConnectionOrigin(request);
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* sessions.recordClientConnection(session.sessionId, clientOrigin);
-        yield* analytics.record("client.connected", clientAnalyticsProps);
         yield* analytics.recordOwners(readClientOwners(request), "client");
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;

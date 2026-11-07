@@ -19,7 +19,7 @@ import type {
 import {
   threadPullRequestKeyOf,
   visibleThreadPullRequests,
-} from "@lecturn/shared/threadPullRequests";
+} from "@lecturn/client-runtime/thread-pull-requests";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useLayoutEffect } from "react";

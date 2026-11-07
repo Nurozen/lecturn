@@ -1,7 +1,7 @@
 import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
-import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { resolveSendEnvMode } from "@lecturn/shared/projectSettings";
 import type { ComposerDraftWorkspaceSelection } from "../../state/use-composer-drafts";
 
@@ -117,8 +117,8 @@ export function resolveNewTaskBranchLabel(input: {
   readonly pullRequestReference?: string;
 }): string {
   if (input.workspaceMode === "worktree" && input.pullRequestReference) {
-    const pr = parseChangeRequestUrl(input.pullRequestReference);
-    if (pr) return `From PR #${pr.number}`;
+    const parsed = sourceControlClients.parseChangeRequestUrl(input.pullRequestReference);
+    if (parsed) return `From ${parsed.definition.changeRequest.shortLabel} #${parsed.link.number}`;
   }
   if (!input.branchName) {
     return "Choose branch";

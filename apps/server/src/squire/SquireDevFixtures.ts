@@ -43,7 +43,7 @@ import {
   type UnknownUnionMember,
   isUnknownUnionMember,
 } from "@lecturn/contracts";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

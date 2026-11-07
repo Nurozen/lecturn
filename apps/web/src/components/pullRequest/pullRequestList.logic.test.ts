@@ -51,7 +51,7 @@ function entry(
 ) {
   return {
     environmentId: "env-1",
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     host: "github.com",
     projectId: "project-1",
     projectTitle: "lecturn",
@@ -896,10 +896,11 @@ describe("pull request quick actions", () => {
     ...(actions === undefined ? {} : { actions }),
   });
 
-  it("offers what each host reports, and GitHub's legacy set when a server reports none", () => {
+  it("offers what each host reports, and the host's own set when a server reports none", () => {
     const actionsOf = pullRequestHostActions([
       summary("bitbucket.org", "bitbucket", ["merge", "close"]),
       summary("github.com", "github"),
+      summary("gitlab.com", "gitlab"),
     ]);
     const bitbucket = actionsOf({
       host: "bitbucket.org",
@@ -914,6 +915,11 @@ describe("pull request quick actions", () => {
       "close",
       "ready",
     ]);
+    const gitlab = actionsOf({
+      host: "gitlab.com",
+      provider: SourceControlProviderKind.make("gitlab"),
+    });
+    expect(pullRequestQuickActions({ state: "open", isDraft: false }, gitlab)).toEqual([]);
   });
 });
 
@@ -947,7 +953,7 @@ describe("findProjectForRepository", () => {
       repositoryIdentity: {
         canonicalKey: `dev.azure.com/${path}`,
         locator: { source: "git-remote" as const, remoteName: "origin", remoteUrl: "" },
-        provider: "azure-devops",
+        provider: SourceControlProviderKind.make("azure-devops"),
         displayName: path,
         owner: "contoso",
         name: path.split("/").at(-1)!,
@@ -983,7 +989,7 @@ describe("findProjectForRepository", () => {
       repositoryIdentity: {
         canonicalKey: `github.com/${repository}`,
         locator: { source: "git-remote" as const, remoteName: "origin", remoteUrl: "" },
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         displayName: repository,
       },
     });

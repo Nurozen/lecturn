@@ -166,6 +166,28 @@ describe("DesktopPreReadyPlatform", () => {
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 
+  it.effect("points the early portal entry at a configured distribution launcher", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("XDG_DATA_HOME", "/xdg");
+    vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+    vi.stubEnv("LECTURN_DESKTOP_LAUNCHER_PATH", " /opt/Lecturn App/lecturn ");
+    getSwitchValueMock.mockReturnValue("");
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+          ),
+        );
+        const entry = writeFileSyncMock.mock.calls.find(
+          ([path]) => path === "/xdg/applications/com.cloudgatherer.lecturn.desktop",
+        )?.[1];
+        assert.include(entry, 'Exec="/opt/Lecturn App/lecturn" %U');
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
   it.effect(
     "acquires a synchronous pre-ready layer before an asynchronous Clerk-shaped layer",
     () =>

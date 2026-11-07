@@ -6,10 +6,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import * as Layout from "../../lib/layout";
 import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
+import * as RootStackReset from "../../lib/root-stack-reset";
 import * as ThreadRouteState from "../threads/thread-route-state";
 import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 import * as DeferredNavigation from "./deferred-navigation";
+import * as WorkspaceOverlayRoutes from "./workspace-overlay-routes";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
 // derived objects keep their identity between renders. So this suite runs the layout module
@@ -28,6 +30,7 @@ const openPendingTaskStub = vi.fn();
 const preferences = { value: { threadListFilters: undefined } };
 // Stable like the real atom's value, so it never changes the context value's identity.
 const noProjects: readonly never[] = [];
+const noInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
   return <>{props.children}</>;
@@ -165,6 +168,21 @@ const stubModules: Record<string, unknown> = {
       return null;
     },
   },
+  "react-native-safe-area-context": {
+    SafeAreaInsetsContext: React.createContext(noInsets),
+    useSafeAreaInsets: () => noInsets,
+  },
+  "../workspace/AndroidWorkspaceTabsProvider": { useAndroidWorkspaceRoot: () => null },
+  "../settings/settings-navigation": { openSettings: vi.fn() },
+  "../../lib/root-stack-reset": RootStackReset,
+  "../workspace/workspace-selection-store": {
+    currentWorkspaceSelections: () => ({}),
+    workspaceSelectionCheck: { thread: () => false, pullRequest: () => false },
+  },
+  "../workspace/workspace-tab-navigation": {
+    workspaceTabNavigationState: () => ({ index: 0, routes: [{ name: "Home" }] }),
+  },
+  "./workspace-overlay-routes": WorkspaceOverlayRoutes,
   "../../native/AndroidHingeObserver": { AndroidHingeObserver: () => null },
   "../../native/window-hinge-context": { WindowHingeContext: React.createContext(null) },
 };

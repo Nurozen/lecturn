@@ -1,5 +1,5 @@
 import type { UserProfileCustomPage } from "@clerk/expo/native-components";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useLayoutEffect } from "react";
 
 import { MobileAccountProfile } from "./MobileAccountProfile";
@@ -27,7 +27,7 @@ export function SettingsAuthRouteScreen(
 
   useLayoutEffect(() => {
     if (!hasCloudPublicConfig()) {
-      navigation.dispatch(StackActions.replace("SettingsContent"));
+      navigation.goBack();
     }
   }, [navigation]);
 

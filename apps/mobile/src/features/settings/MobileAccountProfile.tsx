@@ -1,6 +1,6 @@
 import { useAuth, useClerk } from "@clerk/expo";
 import { type UserProfileCustomPage, UserProfileView } from "@clerk/expo/native-components";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -43,10 +43,7 @@ export function MobileAccountProfile({
       cancelled = true;
     };
   }, [clerk, accountId, isLoaded]);
-  const close = useCallback(
-    () => navigation.dispatch(StackActions.popTo("SettingsContent")),
-    [navigation],
-  );
+  const close = useCallback(() => navigation.goBack(), [navigation]);
   if (!isLoaded || selection?.accountId !== accountId)
     return <LoadingScreen message="Opening account…" messagePlacement="above-spinner" />;
   if (selection.error || !mobileProfileOwnerMatches(accountId, userId, clerk.session?.user?.id))

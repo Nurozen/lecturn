@@ -18,7 +18,7 @@ import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
 import { requestCustomSnooze } from "../CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { resolveThreadCurrentPullRequestLink } from "@lecturn/shared/threadPullRequests";
+import { resolveThreadCurrentPullRequestLink } from "@lecturn/client-runtime/thread-pull-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -60,6 +60,7 @@ import {
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
+  UserRoundIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -756,31 +757,37 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 icon: "input" as const,
                 className: "text-indigo-600 dark:text-indigo-300",
               }
-            : status === "limited"
+            : status === "request"
               ? {
-                  label: "Limited",
-                  icon: "failed" as const,
-                  className: "text-warning",
+                  label: "Request",
+                  icon: "request" as const,
+                  className: "text-guest-foreground",
                 }
-              : status === "failed"
+              : status === "limited"
                 ? {
-                    label: "Failed",
+                    label: "Limited",
                     icon: "failed" as const,
-                    className: "text-error",
+                    className: "text-warning",
                   }
-                : isWoke
+                : status === "failed"
                   ? {
-                      label: "Woke",
-                      icon: "woke" as const,
-                      className: "text-warning",
+                      label: "Failed",
+                      icon: "failed" as const,
+                      className: "text-error",
                     }
-                  : isUnread
+                  : isWoke
                     ? {
-                        label: "Done",
-                        icon: "done" as const,
-                        className: "text-success",
+                        label: "Woke",
+                        icon: "woke" as const,
+                        className: "text-warning",
                       }
-                    : null;
+                    : isUnread
+                      ? {
+                          label: "Done",
+                          icon: "done" as const,
+                          className: "text-success",
+                        }
+                      : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -1070,7 +1077,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 "truncate",
                 shouldRecede
                   ? "text-secondary-label"
-                  : isUnread || isWoke || status === "input"
+                  : isUnread || isWoke || status === "input" || status === "request"
                     ? "text-foreground"
                     : status === "failed"
                       ? "text-foreground/95"
@@ -1080,7 +1087,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
                 shouldRecede
                   ? "text-secondary-label/70"
-                  : props.isActive || isWoke || status === "input"
+                  : props.isActive || isWoke || status === "input" || status === "request"
                     ? "text-foreground"
                     : isUnread
                       ? "text-muted-foreground"
@@ -1478,6 +1485,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                         <CircleDotDashedIcon aria-hidden className="size-4 shrink-0" />
                       ) : topStatus.icon === "input" ? (
                         <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
+                      ) : topStatus.icon === "request" ? (
+                        <UserRoundIcon aria-hidden className="size-4 shrink-0" />
                       ) : topStatus.icon === "approval" ? (
                         <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
                       ) : topStatus.icon === "failed" ? (
@@ -1485,14 +1494,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                       ) : topStatus.icon === "done" ? (
                         <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                       ) : null}
-                      {/* The label alone is the live region: a role="status"
-                        wrapper around the ticking duration would make
-                        screen readers announce every second. The open
-                        thread announces its own status, so its row stays
-                        quiet instead of saying everything twice. */}
-                      <span role={props.isRouteThread ? undefined : "status"}>
-                        {topStatus.label}
-                      </span>
+                      {/* Not a live region: a collapsed sidebar is inert, so
+                        BackgroundThreadAnnouncer and the open thread's
+                        timeline speak status changes instead. */}
+                      {topStatus.label}
                     </span>
                   )
                 ) : (

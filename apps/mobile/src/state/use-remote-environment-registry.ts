@@ -1,12 +1,12 @@
 import * as Dialog from "../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@lecturn/contracts";
-import { useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { useConnectionController } from "../features/connection/useConnectionController";
+import { useAdaptiveWorkspaceLayout } from "../features/layout/adaptive-workspace-context";
 import { environmentPresentations } from "./presentation";
 import { useWorkspaceConnectionState, useWorkspaceEnvironments } from "./workspace";
 import type { SavedRemoteConnection } from "../lib/connection";
@@ -100,7 +100,7 @@ export function useRemoteConnectionStatus() {
 
 export function useRemoteConnections() {
   const controller = useConnectionController();
-  const navigation = useNavigation();
+  const { openWorkspaceTab } = useAdaptiveWorkspaceLayout();
   const connectionPairingUrl = useAtomValue(connectionPairingUrlAtom);
   const pendingConnectionError = useAtomValue(pendingConnectionErrorAtom);
   const { connectedEnvironments, connectionError, connectionState } = useRemoteConnectionStatus();
@@ -178,7 +178,7 @@ export function useRemoteConnections() {
             { text: "Cancel", style: "cancel" },
             {
               text: "Open Settings",
-              onPress: () => navigation.navigate("SettingsSheet"),
+              onPress: () => openWorkspaceTab("settings"),
             },
             remove,
           ],
@@ -191,7 +191,7 @@ export function useRemoteConnections() {
         [{ text: "Cancel", style: "cancel" }, remove],
       );
     },
-    [connectedEnvironments, controller, navigation],
+    [connectedEnvironments, controller, openWorkspaceTab],
   );
 
   return {

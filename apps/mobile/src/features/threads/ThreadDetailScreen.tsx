@@ -116,6 +116,7 @@ import {
   KeyboardController,
   KeyboardStickyView,
   useKeyboardState,
+  useReanimatedKeyboardAnimation,
 } from "react-native-keyboard-controller";
 import Animated, {
   Easing,
@@ -163,7 +164,6 @@ import {
   pendingThreadMessageJump,
   subscribeThreadMessageJump,
 } from "./threadMessageJump";
-import { parentThreadIsBelow } from "../../lib/android-workspace-navigation";
 import {
   clearThreadComposerError,
   threadComposerErrorsAtom,
@@ -206,8 +206,10 @@ import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
+import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
+import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
 import { SquireThreadBanners } from "../squires/SquireThreadBanners";
 import {
@@ -607,6 +609,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
   const navigation = useNavigation();
   // Lecturn: each gated control site below reads the controls allowlist through this.
   const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(props.controls, control);
+  const openLinkedThread = useOpenLinkedThread();
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
   const deviceState = useEnvironmentQuery(
@@ -1060,10 +1063,8 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     );
   const userInputCollapsed =
     activeUserInputRequestId !== null && collapsedUserInputRequestId === activeUserInputRequestId;
-  // The card's height RESERVES keyboard space at all times instead of tracking the keyboard:
-  // transforms (the sticky translation) apply same-frame on the UI thread while layout props lag
-  // a Yoga pass behind, so any height that follows the keyboard flashes the card over the nav
-  // header on the way up.
+  // A height React sets from keyboard state lags the sticky translation by a Yoga pass and
+  // flashes over the nav header on the way up, so the usage panel reserves the keyboard instead.
   const [lastKnownKeyboardHeight, setLastKnownKeyboardHeight] = useState(0);
   useEffect(() => {
     if (liveKeyboardHeight > 0 && liveKeyboardHeight !== lastKnownKeyboardHeight) {
@@ -1072,12 +1073,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
   }, [lastKnownKeyboardHeight, liveKeyboardHeight]);
   const reservedKeyboardHeight =
     lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT;
-  const pendingUserInputMaxHeight = derivePendingUserInputMaxHeight({
-    windowHeight,
-    keyboardHeight: reservedKeyboardHeight,
-    navigationHeaderHeight,
-    composerOverlapHeight: composerBottomInset,
-  });
+  // Waiting for a visibility render misses the first keyboard frames.
+  const keyboardStickyEnabled =
+    Platform.OS === "ios"
+      ? deviceType !== "duo-unfolded" || (composerOwnsKeyboard && !sidebarSearchActive)
+      : !keyboardStateSuspect;
   const estimatedOverlayHeight = composerOverlapHeight;
   // The overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
@@ -1104,6 +1104,18 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     setScreenHeight(event.nativeEvent.layout.height);
   }, []);
   const screenAreaHeight = screenHeight ?? windowHeight;
+  // The question card reads the keyboard frame on the UI thread, in the same frame the sticky
+  // view translates, so it gets the full height while the keyboard is closed and never crosses
+  // the header while the keyboard moves.
+  const { height: keyboardTranslation } = useReanimatedKeyboardAnimation();
+  const pendingUserInputMaxHeight = useDerivedValue(() =>
+    derivePendingUserInputMaxHeight({
+      windowHeight: screenAreaHeight,
+      keyboardHeight: keyboardStickyEnabled ? -keyboardTranslation.value : 0,
+      navigationHeaderHeight,
+      composerOverlapHeight: composerBottomInset,
+    }),
+  );
   // The usage panel stacks with the composer and any approval card, so it gets
   // whatever room they leave below the header. Measured only while it is open
   // so typing in the composer does not re-render the screen.
@@ -1128,9 +1140,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     usageLimitsLayout.overlay > 0
       ? usageLimitsLayout.overlay - usageLimitsLayout.panel
       : composerOverlapHeight;
-  // The keyboard is reserved even while closed, like the question card, so the
-  // panel never grows over the header while the keyboard animates. The floor
-  // keeps the close row on screen when the stack below leaves no room at all.
+  // The floor keeps the close row on screen when the stack below leaves no room at all.
   const usageLimitsMaxHeight = Math.max(
     USAGE_LIMITS_PANEL_MIN_HEIGHT,
     Math.min(
@@ -1676,12 +1686,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
 
       {showContent ? (
         <KeyboardStickyView
-          // Waiting for a visibility render misses the first keyboard frames.
-          enabled={
-            Platform.OS === "ios"
-              ? deviceType !== "duo-unfolded" || (composerOwnsKeyboard && !sidebarSearchActive)
-              : !keyboardStateSuspect
-          }
+          enabled={keyboardStickyEnabled}
           pointerEvents="box-none"
           style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
           offset={{ closed: 0, opened: composerKeyboardOffset }}
@@ -1771,6 +1776,13 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         thread={props.selectedThread}
                       />
                     </>
+                  ) : null}
+                  {/* Lecturn: a guest link is an owner action, which a Squire's home thread denies. */}
+                  {allows("thread-actions") ? (
+                    <ThreadGuestShareBar
+                      threadRef={props.selectedThreadDetailRef}
+                      canOperateThread={props.canOperateThread}
+                    />
                   ) : null}
                   {props.feedbackSubmissions.map((submission) => (
                     <ComposerFeedback
@@ -1966,17 +1978,11 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         onOpenParent={
                           props.selectedThread.lineage.parentThreadId === null
                             ? null
-                            : () => {
-                                const parent = {
+                            : () =>
+                                openLinkedThread({
                                   environmentId: String(props.environmentId),
                                   threadId: String(props.selectedThread.lineage.parentThreadId),
-                                };
-                                navigation.dispatch((state) =>
-                                  parentThreadIsBelow(state, parent)
-                                    ? StackActions.pop()
-                                    : StackActions.push("Thread", parent),
-                                );
-                              }
+                                })
                         }
                       />
                     </View>

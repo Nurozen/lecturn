@@ -115,6 +115,14 @@ export const SQUIRE_COMMAND_RULES = {
   "thread.continued-in.set": "squire",
   "runtime-request.app-expire": "squire",
   "secret_request.record": "squire",
+  // Guest links never reach Squire threads: `GuestShareService` refuses to create one there.
+  "thread.guest-share.open": "squire",
+  "thread.guest-share.redeem": "squire",
+  "thread.guest-share.close": "squire",
+  "thread.guest-message.submit": "squire",
+  "thread.guest-message.dismiss": "squire",
+  // EffectWorker dispatches it outside `SquireDispatchOrigin` when a request cannot be delivered.
+  "runtime-request.delivery.fail": "plumbing",
 } as const satisfies Record<OrchestrationV2ServerCommand["type"], SquireCommandRule>;
 
 // A type the table does not know (a newer peer, a decode gap) is Squire-only.

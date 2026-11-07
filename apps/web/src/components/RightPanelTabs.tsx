@@ -1,10 +1,10 @@
-import { pullRequestHostOf, type SourceControlProviderKind } from "@lecturn/contracts";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { useProjects, useServerConfigs, useVisibleThreadShells } from "~/state/entities";
 import {
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
-} from "@lecturn/shared/threadPullRequests";
+} from "@lecturn/client-runtime/thread-pull-requests";
 import type {
   ContextMenuItem,
   EnvironmentId,
@@ -757,7 +757,7 @@ function PullRequestSurfaceIcon({
   const host =
     surface.host ??
     (identity?.provider
-      ? pullRequestHostOf(identity, identity.provider as SourceControlProviderKind)
+      ? sourceControlClients.changeRequestHost(identity, identity.provider)
       : null);
   const configs = useServerConfigs();
   const capabilities =
