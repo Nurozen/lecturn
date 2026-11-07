@@ -1093,15 +1093,20 @@ of the fork's test-file delta. R4 overrides R2 and R3:
   (`EXPermissionsService` in the `expo-modules-core` patch) and
   `generate-uniwind-themes.test.ts`. So does the fork migration ledger: "keeps
   released migrations contiguous" in `055_OrchestrationV2.test.ts`, the only pin on
-  ids below 70.
+  ids below 70. "Fork-carried" means the patch differs from upstream's:
+  `network-module.test.ts` guarded `patches/expo-network@58.0.3.patch`, which is
+  identical upstream, so it went under R2.
 - **R5.** Fork-only test files stay and are repaired when a removed helper breaks
   them. Keep a production export, helper or non-TS fixture (`.swift`, `.m`, `.ndjson`
   read by URL, which typecheck cannot catch) upstream removed when a fork file or
-  kept test needs it. Otherwise take the removal.
+  kept test needs it. Otherwise take the removal. Upstream #26238 deletes both Expo
+  guard fixtures, and `PermissionsServiceRegression.m` would go without a conflict:
+  restore them then.
 - **R6.** "Obsolete" means the code under test is gone from the merged tree or an
   exact duplicate remains. "Low signal" is not obsolete for a fork test. Record
   each drop with its path, title and reason in the batch's `obsolete-tests.tsv`.
-- **R7.** Later prune passes (#22588-#22599) follow the same rule.
+- **R7.** Later prune passes (#22588, #22589, #22591, #22592, #22593, #22599) follow
+  the same rule.
 
 **Audit.** Per file, list the `(path, title)` pairs in fork `main` whose title is
 absent from the same file in the merge base, plus the test files only the fork has.
