@@ -77,13 +77,20 @@ function samePullRequest(
 /**
  * The page each tab shows in a root route chain: the newest chat, the newest pull request, and
  * the Settings page directly above the Settings route. Returns `previous` when nothing changed.
+ * A connected app's thread belongs to Apps, so it never becomes the remembered chat.
  */
 export function workspaceSelectionsIn(
   routes: readonly RouteLike[],
   previous: WorkspaceSelections,
+  isAppThread: (selection: Omit<ThreadSelection, "key">) => boolean = () => false,
 ): WorkspaceSelections {
   let next = previous;
-  const thread = routes.findLast((route) => route.name === "Thread");
+  const thread = routes.findLast((route) => {
+    if (route.name !== "Thread") return false;
+    const environmentId = stringParam(route.params, "environmentId");
+    const threadId = stringParam(route.params, "threadId");
+    return !(environmentId && threadId && isAppThread({ environmentId, threadId }));
+  });
   const environmentId = stringParam(thread?.params, "environmentId");
   const threadId = stringParam(thread?.params, "threadId");
   if (

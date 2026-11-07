@@ -27,10 +27,13 @@ interface AdaptiveWorkspaceContextValue {
   readonly toggleAuxiliaryPane: () => void;
   readonly togglePrimarySidebar: () => void;
   readonly setPrimarySidebarVisible: (visible: boolean) => void;
-  /** Opens a workspace tab with its list and, with columns, the page it last showed. */
+  /**
+   * Opens a workspace tab with its list and, with columns, the page it last showed. Open sheets
+   * stay on top unless `closeSheets` is set, as for a sheet's own link to another tab.
+   */
   readonly openWorkspaceTab: (
     tab: WorkspaceTab | "settings",
-    options?: { readonly columns?: boolean },
+    options?: { readonly columns?: boolean; readonly closeSheets?: boolean },
   ) => void;
   readonly setAuxiliaryPaneWidth: (width: number) => void;
   /**

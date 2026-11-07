@@ -35,6 +35,22 @@ describe("workspace tab selections", () => {
     expect(workspaceSelectionsIn([home, thread], afterSettings)).toBe(afterSettings);
   });
 
+  it("doesn't remember a connected app's thread as the Chats selection", () => {
+    const appThread = {
+      key: "app-thread",
+      name: "Thread",
+      params: { environmentId: "env", threadId: "app-thread" },
+    };
+    const isAppThread = (selection: { threadId: string }) => selection.threadId === "app-thread";
+    const afterThread = workspaceSelectionsIn([home, thread], {}, isAppThread);
+    expect(workspaceSelectionsIn([home, appThread], afterThread, isAppThread)).toBe(afterThread);
+    expect(workspaceSelectionsIn([home, thread, appThread], {}, isAppThread).threads).toEqual({
+      ...thread.params,
+      key: thread.key,
+    });
+    expect(workspaceSelectionsIn([home, appThread], {}, isAppThread).threads).toBe(undefined);
+  });
+
   it("doesn't remember pages a Settings row doesn't open", () => {
     for (const name of ["SettingsEnvironmentNew", "SettingsProjectOverview", "SettingsAuth"]) {
       expect(workspaceSelectionsIn([home, settings, { key: name, name }], {}).settings).toBe(

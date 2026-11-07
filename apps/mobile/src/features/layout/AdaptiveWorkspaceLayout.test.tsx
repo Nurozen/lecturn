@@ -20,7 +20,13 @@ let layoutRenders = 0;
 let screenRenders = 0;
 let readerRenders = 0;
 let navigationState: unknown = undefined;
-const navigation = { navigate: vi.fn(), dispatch: vi.fn(), getState: () => navigationState };
+const navigation = {
+  navigate: vi.fn(),
+  dispatch: vi.fn(),
+  getParent: () => undefined,
+  getState: () => navigationState,
+};
+const workspaceTabNavigationState = vi.fn(() => ({ index: 0, routes: [{ name: "Home" }] }));
 let threadSelectionAction = "push";
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
 const selectWorkspace = vi.fn();
@@ -179,9 +185,7 @@ const stubModules: Record<string, unknown> = {
     currentWorkspaceSelections: () => ({}),
     workspaceSelectionCheck: { thread: () => false, pullRequest: () => false },
   },
-  "../workspace/workspace-tab-navigation": {
-    workspaceTabNavigationState: () => ({ index: 0, routes: [{ name: "Home" }] }),
-  },
+  "../workspace/workspace-tab-navigation": { workspaceTabNavigationState },
   "./workspace-overlay-routes": WorkspaceOverlayRoutes,
   "../../native/AndroidHingeObserver": { AndroidHingeObserver: () => null },
   "../../native/window-hinge-context": { WindowHingeContext: React.createContext(null) },
@@ -367,5 +371,46 @@ describe("adaptive workspace thread selection", () => {
       environmentId: "e",
       threadId: "t",
     });
+  });
+});
+
+describe("adaptive workspace tabs", () => {
+  afterEach(() => {
+    navigationState = undefined;
+    navigation.dispatch.mockClear();
+    workspaceTabNavigationState.mockClear();
+  });
+
+  it("opens a tab under open sheets unless the sheet's own link asks to close them", async () => {
+    let openWorkspaceTab: ReturnType<typeof layout.useAdaptiveWorkspaceLayout>["openWorkspaceTab"];
+    function TabReader() {
+      ({ openWorkspaceTab } = layout.useAdaptiveWorkspaceLayout());
+      return null;
+    }
+    await renderWorkspace(<TabReader />);
+    const sheet = { key: "connections", name: "Connections" };
+    navigationState = {
+      key: "root",
+      index: 1,
+      routes: [{ key: "home", name: "Home" }, sheet],
+    };
+    const overlaysOfCall = (call: number) =>
+      (
+        workspaceTabNavigationState.mock.calls[call] as unknown as [
+          unknown,
+          unknown,
+          unknown,
+          { readonly overlays: readonly unknown[] },
+        ]
+      )[3].overlays;
+
+    await React.act(async () => openWorkspaceTab!("settings"));
+    expect(overlaysOfCall(0)).toEqual([sheet]);
+
+    await React.act(async () => openWorkspaceTab!("settings", { closeSheets: true }));
+    expect(overlaysOfCall(1)).toEqual([]);
+    expect(navigation.dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "RESET", target: "root" }),
+    );
   });
 });

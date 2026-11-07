@@ -32,14 +32,14 @@ it("skips rows that do not decode and trims the ones that do", () => {
       {
         number: 0,
         title: "invalid",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/0",
+        url: "https://github.com/nurozen/codething-mvp/pull/0",
         baseRefName: "main",
         headRefName: "feature/invalid",
       },
       {
         number: 15,
         title: "  Valid PR title  ",
-        url: " https://github.com/pingdotgg/codething-mvp/pull/15 ",
+        url: " https://github.com/nurozen/codething-mvp/pull/15 ",
         baseRefName: " main ",
         headRefName: "\tfeature/status-valid-pr-entry\t",
         headRepository: { nameWithOwner: "   " },
@@ -53,7 +53,7 @@ it("skips rows that do not decode and trims the ones that do", () => {
   expect(rows[0]).toMatchObject({
     number: 15,
     title: "Valid PR title",
-    url: "https://github.com/pingdotgg/codething-mvp/pull/15",
+    url: "https://github.com/nurozen/codething-mvp/pull/15",
     baseRefName: "main",
     headRefName: "feature/status-valid-pr-entry",
     state: "open",
@@ -66,7 +66,7 @@ it("reads lowercase closed and merged states", () => {
   const row = (number: number, state: string) => ({
     number,
     title: "PR",
-    url: `https://github.com/pingdotgg/codething-mvp/pull/${number}`,
+    url: `https://github.com/nurozen/codething-mvp/pull/${number}`,
     baseRefName: "main",
     headRefName: "feature/status-lowercase-state",
     state,

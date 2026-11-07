@@ -488,16 +488,19 @@ function AdaptiveWorkspaceLayoutContent(
   };
   /**
    * The one way to open a workspace tab: replaces the workspace with the tab's list and, when the
-   * window has columns, the page it last showed, keeping any sheet on top. An overlay sidebar
-   * stays open over that page.
+   * window has columns, the page it last showed, keeping any sheet on top unless `closeSheets`.
+   * An overlay sidebar stays open over that page.
    */
   const openWorkspaceTab = (
     tab: WorkspaceTab | "settings",
-    options?: { readonly columns?: boolean },
+    options?: { readonly columns?: boolean; readonly closeSheets?: boolean },
   ) => {
     const state = rootStackState(navigation);
     if (!state) return;
-    const { workspace, overlays } = workspaceRoutesOf(state.routes.slice(0, state.index + 1));
+    const { workspace, overlays: sheets } = workspaceRoutesOf(
+      state.routes.slice(0, state.index + 1),
+    );
+    const overlays = options?.closeSheets ? [] : sheets;
     const next = workspaceTabNavigationState(
       { ...state, routes: workspace },
       tab,

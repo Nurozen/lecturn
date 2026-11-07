@@ -19,6 +19,7 @@ import { workspaceRoutesOf } from "../layout/workspace-overlay-routes";
 import type { WorkspaceSelections } from "../../persistence/mobile-preferences";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentPresentations } from "../../state/presentation";
+import { environmentProjects } from "../../state/projects";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import {
   rememberedSettingsPage,
@@ -68,7 +69,29 @@ export function currentWorkspaceSelections() {
 /** The navigation container's `onStateChange`: remembers the page each tab is showing. */
 export function recordWorkspaceSelections(state: NavigationState | undefined) {
   if (!REMEMBERS || !state) return;
-  selections = workspaceSelectionsIn(state.routes.slice(0, state.index + 1), selections);
+  selections = workspaceSelectionsIn(
+    state.routes.slice(0, state.index + 1),
+    selections,
+    isAppThread,
+  );
+}
+
+/** A thread in a connected app's workspace, which Apps lists instead of Chats. */
+function isAppThread(selection: { readonly environmentId: string; readonly threadId: string }) {
+  const thread = appAtomRegistry.get(
+    environmentThreadShells.threadShellAtom({
+      environmentId: selection.environmentId as EnvironmentId,
+      threadId: selection.threadId as ThreadId,
+    }),
+  );
+  if (thread === null) return false;
+  const project = appAtomRegistry.get(
+    environmentProjects.projectAtom({
+      environmentId: thread.environmentId,
+      projectId: thread.projectId,
+    }),
+  );
+  return project?.appBinding !== undefined;
 }
 
 function environmentRemoved(environmentId: string) {
@@ -83,11 +106,12 @@ function environmentRemoved(environmentId: string) {
 
 /**
  * A remembered chat is gone once its environment was removed, or once that environment's
- * snapshot has loaded without it. Before it loads there is nothing to contradict it.
+ * snapshot has loaded without it. Before it loads there is nothing to contradict it. An app's
+ * thread remembered by an older build is not reopened beside the Chats list.
  */
 export const workspaceSelectionCheck: WorkspaceSelectionCheck = {
   thread: (selection) => {
-    if (environmentRemoved(selection.environmentId)) return false;
+    if (environmentRemoved(selection.environmentId) || isAppThread(selection)) return false;
     const environmentId = selection.environmentId as EnvironmentId;
     if (!appAtomRegistry.get(threadEnvironment.snapshotAtom(environmentId))) return true;
     return appAtomRegistry

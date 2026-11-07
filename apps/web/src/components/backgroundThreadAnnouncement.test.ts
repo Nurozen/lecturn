@@ -1,10 +1,13 @@
-import { RunId, RuntimeRequestId } from "@lecturn/contracts";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import { EnvironmentId, RunId, RuntimeRequestId, SquireId, ThreadId } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
+import { makeThreadFixture } from "../test-fixtures";
 import {
   type BackgroundThreadMemory,
   type BackgroundThreadSnapshot,
+  backgroundThreadSnapshots,
   nextBackgroundThreadAnnouncement,
   resolveBackgroundThreadRequest,
 } from "./backgroundThreadAnnouncement";
@@ -185,5 +188,45 @@ describe("resolveBackgroundThreadRequest", () => {
         { threads: [login(childApproval(null))] },
       ]),
     ).toEqual(["Needs approval: Fix login redirect"]);
+  });
+});
+
+describe("backgroundThreadSnapshots", () => {
+  const environmentId = EnvironmentId.make("env");
+  const shell = (id: string, overrides: Partial<EnvironmentThreadShell> = {}) =>
+    makeThreadFixture({
+      environmentId,
+      id: ThreadId.make(id),
+      title: id,
+      ...overrides,
+    }) as EnvironmentThreadShell;
+  const squire = (role: "home" | "probe") => ({ squireId: SquireId.make("squire"), role });
+  const threads = [
+    shell("plain"),
+    shell("home", { squire: squire("home") }),
+    shell("probe", { squire: squire("probe") }),
+    shell("child", {
+      lineage: {
+        rootThreadId: ThreadId.make("plain"),
+        parentThreadId: ThreadId.make("plain"),
+        relationshipToParent: "subagent",
+      },
+    }),
+  ];
+  const titles = (listing: Map<EnvironmentId, { squire: boolean }>) =>
+    backgroundThreadSnapshots(threads, new Set([environmentId]), listing, "2026-01-01").map(
+      (snapshot) => snapshot.title,
+    );
+
+  it("stays quiet for Squire home and probe threads the environment hides", () => {
+    expect(titles(new Map([[environmentId, { squire: true }]]))).toEqual(["plain"]);
+  });
+
+  it("speaks Squire threads that list as ordinary threads when Squire is off", () => {
+    expect(titles(new Map())).toEqual(["plain", "home", "probe"]);
+  });
+
+  it("skips threads whose environment is not live", () => {
+    expect(backgroundThreadSnapshots(threads, new Set(), new Map(), "2026-01-01")).toEqual([]);
   });
 });

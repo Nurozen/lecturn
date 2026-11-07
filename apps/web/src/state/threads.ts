@@ -24,6 +24,18 @@ import { environmentShell } from "./shell";
 
 const threadFamilies = createThreadFamilyAtoms(connectionAtomRuntime, environmentShell.stateAtom);
 const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, threadFamilies.snapshotAtom);
+/** Sending a guest message starts a turn in the thread's own mode; dismissing starts nothing. */
+const sendGuestMessage = withAndroidAccessFor(
+  commands.resolveGuestMessage,
+  (value) => value.input.threadId,
+  (registry, value) =>
+    registry.get(
+      environmentThreadShells.threadShellAtom({
+        environmentId: value.environmentId,
+        threadId: value.input.threadId,
+      }),
+    )?.runtimeMode,
+);
 export const threadEnvironment = {
   ...commands,
   create: withAndroidAccess(commands.create),
@@ -41,6 +53,14 @@ export const threadEnvironment = {
   ),
   setRuntimeMode: withAndroidAccess(commands.setRuntimeMode),
   startTurn: withAndroidAccess(commands.startTurn),
+  resolveGuestMessage: {
+    ...commands.resolveGuestMessage,
+    run: (registry, value) =>
+      (value.input.decision === "send" ? sendGuestMessage : commands.resolveGuestMessage).run(
+        registry,
+        value,
+      ),
+  } satisfies typeof commands.resolveGuestMessage,
 };
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(

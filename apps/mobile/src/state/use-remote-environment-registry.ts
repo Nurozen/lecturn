@@ -178,7 +178,8 @@ export function useRemoteConnections() {
             { text: "Cancel", style: "cancel" },
             {
               text: "Open Settings",
-              onPress: () => openWorkspaceTab("settings"),
+              // From the Connections sheet, Settings would otherwise open under it.
+              onPress: () => openWorkspaceTab("settings", { closeSheets: true }),
             },
             remove,
           ],

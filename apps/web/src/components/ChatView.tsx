@@ -3306,23 +3306,21 @@ export default function ChatView(props: ChatViewProps) {
   }, [routeThreadKey, pendingGuestMessageKey, timelineLiveFollowEnabled, scrollToEnd]);
   const queuedRunsControl =
     isServerThread && activeThread ? (
-      <>
-        <QueuedRunsControl
-          ref={queuedRunsControlRef}
-          steerShortcutLabel={shortcutLabelForCommand(keybindings, "thread.steerQueuedMessage", {
-            context: { terminalFocus: false },
-          })}
-          editShortcutLabel={shortcutLabelForCommand(keybindings, "thread.editQueuedMessage", {
-            context: { composerFocus: true },
-          })}
-          environmentId={activeThread.environmentId}
-          threadId={activeThread.id}
-          optimisticMessages={optimisticUserMessages}
-          editingRunId={queuedRunEdit.editingRunId}
-          onEditQueuedRun={queuedRunEdit.beginEdit}
-          onCancelEdit={queuedRunEdit.cancelEdit}
-        />
-      </>
+      <QueuedRunsControl
+        ref={queuedRunsControlRef}
+        steerShortcutLabel={shortcutLabelForCommand(keybindings, "thread.steerQueuedMessage", {
+          context: { terminalFocus: false },
+        })}
+        editShortcutLabel={shortcutLabelForCommand(keybindings, "thread.editQueuedMessage", {
+          context: { composerFocus: true },
+        })}
+        environmentId={activeThread.environmentId}
+        threadId={activeThread.id}
+        optimisticMessages={optimisticUserMessages}
+        editingRunId={queuedRunEdit.editingRunId}
+        onEditQueuedRun={queuedRunEdit.beginEdit}
+        onCancelEdit={queuedRunEdit.cancelEdit}
+      />
     ) : null;
   // One-shot: the resend "Work locally" queued fires once, then the marker clears.
   const resendAfterWorkLocally = () => {

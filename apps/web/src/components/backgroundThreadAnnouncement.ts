@@ -1,4 +1,11 @@
-import type { OrchestrationV2RunStatus, RunId } from "@lecturn/contracts";
+import { scopeThreadRef, scopedThreadKey } from "@lecturn/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
+import { effectiveSnoozed } from "@lecturn/client-runtime/state/thread-settled";
+import {
+  isListedThread,
+  type ThreadListingCapabilitiesByEnvironment,
+} from "@lecturn/client-runtime/state/threads";
+import type { EnvironmentId, OrchestrationV2RunStatus, RunId } from "@lecturn/contracts";
 
 import type { SidebarThreadSummary } from "../types";
 import { runOutcomeText, THREAD_STATUS_TEXT } from "./chat/threadActivityAnnouncement";
@@ -32,6 +39,34 @@ export function resolveBackgroundThreadRequest(
   if (thread.hasPendingUserInput) return { request: "input", requestId: ownRequestId };
   if (thread.pendingSubagentRequest === "user_input") return { request: "input", requestId: null };
   return { request: null, requestId: null };
+}
+
+/**
+ * Threads with their own row in a live environment. Subagents surface their
+ * requests on the parent, and hidden Squire home/probe threads have no row.
+ */
+export function backgroundThreadSnapshots(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  liveEnvironmentIds: ReadonlySet<EnvironmentId>,
+  listingCapabilities: ThreadListingCapabilitiesByEnvironment,
+  now: string,
+): BackgroundThreadSnapshot[] {
+  const snapshots: BackgroundThreadSnapshot[] = [];
+  for (const thread of threads) {
+    if (thread.archivedAt !== null) continue;
+    if (!isListedThread(thread, listingCapabilities.get(thread.environmentId))) continue;
+    if (!liveEnvironmentIds.has(thread.environmentId)) continue;
+    snapshots.push({
+      key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      title: thread.title,
+      ...resolveBackgroundThreadRequest(thread),
+      runId: thread.latestRun?.runId ?? null,
+      runStatus: thread.latestRun?.status ?? null,
+      activeRunId: thread.runtime?.activeRunId ?? null,
+      snoozed: effectiveSnoozed(thread, { now }),
+    });
+  }
+  return snapshots;
 }
 
 interface BackgroundThreadMemoryEntry {
