@@ -67,6 +67,7 @@ import {
 } from "@lecturn/shared/codexArtifactTemplates";
 import {
   declinePendingApprovals,
+  hasAppToolApproval,
   type ApprovalResponder,
   type ThreadUserInputQuestion,
 } from "@lecturn/client-runtime/state/thread-requests";
@@ -1259,6 +1260,10 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     selectedThreadKey,
   ]);
 
+  // A connected app's tool call gets an explicit answer on its card, so with one pending a send
+  // declines nothing and goes out as any follow-up does.
+  const sendDeclinesApprovals =
+    props.activePendingApprovals.length > 0 && !hasAppToolApproval(props.activePendingApprovals);
   const activePendingApprovalsRef = useRef(props.activePendingApprovals);
   useLayoutEffect(() => {
     activePendingApprovalsRef.current = props.activePendingApprovals;
@@ -1276,7 +1281,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
     // empty submit, a queued-message edit, or `/feedback` leaves approvals alone.
     const approvalsToDecline = props.activePendingApprovals;
     const declineBeforeDispatch =
-      approvalsToDecline.length > 0 && props.activePendingUserInput === null
+      sendDeclinesApprovals && props.activePendingUserInput === null
         ? async () =>
             props.respondingApprovalId === null &&
             (await declinePendingApprovals(approvalsToDecline, props.onRespondToApproval)) &&
@@ -1815,7 +1820,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         reportedModelSelection={reportedModelSelection}
                         editorRef={composerEditorRef}
                         placeholder={
-                          props.activePendingApproval
+                          sendDeclinesApprovals
                             ? "Send a message to decline and redirect the agent"
                             : (props.composerPlaceholder ?? "Ask the repo agent, or run a command…")
                         }
@@ -1843,8 +1848,7 @@ const ThreadDetailScreenContent = function ThreadDetailScreenContent(
                         }
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={
-                          props.activePendingApprovals.length > 0 &&
-                          props.activePendingUserInput === null
+                          sendDeclinesApprovals && props.activePendingUserInput === null
                             ? "steer"
                             : props.followUpBehavior
                         }

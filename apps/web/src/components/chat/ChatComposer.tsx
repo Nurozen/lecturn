@@ -1031,9 +1031,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderEntry?.snapshot,
     selectedModel,
   );
+  const approvalBlockReason = approvalSendBlockReason(
+    activePendingApproval,
+    pendingApprovals.filter((approval) => !heldRequestIds.has(approval.requestId)),
+  );
   const sendDisabledReason =
     externalSendDisabledReason ??
-    approvalSendBlockReason(activePendingApproval) ??
+    approvalBlockReason ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -3951,7 +3955,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onPaste={onComposerPasteStable}
                     placeholder={
                       isComposerApprovalState
-                        ? "Send a message to decline and redirect the agent"
+                        ? (approvalBlockReason ??
+                          "Send a message to decline and redirect the agent")
                         : activePendingProgress
                           ? isChoiceOnlyPendingQuestion
                             ? "Choose an option above"

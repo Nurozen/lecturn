@@ -2,9 +2,12 @@
  * Live Jev routing against a funded test environment. Never runs
  * in CI: it spends allowance and needs a relay credential. Run with
  *
+ *   LECTURN_TEST_KEEP_PROVIDER_ENV=1 \
  *   LECTURN_SQUIRE_JEV_LIVE=1 LECTURN_SQUIRE_JEV_RELAY_URL=... \
  *   LECTURN_SQUIRE_JEV_CREDENTIAL=... LECTURN_SQUIRE_JEV_ENVIRONMENT_ID=... \
  *   LECTURN_SQUIRE_JEV_GENERATION=... vp test run <this file>
+ *
+ * Without the first variable the test setup strips the LECTURN_* gates and this skips silently.
  *
  * and it writes p50/p95 latency and the confidence spread to
  * `artifacts/squire-bar/jev/latency.json`.

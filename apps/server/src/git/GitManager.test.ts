@@ -1092,7 +1092,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const pullRequest = {
         number: 1,
         title: "Draft status",
-        url: "https://github.com/pingdotgg/codething-mvp/pull/1",
+        url: "https://github.com/nurozen/codething-mvp/pull/1",
         baseRefName: "main",
         headRefName: "feature/draft-status",
         state: "OPEN",
@@ -1105,7 +1105,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               {
                 ...pullRequest,
                 number: 2,
-                url: "https://github.com/pingdotgg/codething-mvp/pull/2",
+                url: "https://github.com/nurozen/codething-mvp/pull/2",
                 state: "MERGED",
               },
             ]),
@@ -1129,9 +1129,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         changes.pipe(Stream.takeUntil((event) => event.number === 2, { excludeLast: true })),
       );
       expect(events).toEqual([
-        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
-        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
-        { host: "github.com", repository: "pingdotgg/codething-mvp", number: 1 },
+        { host: "github.com", repository: "nurozen/codething-mvp", number: 1 },
+        { host: "github.com", repository: "nurozen/codething-mvp", number: 1 },
+        { host: "github.com", repository: "nurozen/codething-mvp", number: 1 },
       ]);
     }),
   );

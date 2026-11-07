@@ -916,8 +916,9 @@ from upstream's side.
   gating lives in fork `ClaudeCapabilitiesCache.ts`, and an unauthenticated
   status invalidates it. #20413 launch append text is ignored for Squire homes
   and probes.
-- **Idle compaction (#21682)** stays an opt-in beta (`compactIdleThreads`
-  defaults to false), and `idleCompactionWindow` skips Squire threads.
+- **Idle compaction (#21682).** `compactIdleThreads` defaults to `"onReturn"`, the
+  resume prompt, and legacy booleans still decode. Background compaction
+  (`"beforeCacheExpires"`) stays opt-in, and `idleCompactionWindow` skips Squire threads.
 - **Owner analytics (#21506).** `readClientOwnerParams` hashes the primary
   signed-in Connect account. `ws.ts` `readClientOwners` records only
   `isTelemetryIdHash` values. The web device id key is
@@ -1062,6 +1063,11 @@ from upstream's side.
   - #21503 applies to provider approvals only: the footer stays and a send
     declines and redirects. App tool approvals keep the send block;
     `approvalReplacesComposer` now only picks the placeholder.
+  - Sends never decline Lecturn Apps tool approvals, on web or mobile. Web blocks the
+    send while any shown approval is an app tool, including one queued behind a provider
+    card and a preview annotation send, which calls `onSend` past the composer. Mobile
+    never had a block, so with one pending a send declines nothing and follows
+    `followUpBehavior` as before #21503.
 - **Mobile.**
   - Composer chips (#22518): the Android icon object is `LecturnChipIcons`; the iOS
     chip font stays system, in `makeAttachmentString`.
@@ -1190,7 +1196,7 @@ to `com.cloudgatherer.lecturn`, `@t3tools/` to `@lecturn/`, `T3 Code` to `Lectur
 `T3CODE_` to `LECTURN_`, `t3code` to `lecturn`, then at a word start `T3Code` to
 `Lecturn`, `T3_` to `LECTURN_`, `.t3` to `.lecturn`, and `T3`/`t3` (standalone, before
 a capital, or `t3-`) to `Lecturn`/`lecturn`.
-The translation misses mid-word camelCase `T3` and owner or host names,
+The translation misses mid-word camelCase `T3`, `t3_`, and owner or host names,
 and `t3-context://` is mapped although the fork keeps it, so some pairs and deltas
 are false positives; check those by hand. A title regex misses dynamic titles
 (`scenario.name`, `$name`) and `.each`/`.for` rows, so compare those with a parser or

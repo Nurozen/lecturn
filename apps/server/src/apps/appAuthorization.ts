@@ -116,6 +116,7 @@ const EMBED_COMMAND_TYPES: ReadonlySet<OrchestrationV2Command["type"]> = new Set
   "thread.mark-unread",
   // A held queue and an agent's question each need their way out in the embed too.
   "queue.resume",
+  "queued-run.start",
   "thread.user-input.dismiss",
 ]);
 

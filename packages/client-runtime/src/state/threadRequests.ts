@@ -30,6 +30,13 @@ export async function declinePendingApprovals(
   return true;
 }
 
+/** A connected app's tool call gets an explicit answer, so no send may decline one. */
+export function hasAppToolApproval(
+  approvals: ReadonlyArray<Pick<ThreadPendingApproval, "connectedAppTool">>,
+): boolean {
+  return approvals.some((approval) => approval.connectedAppTool !== undefined);
+}
+
 export interface ThreadPendingApproval {
   readonly requestId: RuntimeRequestId;
   readonly requestKind: ProviderRequestKind;

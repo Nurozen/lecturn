@@ -29,7 +29,10 @@ import {
 } from "@lecturn/contracts";
 import { deriveThreadTitleSeed } from "@lecturn/client-runtime/operations";
 import { wasBootstrapThreadDeleted } from "@lecturn/client-runtime/errors";
-import { declinePendingApprovals } from "@lecturn/client-runtime/state/thread-requests";
+import {
+  declinePendingApprovals,
+  hasAppToolApproval,
+} from "@lecturn/client-runtime/state/thread-requests";
 import {
   parseCodexFeedbackCommand,
   submitCodexFeedback,
@@ -493,6 +496,18 @@ export function useComposerSend(input: ComposerSendInput) {
         return;
       }
       onAdvanceActivePendingUserInput();
+      return;
+    }
+    // The composer blocks this too, but a preview annotation sends past the composer, and the
+    // redirect below would answer an app tool's approval for the user.
+    if (
+      hasAppToolApproval(
+        pendingApprovalsRef.current.filter((approval) =>
+          sendCtx?.shownPendingApprovalIds.includes(approval.requestId),
+        ),
+      )
+    ) {
+      notifyDirectAnnotationAttached();
       return;
     }
     if (!sendCtx?.providerAvailable) {
