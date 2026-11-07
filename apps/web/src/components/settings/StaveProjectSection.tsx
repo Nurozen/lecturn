@@ -266,7 +266,7 @@ function ManifestTable({
                     : "break-all font-mono text-warning-foreground"
               }
             >
-              {cellText(cell) ?? "—"}
+              {cellText(cell) ?? "-"}
             </span>
           ))}
         </div>

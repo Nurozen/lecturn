@@ -1,4 +1,5 @@
 import { matchComposerThreadItems } from "@lecturn/client-runtime/composerThreadItems";
+import { useState } from "react";
 import type {
   EnvironmentId,
   ProjectId,
@@ -78,6 +79,8 @@ export function useComposerMenuItems({
   /** Lecturn: ChatView's allowlist; absent offers every command. */
   readonly controls: ChatViewControls | undefined;
 }) {
+  // Thread mentions rank by recency as of when the composer mounted.
+  const [now] = useState(() => Date.now());
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const pullRequestTriggerQuery =
@@ -168,6 +171,7 @@ export function useComposerMenuItems({
           excludeThreadId: activeThreadId,
           query: composerTrigger.query,
           listing: threadListing.get(environmentId),
+          now,
         }),
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,

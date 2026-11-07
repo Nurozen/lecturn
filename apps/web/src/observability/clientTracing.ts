@@ -18,8 +18,9 @@ const CLIENT_TRACING_RESOURCE = {
   serviceName: "lecturn-web",
   attributes: {
     "service.namespace": "lecturn",
+    "deployment.environment.name": import.meta.env.DEV ? "development" : "production",
     "service.runtime": "lecturn-web",
-    "service.mode": isElectron ? "electron" : "browser",
+    "lecturn.client.surface": isElectron ? "desktop" : "web",
     "service.version": APP_VERSION,
   },
 } as const;

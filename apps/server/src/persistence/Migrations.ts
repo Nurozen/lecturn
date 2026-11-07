@@ -108,6 +108,11 @@ import Migration0084 from "./Migrations/066_RepairClientSettlementTimestamps.ts"
 // Upstream published this as 67, which Lecturn's ledger already used
 // (MessageContextTitleStateCompatibility), so it runs here as 85.
 import Migration0085 from "./Migrations/067_WebhookDedupe.ts";
+// Upstream published these as 68 and 69, which Lecturn's ledger already used
+// (PullRequestFilesViewedCompatibility, ProjectionThreadsAutoSettleDisabledAtCompatibility),
+// so they run here as 86 and 87.
+import Migration0086 from "./Migrations/068_ShellStopRequestIndex.ts";
+import Migration0087 from "./Migrations/069_ThreadMessageSearch.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -164,6 +169,31 @@ const WebhookDedupeCompatibility = Effect.gen(function* () {
   `;
   if (tables.length > 0) return;
   yield* Migration0085;
+});
+
+// Upstream 68 creates its index without IF NOT EXISTS. A database that already
+// ran it under upstream's id keeps that index, so only create it when missing.
+const ShellStopRequestIndexCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const indexes = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'index' AND name = 'orchestration_v2_projection_turn_items_stop_request_idx'
+  `;
+  if (indexes.length > 0) return;
+  yield* Migration0086;
+});
+
+// Upstream 69 reads "table already exists" as an SQLite without FTS5 trigrams
+// and warns that search will scan. A database that already ran it under
+// upstream's id keeps a working index, so only build the index when missing.
+const ThreadMessageSearchCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'orchestration_v2_message_search'
+  `;
+  if (tables.length > 0) return;
+  yield* Migration0087;
 });
 
 /**
@@ -285,6 +315,10 @@ const migrationEntries = [
   [84, "RepairClientSettlementTimestamps", Migration0084],
   // Upstream 67.
   [85, "WebhookDedupe", WebhookDedupeCompatibility],
+  // Upstream 68.
+  [86, "ShellStopRequestIndex", ShellStopRequestIndexCompatibility],
+  // Upstream 69.
+  [87, "ThreadMessageSearch", ThreadMessageSearchCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

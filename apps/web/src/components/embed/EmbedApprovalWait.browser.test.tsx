@@ -196,7 +196,7 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
       isWorking={live}
       activeTurnInProgress={live}
       emptyPlaceholderInset={0}
-      awaitingUser={approvals.length > 0}
+      awaitingUser={approvals.length > 0 ? "approval" : null}
       activeTurnStartedAt={at(0)}
       listRef={createRef<LegendListRef | null>()}
       latestRun={{

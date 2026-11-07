@@ -67,7 +67,7 @@ describe("saga cascade confirmation", () => {
   it("names every affected space, member project and archived-inclusive conversation count", () => {
     const text = staveSagaReviewLines(review).join("\n");
     expect(text).toContain("saga: /spaces/saga");
-    expect(text).toContain('member: /spaces/member — project "Member app", 2 threads');
+    expect(text).toContain('member: /spaces/member (project "Member app", 2 threads)');
     expect(text).toContain("deletes 1 imported project");
     expect(text).toContain("including archived conversation history");
     expect(staveSagaTeardownAuthorization(review)).toEqual({

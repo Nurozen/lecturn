@@ -15,9 +15,12 @@ import { getProviderModelCapabilities } from "../providerModels";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import type {
   EnvironmentThread,
+  ThreadStructure,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
+import type { ThreadStructureVisibleTurnItem } from "@lecturn/client-runtime/state/models";
 import {
+  type ForkPointMessage,
   isSameForkPoint,
   resolveMessageForkPoints,
   type ThreadForkPoint,
@@ -38,7 +41,6 @@ import {
   type MessageId,
   type ModelSelection,
   type OrchestrationMessageContext,
-  type OrchestrationV2ProjectedTurnItem,
   type PreviewAnnotationPayload,
   type ProviderInteractionMode,
   ProviderDriverKind,
@@ -118,6 +120,7 @@ import {
 } from "../providerInstances";
 
 type ThreadProjection = EnvironmentThread["projection"];
+type ThreadStructureRow = ThreadStructure["visibleTurnItems"][number];
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "lecturn:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -956,6 +959,10 @@ export function shouldShowPlanFollowUpPrompt(input: {
   );
 }
 
+// A typed `/compact`, with or without instructions, is already the compaction. Queueing a
+// bare one ahead of it would run an uninstructed compaction first and charge for two.
+const COMPACT_COMMAND_PATTERN = /^\/compact(?:\s|$)/i;
+
 const sessionDismissedBranchMismatchKeys = new Set<string>();
 
 export function dismissBranchMismatchForSession(key: string): void {
@@ -1188,8 +1195,8 @@ export function resolveForkRevertDisabledReason(
     thread.latestUserMessageAt !== null &&
     Date.parse(thread.latestUserMessageAt) > Date.parse(thread.createdAt);
   return hasOwnLegacyTurns
-    ? "Turns from before the Lecturn update can't be reverted — revert becomes available after the fork's next turn"
-    : "Send a message first — revert becomes available once the fork has its own turn";
+    ? "Turns from before the Lecturn update can't be reverted. Revert becomes available after the fork's next turn"
+    : "Send a message first. Revert becomes available once the fork has its own turn";
 }
 
 /**
@@ -1280,8 +1287,47 @@ export function buildForkTitle(parentTitle: string | null | undefined): string {
   return base ? `${base} (fork)` : "Untitled (fork)";
 }
 
+/**
+ * The messages fork points read, in timeline order. ChatView's own entries leave out replies
+ * because the thread structure strips their text, but a turn only counts as completed through its
+ * reply, so they come from the structure's rows, which keep what fork points need. The optimistic
+ * messages not yet in the structure follow.
+ */
+export function forkPointMessagesFromStructure(
+  rows: ReadonlyArray<ThreadStructureVisibleTurnItem>,
+  optimisticMessages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "runId" | "streaming">>,
+): ReadonlyArray<ForkPointMessage> {
+  const messages: ForkPointMessage[] = [];
+  const committedIds = new Set<MessageId>();
+  // An answer's message folds into its request row, as in the timeline.
+  const foldedAnswerIds = new Set(
+    rows.flatMap(({ item }) =>
+      item.type === "user_input_request" && item.questionAnswer
+        ? [`async-answer:${item.questionAnswer.requestId}`]
+        : [],
+    ),
+  );
+  for (const row of rows) {
+    const { item } = row;
+    if (item.type !== "user_message" && item.type !== "assistant_message") continue;
+    if (foldedAnswerIds.has(item.messageId)) continue;
+    committedIds.add(item.messageId);
+    messages.push({
+      id: item.messageId,
+      role: item.type === "user_message" ? "user" : "assistant",
+      runId: item.runId,
+      streaming: item.type === "assistant_message" && item.streaming,
+      inherited: row.visibility === "inherited",
+    });
+  }
+  for (const message of optimisticMessages) {
+    if (!committedIds.has(message.id)) messages.push(message);
+  }
+  return messages;
+}
+
 interface TimelineForkPointsInput {
-  timelineEntries: ReadonlyArray<TimelineEntry>;
+  messages: ReadonlyArray<ForkPointMessage>;
   completedRunIds: ReadonlySet<RunId>;
   activeRunId: RunId | null;
   runlessHistory: boolean;
@@ -1289,19 +1335,7 @@ interface TimelineForkPointsInput {
 
 function resolveTimelineForkPoints(input: TimelineForkPointsInput) {
   return resolveMessageForkPoints({
-    messages: input.timelineEntries.flatMap((entry) =>
-      entry.kind === "message"
-        ? [
-            {
-              id: entry.message.id,
-              role: entry.message.role,
-              runId: entry.message.runId,
-              streaming: entry.message.streaming,
-              inherited: entry.projectedItem?.visibility === "inherited",
-            },
-          ]
-        : [],
-    ),
+    messages: input.messages,
     completedRunIds: input.completedRunIds,
     activeRunId: input.activeRunId,
     runlessHistory: input.runlessHistory,
@@ -1518,7 +1552,7 @@ export function createLocalDispatchSnapshot(
  * turn items avoids dropping steer rows in that gap.
  */
 export function deriveCommittedServerUserMessageIds(
-  visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  visibleTurnItems: ReadonlyArray<ThreadStructureRow>,
 ): ReadonlySet<ChatMessage["id"]> {
   return new Set(
     visibleTurnItems.flatMap((row) =>
@@ -1872,7 +1906,7 @@ export function planComposerTurn(input: {
   const compactBeforeSend =
     input.resumeCompactionTokens !== null &&
     !input.keepFullHistory &&
-    input.messageText.toLowerCase() !== "/compact";
+    !COMPACT_COMMAND_PATTERN.test(input.messageText);
   return {
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
@@ -1958,20 +1992,29 @@ export function sendTitleFallbackLabels(snapshot: ComposerSendSnapshot) {
   ];
 }
 
-/** A thread shell built from its loaded detail, for direct links that hydrate the detail first. */
+/**
+ * A thread shell built from its loaded detail, for direct links that hydrate the detail first.
+ * `updatedAt` and `lastVisitedAt` are passed live: the thread structure leaves them out.
+ */
 export function presentThreadShellFromProjection(
   environmentId: EnvironmentId,
   threadId: ThreadId,
-  projection: ThreadProjection,
+  projection: ThreadStructure,
+  live: {
+    readonly updatedAt: ThreadProjection["updatedAt"];
+    readonly lastVisitedAt: ThreadProjection["thread"]["lastVisitedAt"];
+  },
 ) {
+  const { updatedAt, lastVisitedAt } = live;
   const latestRun = deriveLatestThreadRun(projection);
-  const runtime = deriveThreadRuntime(projection);
+  const runtime = deriveThreadRuntime({ ...projection, updatedAt });
   const pendingRuntimeRequest =
     projection.runtimeRequests.findLast((request) => request.status === "pending") ?? null;
   // Direct links can hydrate detail before the thread enters the shell index.
   return {
     ...presentThreadShell(environmentId, {
       ...projection.thread,
+      lastVisitedAt,
       latestRunId: latestRun?.runId ?? null,
       activeRunId: runtime?.activeRunId ?? null,
       status: runtime?.status ?? "idle",
@@ -1995,7 +2038,7 @@ export function presentThreadShellFromProjection(
         )?.goal ?? null,
       itemCount: projection.turnItems.length,
       visibleItemCount: projection.visibleTurnItems.length,
-      updatedAt: projection.updatedAt,
+      updatedAt,
     }),
     latestRun,
     runtime,
@@ -2003,7 +2046,7 @@ export function presentThreadShellFromProjection(
 }
 
 /** Background work the provider still runs after the latest run ended. */
-export function deriveThreadPendingBackgroundTasks(projection: ThreadProjection | null) {
+export function deriveThreadPendingBackgroundTasks(projection: ThreadStructure | null) {
   if (projection === null) return [];
   const sessionError =
     projection.providerSessions.findLast(
@@ -2029,7 +2072,7 @@ export function deriveThreadPendingBackgroundTasks(projection: ThreadProjection 
  * active provider thread, plus 0 for the thread start. Empty without a live provider session
  * on the thread's selected instance.
  */
-export function deriveAvailableRevertTurnCounts(projection: ThreadProjection | null) {
+export function deriveAvailableRevertTurnCounts(projection: ThreadStructure | null) {
   const available = new Set<number>();
   const providerThread = projection?.providerThreads.find(
     (candidate) => candidate.id === projection.thread.activeProviderThreadId,
@@ -2072,7 +2115,7 @@ export function deriveAvailableRevertTurnCounts(projection: ThreadProjection | n
  * without reporting the paths it touched.
  */
 export function deriveWorkspaceMutationId(
-  visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  visibleTurnItems: ReadonlyArray<ThreadStructureRow>,
   latestCheckpointCompletedAt: string | null,
 ) {
   let itemId: string | null = null;

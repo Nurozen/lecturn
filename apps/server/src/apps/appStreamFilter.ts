@@ -6,8 +6,12 @@
  */
 import type {
   OrchestrationProjectShell,
+  OrchestrationV2DomainEvent,
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ShellStreamItem,
+  OrchestrationV2ThreadOpens,
+  OrchestrationV2ThreadProjection,
+  OrchestrationV2ThreadStreamItem,
   ProjectId,
   ProjectSnapshot,
   ServerSettings,
@@ -28,6 +32,17 @@ const ownsProjectShell = (
   project.appBinding?.appId === subject.appId &&
   (subject.kind === "app" || project.id === subject.projectId);
 
+/**
+ * `opens.picks` is what the user typed in the palette to pick a thread. Only the palette reads
+ * it, so a connected app gets none of it, even for its own threads.
+ */
+const withoutPalettePicks = <
+  Thread extends { readonly opens?: OrchestrationV2ThreadOpens | null | undefined },
+>(
+  thread: Thread,
+): Thread =>
+  thread.opens?.picks.length ? { ...thread, opens: { ...thread.opens, picks: [] } } : thread;
+
 const filterShellSnapshot = (
   subject: AppSubject,
   snapshot: OrchestrationV2ShellSnapshot,
@@ -37,8 +52,12 @@ const filterShellSnapshot = (
   return {
     ...snapshot,
     projects,
-    threads: snapshot.threads.filter((thread) => visible.has(thread.projectId)),
-    archivedThreads: snapshot.archivedThreads.filter((thread) => visible.has(thread.projectId)),
+    threads: snapshot.threads
+      .filter((thread) => visible.has(thread.projectId))
+      .map(withoutPalettePicks),
+    archivedThreads: snapshot.archivedThreads
+      .filter((thread) => visible.has(thread.projectId))
+      .map(withoutPalettePicks),
   };
 };
 
@@ -60,14 +79,15 @@ export const filterShellItem = <E, R>(
         ownsProjectShell(subject, item.project) ? Option.some(item) : Option.none(),
       );
     case "thread.updated": {
+      const update = { ...item, thread: withoutPalettePicks(item.thread) };
       if (subject.kind === "embed") {
         // Embed tokens are minted only for a project bound to their app.
         return Effect.succeed(
-          item.thread.projectId === subject.projectId ? Option.some(item) : Option.none(),
+          item.thread.projectId === subject.projectId ? Option.some(update) : Option.none(),
         );
       }
       return ownsProject(item.thread.projectId).pipe(
-        Effect.map((owned) => (owned ? Option.some(item) : Option.none())),
+        Effect.map((owned) => (owned ? Option.some(update) : Option.none())),
       );
     }
     case "synchronized":
@@ -95,6 +115,49 @@ export const filterShellStream =
             ),
           ),
         );
+
+const projectionWithoutPalettePicks = <Projection extends OrchestrationV2ThreadProjection>(
+  projection: Projection,
+): Projection => ({ ...projection, thread: withoutPalettePicks(projection.thread) });
+
+/** Thread events carry the whole thread as their payload, so a visit would ship the picks. */
+const threadEventWithoutPalettePicks = (
+  event: OrchestrationV2DomainEvent,
+): OrchestrationV2DomainEvent =>
+  "opens" in event.payload
+    ? ({
+        ...event,
+        payload: withoutPalettePicks(event.payload),
+      } as OrchestrationV2DomainEvent)
+    : event;
+
+const threadItemWithoutPalettePicks = (
+  item: OrchestrationV2ThreadStreamItem,
+): OrchestrationV2ThreadStreamItem => {
+  switch (item.kind) {
+    case "snapshot":
+      return { ...item, projection: projectionWithoutPalettePicks(item.projection) };
+    case "event":
+      return { ...item, event: threadEventWithoutPalettePicks(item.event) };
+    default:
+      return item;
+  }
+};
+
+export const filterThreadStream =
+  (session: AuthenticatedSession) =>
+  <E, R>(
+    stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+  ): Stream.Stream<OrchestrationV2ThreadStreamItem, E, R> =>
+    parseAppSubject(session.subject) === null
+      ? stream
+      : stream.pipe(Stream.map(threadItemWithoutPalettePicks));
+
+/** For a thread projection returned whole, by RPC or the HTTP thread routes. */
+export const filterThreadProjectionForSubject =
+  (subject: string) =>
+  <Projection extends OrchestrationV2ThreadProjection>(projection: Projection): Projection =>
+    parseAppSubject(subject) === null ? projection : projectionWithoutPalettePicks(projection);
 
 /** For the HTTP shell snapshot, which has the subject but no apps services in reach. */
 export const filterShellSnapshotForSubject =

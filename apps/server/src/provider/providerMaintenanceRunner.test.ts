@@ -669,20 +669,25 @@ describe("providerMaintenanceRunner", () => {
         baseProvider,
         { ...baseOpenCodeProvider, version: "9.9.9" },
       ]);
-      const updater = yield* makeTestRunner(registry);
+      const secondQueued = yield* Deferred.make<void>();
+      const updater = yield* makeTestRunner({
+        ...registry,
+        setProviderMaintenanceActionState: (input) =>
+          registry
+            .setProviderMaintenanceActionState(input)
+            .pipe(
+              Effect.tap(() =>
+                input.instanceId === OPENCODE_INSTANCE_ID && input.state?.status === "queued"
+                  ? Deferred.succeed(secondQueued, undefined)
+                  : Effect.void,
+              ),
+            ),
+      });
 
       const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
       yield* Effect.promise(() => firstStarted);
       const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const queuedStatus = (yield* registry.getProviders).find(
-          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
-        )?.updateState?.status;
-        if (queuedStatus === "queued") {
-          break;
-        }
-        yield* Effect.yieldNow;
-      }
+      yield* Deferred.await(secondQueued);
 
       releaseFirstLatch.resolve();
       yield* Fiber.join(first);

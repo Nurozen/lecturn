@@ -514,7 +514,7 @@ function AvailableDecisionsPanel({
               setView({ visible: list.data?.decisions ?? EMPTY, newCount: 0 });
             }}
           >
-            {newCount} new decisions — show
+            Show {newCount} new decisions
           </Button>
         ) : null}
       </div>

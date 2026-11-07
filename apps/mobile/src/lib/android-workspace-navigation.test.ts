@@ -1,5 +1,5 @@
 import * as NodeModule from "node:module";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   androidWorkspaceTabFromNavigationState,
   androidWorkspaceTabNavigationState,
@@ -9,6 +9,7 @@ import {
   androidWorkspaceNavigationState,
   parentThreadIsBelow,
   resetAndroidWorkspace,
+  returnFromDraft,
   returnToAndroidWorkspaceList,
   type AndroidWorkspaceDestination,
   type AndroidWorkspaceResetAction,
@@ -264,6 +265,19 @@ describe("Android workspace navigation", () => {
     const [action] = actions;
     expect(action?.target).toBe(root.key);
     expect(names(apply(root, action!))).toEqual(["Home", "Thread"]);
+  });
+});
+
+describe("returnFromDraft", () => {
+  it("pops to where the draft opened, and uses the list only with nothing below", () => {
+    const goBack = vi.fn();
+    const returnToList = vi.fn();
+    returnFromDraft({ canGoBack: () => true, goBack }, returnToList);
+    expect(goBack).toHaveBeenCalledOnce();
+    expect(returnToList).not.toHaveBeenCalled();
+    returnFromDraft({ canGoBack: () => false, goBack }, returnToList);
+    expect(goBack).toHaveBeenCalledOnce();
+    expect(returnToList).toHaveBeenCalledOnce();
   });
 });
 

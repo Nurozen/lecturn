@@ -76,7 +76,10 @@ import {
   stagePendingTerminalLaunch,
 } from "../terminal/terminalLaunchContext";
 import { terminalDebugLog } from "../terminal/terminalDebugLog";
-import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
+import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
+import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
+import { draftRouteIdentity } from "./thread-route-state";
+import { NewTaskDraftRouteScreen, type NewTaskDraftRouteParams } from "./NewTaskDraftRouteScreen";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSelectedThreadGitActions } from "../../state/use-selected-thread-git-actions";
@@ -134,19 +137,12 @@ function firstRouteParam(value: string | string[] | undefined): string | null {
   return first === undefined || first.trim().length === 0 ? null : first;
 }
 
-function ThreadPane(props: { readonly children: ReactNode }) {
-  return (
-    <View className="flex-1 bg-screen android:overflow-hidden android:rounded-t-[28px] android:bg-thread-canvas">
-      {props.children}
-    </View>
-  );
-}
-
 function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
   const goBack = useWorkspaceBackNavigation("threads");
   const { layout } = useAdaptiveWorkspaceLayout();
   const { themeVariables } = useAppearancePreferences();
-  if (Platform.OS !== "android") return props.children;
+  if (Platform.OS !== "android")
+    return <ThreadScreenFallback>{props.children}</ThreadScreenFallback>;
 
   return (
     <>
@@ -156,7 +152,7 @@ function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
         onBack={layout.usesSplitView ? undefined : goBack}
         hideBottomBorder
       />
-      <ThreadPane>{props.children}</ThreadPane>
+      <ThreadScreenFallback>{props.children}</ThreadScreenFallback>
     </>
   );
 }
@@ -175,8 +171,9 @@ function OpeningThreadLoadingScreen() {
 
 type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly accountId?: string;
-  readonly environmentId: string;
-  readonly threadId: string;
+  readonly environmentId?: string;
+  readonly threadId?: string;
+  readonly draft?: NewTaskDraftRouteParams;
   readonly prompt?: string | string[];
 }>;
 
@@ -218,23 +215,39 @@ function ThreadUnavailableScreen(props: {
 }
 
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
+  return (
+    <ThreadScreenHost>
+      {props.route.params?.draft ? (
+        <NewTaskDraftRouteScreen
+          key={draftRouteIdentity(props.route.params.draft)}
+          route={{ ...props.route, params: props.route.params.draft }}
+        />
+      ) : (
+        <LiveThreadRouteController {...props} />
+      )}
+    </ThreadScreenHost>
+  );
+}
+
+function LiveThreadRouteController(props: ThreadRouteScreenProps) {
   useAndroidWorkspaceBack(useThreadWorkspaceTab(props.route.params));
   return <AccountScopedThreadRouteScreen {...props} />;
 }
+
 function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const accountsReady = useAtomValue(connectAccountsReadyAtom);
   const accounts = useConnectAccounts();
   const navigation = useNavigation();
   const entry = [...catalog.entries.values()].find(
-    (candidate) => candidate.target.environmentId === props.route.params.environmentId,
+    (candidate) => candidate.target.environmentId === props.route.params?.environmentId,
   );
   const target = entry === undefined ? undefined : accountOwnerTarget(entry);
   const decision = resolveThreadAccountRoute({
     catalogReady: catalog.isReady,
     accountsReady,
     target,
-    requestedAccountId: props.route.params.accountId,
+    requestedAccountId: props.route.params?.accountId,
     accounts,
   });
   const owner = decision.kind === "ready" ? decision.accountId : null;
@@ -256,19 +269,21 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
     );
   if (decision.kind === "sign-in")
     return (
-      <View className="flex-1 justify-center bg-screen p-5">
-        <EmptyState
-          title="Sign in again"
-          detail="Sign in to this thread's Connect account to continue."
-          actionLabel="Sign in again"
-          onAction={() =>
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsAddAccount",
-              params: { accountId: decision.accountId },
-            })
-          }
-        />
-      </View>
+      <ThreadRouteFallbackLayout>
+        <View className="flex-1 justify-center bg-screen p-5">
+          <EmptyState
+            title="Sign in again"
+            detail="Sign in to this thread's Connect account to continue."
+            actionLabel="Sign in again"
+            onAction={() =>
+              navigation.navigate("SettingsSheet", {
+                screen: "SettingsAddAccount",
+                params: { accountId: decision.accountId },
+              })
+            }
+          />
+        </View>
+      </ThreadRouteFallbackLayout>
     );
   return <ConnectedThreadRouteScreen {...props} />;
 }
@@ -276,7 +291,7 @@ function ConnectedThreadRouteScreen(props: ThreadRouteScreenProps) {
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();
-  const params = props.route.params;
+  const params = props.route.params ?? {};
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const threadIdRaw = firstRouteParam(params.threadId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
@@ -398,6 +413,12 @@ function ThreadRouteContent(
           input: { threadId: selectedThread.id },
         });
       },
+      onLoadThrough: (throughEntryId: string) => {
+        void loadEarlierHistory({
+          environmentId: selectedThread.environmentId,
+          input: { threadId: selectedThread.id, throughEntryId },
+        });
+      },
     };
   })();
   const navigation = useNavigation();
@@ -433,7 +454,7 @@ function ThreadRouteContent(
       threadId: mergeBackTargetThreadId,
     });
   };
-  const params = props.route.params;
+  const params = props.route.params ?? {};
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
   const threadId = firstRouteParam(params.threadId);
@@ -640,7 +661,7 @@ function ThreadRouteContent(
     <GitOverviewSheet
       headerInset={inspectorHeaderInset}
       presentation="inspector"
-      route={{ params: props.route.params }}
+      route={{ params: { environmentId: environmentId!, threadId: threadId! } }}
     />
   );
   const FilesInspector = () =>
@@ -1001,9 +1022,8 @@ function ThreadRouteContent(
     }
     clearPendingThreadCreationOutcome(routeThreadIdentity);
     navigation.dispatch(
-      StackActions.replace("NewTaskSheet", {
-        screen: "NewTaskDraft",
-        params: {
+      StackActions.replace("Thread", {
+        draft: {
           draftId: restoredNewTaskDraftKey(creation.messageId),
           environmentId: String(creation.environmentId),
           projectId: String(creation.creation.projectId),
@@ -1136,8 +1156,30 @@ function ThreadRouteContent(
         onOpenPullRequest={openPullRequest}
       />
 
-      <ThreadPane>
-        <ThreadDetailScreen
+      <>
+        <ThreadScreenBinding
+          header={
+            <ThreadHeader
+              // Lecturn: a home thread is titled by its Squire, as the Squire screen is.
+              title={homeSquire?.name ?? selectedThread.title}
+              controls={controls}
+              squireTrackingMenu={Platform.OS === "android" ? squireTrackingHeaderMenu : null}
+              subtitle={headerSubtitle}
+              headerColor={headerColor}
+              usesNativeHeaderGlass={usesNativeHeaderGlass}
+              gitControls={threadGitControlProps}
+              hasThreadCwd={selectedThreadCwd !== null}
+              hasWorkspaceRoot={Boolean(selectedThreadProject?.workspaceRoot)}
+              fileInspectorSupported={fileInspector.supported}
+              inspectorMode={inspectorMode}
+              onToggleInspector={handleToggleInspector}
+              onOpenGitInspector={handleOpenGitInspector}
+              onOpenFilesInspector={handleOpenFilesInspector}
+              onReturnToThread={props.onReturnToThread}
+              threadActionsHeaderItem={threadActionsHeaderItem}
+              forkHeaderAction={forkHeaderAction}
+            />
+          }
           controls={controls}
           composerPlaceholder={squireComposerPlaceholder(homeSquire) ?? undefined}
           canOperateThread={canOperateThread}
@@ -1206,7 +1248,11 @@ function ThreadRouteContent(
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
-          queuedMessages={composer.selectedThreadQueuedMessages}
+          queuedMessages={
+            selectedThreadCreation && selectedThreadCreation.outcome?.kind !== "delivered"
+              ? [selectedThreadCreation.message, ...composer.selectedThreadQueuedMessages]
+              : composer.selectedThreadQueuedMessages
+          }
           dispatchingMessageId={composer.dispatchingQueuedMessageId}
           layoutVariant={layout.variant}
           usesAutomaticContentInsets={usesNativeHeaderGlass}
@@ -1232,33 +1278,13 @@ function ThreadRouteContent(
           onSubmitUserInput={requests.onSubmitUserInput}
           onDismissUserInput={requests.onDismissUserInput}
         />
-      </ThreadPane>
+      </>
     </>
   );
 
   return (
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
-      <ThreadHeader
-        // Lecturn: a home thread is titled by its Squire, as the Squire screen is.
-        title={homeSquire?.name ?? selectedThread.title}
-        controls={controls}
-        squireTrackingMenu={Platform.OS === "android" ? squireTrackingHeaderMenu : null}
-        subtitle={headerSubtitle}
-        headerColor={headerColor}
-        usesNativeHeaderGlass={usesNativeHeaderGlass}
-        gitControls={threadGitControlProps}
-        hasThreadCwd={selectedThreadCwd !== null}
-        hasWorkspaceRoot={Boolean(selectedThreadProject?.workspaceRoot)}
-        fileInspectorSupported={fileInspector.supported}
-        inspectorMode={inspectorMode}
-        onToggleInspector={handleToggleInspector}
-        onOpenGitInspector={handleOpenGitInspector}
-        onOpenFilesInspector={handleOpenFilesInspector}
-        onReturnToThread={props.onReturnToThread}
-        threadActionsHeaderItem={threadActionsHeaderItem}
-        forkHeaderAction={forkHeaderAction}
-      />
 
       {renderThreadRouteBody()}
     </>

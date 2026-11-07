@@ -1029,6 +1029,7 @@ export const SAMPLE_MEMORY_STATUS = String.raw`{
 `;
 
 /** `memory detach s-init --json` (exit 0). Exit code: 0. */
+// oxlint-disable-next-line lecturn/no-em-dash-copy -- the binary's exact stdout, captured verbatim like every sample here.
 export const SAMPLE_MEMORY_DETACH = String.raw`{
   "detached": [
     {

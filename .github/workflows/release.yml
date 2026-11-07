@@ -490,11 +490,10 @@ jobs:
             --version "${{ needs.preflight.outputs.stave_tag }}" \
             --out "$GITHUB_WORKSPACE/stave-bin"
 
-      # Keep VP_NODE_VERSION in step with SEA_NODE_VERSION in
-      # apps/server/vite.config.ts; only exact versions have a nodejs.org dist.
+      # Setup Vite+ selects the exact engines.node version from package.json,
+      # and a native build embeds that executable.
       - name: Build CLI single-executable
         env:
-          VP_NODE_VERSION: "26.8.2"
           # The executable bundles the server again, so it needs the same stamp
           # as the server bundle above.
           LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
@@ -927,14 +926,12 @@ jobs:
           fi
           vp run dist:desktop:artifact "${args[@]}"
 
-      # The single-executable is built with a Node that supports --build-sea
-      # (25.7+); the repo itself stays on the engines.node version. Keep
-      # VP_NODE_VERSION in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      # Setup Vite+ selects the exact engines.node version from package.json,
+      # and a native build embeds that executable.
       - name: Build CLI single-executable
         if: matrix.cli_archive
         shell: bash
         env:
-          VP_NODE_VERSION: "26.8.2"
           # The executable bundles the server again, so it needs the same stamp
           # as the desktop artifact's server bundle.
           LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}

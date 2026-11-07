@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { androidChatSnapshot, createAndroidChatPublisher } from "../lib/androidChatWidget";
 
-export function useAndroidChatBridge({
+/**
+ * Publishes the open conversation to the Android host's chat widget. Reads reply text, so it
+ * lives beside the live timeline rows rather than in ChatView, which holds through text deltas.
+ */
+export function useAndroidChatPublisher({
   scope,
   thread,
-  focusComposer,
 }: {
   scope: string;
   thread: Parameters<typeof androidChatSnapshot>[0] | null;
-  focusComposer: () => void;
 }) {
   const publisher = useRef<{
     scope: string;
@@ -57,10 +59,21 @@ export function useAndroidChatBridge({
       clear();
     };
   }, [publishCurrent]);
+}
+
+/** Focuses the composer for the host's Reply action once the conversation is ready for one. */
+export function useAndroidChatCompose({
+  scope,
+  ready,
+  focusComposer,
+}: {
+  scope: string;
+  ready: boolean;
+  focusComposer: () => void;
+}) {
   const [composeScope, setComposeScope] = useState<string | null>(null);
-  const composerReady = thread !== null;
   useEffect(() => {
-    if (!composerReady) return;
+    if (!ready) return;
     let frame: number | undefined;
     const compose = () => {
       window.__lecturnComposeRequested = false;
@@ -74,6 +87,6 @@ export function useAndroidChatBridge({
       window.removeEventListener("lecturn:compose", compose);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [composerReady, focusComposer, scope]);
+  }, [focusComposer, ready, scope]);
   return composeScope === scope;
 }

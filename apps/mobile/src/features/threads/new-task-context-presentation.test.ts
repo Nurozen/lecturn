@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  resolveDraftHeaderGitCwd,
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskGitCwd,
   resolveNewTaskLocalWorkspaceSelection,
@@ -149,6 +150,18 @@ describe("resolveNewTaskGitCwd", () => {
   it("issues no query for a stand-in project without a root", () => {
     expect(resolveNewTaskGitCwd({ workspaceRoot: "" })).toBeNull();
     expect(resolveNewTaskGitCwd(null)).toBeNull();
+  });
+});
+
+describe("resolveDraftHeaderGitCwd", () => {
+  it("swaps a Stave space root for its primary repo and keeps a worktree", () => {
+    expect(resolveDraftHeaderGitCwd(staveProject, "/spaces/lecturn")).toBe(
+      "/spaces/lecturn/lecturn",
+    );
+    expect(resolveDraftHeaderGitCwd({ workspaceRoot: "/repo" }, "/repo/worktree")).toBe(
+      "/repo/worktree",
+    );
+    expect(resolveDraftHeaderGitCwd({ workspaceRoot: "" }, null)).toBeNull();
   });
 });
 

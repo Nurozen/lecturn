@@ -1,3 +1,6 @@
+import { WorkspaceNoTabs } from "./WorkspaceNoTabs";
+import { useEnabledNavigationTabs } from "./navigation-tabs";
+import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
 import { useMemo } from "react";
 import { View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,8 +22,9 @@ import { WorkspaceTabPanes } from "./WorkspaceTabPanes";
 import { WORKSPACE_TABS } from "./workspace-tabs-state";
 
 export function WorkspaceRootScreen() {
-  const { layout } = useAdaptiveWorkspaceLayout();
+  const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const workspace = useWorkspaceTabs()!;
+  const enabled = useEnabledNavigationTabs();
   const insets = useSafeAreaInsets();
   const { fabClearance } = useAndroidControlSizing();
   const context = useMemo(
@@ -33,6 +37,7 @@ export function WorkspaceRootScreen() {
   const tab = workspace.state.selectedTab;
 
   if (layout.usesSplitView) {
+    if (enabled.length === 0) return <View className="flex-1 bg-screen" />;
     return (
       <WorkspaceTabPanes
         tabs={WORKSPACE_TABS}
@@ -52,6 +57,8 @@ export function WorkspaceRootScreen() {
                 />
               </View>
             </>
+          ) : tab !== "pullRequests" ? (
+            <WorkspaceExtraTab tab={tab} />
           ) : (
             <>
               <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -75,31 +82,37 @@ export function WorkspaceRootScreen() {
       <View className="flex-1 bg-header">
         <NativeStackScreenOptions options={{ headerShown: false }} />
         <SafeAreaInsetsContext value={{ ...insets, bottom: 0 }}>
-          <WorkspaceTabPanes
-            tabs={WORKSPACE_TABS}
-            selected={tab}
-            renderTab={(tab) =>
-              tab === "threads" ? (
-                <HomeRouteScreen />
-              ) : tab === "apps" ? (
-                <>
-                  <AppsToolbar />
-                  <ScreenContent>
-                    <AppsScreen />
-                  </ScreenContent>
-                </>
-              ) : (
-                <PullRequestFilterMenuProvider>
-                  <PullRequestToolbar />
-                  <ScreenContent>
-                    <PullRequestsScreen />
-                  </ScreenContent>
-                </PullRequestFilterMenuProvider>
-              )
-            }
-          />
+          {enabled.length === 0 ? (
+            <WorkspaceNoTabs />
+          ) : (
+            <WorkspaceTabPanes
+              tabs={WORKSPACE_TABS}
+              selected={tab}
+              renderTab={(tab) =>
+                tab === "threads" ? (
+                  <HomeRouteScreen />
+                ) : tab === "apps" ? (
+                  <>
+                    <AppsToolbar />
+                    <ScreenContent>
+                      <AppsScreen />
+                    </ScreenContent>
+                  </>
+                ) : tab !== "pullRequests" ? (
+                  <WorkspaceExtraTab tab={tab} />
+                ) : (
+                  <PullRequestFilterMenuProvider>
+                    <PullRequestToolbar />
+                    <ScreenContent>
+                      <PullRequestsScreen />
+                    </ScreenContent>
+                  </PullRequestFilterMenuProvider>
+                )
+              }
+            />
+          )}
         </SafeAreaInsetsContext>
-        <AndroidWorkspaceNavigation />
+        <AndroidWorkspaceNavigation onNewThread={startNewTask} />
       </View>
     </WorkspaceTabsContext>
   );

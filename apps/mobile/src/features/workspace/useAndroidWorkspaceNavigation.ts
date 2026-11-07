@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { BackHandler, Keyboard, Platform } from "react-native";
 import {
   resetAndroidWorkspace,
+  returnFromDraft,
   returnToAndroidWorkspaceList,
 } from "../../lib/android-workspace-navigation";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
@@ -29,6 +30,12 @@ export function useWorkspaceBackNavigation(tab: WorkspaceTab) {
       returnToAndroidWorkspaceList(navigation, () => dispatch?.({ type: "select", tab }));
     } else returnToList();
   }, [navigation, dispatch, tab, returnToList]);
+}
+
+export function useDraftBackNavigation() {
+  const navigation = useNavigation();
+  const returnToList = useWorkspaceBackNavigation("threads");
+  return useCallback(() => returnFromDraft(navigation, returnToList), [navigation, returnToList]);
 }
 
 export function useAndroidWorkspaceBack(tab: WorkspaceTab) {

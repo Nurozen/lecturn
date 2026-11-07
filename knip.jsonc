@@ -124,6 +124,8 @@
       // verify-windows-desktop-artifact.ts checks a Windows payload built on another host, and
       // electron-builder loads the macOS signer (sign-macos.ts) by path.
       "entry": [
+        // These fixture scripts are injected into a browser page by path.
+        "fixtures/*/*.js",
         "export-android-icons.ts",
         "export-brand-icons.ts",
         "export-provider-emblems.ts",
@@ -135,6 +137,9 @@
         "smoke-pack-install.ts",
         "verify-windows-desktop-artifact.ts",
       ],
+      // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
+      // knip run beside it in check:changed must not report.
+      "ignore": [".knip-test-*/**"],
     },
     "packages/*": {
       // These workspace packages are private to this monorepo.

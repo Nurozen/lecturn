@@ -3,7 +3,7 @@ import { Keyboard, Pressable, View } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
-import { WORKSPACE_DOCK, WORKSPACE_TABS } from "./workspace-tabs-state";
+import { WORKSPACE_DOCK } from "./workspace-tabs-state";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
 const TAB_ITEMS = {
@@ -11,6 +11,7 @@ const TAB_ITEMS = {
   apps: { label: "Apps", icon: "square.grid.2x2" },
   pullRequests: { label: "Pull requests", icon: PullRequestGlyph.pullRequest },
 } as const;
+const DOCK_TABS = ["threads", "apps", "pullRequests"] as const;
 
 export function WorkspaceDock(props: { readonly onNewTask: () => void }) {
   const workspace = useWorkspaceTabs()!;
@@ -27,7 +28,7 @@ export function WorkspaceDock(props: { readonly onNewTask: () => void }) {
         }}
       >
         <View className="flex-1 flex-row p-1" accessibilityRole="tablist">
-          {WORKSPACE_TABS.map((tab) => {
+          {DOCK_TABS.map((tab) => {
             const selected = workspace.state.selectedTab === tab;
             return (
               <Pressable

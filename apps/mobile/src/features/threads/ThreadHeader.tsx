@@ -5,7 +5,10 @@ import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types"
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
-import { useWorkspaceBackNavigation } from "../workspace/useAndroidWorkspaceNavigation";
+import {
+  useDraftBackNavigation,
+  useWorkspaceBackNavigation,
+} from "../workspace/useAndroidWorkspaceNavigation";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import { allowsThreadRouteControl, type ThreadRouteControls } from "./threadRouteControls";
 
@@ -37,7 +40,9 @@ export function ThreadHeader(
   const filesShown = allows("files");
   const terminalShown = allows("terminal");
   const mergeBackShown = allows("merge-back");
-  const goBack = useWorkspaceBackNavigation("threads");
+  const workspaceBack = useWorkspaceBackNavigation("threads");
+  const draftBack = useDraftBackNavigation();
+  const goBack = props.draft ? draftBack : workspaceBack;
   const { layout, panes, toggleAuxiliaryPane, composerKeyboardActive } =
     useAdaptiveWorkspaceLayout();
   const { onOpenTerminal, onMergeBack } = props.gitControls;

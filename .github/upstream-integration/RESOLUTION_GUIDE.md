@@ -1104,6 +1104,80 @@ from upstream's side.
   `page.evaluate`, and Playwright grants about 5 s of real activation. The two
   idle-page tests wait it out with `idlePage()` before they render.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream bb7783e2).**
+
+- **Node and dependencies.**
+  - Root `engines.node` stays exact (26.12.1, #23165): `apps/server/vite.config.ts` throws
+    on a native build when the host differs, and `setup-ci-deps` keys its cache on it. So
+    `release.yml` sets no `VP_NODE_VERSION`; do not reintroduce it. `apps/server` keeps its
+    range for the npm CLI.
+  - Each entry in `patchedDependencies` has an override at the patched version (#23798,
+    #23988), including fork-only patches.
+- **Workflows not taken.** `relay-preview.yml` and `relay-preview-cleanup.yml` would run PR
+  code on the fork's repo-level Cloudflare, PlanetScale and Axiom secrets, with no protected
+  `relay-preview` environment on the fork, and cleanup crons on a Blacksmith runner.
+  `stale-needs-more-info.yml` closes public issues, which is not fork policy. Their doc
+  paragraphs go too. Check each new upstream workflow against the fork's runners,
+  environments, secrets and crons before keeping it.
+- **Server migrations.** Upstream 68 (`ShellStopRequestIndex`) runs as fork id 86 and 69
+  (`ThreadMessageSearch`) as 87, each with a compatibility wrapper like 83 and 85. Files
+  keep upstream's numbers. The wrapper for 87 only prevents a false "search will scan"
+  warning, so tests do not pin it.
+- **Server.**
+  - `ws.ts` keeps `makeWsRpcHandlers` and the five handler groups over upstream's
+    `SplitWsRpc`.
+  - `ThreadSearch` hides Squire threads in both `eligible` and `titleCandidates`; the
+    second is new and leaks through `searchThreads` without the filter.
+  - `server.ts` sits at the 20-argument `pipe` ceiling: fold new layers into the fork
+    `mergeAll`.
+  - `PullRequestService.filterOptions` reads `project.cwd`, not `workspaceRoot`, so a Stave
+    space reads its checkouts. `invocation.ts` adds `resolveEntryPath` without the npm
+    launcher branch.
+  - `appAuthorization.ts` reads payloads through `PayloadByMethod`, one pass over the RPC
+    union. Per-method `Rpc.ExtractTag` is quadratic and hit TS2589 at the 327th method.
+- **ChatView (#23117, #23124).** `ChatView`'s entries hold no replies, so a fork feature
+  that reads reply rows or text moves beside `ThreadTimeline`.
+  - Fork points read `forkPointMessagesFromStructure`; on `ChatView`'s entries every Fork
+    from here would vanish, with no type error.
+  - The Android widget publisher (`useAndroidChatPublisher`) and composer-card row hiding
+    live in `ThreadTimeline`; `useAndroidChatCompose` stays in `ChatView`.
+  - `CommandPalette` New Squire sets `searchTitle: "Squire"`, because the #24343 scorer
+    ignores the leading term.
+- **Web, removed upstream.** npm failure detail survives #23233 in the run toast, the pill
+  and Settings. Route reveal (#23519) does not widen scope for app threads or
+  archived Stave spaces. `useHandleNewThread` keeps `forcedMode` ahead of the offline guard.
+- **Mobile.**
+  - Apps is a `NAVIGATION_TAB_ORDER` section. Four sections plus Settings fill the native
+    slots; a fifth turns on customization and overflow.
+  - Fork new-task routes live on the root stack under `new/...`; `replaceNewTaskFlowWithThread`
+    replaces the flow with the thread, also from `AddProjectScreen`.
+  - Not taken: `THREAD_SIDEBAR_ROW_LAYOUT` and `ComposerModelControl`. The model tray stays
+    under the composer on threads and drafts. The inferred project stays draft-free, Contextual
+    moves to the compact row and draft dock, and pending rows keep the glass card.
+- **Test fixtures.**
+  - Fork refresh jitter is up to 10%, so an upstream `TestClock` interval test advances 1.1
+    times the interval (`managedProvider.test.ts`, OpenCode `driver.test.ts`).
+  - The identity sweep can break a case-normalized fixture: GitCafe parsing lowercases, so
+    those use `nurozen/lecturn`.
+- **Lints (#23799, #23983).** Copy placeholders are `-`, as upstream's are. Only the recorded
+  Stave stdout in `staveJsonSamples.ts` suppresses `no-em-dash-copy`. The polling burn-down list
+  stays closed: fork tests await a `SubscriptionRef`, `EventSink.stream` or `awaitSettled`;
+  fake-clock frame steppers and the live-provider s0a2 loop suppress with a reason.
+- **Vendored screens.** `t3-fork.json` in the `t3.43` tarball names `juliusmarminge` while
+  upstream links PixPMusic; tag `t3-v5.0.0-t3.43` resolves to the same object on both.
+- **The identity sweep must not map hostnames.** `t3.codes` became a dead `lecturn.codes` in a
+  curl-to-shell installer line: an unregistered name is remote code execution once someone
+  registers it. Scan URLs on added lines vs `main`; the installer URL is in
+  `docs/user/install.md`. An identity scan cannot catch this, since the output has no T3 name.
+- **`setParams` merges.** Where upstream replaced `navigate("Thread")` with it, route resets must
+  also clear `accountId` and `appId` (`threadRouteSelectionParams`), or a stale
+  notification account marks the next thread unavailable.
+- **Folded rows must open on citations.** Upstream has no user-row citation source, so its tests
+  miss this: decision sources, thread notes and citation links target folded agent rows.
+- **Palette `picks` stay out of app streams.** Upstream's `thread.opens` ships in the shell, thread
+  snapshots and every thread event. `apps/appStreamFilter.ts` strips `picks` for app and embed
+  sessions; any new surface returning a thread needs the same filter.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's
@@ -1185,8 +1259,8 @@ of the fork's test-file delta. R4 overrides R2 and R3:
 - **R6.** "Obsolete" means the code under test is gone from the merged tree or an
   exact duplicate remains. "Low signal" is not obsolete for a fork test. Record
   each drop with its path, title and reason in the batch's `obsolete-tests.tsv`.
-- **R7.** Later prune passes (#22588, #22589, #22591, #22592, #22593, #22599) follow
-  the same rule.
+- **R7.** Later prune passes (#22588, #22589, #22591, #22592, #22593, #22599, #24058
+  with its restores #23991, #24011, #23980, #23977) follow the same rule.
 
 **Audit.** Per file, list the `(path, title)` pairs in fork `main` whose title is
 absent from the same file in the merge base, plus the test files only the fork has.

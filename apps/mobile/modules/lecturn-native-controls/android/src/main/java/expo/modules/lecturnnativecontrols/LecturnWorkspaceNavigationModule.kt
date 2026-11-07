@@ -63,12 +63,13 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
-private val TABS = listOf("threads", "apps", "pullRequests", "settings")
-
 class LecturnWorkspaceNavigationModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LecturnWorkspaceNavigation")
     View(LecturnWorkspaceNavigationView::class) {
+      Prop("tabs") { view: LecturnWorkspaceNavigationView, value: List<String> ->
+        view.tabs = value
+      }
       Prop("selectedTab") { view: LecturnWorkspaceNavigationView, value: String ->
         view.selectedTab = value
       }
@@ -123,6 +124,7 @@ class LecturnWorkspaceNavigationView(
   private val onTabSelected by EventDispatcher()
   private val onNewThread by EventDispatcher()
   private val onOverlayChange by EventDispatcher()
+  var tabs by mutableStateOf(listOf("threads", "apps", "pullRequests", "usage", "settings"))
   var selectedTab by mutableStateOf("threads")
   var rail by mutableStateOf(false)
   var dark by mutableStateOf(false)
@@ -177,7 +179,7 @@ class LecturnWorkspaceNavigationView(
                 tonalElevation = androidx.compose.ui.unit.Dp(0f),
                 windowInsets = WindowInsets(0),
               ) {
-                TABS.forEach { tab ->
+                tabs.forEach { tab ->
                   NavigationBarItem(
                     selected = selectedTab == tab,
                     onClick = { onTabSelected(mapOf("tab" to tab)) },
@@ -277,12 +279,14 @@ class LecturnWorkspaceNavigationView(
             )
           }
         }
-        newThreadButton(fraction) {
-          expanded = false
-          onNewThread(emptyMap<String, Any>())
+        if (selectedTab == "threads") {
+          newThreadButton(fraction) {
+            expanded = false
+            onNewThread(emptyMap<String, Any>())
+          }
         }
         Spacer(Modifier.weight(1f))
-        TABS.forEach { tab ->
+        tabs.forEach { tab ->
           railItem(tab, fraction) {
             expanded = false
             onTabSelected(mapOf("tab" to tab))
@@ -364,12 +368,13 @@ class LecturnWorkspaceNavigationView(
     }
   }
 
-  // Four equal bottom-bar slots leave "Pull requests" too wide at larger text sizes; the
+  // Equal bottom-bar slots leave "Pull requests" too wide at larger text sizes; the
   // short label matches the iOS tab bar, and the rail has room for the full one.
   private fun tabTitle(tab: String) = when (tab) {
     "threads" -> "Chats"
     "apps" -> "Apps"
     "pullRequests" -> "Pulls"
+    "usage" -> "Usage"
     else -> "Settings"
   }
 
@@ -382,6 +387,7 @@ class LecturnWorkspaceNavigationView(
       "threads" -> R.drawable.lecturn_chats
       "apps" -> R.drawable.lecturn_apps
       "pullRequests" -> R.drawable.lecturn_pull_requests
+      "usage" -> R.drawable.lecturn_usage
       else -> R.drawable.lecturn_settings
     }
   )

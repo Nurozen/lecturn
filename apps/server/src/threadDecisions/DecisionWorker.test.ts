@@ -512,7 +512,8 @@ it.layer(testLayer)("Decision worker", (it) => {
       assert.equal(f.requests.length, 0);
       // The lease timer is armed by a forked fiber; advance in lease-sized steps
       // so the wake does not depend on that fiber winning the race to sleep().
-      for (let step = 0; step < 20 && !(yield* Deferred.isDone(written)); step++) {
+      // The resumed job's own lease is minutes long, so the later steps cannot expire it.
+      for (let step = 0; step < 20; step++) {
         yield* TestClock.adjust(1000);
         yield* Effect.yieldNow;
       }

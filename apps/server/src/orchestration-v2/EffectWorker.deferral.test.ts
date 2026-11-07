@@ -10,6 +10,8 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -25,17 +27,6 @@ const startEffect = (name: string): EffectOutbox.PendingOrchestrationEffectV2 =>
   request: { type: "provider-turn.start", runId: RunId.make(`run:${name}`) },
 });
 
-/** Lets the worker fibers and SQLite make progress until `done` holds. */
-const eventually = (label: string, done: () => Effect.Effect<boolean>) =>
-  Effect.gen(function* () {
-    for (let step = 0; step < 2_000; step++) {
-      if (yield* done()) return;
-      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
-      yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-    }
-    assert.fail(`timed out waiting for: ${label}`);
-  });
-
 const harness = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`DELETE FROM orchestration_v2_effect_outbox`;
@@ -46,6 +37,10 @@ const harness = Effect.gen(function* () {
   const attempts = new Map<string, number>();
   const started: Array<string> = [];
   const cleaned: Array<string> = [];
+  const executed = yield* SubscriptionRef.make(0);
+  /** Re-reads `holds` after each execution; one that never holds fails on the test's timeout. */
+  const afterExecutions = (holds: () => boolean) =>
+    SubscriptionRef.changes(executed).pipe(Stream.filter(holds), Stream.runHead, Effect.asVoid);
   const reviewResolved = yield* Deferred.make<void>();
   const executor = EffectWorker.OrchestrationEffectExecutorV2.of({
     execute: (effect) =>
@@ -66,7 +61,7 @@ const harness = Effect.gen(function* () {
           });
         }
         started.push(runId);
-      }),
+      }).pipe(Effect.tap(() => SubscriptionRef.update(executed, (count) => count + 1))),
   });
   const worker = yield* Effect.provide(
     Effect.service(EffectWorker.OrchestrationEffectWorkerV2),
@@ -90,7 +85,17 @@ const harness = Effect.gen(function* () {
   const resolveReview = Effect.sync(() => held.clear()).pipe(
     Effect.andThen(Deferred.succeed(reviewResolved, undefined)),
   );
-  return { outbox, attempts, started, cleaned, enqueue, row, resolveReview, daemon };
+  return {
+    outbox,
+    attempts,
+    started,
+    cleaned,
+    afterExecutions,
+    enqueue,
+    row,
+    resolveReview,
+    daemon,
+  };
 });
 
 const TestLayer = EffectOutbox.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
@@ -105,15 +110,11 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
           startEffect(`held-${index}`),
         );
         yield* h.enqueue(heldEffects);
-        yield* eventually("every held turn attempted once", () =>
-          Effect.sync(() => h.attempts.size === HELD_THREADS),
-        );
+        yield* h.afterExecutions(() => h.attempts.size === HELD_THREADS);
 
         // A normal turn on another thread starts although 5 turns are held.
         yield* h.enqueue([startEffect("normal")]);
-        yield* eventually("the normal turn started", () =>
-          Effect.sync(() => h.started.includes("run:normal")),
-        );
+        yield* h.afterExecutions(() => h.started.includes("run:normal"));
         // A held thread's other effects are not blocked by its deferred start.
         yield* h.enqueue([
           {
@@ -123,9 +124,7 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
             request: { type: "terminal.cleanup" },
           },
         ]);
-        yield* eventually("the held thread's cleanup ran", () =>
-          Effect.sync(() => h.cleaned.includes("thread:held-0")),
-        );
+        yield* h.afterExecutions(() => h.cleaned.includes("thread:held-0"));
         for (const effect of heldEffects) {
           const current = yield* h.row(effect.id);
           assert.equal(current?.status, "pending");
@@ -136,13 +135,10 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
 
         // Resolving the review wakes the deferred starts before their 5 s delay.
         yield* h.resolveReview;
-        yield* eventually("every held turn started", () =>
-          Effect.sync(() => h.started.length === HELD_THREADS + 1),
-        );
+        yield* h.afterExecutions(() => h.started.length === HELD_THREADS + 1);
         for (const effect of heldEffects) {
-          yield* eventually(`${effect.id} settled`, () =>
-            h.row(effect.id).pipe(Effect.map((current) => current?.status === "succeeded")),
-          );
+          yield* h.outbox.awaitSettled(effect.id);
+          assert.equal((yield* h.row(effect.id))?.status, "succeeded");
         }
         yield* Fiber.interrupt(h.daemon);
       }),
@@ -207,9 +203,7 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
         startEffect(`held-${index}`),
       );
       yield* h.enqueue(heldEffects);
-      yield* eventually("every held turn attempted once", () =>
-        Effect.sync(() => h.attempts.size === HELD_THREADS),
-      );
+      yield* h.afterExecutions(() => h.attempts.size === HELD_THREADS);
       // run.interrupt of a starting run cancels its unsettled start effect.
       const cancelled = yield* h.outbox.cancelUnsettled({
         threadId: ThreadId.make("thread:held-0"),
@@ -219,13 +213,9 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
       assert.deepEqual(cancelled, ["effect:start:held-0"]);
       yield* h.outbox.signalCancellations(cancelled);
       yield* h.enqueue([startEffect("normal")]);
-      yield* eventually("the normal turn started", () =>
-        Effect.sync(() => h.started.includes("run:normal")),
-      );
+      yield* h.afterExecutions(() => h.started.includes("run:normal"));
       yield* h.resolveReview;
-      yield* eventually("the other held turns started", () =>
-        Effect.sync(() => h.started.length === HELD_THREADS),
-      );
+      yield* h.afterExecutions(() => h.started.length === HELD_THREADS);
       assert.isFalse(h.started.includes("run:held-0"));
       assert.equal((yield* h.row("effect:start:held-0"))?.status, "cancelled");
       // A late wake of the cancelled row never revives it.

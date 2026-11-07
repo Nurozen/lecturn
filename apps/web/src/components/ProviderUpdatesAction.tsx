@@ -11,6 +11,7 @@ import {
   getProviderUpdateRunToastView,
   type ProviderUpdateRun,
 } from "./ProviderUpdateLaunchNotification.logic";
+import { ProviderUpdateOutputText } from "./ProviderUpdateOutput";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -53,8 +54,17 @@ export function useProviderUpdates() {
     if (view) {
       toastManager.add(
         stackedThreadToast({
-          ...view,
+          type: view.type,
+          title: view.title,
           description: <span className="whitespace-pre-line">{view.description}</span>,
+          ...(view.output
+            ? {
+                data: {
+                  expandableContent: <ProviderUpdateOutputText output={view.output} />,
+                  expandableLabels: { expand: "Show output", collapse: "Hide output" },
+                },
+              }
+            : {}),
         }),
       );
     }

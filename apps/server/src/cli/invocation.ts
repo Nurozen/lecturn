@@ -19,6 +19,16 @@ export const resolveServerInstallation: Effect.Effect<ServerInstallation | null>
   Effect.succeed(null);
 
 /**
+ * The Node entry script of a build run from source, or the path of a standalone
+ * executable, which has none. Lecturn ships no npm launcher, so upstream's
+ * launcher path never applies here.
+ */
+export const resolveEntryPath = Effect.gen(function* () {
+  if (yield* HostProcess.IsExecutable) return yield* HostProcess.ExecutablePath;
+  return (yield* HostProcess.Arguments)[1] ?? "";
+});
+
+/**
  * Render a `lecturn <subcommand>` suggestion. Upstream derives a package
  * runner (`npx`, `pnpm dlx`, `bunx`) and channel tag from the entry path and
  * version so copy/pasting matches the launching command. Lecturn has no public

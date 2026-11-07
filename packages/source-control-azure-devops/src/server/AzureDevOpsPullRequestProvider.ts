@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@lecturn/contracts";
+import { resolvePullRequestAuthorFilter, SourceControlProviderKind } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import type { PullRequestCapabilities, PullRequestViewerPermissions } from "@lecturn/contracts";
@@ -276,6 +276,10 @@ export const make = Effect.gen(function* () {
           viewer: input.viewer,
           limit: input.limit,
           cursor: input.cursor,
+          author:
+            input.filters?.author === undefined
+              ? undefined
+              : resolvePullRequestAuthorFilter(input.filters.author, input.viewer),
         })
         .pipe(
           Effect.mapError(fail("listChangeRequests")),

@@ -37,7 +37,7 @@ export function staveSagaReviewLines(
     `Stave will ${review.target} the saga and the following spaces:`,
     ...review.participants.map(
       (participant) =>
-        `• ${participant.spaceId}: ${participant.workspaceRoot}${participant.projectId ? ` — project "${participant.projectTitle ?? participant.projectId}", ${participant.threadIds.length} threads` : ""}`,
+        `• ${participant.spaceId}: ${participant.workspaceRoot}${participant.projectId ? ` (project "${participant.projectTitle ?? participant.projectId}", ${participant.threadIds.length} threads)` : ""}`,
     ),
     ...(review.target === "destroy" && projects.length > 0
       ? [

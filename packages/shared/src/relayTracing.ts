@@ -173,7 +173,7 @@ export function layer(
       attributes: {
         "service.namespace": "lecturn",
         "service.runtime": resource.runtime,
-        "service.component": resource.component ?? "relay-client",
+        "lecturn.component": resource.component ?? "relay-client",
         "lecturn.client.surface": resource.client,
       },
     },

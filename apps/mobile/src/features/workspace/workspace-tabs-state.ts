@@ -1,6 +1,24 @@
-export const WORKSPACE_TABS = ["threads", "apps", "pullRequests"] as const;
-export type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
+import {
+  NAVIGATION_TAB_ORDER,
+  navigationCustomizationAvailable,
+  resolveNavigationTabOrder,
+  type NavigationTab,
+} from "./navigation-tab-order";
+
+export const WORKSPACE_TABS = NAVIGATION_TAB_ORDER;
+
+export function resolveWorkspaceTabOrder(saved: readonly unknown[] | undefined) {
+  return navigationCustomizationAvailable()
+    ? resolveNavigationTabOrder(saved)
+    : NAVIGATION_TAB_ORDER;
+}
+
+export type WorkspaceTab = NavigationTab;
 export type WorkspaceSearchMode = "resting" | "active" | "expanded";
+
+export function workspaceUsesColumns(tab: WorkspaceTab, detailRoute?: string) {
+  return tab !== "usage" && detailRoute !== "SettingsSheet";
+}
 
 export interface WorkspaceTabState {
   readonly query: string;
@@ -20,21 +38,11 @@ export function isWorkspaceTab(value: string): value is WorkspaceTab {
 }
 
 export function workspaceTabSearchLabel(tab: WorkspaceTab): string {
-  return tab === "threads"
-    ? "Search threads"
-    : tab === "apps"
-      ? "Search apps"
-      : "Search pull requests";
-}
-
-/**
- * From iOS 26.1 the compose tab is a UISearchTab that shows only its icon, and a
- * title written after the tabs are installed makes UIKit fit the other titles to
- * a four-slot bar. Earlier releases render it as an ordinary labelled tab.
- */
-export function workspaceComposeTabTitle(iosVersion: string | number): string | undefined {
-  const [major = 0, minor = 0] = String(iosVersion).split(".").map(Number);
-  return major > 26 || (major === 26 && minor >= 1) ? undefined : "New chat";
+  return tab === "apps"
+    ? "Search apps"
+    : tab === "pullRequests"
+      ? "Search pull requests"
+      : "Search threads";
 }
 
 function emptyTab(): WorkspaceTabState {
@@ -45,7 +53,12 @@ export function initialWorkspaceTabsState(): WorkspaceTabsState {
   return {
     selectedTab: "threads",
     selectionRevision: 0,
-    tabs: { threads: emptyTab(), apps: emptyTab(), pullRequests: emptyTab() },
+    tabs: {
+      threads: emptyTab(),
+      apps: emptyTab(),
+      pullRequests: emptyTab(),
+      usage: emptyTab(),
+    },
   };
 }
 
@@ -70,6 +83,7 @@ export function workspaceTabsReducer(
           selectionRevision: state.selectionRevision + 1,
         };
   const tab = action.tab ?? state.selectedTab;
+  if (tab === "usage") return state;
   const current = state.tabs[tab];
   let next: WorkspaceTabState;
   switch (action.type) {
@@ -108,8 +122,43 @@ export const WORKSPACE_TOOLBAR = { height: 48, expandedGap: 10, edge: 16, gap: 8
 // Three 72pt tabs plus padding; still leaves room for the compose button on a 320pt phone.
 export const WORKSPACE_DOCK = { height: 48, tabsWidth: 224, gap: 12, bottomGap: 6 };
 
+export function workspaceDockBottomClearance(input: {
+  readonly bottomInset: number;
+  readonly keyboardHeight: number;
+}) {
+  return 64 + Math.max(input.bottomInset, input.keyboardHeight) + 16;
+}
+
+export function workspaceSearchBottomClearance(input: {
+  readonly bottomInset: number;
+  readonly bottomBarInset?: number;
+  readonly keyboardHeight: number;
+}) {
+  const bottom = input.bottomBarInset ?? Math.max(input.bottomInset, 12);
+  // AboveKeyboard lifts the field to an 8-point gap above the keyboard.
+  return (
+    Math.max(bottom, input.keyboardHeight > 0 ? input.keyboardHeight + 8 : 0) +
+    WORKSPACE_TOOLBAR.height +
+    16
+  );
+}
+
 export function workspaceToolbarHeight(mode: WorkspaceSearchMode): number {
   return mode === "expanded"
     ? WORKSPACE_TOOLBAR.height * 2 + WORKSPACE_TOOLBAR.expandedGap
     : WORKSPACE_TOOLBAR.height;
+}
+
+export const NATIVE_WORKSPACE_TAB_SLOTS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "settings",
+] as const;
+
+export function workspaceTabForNativeSlot(order: readonly WorkspaceTab[], slot: string) {
+  if (slot === "settings") return "settings";
+  const index = NATIVE_WORKSPACE_TAB_SLOTS.findIndex((candidate) => candidate === slot);
+  return order[index] ?? null;
 }

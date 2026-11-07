@@ -41,7 +41,6 @@ import { NightlyMobileBetaNotice } from "./NightlyMobileBeta";
 import { PermissionUpdateNotice } from "./PermissionUpdateNotice";
 import { ProjectCloneToastCoordinator } from "./ProjectCloneToastCoordinator";
 import { ProviderDetectionProgress } from "./ProviderDetectionProgress";
-import { ProviderUpdateLaunchNotification } from "./ProviderUpdateLaunchNotification";
 import { ReopenClosedViewShortcut } from "./ReopenClosedViewShortcut";
 import { BrowserChromeThemeSync, DocumentTitleSync } from "./RootDocumentSync";
 import { SlowRpcRequestToastCoordinator } from "./SlowRpcRequestToastCoordinator";
@@ -155,7 +154,6 @@ export default function AppShell({
           {primaryEnvironmentAuthenticated ? (
             <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
           ) : null}
-          {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
           {isElectron ? <DesktopUpdateLaunchNotice /> : null}
           {/* Hosted Nightly is "hosted-static", not authenticated, and needs it too. */}
           <NightlyMobileBetaNotice />

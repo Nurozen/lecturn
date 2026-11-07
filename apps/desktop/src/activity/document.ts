@@ -3,7 +3,7 @@ import { activityThemeStyles } from "./theme.ts";
 
 // Inline the illuminated-book mark so the isolated surface never requests remote assets.
 const activityMark = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" aria-hidden="true" viewBox="0 0 128 128" fill="none">
-  <title>Lecturn — the illuminated book</title>
+  <title>Lecturn, the illuminated book</title>
   <g stroke="#C89954" stroke-linecap="round" stroke-linejoin="round">
     <path d="M42 17A50 50 0 1 0 86 17" stroke-width="2"/>
     <path d="M35 29A43 43 0 0 0 31 95M93 29A43 43 0 0 1 97 95" stroke-width=".8" opacity=".6"/>

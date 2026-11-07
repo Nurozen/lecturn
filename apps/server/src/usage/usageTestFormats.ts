@@ -2,18 +2,20 @@ import type { UsageProviderKind } from "@lecturn/contracts";
 import type { TranscriptUsageFormat } from "@lecturn/provider-core/server/usage";
 import { piUsageFormat } from "@lecturn/provider-pi/server/usage";
 import { grokUsageFormat } from "@lecturn/provider-grok/server/usage";
+import { museUsageFormat } from "@lecturn/provider-muse/server/usage";
 
 import { claudeUsageFormat } from "../provider/Drivers/claudeUsage.ts";
 import { codexUsageFormat } from "../provider/Drivers/codexUsage.ts";
 
 export const TEST_FORMATS: Record<
-  "claude" | "codex" | "grok" | "pi",
+  "claude" | "codex" | "grok" | "pi" | "muse",
   TranscriptUsageFormat<unknown>
 > = {
   claude: claudeUsageFormat,
   codex: codexUsageFormat,
   grok: grokUsageFormat,
   pi: piUsageFormat,
+  muse: museUsageFormat,
 };
 
 export const TEST_FORMAT_MAP = new Map<UsageProviderKind, TranscriptUsageFormat<unknown>>(

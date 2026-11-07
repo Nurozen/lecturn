@@ -11,6 +11,7 @@ import {
   ThreadEnvMode,
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
+import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -229,6 +230,7 @@ export const make = Effect.gen(function* () {
 
   const get: ProjectStoreV2["Service"]["get"] = (projectId, options) =>
     selectRows({ projectId, includeDeleted: options?.includeDeleted === true }).pipe(
+      NodeSqliteClient.readOnly,
       Effect.map((rows) => Option.map(Option.fromUndefinedOr(rows[0]), fromDbRow)),
       mapError("get"),
     );
@@ -238,6 +240,7 @@ export const make = Effect.gen(function* () {
       ...(options?.projectIds === undefined ? {} : { projectIds: options.projectIds }),
       includeDeleted: options?.includeDeleted === true,
     }).pipe(
+      NodeSqliteClient.readOnly,
       Effect.map((rows) => rows.map(fromDbRow)),
       mapError("list"),
     );
@@ -246,6 +249,7 @@ export const make = Effect.gen(function* () {
     workspaceRoot,
   ) =>
     selectRows({ workspaceRoot, appBinding: null, includeDeleted: false }).pipe(
+      NodeSqliteClient.readOnly,
       Effect.map((rows) => Option.map(Option.fromUndefinedOr(rows[0]), fromDbRow)),
       mapError("findActiveByWorkspaceRoot"),
     );

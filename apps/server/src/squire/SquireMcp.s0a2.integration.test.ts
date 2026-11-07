@@ -94,6 +94,7 @@ const awaitSettled = (threadId: ThreadId, runs: number) =>
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const events = yield* OrchestrationEventStore.OrchestrationEventStore;
     const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
+    // oxlint-disable-next-line lecturn/no-polling-loop-in-tests -- runs only against a live provider, whose effect retries announce no event.
     for (;;) {
       const head = yield* events.latestApplicationSequence;
       if (Option.isSome(worker)) yield* worker.value.drain();

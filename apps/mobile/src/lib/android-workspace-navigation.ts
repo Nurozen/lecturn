@@ -83,12 +83,13 @@ export function parentThreadIsBelow(
   state: NavigationState,
   parent: ReactNavigation.RootParamList["Thread"],
 ) {
+  if (!parent?.environmentId || !parent.threadId) return false;
   const previous = state.routes[state.index - 1];
   const params = previous?.params as ReactNavigation.RootParamList["Thread"] | undefined;
   return (
     previous?.name === "Thread" &&
     params?.environmentId === parent.environmentId &&
-    params.threadId === parent.threadId
+    params?.threadId === parent.threadId
   );
 }
 
@@ -100,6 +101,18 @@ export function returnToAndroidWorkspaceList(
   if (state && androidWorkspaceBackReturnsToThread(state)) return navigation.goBack();
   selectTab();
   resetAndroidWorkspace(navigation);
+}
+
+/**
+ * A draft opens over where it started: Home on any tab, an app's threads, or another thread.
+ * Back returns there. Only a draft with nothing below it, from a link, needs the workspace list.
+ */
+export function returnFromDraft(
+  navigation: { readonly canGoBack: () => boolean; readonly goBack: () => void },
+  returnToList: () => void,
+) {
+  if (navigation.canGoBack()) navigation.goBack();
+  else returnToList();
 }
 
 // In the split view these destinations swap the detail pane beside the sidebar instead of

@@ -21,12 +21,19 @@ function loadRouters() {
 
 vi.mock("react-native", () => ({ Platform: { OS: "ios" }, Keyboard: { dismiss: vi.fn() } }));
 
+vi.mock("../workspace/useAndroidWorkspaceSelection", () => ({
+  useAndroidWorkspaceSelection: vi.fn(),
+}));
+
 vi.mock("@react-navigation/native", () => {
   const { CommonActions, StackActions } = loadRouters();
   return { CommonActions, StackActions };
 });
 
-import { createHomeThreadNavigationAction } from "./home-thread-navigation";
+import {
+  createHomeThreadRouteAction,
+  createHomeThreadNavigationAction,
+} from "./home-thread-navigation";
 
 const { StackActions, StackRouter } = loadRouters();
 const routeNames = ["Home", "Thread"];
@@ -194,5 +201,59 @@ describe("createHomeThreadNavigationAction", () => {
       name: "Thread",
       params: { environmentId: "environment-1", threadId: "thread-b" },
     });
+  });
+});
+
+describe("draft and live thread selection", () => {
+  it("drops a linked route's account and app when another thread is selected", () => {
+    const linked = apply(
+      initialState(),
+      StackActions.push("Thread", {
+        accountId: "account-a",
+        appId: "dev.example",
+        prompt: "from a link",
+        environmentId: "environment-1",
+        threadId: "thread-1",
+      }),
+    );
+
+    const selected = selectThread(linked, thread("thread-2"));
+
+    expect(selected.routes.at(-1)?.key).toBe(linked.routes.at(-1)?.key);
+    expect(selected.routes.at(-1)?.params).toEqual({
+      environmentId: "environment-1",
+      threadId: "thread-2",
+    });
+  });
+
+  it("keeps the screen key and clears old identity when switching both ways", () => {
+    const live = selectThread(initialState(), thread("thread-a"));
+    const key = live.routes[live.index]!.key;
+    const draft = apply(
+      live,
+      createHomeThreadRouteAction({
+        state: live,
+        dismissingRouteKey: null,
+        params: { draft: { draftId: "new-task:draft-a" } },
+      }),
+    );
+    expect(draft.routes[draft.index]).toMatchObject({
+      key,
+      params: {
+        environmentId: undefined,
+        threadId: undefined,
+        draft: { draftId: "new-task:draft-a" },
+      },
+    });
+    const restored = selectThread(draft, thread("thread-b"));
+    expect(restored.routes[restored.index]).toMatchObject({
+      key,
+      params: {
+        environmentId: "environment-1",
+        threadId: "thread-b",
+        draft: undefined,
+      },
+    });
+    expect(restored.routes).toHaveLength(live.routes.length);
   });
 });

@@ -42,7 +42,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
 import type { ChatMessage, Thread } from "../types";
-import type { TimelineEntry } from "../session-logic";
+import type { ThreadStructureVisibleTurnItem } from "@lecturn/client-runtime/state/models";
 import { pullRequestSurface } from "../rightPanelStore";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 import {
@@ -50,6 +50,7 @@ import {
   getProviderSendBlockReason,
   buildForkPointByRunlessReplyId,
   buildForkPointByUserMessageId,
+  forkPointMessagesFromStructure,
   resolveDraftBranchSync,
   buildForkTitle,
   buildImportChip,
@@ -1422,15 +1423,15 @@ describe("resolveDraftBranchSync", () => {
 describe("buildForkPointByUserMessageId", () => {
   const run1 = RunId.make("run-1");
   const run2 = RunId.make("run-2");
-  const messageEntry = (
+  const forkPointMessage = (
     message: ChatMessage,
     visibility: OrchestrationV2ProjectedTurnItem["visibility"] = "local",
-  ): TimelineEntry => ({
-    id: `entry:${message.id}`,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-    projectedItem: { visibility } as OrchestrationV2ProjectedTurnItem,
+  ) => ({
+    id: message.id,
+    role: message.role,
+    runId: message.runId,
+    streaming: message.streaming,
+    inherited: visibility === "inherited",
   });
   const user1 = makeChatMessage("user-1", "2026-03-29T00:00:00.000Z", { runId: run1 });
   const answer1 = makeChatMessage("answer-1", "2026-03-29T00:00:01.000Z", {
@@ -1442,13 +1443,13 @@ describe("buildForkPointByUserMessageId", () => {
     role: "assistant",
     runId: run2,
   });
-  const entries = [user1, answer1, user2, answer2].map((message) => messageEntry(message));
+  const entries = [user1, answer1, user2, answer2].map((message) => forkPointMessage(message));
   const base = { runlessHistory: false };
 
   it("maps a user message to the run completed before it", () => {
     const byMessage = buildForkPointByUserMessageId({
       ...base,
-      timelineEntries: entries,
+      messages: entries,
       completedRunIds: new Set([run1, run2]),
       activeRunId: null,
     });
@@ -1460,7 +1461,7 @@ describe("buildForkPointByUserMessageId", () => {
     expect(
       buildForkPointByUserMessageId({
         ...base,
-        timelineEntries: entries,
+        messages: entries,
         completedRunIds: new Set([run1]),
         activeRunId: run1,
       }).size,
@@ -1468,7 +1469,7 @@ describe("buildForkPointByUserMessageId", () => {
     expect(
       buildForkPointByUserMessageId({
         ...base,
-        timelineEntries: entries,
+        messages: entries,
         completedRunIds: new Set(),
         activeRunId: null,
       }).size,
@@ -1476,14 +1477,14 @@ describe("buildForkPointByUserMessageId", () => {
   });
 
   it("never offers inherited rows, or run-less history on a native thread", () => {
-    const inherited = [user1, answer1].map((message) => messageEntry(message, "inherited"));
-    const imported = messageEntry(
+    const inherited = [user1, answer1].map((message) => forkPointMessage(message, "inherited"));
+    const imported = forkPointMessage(
       makeChatMessage("imported", "2026-03-28T00:00:00.000Z", { role: "assistant" }),
     );
     expect(
       buildForkPointByUserMessageId({
         ...base,
-        timelineEntries: [...inherited, imported, messageEntry(user2)],
+        messages: [...inherited, imported, forkPointMessage(user2)],
         completedRunIds: new Set([run1]),
         activeRunId: null,
       }).size,
@@ -1499,7 +1500,7 @@ describe("buildForkPointByUserMessageId", () => {
     ];
     const byMessage = buildForkPointByUserMessageId({
       runlessHistory: true,
-      timelineEntries: [...history, user1, answer1, user2].map((message) => messageEntry(message)),
+      messages: [...history, user1, answer1, user2].map((message) => forkPointMessage(message)),
       completedRunIds: new Set([run1]),
       activeRunId: null,
     });
@@ -1519,7 +1520,7 @@ describe("buildForkPointByUserMessageId", () => {
     ];
     const input = {
       runlessHistory: true,
-      timelineEntries: [...history.map((message) => messageEntry(message)), ...entries],
+      messages: [...history.map((message) => forkPointMessage(message)), ...entries],
       completedRunIds: new Set([run1, run2]),
       activeRunId: null,
     };
@@ -1534,15 +1535,45 @@ describe("buildForkPointByUserMessageId", () => {
     expect(
       buildForkPointByRunlessReplyId({
         ...input,
-        timelineEntries: history.map((message) => messageEntry(message, "inherited")),
+        messages: history.map((message) => forkPointMessage(message, "inherited")),
       }).size,
     ).toBe(0);
+  });
+
+  it("reads fork points through replies the thread structure strips of text", () => {
+    const row = (item: object, visibility = "local") =>
+      ({ item, visibility }) as unknown as ThreadStructureVisibleTurnItem;
+    const messages = forkPointMessagesFromStructure(
+      [
+        row({ type: "user_message", messageId: user1.id, runId: run1 }),
+        row({ type: "assistant_message", messageId: answer1.id, runId: run1, streaming: false }),
+        row({ type: "tool_call", runId: run1 }),
+        row({ type: "user_input_request", questionAnswer: { requestId: "request-1" } }),
+        row({ type: "user_message", messageId: "async-answer:request-1", runId: run1 }),
+        row({ type: "user_message", messageId: user2.id, runId: run2 }),
+      ],
+      [user2, makeChatMessage("optimistic", "2026-03-29T00:00:04.000Z")],
+    );
+    expect(messages.map((message) => message.id)).toEqual([
+      user1.id,
+      answer1.id,
+      user2.id,
+      "optimistic",
+    ]);
+    const byMessage = buildForkPointByUserMessageId({
+      ...base,
+      messages,
+      completedRunIds: new Set([run1]),
+      activeRunId: null,
+    });
+    expect(byMessage.get(user2.id)).toEqual({ type: "run", runId: run1 });
+    expect(byMessage.get("optimistic" as MessageId)).toEqual({ type: "run", runId: run1 });
   });
 
   it("keeps the previous map identity while unchanged", () => {
     const input = {
       ...base,
-      timelineEntries: entries,
+      messages: entries,
       completedRunIds: new Set([run1, run2]),
       activeRunId: null,
     };
@@ -1773,14 +1804,21 @@ describe("planComposerTurn", () => {
   });
 
   it("queues behind a compaction of a stale session, except for /compact itself", () => {
-    expect(planComposerTurn({ ...base, resumeCompactionTokens: 120_000 })).toMatchObject({
-      compactBeforeSend: true,
-      turnDispatchMode: "queue",
-      shouldQueueBehindActiveRun: true,
-    });
-    expect(
-      planComposerTurn({ ...base, resumeCompactionTokens: 120_000, messageText: "/COMPACT" }),
-    ).toMatchObject({ compactBeforeSend: false, turnDispatchMode: "auto" });
+    const stale = { ...base, resumeCompactionTokens: 120_000 };
+    for (const messageText of ["hello", "/compactfoo"]) {
+      expect(planComposerTurn({ ...stale, messageText })).toMatchObject({
+        compactBeforeSend: true,
+        turnDispatchMode: "queue",
+        shouldQueueBehindActiveRun: true,
+      });
+    }
+    for (const messageText of ["/COMPACT", "/compact keep the API notes", "/compact\n  tests"]) {
+      expect(planComposerTurn({ ...stale, messageText })).toMatchObject({
+        compactBeforeSend: false,
+        turnDispatchMode: "auto",
+        shouldQueueBehindActiveRun: false,
+      });
+    }
   });
 
   it("queues behind a running turn only when asked to", () => {

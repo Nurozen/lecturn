@@ -25,13 +25,8 @@ import {
   ProviderInstanceId,
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
-import {
-  CommonActions,
-  StackActions,
-  useNavigation,
-  usePreventRemove,
-  type NavigationAction,
-} from "@react-navigation/native";
+import { StackActions, useNavigation, usePreventRemove } from "@react-navigation/native";
+import { replaceNewTaskFlowWithThread } from "./replaceNewTaskFlowWithThread";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -581,21 +576,16 @@ export function AddProjectImportSessionsScreen(props: {
   const importing = progress !== null;
   // Leaving mid-import would strand the run, so the screen and its sheet stay
   // put until it settles; the finishing navigation waits for the guard to lift.
-  const [finishAction, setFinishAction] = useState<{
-    readonly action: NavigationAction;
-    readonly fromSheet: boolean;
-  } | null>(null);
+  const [finishThreadParams, setFinishThreadParams] = useState<object | null>(null);
   usePreventRemove(importing, () => undefined);
   useEffect(() => {
-    if (importing || finishAction === null) return;
+    if (importing || finishThreadParams === null) return;
     const frame = requestAnimationFrame(() => {
-      setFinishAction(null);
-      (finishAction.fromSheet ? (navigation.getParent() ?? navigation) : navigation).dispatch(
-        finishAction.action,
-      );
+      setFinishThreadParams(null);
+      replaceNewTaskFlowWithThread(navigation, finishThreadParams);
     });
     return () => cancelAnimationFrame(frame);
-  }, [finishAction, importing, navigation]);
+  }, [finishThreadParams, importing, navigation]);
 
   const toggle = useCallback(
     (key: string) => {
@@ -657,29 +647,17 @@ export function AddProjectImportSessionsScreen(props: {
       if (thread !== null) {
         // The Thread route renders its loading state until the imported
         // thread's shell arrives, matching the single-session picker.
-        setFinishAction({
-          fromSheet: true,
-          action: StackActions.replace("Thread", {
-            environmentId: String(thread.environmentId),
-            threadId: String(thread.threadId),
-          }),
+        setFinishThreadParams({
+          environmentId: String(thread.environmentId),
+          threadId: String(thread.threadId),
         });
       } else {
-        setFinishAction({
-          fromSheet: false,
-          action: CommonActions.reset({
-            index: 0,
-            routes: [
-              {
-                name: "NewTaskDraft",
-                params: {
-                  environmentId: project.environmentId,
-                  projectId: project.id,
-                  title: project.title,
-                },
-              },
-            ],
-          }),
+        setFinishThreadParams({
+          draft: {
+            environmentId: project.environmentId,
+            projectId: project.id,
+            title: project.title,
+          },
         });
       }
     })().finally(() => {

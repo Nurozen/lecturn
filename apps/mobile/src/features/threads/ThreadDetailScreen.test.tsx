@@ -64,7 +64,11 @@ const stubbed = (overrides: Record<string, unknown> = {}) =>
 const modulesWith = (overrides: Record<string, unknown>) =>
   new Proxy(
     {
-      react: React,
+      // Static markup rendering rejects a store subscription that has no server snapshot.
+      react: {
+        ...React,
+        useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
+      },
       "react/jsx-runtime": ReactJsxRuntime,
       "react/compiler-runtime": ReactCompilerRuntime,
       ...overrides,
@@ -156,6 +160,7 @@ function renderDetailScreen(input: {
   rendered.composer = null;
   renderWith(DetailScreen, {
     controls: input.controls,
+    draftMode: undefined,
     selectedThread: onlyTheFields({ id: "thread-1", importedFrom: null }),
     selectedThreadFeed: [],
     contentPresentation: { kind: "ready" },

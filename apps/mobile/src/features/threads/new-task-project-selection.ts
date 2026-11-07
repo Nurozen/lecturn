@@ -2,6 +2,7 @@ import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { repositoryGroupingKeyOf, type EnvironmentId, type ProjectId } from "@lecturn/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
+import { listedProjects } from "../../state/listed-entities";
 import type { HomeProjectScope } from "../home/homeThreadList";
 
 type DraftProjectSelectionResolution =
@@ -116,4 +117,27 @@ export function resolveDraftProjectSelection(
 
   const onlyProject = getOnlySelectableProject(projectScopes);
   return onlyProject ? { kind: "select", project: onlyProject } : { kind: "pick" };
+}
+
+export function newTaskDestination(
+  _usesSplitView: boolean,
+  projects: ReadonlyArray<EnvironmentProject>,
+  currentProject: Pick<EnvironmentProject, "environmentId" | "id"> | undefined,
+  requestId: string,
+) {
+  const project =
+    projects.find(
+      (candidate) =>
+        candidate.environmentId === currentProject?.environmentId &&
+        candidate.id === currentProject.id,
+    ) ?? listedProjects(projects)[0];
+  return project
+    ? {
+        draft: {
+          requestId,
+          environmentId: String(project.environmentId),
+          projectId: String(project.id),
+        },
+      }
+    : { draft: { requestId } };
 }

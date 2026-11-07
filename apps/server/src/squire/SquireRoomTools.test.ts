@@ -224,6 +224,10 @@ describe("squire_propose_room", () => {
           );
 
           yield* TestClock.adjust("1 hour");
+          // The wake fiber may already have batched the proposal; settle it so the status
+          // below is the one expiry sees, not a race. The next test pins pending/deferred.
+          yield* deliver(cast.lead.squireId);
+          const atExpiry = Option.getOrThrow(yield* (yield* repo).getEventByKey(key));
           yield* tools.expireProposals(yield* DateTime.now);
           yield* tools.expireProposals(yield* DateTime.now);
           const expired = (yield* logOf(cast.lead.squireId, "room.proposed")).filter(
@@ -232,10 +236,8 @@ describe("squire_propose_room", () => {
           assert.lengthOf(expired, 1);
           assert.strictEqual(expired[0]!.data.proposalId, proposalId);
           const after = Option.getOrThrow(yield* (yield* repo).getEventByKey(key));
-          assert.strictEqual(
-            after.status,
-            before.status === "pending" || before.status === "deferred" ? "dropped" : before.status,
-          );
+          assert.notStrictEqual(atExpiry.status, "pending");
+          assert.strictEqual(after.status, atExpiry.status);
           assert.isTrue(Option.isNone(yield* tools.nextExpiryAt));
 
           const late = yield* openRoom(cast, { proposalId });
@@ -244,6 +246,46 @@ describe("squire_propose_room", () => {
         }),
       { leadManageSquires: "recommend" },
     ),
+  );
+
+  it.effect.each(["deferred", "pending"] as const)(
+    "expiry drops a proposal still held back from the Lead as %s",
+    (heldStatus) =>
+      withCast(
+        (cast) =>
+          Effect.gen(function* () {
+            const tools = yield* need(SquireRoomTools);
+            const repository = yield* repo;
+            const proposalId = structured(yield* propose(cast)).proposalId!;
+            const key = {
+              squireId: cast.lead.squireId,
+              kind: "room-proposed",
+              threadId: null,
+              stateKey: proposalId,
+            };
+            const event = Option.getOrThrow(yield* repository.getEventByKey(key));
+            yield* repository.setEventStatus({
+              ids: [event.id],
+              fromStatuses: ["pending", "batched"],
+              status: "deferred",
+            });
+
+            yield* TestClock.adjust("24 hours");
+            // Forced after the clock moves: the wake fiber would batch a proposal left pending.
+            yield* repository.setEventStatus({
+              ids: [event.id],
+              fromStatuses: ["deferred"],
+              status: heldStatus,
+            });
+            const atExpiry = Option.getOrThrow(yield* repository.getEventByKey(key));
+            assert.strictEqual(atExpiry.status, heldStatus);
+            yield* tools.expireProposals(yield* DateTime.now);
+
+            const after = Option.getOrThrow(yield* repository.getEventByKey(key));
+            assert.strictEqual(after.status, "dropped");
+          }),
+        { leadManageSquires: "recommend" },
+      ),
   );
 });
 

@@ -10,6 +10,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createStaticNavigation, getStateFromPath } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
+import { ProjectChipIconRasterizer } from "./native/ProjectChipIconImages";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
 import * as Dialog from "./components/ui/Dialog";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
@@ -25,7 +26,7 @@ import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-
 import { environmentThreadShells } from "./state/threads";
 import { environmentShell } from "./state/shell";
 import { OverlayPortalHost } from "./components/ui/OverlayPortal";
-import { shouldHandleAppLink } from "./lib/appLinking";
+import { shouldHandleAppLink, restoreDraftLinkState } from "./lib/appLinking";
 import { appSquireHomeThreadLookup, resolveSquireThreadPath } from "./features/squires/squireLinks";
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
@@ -65,7 +66,10 @@ const appLinking = {
   // Lecturn: push, Live Activity, and in-app links name a Squire's home thread; open its Squire
   // screen. `linkTo` resolves through this too, so notification taps share it.
   getStateFromPath: (path: string, options?: Parameters<typeof getStateFromPath>[1]) =>
-    getStateFromPath(resolveSquireThreadPath(path, appSquireHomeThreadLookup), options),
+    restoreDraftLinkState(
+      getStateFromPath(resolveSquireThreadPath(path, appSquireHomeThreadLookup), options),
+      path,
+    ),
 };
 
 const Navigation = createStaticNavigation(RootStack);
@@ -130,6 +134,7 @@ function AppContent() {
                   </IncomingShareProvider>
                   <Dialog.Host />
                   <ThreadArrangementHost />
+                  <ProjectChipIconRasterizer />
                 </NativeLayoutMetricsProvider>
               </GlobalVoiceInputControl>
               {/* Anchored-menu overlays render here — in-window, so the

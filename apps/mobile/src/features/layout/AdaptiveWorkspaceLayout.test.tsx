@@ -6,7 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import * as Layout from "../../lib/layout";
 import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
+import * as ThreadRouteState from "../threads/thread-route-state";
+import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
+import * as DeferredNavigation from "./deferred-navigation";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
 // derived objects keep their identity between renders. So this suite runs the layout module
@@ -14,13 +17,17 @@ import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 let layoutRenders = 0;
 let screenRenders = 0;
 let readerRenders = 0;
-const navigation = { navigate: vi.fn(), dispatch: vi.fn(), getState: () => undefined };
+let navigationState: unknown = undefined;
+const navigation = { navigate: vi.fn(), dispatch: vi.fn(), getState: () => navigationState };
+let threadSelectionAction = "push";
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
 const selectWorkspace = vi.fn();
 const openThreadPullRequests = vi.fn();
 // Stable like the real hook's handler, so it never changes the sidebar's props identity.
 const openPendingTaskStub = vi.fn();
 const preferences = { value: { threadListFilters: undefined } };
+// Stable like the real atom's value, so it never changes the context value's identity.
+const noProjects: readonly never[] = [];
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
   return <>{props.children}</>;
@@ -48,6 +55,15 @@ const stubModules: Record<string, unknown> = {
   "react/jsx-runtime": ReactJsxRuntime,
   "react/compiler-runtime": ReactCompilerRuntime,
   "../../lib/layout": Layout,
+  "./adaptive-workspace-context": AdaptiveWorkspaceContextModule,
+  "./deferred-navigation": DeferredNavigation,
+  "../../lib/uuid": { uuidv4: () => "uuid" },
+  "../../state/atom-registry": { appAtomRegistry: { get: () => [] } },
+  "../../state/entities": { useProjects: () => noProjects },
+  "../../state/threads": { environmentThreadShells: { navigationThreadShellsAtom: {} } },
+  "../threads/new-task-project-selection": { newTaskDestination: () => ({ route: "Home" }) },
+  "../threads/thread-route-state": ThreadRouteState,
+  "../workspace/WorkspaceTabsContext": { useWorkspaceTabs: () => null },
   "@lecturn/contracts": {
     EnvironmentId: { make: (value: string) => value },
     ThreadId: { make: (value: string) => value },
@@ -63,7 +79,10 @@ const stubModules: Record<string, unknown> = {
     useNavigation: () => navigation,
     NavigationContext: React.createContext<unknown>(undefined),
     NavigationRouteContext: React.createContext<unknown>(undefined),
-    CommonActions: { reset: (state: unknown) => ({ type: "RESET", state }) },
+    CommonActions: {
+      reset: (state: unknown) => ({ type: "RESET", state }),
+      setParams: (params: unknown) => ({ type: "SET_PARAMS", payload: { params } }),
+    },
     StackActions: { replace: (name: string) => ({ type: "REPLACE", name }) },
   },
   "react-native": {
@@ -89,7 +108,7 @@ const stubModules: Record<string, unknown> = {
     withTiming: (value: number) => value,
   },
   "../../lib/adaptive-navigation": {
-    resolveThreadSelectionNavigationAction: () => "push",
+    resolveThreadSelectionNavigationAction: () => threadSelectionAction,
     resolveThreadSelectionOverlayState: () => null,
   },
   "../../lib/scopedEntities": {
@@ -277,5 +296,58 @@ describe("adaptive workspace inspector registration", () => {
 
     await renderWorkspace(null);
     expect(shownInspector).toBeNull();
+  });
+});
+
+describe("adaptive workspace thread selection", () => {
+  afterEach(() => {
+    threadSelectionAction = "push";
+    navigationState = undefined;
+    navigation.dispatch.mockClear();
+  });
+
+  it("drops a linked route's account and app when another thread is selected in place", async () => {
+    // Android resets the workspace instead; the merge is on the iOS path.
+    const ios = loadCompiledMobileModule({
+      file: "src/features/layout/AdaptiveWorkspaceLayout.tsx",
+      modules: stubModules,
+      platform: "ios",
+    }).exports as unknown as typeof AdaptiveWorkspaceLayoutModule;
+    let selectThreadRoute: ReturnType<typeof ios.useAdaptiveWorkspaceLayout>["selectThreadRoute"];
+    function SelectionReader() {
+      ({ selectThreadRoute } = ios.useAdaptiveWorkspaceLayout());
+      return null;
+    }
+    await React.act(() =>
+      root.render(
+        <ios.AdaptiveWorkspaceLayout pathname="/" workspaceRouteKey="workspace-route">
+          <SelectionReader />
+        </ios.AdaptiveWorkspaceLayout>,
+      ),
+    );
+    threadSelectionAction = "set-params";
+    navigationState = {
+      routes: [
+        {
+          key: "workspace-route",
+          name: "Thread",
+          params: { accountId: "a", appId: "dev.example" },
+        },
+      ],
+    };
+
+    await React.act(async () => selectThreadRoute!({ environmentId: "e", threadId: "t" }));
+
+    const action = navigation.dispatch.mock.calls[0]![0];
+    expect(action).toMatchObject({ type: "SET_PARAMS", source: "workspace-route" });
+    // `setParams` merges, so the keys must be present with no value to overwrite the old ones.
+    expect(action.payload.params).toStrictEqual({
+      accountId: undefined,
+      appId: undefined,
+      prompt: undefined,
+      draft: undefined,
+      environmentId: "e",
+      threadId: "t",
+    });
   });
 });

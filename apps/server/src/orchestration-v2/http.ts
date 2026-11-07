@@ -171,14 +171,16 @@ export const layer = HttpApiBuilder.group(
         "threadSnapshot",
         Effect.fn("environment.orchestration.threadSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           const snapshot = yield* loadThreadSnapshot(
             args.params.threadId,
             "orchestration_thread_snapshot_failed",
           ).pipe(traceLocalHandlerWork);
           return {
             snapshotSequence: snapshot.snapshotSequence,
-            projection: snapshot.projection,
+            projection: AppStreamFilter.filterThreadProjectionForSubject(principal.subject)(
+              snapshot.projection,
+            ),
           };
         }),
       )
@@ -211,12 +213,14 @@ export const layer = HttpApiBuilder.group(
         "threadBoundedSnapshot",
         Effect.fn("environment.orchestration.threadBoundedSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId).pipe(
             traceLocalHandlerWork,
           );
           const bounded = buildBoundedThreadProjection({
-            projection: snapshot.projection,
+            projection: AppStreamFilter.filterThreadProjectionForSubject(principal.subject)(
+              snapshot.projection,
+            ),
             snapshotSequence: snapshot.snapshotSequence,
           });
           return {

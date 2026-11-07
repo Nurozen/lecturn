@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import type { HomeProjectScope } from "../home/homeThreadList";
 import {
+  newTaskDestination,
   resolveDraftProjectSelection,
   resolveEnvironmentProjectMatch,
   resolveNewTaskDraftProject,
@@ -122,6 +123,52 @@ describe("resolveDraftProjectSelection", () => {
     ).toEqual({
       kind: "select",
       project,
+    });
+  });
+});
+
+describe("newTaskDestination", () => {
+  it("opens the current thread's project directly in split view", () => {
+    const projects = [makeProject("first"), makeProject("current", "other-environment")];
+    expect(newTaskDestination(true, projects, projects[1], "request")).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "current" },
+    });
+  });
+  it("uses an available project when split view has no current project", () => {
+    expect(newTaskDestination(true, [makeProject("first")], undefined, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "first" },
+    });
+  });
+  it("falls back to a listed project, past app workspaces and archived spaces", () => {
+    const appWorkspace = { ...makeProject("app"), appBinding: { appId: "dev.example" } };
+    const archived = {
+      ...makeProject("archived"),
+      stave: { spaceId: "space", isSaga: false, repos: [], state: "archived" },
+    };
+    const projects = [appWorkspace, archived, makeProject("listed")] as EnvironmentProject[];
+    expect(newTaskDestination(true, projects, undefined, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "listed" },
+    });
+    expect(
+      newTaskDestination(true, [appWorkspace] as EnvironmentProject[], undefined, "r"),
+    ).toEqual({ draft: { requestId: "r" } });
+  });
+  it("still finds a current project that only the Apps tab lists", () => {
+    const appWorkspace = { ...makeProject("app"), appBinding: { appId: "dev.example" } };
+    const projects = [makeProject("listed"), appWorkspace] as EnvironmentProject[];
+    expect(newTaskDestination(true, projects, appWorkspace, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "app" },
+    });
+  });
+  it("keeps the picker when there are no projects", () => {
+    expect(newTaskDestination(true, [], undefined, "request")).toEqual({
+      draft: { requestId: "request" },
+    });
+  });
+  it("opens the same draft route in compact view", () => {
+    const project = makeProject("current");
+    expect(newTaskDestination(false, [project], project, "request")).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "current" },
     });
   });
 });
