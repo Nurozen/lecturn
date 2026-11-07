@@ -36,7 +36,7 @@ jobs:
               - --filter=lecturn-auth-email...
       - name: Verify handler
         run: |
-          vp test run infra/auth-email/src/index.test.ts
+          vp run --filter lecturn-auth-email test
           vp run --filter lecturn-auth-email typecheck
       - name: Deploy Worker and secrets
         uses: cloudflare/wrangler-action@v3
