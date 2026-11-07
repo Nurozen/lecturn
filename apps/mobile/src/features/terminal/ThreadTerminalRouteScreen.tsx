@@ -53,6 +53,7 @@ import {
   TERMINAL_FONT_SIZE_STEP,
   stepTerminalFontSize,
 } from "../../lib/appearancePreferences";
+import { useShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   useAttachedTerminalSession,
@@ -484,6 +485,11 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     readyReplayKey: readyBufferReplayKey,
   });
   const isRunning = terminal.status === "running" || terminal.status === "starting";
+  useShowcaseSceneRendered(
+    "terminal",
+    themeId,
+    readyBufferReplayKey === bufferReplayKey && terminalSurfaceBuffer.length > 0,
+  );
 
   const pendingExitNavigationRef = useRef<string | null>(null);
 
