@@ -43,12 +43,17 @@ env:
 
 jobs:
   ios:
-    name: iPhone, iPhone Duo, and iPad 13
+    name: iPhone 6.9, iPhone 6.5, and iPad 13
     if: inputs.platform == 'all' || inputs.platform == 'ios'
-    runs-on: blacksmith-12vcpu-macos-26
+    # Blacksmith's macOS runners sit queued without provisioning for this repo.
+    runs-on: macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
+    timeout-minutes: ${{ inputs.theme == 'all' && 360 || 150 }}
+    env:
+      # The hosted image's Xcode has no iPhone Duo simulator; capture Duo locally.
+      SHOWCASE_IOS_DEVICES: --device iphone-6.9 --device iphone-6.5 --device ipad-13
+      LECTURN_SHOWCASE_DIAGNOSTICS_DIR: ${{ github.workspace }}/artifacts/ios-diagnostics
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -87,14 +92,20 @@ jobs:
           brew install cameroncooke/axe/axe
           axe --version
 
-      - name: Install foldable simulator controls
-        run: npm install --global agent-device@0.21.25
-
       - name: Capture iOS showcase
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+
+      - name: Upload iOS diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-diagnostics
+          path: artifacts/ios-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload iOS screenshots
         if: always()
