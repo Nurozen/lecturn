@@ -12,6 +12,7 @@ const native = vi.hoisted(() => ({
   dispatch: vi.fn(),
   tabDispatch: vi.fn(),
   status: vi.fn((target: unknown) => target),
+  runStackedAction: vi.fn(),
 }));
 
 vi.mock("react-native", () => ({
@@ -51,7 +52,7 @@ vi.mock("../../state/use-vcs-action-state", () => ({
   useVcsActionState: () => ({ currentLabel: null }),
 }));
 vi.mock("../../state/vcs", () => ({
-  vcsActionManager: { runStackedAction: vi.fn() },
+  vcsActionManager: { runStackedAction: native.runStackedAction },
   vcsEnvironment: { pull: {}, status: native.status },
 }));
 vi.mock("../layout/AdaptiveWorkspaceLayout", () => ({
@@ -112,6 +113,14 @@ describe("DraftThreadHeader", () => {
     expect(native.status).toHaveBeenCalledWith({
       environmentId: "environment",
       input: { cwd: "/spaces/lecturn/lecturn" },
+    });
+  });
+
+  it("targets a Stave draft's git actions at the primary repo, not the space root", () => {
+    renderHeader(staveSpace, "/spaces/lecturn");
+    expect(native.runStackedAction).toHaveBeenCalledWith({
+      environmentId: "environment",
+      cwd: "/spaces/lecturn/lecturn",
     });
   });
 

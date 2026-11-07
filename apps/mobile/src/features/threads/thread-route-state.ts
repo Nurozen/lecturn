@@ -26,7 +26,8 @@ export function isDraftThreadRoute(
 
 /**
  * `setParams` merges, so a thread selection clears what it does not name: a stale `accountId`
- * from a notification link would mark the next thread unavailable.
+ * from a notification link would mark the next thread unavailable, and an unconsumed `prompt`
+ * would fill the next thread's composer.
  */
 export function threadRouteSelectionParams<Params extends object | undefined>(params: Params) {
   return {
@@ -35,6 +36,7 @@ export function threadRouteSelectionParams<Params extends object | undefined>(pa
     draft: undefined,
     accountId: undefined,
     appId: undefined,
+    prompt: undefined,
     ...params,
   };
 }

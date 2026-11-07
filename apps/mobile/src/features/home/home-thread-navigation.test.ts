@@ -211,6 +211,7 @@ describe("draft and live thread selection", () => {
       StackActions.push("Thread", {
         accountId: "account-a",
         appId: "dev.example",
+        prompt: "from a link",
         environmentId: "environment-1",
         threadId: "thread-1",
       }),

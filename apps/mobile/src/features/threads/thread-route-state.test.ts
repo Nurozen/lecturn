@@ -54,6 +54,7 @@ describe("draft thread handoff", () => {
       CommonActions.navigate("Thread", {
         accountId: "account-a",
         appId: "dev.example",
+        prompt: "from a link",
         draft: { projectId: "project" },
       }),
       options,
