@@ -5,11 +5,13 @@ import { PNG } from "pngjs";
 import { type ShowcaseConfig, type ShowcaseStoreAssetSpec } from "./mobile-showcase.config.ts";
 import {
   encodeAndroidPairingUrls,
+  manifestBundleUrl,
   normalizeStorePng,
   parsePairingCredentialOutput,
   parseShowcaseCliArgs,
   planShowcaseCaptures,
   readPngMetadata,
+  screenshotsMatch,
 } from "./mobile-showcase.ts";
 
 const appleSpec: ShowcaseStoreAssetSpec = {
@@ -97,4 +99,34 @@ it("captures the optional PR watch route without expanding the default store mat
   assert.deepStrictEqual(selected[0]?.scenes, ["pr-watch"]);
   const defaults = planShowcaseCaptures(config, parseShowcaseCliArgs(["--device", "phone"]));
   assert.deepStrictEqual(defaults[0]?.scenes, ["thread", "review"]);
+});
+
+it("warms the bundle URL the dev client loads from the manifest", () => {
+  const bundleUrl =
+    "http://192.168.64.8:8199/apps/mobile/index.bundle?platform=ios&dev=true&lazy=false&transform.engine=hermes";
+  assert.equal(manifestBundleUrl({ launchAsset: { url: bundleUrl } }), bundleUrl);
+  assert.throws(() => manifestBundleUrl({ launchAsset: {} }), /no launch asset URL/);
+  assert.throws(() => manifestBundleUrl(null), /no launch asset URL/);
+});
+
+it("treats a capture that still shows the previous scene as a match", () => {
+  const frame = (paint: (x: number, y: number) => number) => {
+    const png = new PNG({ width: 200, height: 400 });
+    for (let y = 0; y < 400; y += 1) {
+      for (let x = 0; x < 200; x += 1) {
+        const offset = (y * 200 + x) * 4;
+        png.data[offset] = paint(x, y);
+        png.data[offset + 1] = 40;
+        png.data[offset + 2] = 60;
+        png.data[offset + 3] = 255;
+      }
+    }
+    return PNG.sync.write(png);
+  };
+  const thread = frame(() => 20);
+  const sameThreadAfterStatusBarTick = frame((x, y) => (x === 0 && y === 0 ? 240 : 20));
+  const terminal = frame((_x, y) => (y < 200 ? 20 : 200));
+  assert.equal(screenshotsMatch(thread, sameThreadAfterStatusBarTick), true);
+  assert.equal(screenshotsMatch(thread, terminal), false);
+  assert.equal(screenshotsMatch(thread, normalizeStorePng(thread)), true);
 });

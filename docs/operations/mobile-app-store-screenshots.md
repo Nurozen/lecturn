@@ -121,11 +121,14 @@ appearance settings can never drift apart.
 ## Capture in GitHub Actions
 
 Run the `Mobile Showcase Screenshots` workflow from GitHub's Actions tab, choose `all`, `ios`, or
-`android`, select `light`, `dark`, or `both`, and pick a palette (or `all`, which raises each job's
-timeout from 60 to 300 minutes). The default dispatch captures both appearances of the `lecturn`
-palette and runs iOS and Android concurrently: iPhone and iPad capture on a
-12-vCPU Blacksmith macOS runner, while Android phone, 7-inch tablet, and 10-inch tablet capture on a
-16-vCPU Blacksmith Linux runner with a KVM-accelerated x86_64 emulator.
+`android`, select `light`, `dark`, or `both`, and pick a palette (or `all`, which raises the job
+timeouts to 360 minutes for iOS and 300 for Android). The default dispatch captures both appearances of the `lecturn`
+palette and runs iOS and Android concurrently: iPhone 6.9, iPhone 6.5, and iPad capture on GitHub's
+`macos-26` runner, while Android phone, 7-inch tablet, and 10-inch tablet capture on a
+16-vCPU Blacksmith Linux runner with a KVM-accelerated x86_64 emulator. The hosted Xcode has no
+iPhone Duo simulator, so capture the Duo folders locally. A failed iOS capture uploads an
+`ios-diagnostics` artifact with the simulator screen, its accessibility tree, the app log, and the
+host's process list.
 
 Every job uploads its PNGs even when capture fails, which makes partial runs useful for diagnosis.
 The separate validation step is success-gated: it runs before upload only when capture succeeds. If
