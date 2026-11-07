@@ -344,6 +344,7 @@ describe("adaptive workspace thread selection", () => {
     expect(action.payload.params).toStrictEqual({
       accountId: undefined,
       appId: undefined,
+      prompt: undefined,
       draft: undefined,
       environmentId: "e",
       threadId: "t",
