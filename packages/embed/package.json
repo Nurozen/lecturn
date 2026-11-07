@@ -62,7 +62,7 @@
     "@lecturn/contracts": "workspace:*",
     "@lecturn/shared": "workspace:*",
     "@types/node": "catalog:",
-    "electron": "44.4.5",
+    "electron": "44.9.3",
     "vite-plus": "catalog:"
   },
   "peerDependencies": {

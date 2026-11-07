@@ -4,7 +4,12 @@ import type {
   ProviderApprovalOption,
   RuntimeRequestId,
 } from "@lecturn/contracts";
-import { View } from "react-native";
+import {
+  FULL_ACCESS_OVERRIDE_QUESTION,
+  fullAccessOverrideExplanation,
+} from "@lecturn/client-runtime/state/thread-requests";
+import { useState } from "react";
+import { Pressable, View } from "react-native";
 
 import { GlassCard } from "../../components/GlassCard";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -31,6 +36,7 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   const { eyebrow, title, detail, detailMaxLines } = pendingApprovalCardText(props.approval);
+  const [explanationOpen, setExplanationOpen] = useState(false);
   return (
     <GlassCard tone="accent" radius={24} className="gap-2.5 p-4" opaque>
       <Text className="font-lecturn-medium text-xs text-primary">{eyebrow}</Text>
@@ -42,6 +48,27 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
         >
           {detail}
         </Text>
+      ) : null}
+      {props.approval.reason ? (
+        <Text className="font-sans text-xs leading-normal text-warning-foreground">
+          {props.approval.reason}
+        </Text>
+      ) : null}
+      {props.approval.fullAccessOverride ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: explanationOpen }}
+          onPress={() => setExplanationOpen((open) => !open)}
+        >
+          <Text className="font-lecturn-bold text-xs text-foreground-secondary underline">
+            {FULL_ACCESS_OVERRIDE_QUESTION}
+          </Text>
+          {explanationOpen ? (
+            <Text className="mt-1 font-sans text-xs leading-normal text-foreground-muted">
+              {fullAccessOverrideExplanation(props.approval.fullAccessOverride)}
+            </Text>
+          ) : null}
+        </Pressable>
       ) : null}
       {!canRespond ? (
         <Text className="font-sans text-sm leading-5 text-foreground-muted">

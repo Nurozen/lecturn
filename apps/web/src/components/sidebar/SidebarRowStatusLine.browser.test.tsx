@@ -1,31 +1,37 @@
 import "../../index.css";
 
 import { AlarmClockIcon, CheckIcon, PinIcon } from "lucide-react";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ReactNode } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
+import { render, type Screen } from "../../../test/render";
 import { SidebarRowStatusLine } from "./SidebarRowStatusLine";
 
 // A nested card row in the default 256 px sidebar: the title shares the line
 // with the markers and the status slot.
 const ROW_WIDTH = 180;
 
-let root: Root;
 let container: HTMLDivElement;
+let screen: Screen | undefined;
 
-beforeEach(() => {
+// One dark container per test: renderRow mounts into it first and rerenders after.
+function setup(): AsyncDisposable {
   container = document.createElement("div");
   container.className = "dark";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-});
+  screen = undefined;
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen?.[Symbol.asyncDispose]();
+      } finally {
+        screen = undefined;
+        container.remove();
+      }
+    },
+  };
+}
 
 type Row = "plain" | "pinned" | "woke";
 
@@ -80,18 +86,18 @@ function line(row: Row, withActions: boolean, actionsOpen = false): ReactNode {
   );
 }
 
-async function render(content: ReactNode) {
+async function renderRow(content: ReactNode) {
   await page.viewport(1440, 900);
-  await act(async () =>
-    root.render(
-      // Clear of the page's corner, where the test pointer rests, so nothing is hovered.
-      <div style={{ width: ROW_WIDTH, margin: 200 }}>
-        <div data-testid="row" className="group/sidebar-row relative overflow-hidden px-2 py-1">
-          {content}
-        </div>
-      </div>,
-    ),
+  // Clear of the page's corner, where the test pointer rests, so nothing is hovered.
+  const ui = (
+    <div style={{ width: ROW_WIDTH, margin: 200 }}>
+      <div data-testid="row" className="group/sidebar-row relative overflow-hidden px-2 py-1">
+        {content}
+      </div>
+    </div>
   );
+  if (screen) await screen.rerender(ui);
+  else screen = await render(ui, { container });
   const row = container.querySelector<HTMLElement>('[data-testid="row"]')!;
   const find = (testId: string) => row.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
   return {
@@ -121,12 +127,13 @@ describe("SidebarRowStatusLine", () => {
   it.each(["plain", "pinned", "woke"] as const)(
     "gives a %s row's title the same width at rest with or without hover actions",
     async (row) => {
-      const bare = await render(line(row, false));
+      await using _env = setup();
+      const bare = await renderRow(line(row, false));
       expect(bare.row.matches(":hover")).toBe(false);
       const bareTitleWidth = bare.title.getBoundingClientRect().width;
       const bareSlotWidth = bare.slot.getBoundingClientRect().width;
 
-      const full = await render(line(row, true));
+      const full = await renderRow(line(row, true));
       expect(full.row.matches(":hover")).toBe(false);
       expect(full.actions).not.toBeNull();
       expect(getComputedStyle(full.actions!).opacity).toBe("0");
@@ -143,7 +150,8 @@ describe("SidebarRowStatusLine", () => {
   );
 
   it("keeps a pinned row's pin and status in place, uncovered, when the row is hovered", async () => {
-    const view = await render(line("pinned", true));
+    await using _env = setup();
+    const view = await renderRow(line("pinned", true));
     const pinAtRest = box(view.pin!);
     const statusAtRest = box(view.status);
     const titleAtRest = view.title.getBoundingClientRect().width;
@@ -176,7 +184,8 @@ describe("SidebarRowStatusLine", () => {
   });
 
   it("keeps the Woke label in place and visible when the row is hovered", async () => {
-    const view = await render(line("woke", true));
+    await using _env = setup();
+    const view = await renderRow(line("woke", true));
     const statusAtRest = box(view.status);
 
     await hover(view.row, view.actions!);
@@ -188,7 +197,8 @@ describe("SidebarRowStatusLine", () => {
   });
 
   it("shows a plain row's actions in the status's place on hover", async () => {
-    const view = await render(line("plain", true));
+    await using _env = setup();
+    const view = await renderRow(line("plain", true));
     const slotAtRest = box(view.slot);
 
     await hover(view.row, view.actions!);
@@ -199,7 +209,8 @@ describe("SidebarRowStatusLine", () => {
   });
 
   it("reveals a pinned row's actions for keyboard focus without moving the pin", async () => {
-    const view = await render(line("pinned", true));
+    await using _env = setup();
+    const view = await renderRow(line("pinned", true));
     const pinAtRest = box(view.pin!);
 
     await userEvent.keyboard("{Tab}");
@@ -212,10 +223,11 @@ describe("SidebarRowStatusLine", () => {
   });
 
   it("keeps the actions shown and the pin in place while the snooze menu is open", async () => {
-    const atRest = await render(line("pinned", true));
+    await using _env = setup();
+    const atRest = await renderRow(line("pinned", true));
     const pinAtRest = box(atRest.pin!);
 
-    const open = await render(line("pinned", true, true));
+    const open = await renderRow(line("pinned", true, true));
     expect(open.row.matches(":hover")).toBe(false);
     expect(getComputedStyle(open.actions!).position).toBe("static");
     expect(box(open.pin!)).toEqual(pinAtRest);

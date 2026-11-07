@@ -15,6 +15,7 @@ import {
   type AtomCommandResult,
 } from "@lecturn/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import { planProjectRemoval } from "@lecturn/client-runtime/state/projects";
 import { AsyncResult } from "effect/reactivity";
 import { type EnvironmentId, type ProjectIconOverride } from "@lecturn/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -386,12 +387,15 @@ function ProjectDetail({
     const api = readLocalApi();
     if (!api) return;
 
-    const memberKeys = new Set(members.map(memberKey));
-    const projectThreads = threads.filter((thread) =>
-      memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
-    );
-    const isWholeGroup = members.length === group.memberProjects.length;
-    const targetKind = hasOtherMembers || !isWholeGroup ? "checkout" : "project";
+    // The shared plan owns thread matching and target kind; the dialog copy stays local
+    // because Lecturn lists Stave worktree deletions in place of the files-on-disk note.
+    const { projectThreads, isWholeGroup, targetKind } = planProjectRemoval({
+      members,
+      groupMemberCount: group.memberProjects.length,
+      hasOtherMembers,
+      displayName: group.displayName,
+      threads,
+    });
     const singleMember = members.length === 1 ? members[0]! : null;
     const targetLabel = singleMember?.title ?? group.displayName;
     const staveDeletions = await Promise.all(members.map(prepareStaveProjectDeletion));

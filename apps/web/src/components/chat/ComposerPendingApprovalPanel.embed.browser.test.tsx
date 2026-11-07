@@ -5,10 +5,9 @@ import "../../embed/embedComposer.css";
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { AppId, EnvironmentId, ProjectId, RuntimeRequestId } from "@lecturn/contracts";
 import { ShieldIcon } from "lucide-react";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { applyEmbedThemeToRoot } from "../../embed/embedTheme";
@@ -22,25 +21,24 @@ const presentation = {
   projectRef: scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1")),
 };
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  applyEmbedThemeToRoot(document.documentElement, { appearance: "light", variables: {} });
-  delete document.documentElement.dataset.lecturnEmbed;
-  document.documentElement.style.removeProperty("color-scheme");
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+      applyEmbedThemeToRoot(document.documentElement, { appearance: "light", variables: {} });
+      delete document.documentElement.dataset.lecturnEmbed;
+      document.documentElement.style.removeProperty("color-scheme");
+    },
+  };
+}
 
 const options: NonNullable<PendingApproval["options"]> = [
   { decision: "decline", label: "Decline" },
@@ -148,13 +146,11 @@ async function render(
       </ComposerSurface.Host>
     </ComposerSurface.Shell>
   );
-  await act(async () =>
-    root.render(
-      embedded ? (
-        <EmbedPresentationContext value={presentation}>{composer}</EmbedPresentationContext>
-      ) : (
-        composer
-      ),
+  await testScreen.rerender(
+    embedded ? (
+      <EmbedPresentationContext value={presentation}>{composer}</EmbedPresentationContext>
+    ) : (
+      composer
     ),
   );
 }
@@ -196,6 +192,7 @@ function expectActionsOnTitleRow(m: ReturnType<typeof measure>) {
 
 describe("the embed's approval card in a 352 px pane", () => {
   it("shows the whole tool name beside compact Decline, Approve and menu", async () => {
+    await using _setup = await setup();
     await render(352);
     const m = measure();
     expectActionsOnTitleRow(m);
@@ -206,6 +203,7 @@ describe("the embed's approval card in a 352 px pane", () => {
 
 describe("the embed's approval card in a 320 px pane", () => {
   it("keeps the actions on the title's row and cuts the name only at its end", async () => {
+    await using _setup = await setup();
     await render(320);
     const m = measure();
     expectActionsOnTitleRow(m);
@@ -217,6 +215,7 @@ describe("the embed's approval card in a 320 px pane", () => {
 
 describe.each([352, 320])("the embed's approval card in a %i px pane", (width) => {
   it("spans the composer and sits on it, about 60 px tall", async () => {
+    await using _setup = await setup();
     await render(width);
     const { card, composer } = measure();
 
@@ -230,6 +229,7 @@ describe.each([352, 320])("the embed's approval card in a %i px pane", (width) =
 
 describe("an app's long reason in a 352 px embed pane", () => {
   it("reads as sans prose on two lines, then truncates, and the card grows by one line", async () => {
+    await using _setup = await setup();
     await render(352);
     const oneLine = measure();
     await render(352, true, undefined, withReason(LONG_REASON));
@@ -251,6 +251,7 @@ describe("an app's long reason in a 352 px embed pane", () => {
 
 describe("a provider command approval in a 352 px embed pane", () => {
   it("keeps its command in monospace", async () => {
+    await using _setup = await setup();
     await render(352, true, undefined, commandApproval);
     const detail = container.querySelector<HTMLElement>('[aria-label="Command"]')!;
 
@@ -262,6 +263,7 @@ describe("a provider command approval in a 352 px embed pane", () => {
 
 describe.each([352, 320])("the embed approval card's menu in a %i px pane", (width) => {
   it("offers Stop turn, which stops the running turn", async () => {
+    await using _setup = await setup();
     const onStopTurn = vi.fn();
     await render(width, true, onStopTurn);
     await act(async () =>
@@ -276,6 +278,7 @@ describe.each([352, 320])("the embed approval card's menu in a %i px pane", (wid
 
 describe("the approval card outside the embed", () => {
   it("offers no Stop turn, since its composer keeps the stop button", async () => {
+    await using _setup = await setup();
     await render(352, false, () => undefined);
     await act(async () =>
       container.querySelector<HTMLElement>('[aria-label="More approval options"]')!.click(),
@@ -285,6 +288,7 @@ describe("the approval card outside the embed", () => {
   });
 
   it("keeps its inset, tucked drawer and whole tool name", async () => {
+    await using _setup = await setup();
     await render(352, false);
     const { title, card, composer, titleBox, buttonBoxes } = measure();
 
@@ -339,6 +343,7 @@ async function paintedAt(points: ReadonlyArray<{ x: number; y: number }>) {
 
 describe.each([352, 1280])("the embed approval card's Decline in a %i px pane", (width) => {
   it("stands out from the card as an outlined button under a host's dark theme", async () => {
+    await using _setup = await setup();
     applyEmbedThemeToRoot(document.documentElement, { appearance: "dark", variables: HOST_THEME });
     await render(width);
     const actions = container.querySelector('[data-slot="composer-banner-actions"]')!;

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { RIG_ART } from "./rigArt";
 import { createSquireFx, SQUIRE_FX_LANDMARKS } from "./squireFx";
@@ -150,16 +150,23 @@ function stopColors(stage: Stage) {
   );
 }
 
-afterEach(() => {
-  for (const stage of stages) {
-    stage.fx.destroy();
-    stage.svg.remove();
-  }
+// Every stage a test mounts is destroyed and removed when its `using` scope ends.
+function setup(): Disposable {
   stages.length = 0;
-});
+  return {
+    [Symbol.dispose]() {
+      for (const stage of stages) {
+        stage.fx.destroy();
+        stage.svg.remove();
+      }
+      stages.length = 0;
+    },
+  };
+}
 
 describe("squireFx", () => {
   it("holds the attentive halo and aura steady while time and breath vary", () => {
+    using _stages = setup();
     for (const equipment of EQUIPMENT) {
       const stage = mount({ equipment });
       const halo = stage.svg.querySelector<SVGGraphicsElement>('[data-fx="halo"]');
@@ -187,6 +194,7 @@ describe("squireFx", () => {
   });
 
   it("fades the halo in with the attentive blend instead of switching it on", () => {
+    using _stages = setup();
     const stage = mount();
     const halo = stage.svg.querySelector<SVGGraphicsElement>('[data-fx="halo"]');
     if (!halo) throw new Error("halo must be tagged");
@@ -200,6 +208,7 @@ describe("squireFx", () => {
   });
 
   it("adds no item signals in attentive: no beacon ring, no lift sparkles, no tagged cue nodes", () => {
+    using _stages = setup();
     for (const equipment of EQUIPMENT) {
       const idle = mount({ equipment }, "idle");
       const attentive = mount({ equipment }, "att");
@@ -222,6 +231,7 @@ describe("squireFx", () => {
   });
 
   it("keeps idle and thinking ambient effects moving", () => {
+    using _stages = setup();
     for (const [state, equipment] of [
       ["idle", "helmet"],
       ["idle", "none"],
@@ -246,6 +256,7 @@ describe("squireFx", () => {
   });
 
   it("rests ambient effects on rest frames and once settled", () => {
+    using _stages = setup();
     const stage = mount({ equipment: "none" });
     const restFrames = new Set<string>();
     for (let i = 0; i < 30; i++) {
@@ -262,6 +273,7 @@ describe("squireFx", () => {
   });
 
   it("draws the crest on the torso only while crest is on", () => {
+    using _stages = setup();
     const config = { equipment: "lance", crest: "on", palette: "gold" } as const;
     const stage = mount(config);
     const crests = () => stage.svg.querySelectorAll('[data-fx="crest"]');
@@ -279,6 +291,7 @@ describe("squireFx", () => {
   });
 
   it("draws the Lead crest as a star over a thread, centred on the cloak drape", () => {
+    using _stages = setup();
     const stage = mount({ equipment: "helmet", crest: "on", palette: "gold" });
     const crest = stage.svg.querySelector('[data-fx="crest"]')!;
     const svgBox = stage.svg.getBoundingClientRect();
@@ -311,6 +324,7 @@ describe("squireFx", () => {
   });
 
   it("never twinkles a cloak star from under the crest", () => {
+    using _stages = setup();
     const [cx, cy, size] = SQUIRE_FX_LANDMARKS.cloak.crest;
     const underCrest = SQUIRE_FX_LANDMARKS.cloak.stars
       .filter(([x, y, r]) => Math.abs(x - cx) < size / 2 + r && Math.abs(y - cy) < size / 2 + r)
@@ -333,6 +347,7 @@ describe("squireFx", () => {
   });
 
   it("gives gold its own FX colors, distinct from brass and every other palette", () => {
+    using _stages = setup();
     const palettes: readonly CompanionPalette[] = ["brass", "moonstone", "sage", "rose", "gold"];
     const colors = palettes.map((palette) => {
       const stage = mount({ palette }, "p");
@@ -348,6 +363,7 @@ describe("squireFx", () => {
   });
 
   it("renders hold frames identically for equal inputs and seed", () => {
+    using _stages = setup();
     const inputs = frame("thinking", 7.3, { live: false, hold: true, seed: 5, breath: 0.2 });
     const first = mount({ equipment: "lance" }, "hold");
     first.fx.update(inputs);
@@ -368,6 +384,7 @@ describe("squireFx", () => {
   });
 
   it("glints the helmet star at the peak of greet, ponder, and listen, and not at the ends", () => {
+    using _stages = setup();
     const stage = mount({ equipment: "helmet" });
     const star = stage.svg.querySelector('[data-fx="star-glint"]');
     if (!star) throw new Error("helmet star glint must be tagged");
@@ -388,6 +405,7 @@ describe("squireFx", () => {
   });
 
   it("gives each gesture its own steady peak motif, alone, and gone at the end", () => {
+    using _stages = setup();
     const motifs = {
       nod: ["nod-glint", "nod-chevron"],
       greet: ["greet-arc"],
@@ -436,6 +454,7 @@ describe("squireFx", () => {
   });
 
   it("closes the eyes through the nod's dip so the peak still shows a nod", () => {
+    using _stages = setup();
     for (const appearance of ["female", "male"] as const) {
       const stage = mount({ appearance });
       const closedness = (progress: number) => {
@@ -453,6 +472,7 @@ describe("squireFx", () => {
   // A full eye-to-item sightline read as a laser or a stick at panel size, and crossed the
   // face. The glance now arrives at the item as a short flick ending at the landing glint.
   it("lands the glance as a short flick at the item's glint, clear of the eye", () => {
+    using _stages = setup();
     for (const appearance of ["female", "male"] as const) {
       for (const equipment of EQUIPMENT) {
         const stage = mount({ appearance, equipment });
@@ -488,6 +508,7 @@ describe("squireFx", () => {
   });
 
   it("keeps the attentive halo warm on every appearance, hood, and palette", () => {
+    using _stages = setup();
     const palettes: readonly CompanionPalette[] = ["brass", "moonstone", "sage", "rose", "gold"];
     for (const appearance of ["female", "male"] as const) {
       for (const hood of ["down", "up"] as const) {
@@ -512,6 +533,7 @@ describe("squireFx", () => {
   });
 
   it("holds a steady thought-light in thinking that fades in with the thinking blend", () => {
+    using _stages = setup();
     for (const equipment of EQUIPMENT) {
       const stage = mount({ equipment });
       const thought = stage.svg.querySelector('[data-fx="thought"]');

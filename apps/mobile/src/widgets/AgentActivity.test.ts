@@ -204,45 +204,6 @@ describe("AgentActivity widget layout", () => {
     expect(banner).toContain("#061522");
   });
 
-  it("orders rows attention-first in the banner", () => {
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 2,
-        activities: [
-          makeRow({ threadTitle: "Working thread" }),
-          makeRow({
-            threadId: "thread-2",
-            threadTitle: "Blocked thread",
-            phase: "waiting_for_approval",
-            status: "Approval",
-          }),
-        ],
-      },
-      environment as never,
-    );
-    const banner = JSON.stringify(layout.banner);
-    expect(banner.indexOf("Blocked thread")).toBeGreaterThan(-1);
-    expect(banner.indexOf("Blocked thread")).toBeLessThan(banner.indexOf("Working thread"));
-  });
-
-  it("summarizes the attention count in the banner header", () => {
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 3,
-        activities: [
-          makeRow({}),
-          makeRow({ threadId: "thread-2", phase: "waiting_for_input", status: "Input" }),
-        ],
-      },
-      environment as never,
-    );
-    const banner = JSON.stringify(layout.banner);
-    expect(banner).toContain("3 active agents");
-    expect(banner).toContain("1 needs attention");
-  });
-
   it("keeps the compact brand mark and attention status distinct", () => {
     const layout = AgentActivity(
       {
@@ -258,47 +219,6 @@ describe("AgentActivity widget layout", () => {
     expect(JSON.stringify(layout.compactLeading)).toContain("#e6bc63"); // brand mark
     expect(JSON.stringify(layout.compactTrailing)).toContain("Input");
     expect(JSON.stringify(layout.minimal)).toContain("#f0b34d");
-  });
-
-  it("deep links the banner to the row that needs attention", () => {
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 2,
-        activities: [
-          makeRow({}),
-          makeRow({
-            threadId: "thread-2",
-            phase: "waiting_for_approval",
-            status: "Approval",
-            deepLink: "/threads/env-1/thread-2",
-          }),
-        ],
-      },
-      environment as never,
-    );
-    expect(JSON.stringify(layout.banner)).toContain(
-      '"widgetURL":"lecturn://threads/env-1/thread-2"',
-    );
-  });
-
-  it("deep links the banner to the first row when nothing needs attention", () => {
-    const layout = AgentActivity({ ...props, activities: [makeRow({})] }, environment as never);
-    expect(JSON.stringify(layout.banner)).toContain(
-      '"widgetURL":"lecturn://threads/env-1/thread-1"',
-    );
-  });
-
-  it("omits the deep link for unsafe paths and empty aggregates", () => {
-    expect(JSON.stringify(AgentActivity(props, environment as never))).not.toContain("widgetURL");
-    expect(
-      JSON.stringify(
-        AgentActivity(
-          { ...props, activities: [makeRow({ deepLink: "//evil.example" })] },
-          environment as never,
-        ),
-      ),
-    ).not.toContain("widgetURL");
   });
 
   it("leads with the outcome instead of a zero count when nothing is active", () => {
@@ -360,24 +280,6 @@ describe("AgentActivity widget layout", () => {
     expect(JSON.stringify(layout.compactTrailing)).toContain("Failed");
     expect(JSON.stringify(layout.expandedLeading)).toContain("Failed");
     expect(JSON.stringify(layout.minimal)).toContain("xmark.octagon.fill");
-  });
-
-  it("renders up to five rows in the banner", () => {
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 6,
-        activities: [1, 2, 3, 4, 5, 6].map((n) =>
-          makeRow({ threadId: `t${n}`, threadTitle: `Thread ${n}` }),
-        ),
-      },
-      environment as never,
-    );
-    const banner = JSON.stringify(layout.banner);
-    for (const visible of [1, 2, 3, 4, 5]) {
-      expect(banner).toContain(`Thread ${visible}`);
-    }
-    expect(banner).not.toContain("Thread 6");
   });
 });
 

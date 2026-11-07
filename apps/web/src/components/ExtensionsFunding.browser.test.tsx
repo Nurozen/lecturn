@@ -1,6 +1,4 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@lecturn/contracts";
 
 const mocks = vi.hoisted(() => ({
@@ -77,6 +75,7 @@ vi.mock(import("../state/use-atom-command"), async (original) => ({
   useAtomCommand: (() => mocks.command) as never,
 }));
 
+import { act, fakeTimers, render as renderUi, type Screen } from "../../test/render";
 import { ExtensionsFunding } from "./ExtensionsFunding";
 import {
   FUNDING_OBSERVATION_LIMIT,
@@ -101,7 +100,7 @@ const observed = (state = "awaiting-approval") => ({
   state,
   accountLabel: state === "awaiting-approval" ? null : "payer@example.test",
 });
-let view: { root: Root; container: HTMLDivElement } | undefined;
+let view: Screen | undefined;
 function button(label: string) {
   return [...view!.container.querySelectorAll("button")].find(
     (node) => node.textContent === label,
@@ -114,24 +113,15 @@ async function click(label: string) {
 }
 const text = () => view!.container.textContent ?? "";
 async function render(host = "host") {
-  if (!view) {
-    const container = document.createElement("div");
-    document.body.append(container);
-    view = { root: createRoot(container), container };
-  }
-  const { root } = view;
-  await act(async () => {
-    root.render(
-      <ExtensionsFunding environmentId={EnvironmentId.make(host)} featureId="contextual" />,
-    );
-  });
+  const ui = <ExtensionsFunding environmentId={EnvironmentId.make(host)} featureId="contextual" />;
+  if (view) await view.rerender(ui);
+  else view = await renderUi(ui, { router: false });
 }
 function calls(operation: string) {
   return mocks.command.mock.calls.filter(([input]) => input.input.operation === operation);
 }
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.useFakeTimers();
+function setup(): AsyncDisposable {
+  const timers = fakeTimers();
   vi.setSystemTime(new Date("2026-09-26T12:00:00.000Z"));
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.command.mockReset();
@@ -155,21 +145,20 @@ beforeEach(() => {
   mocks.command.mockImplementation(async ({ input }) =>
     success(input.operation === "create" ? challenge : observed()),
   );
-});
-afterEach(async () => {
-  const current = view;
-  view = undefined;
-  if (current) {
-    await act(async () => current.root.unmount());
-    current.container.remove();
-  }
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      const current = view;
+      view = undefined;
+      await current?.[Symbol.asyncDispose]();
+      timers[Symbol.dispose]();
+      vi.restoreAllMocks();
+    },
+  };
+}
 
 describe("feature funding host linking", () => {
   it("accepts redemption completed by observe without redeeming twice", async () => {
+    await using _setup = setup();
     mocks.command.mockImplementation(async ({ input }) =>
       success(
         input.operation === "create"
@@ -197,6 +186,7 @@ describe("feature funding host linking", () => {
   it.each(["active", "revoked"])(
     "reconciles a recovery race to the actual newer %s state without claiming this approval succeeded",
     async (state) => {
+      await using _setup = setup();
       mocks.state = {
         ...mocks.state,
         state: "active",
@@ -242,6 +232,7 @@ describe("feature funding host linking", () => {
     },
   );
   it("does not discard an approval using an unconfirmed newer cached status", async () => {
+    await using _setup = setup();
     await render();
     await click("Link membership");
     mocks.state = { ...mocks.state, state: "active", generation: 4 };
@@ -251,6 +242,7 @@ describe("feature funding host linking", () => {
     expect(text()).not.toContain("Membership linked");
   });
   it("does not create or approve funding on render and preserves read-only access", async () => {
+    await using _setup = setup();
     mocks.access = false;
     await render();
     expect(mocks.command).not.toHaveBeenCalled();
@@ -258,6 +250,7 @@ describe("feature funding host linking", () => {
     expect(text()).toContain("relay management permission");
   });
   it("registers the primary host before requesting the named feature approval", async () => {
+    await using _setup = setup();
     mocks.configured = true;
     mocks.ensureLink.mockResolvedValue(true);
     await render();
@@ -275,6 +268,7 @@ describe("feature funding host linking", () => {
     expect(calls("redeem")).toHaveLength(0);
   });
   it("observes exact consent and automatically redeems once at the next funding generation", async () => {
+    await using _setup = setup();
     let approved = false;
     mocks.command.mockImplementation(async ({ input }) =>
       success(
@@ -315,6 +309,7 @@ describe("feature funding host linking", () => {
   it.each(["featureId", "environmentId", "challengeId", "generation", "expiresAt"])(
     "never redeems an approval with mismatched %s",
     async (field) => {
+      await using _setup = setup();
       mocks.command.mockImplementation(async ({ input }) =>
         success(
           input.operation === "create"
@@ -332,6 +327,7 @@ describe("feature funding host linking", () => {
     },
   );
   it("does not report an active link when redemption returns the challenge generation", async () => {
+    await using _setup = setup();
     mocks.command.mockImplementation(async ({ input }) =>
       success(
         input.operation === "create"
@@ -347,6 +343,7 @@ describe("feature funding host linking", () => {
     expect(text()).not.toContain("Membership linked");
   });
   it("cancels the exact pending challenge and preserves prior active funding", async () => {
+    await using _setup = setup();
     mocks.state = {
       ...mocks.state,
       state: "active",
@@ -371,6 +368,7 @@ describe("feature funding host linking", () => {
     expect(calls("redeem")).toHaveLength(0);
   });
   it("bounds automatic checks and supports explicit retry without a new challenge", async () => {
+    await using _setup = setup();
     await render();
     await click("Link membership");
     await act(async () => {
@@ -385,6 +383,7 @@ describe("feature funding host linking", () => {
     expect(calls("create")).toHaveLength(1);
   });
   it("stops observing the prior account's challenge when the signed-in account changes", async () => {
+    await using _setup = setup();
     mocks.configured = true;
     mocks.ensureLink.mockResolvedValue(true);
     await render();
@@ -399,6 +398,7 @@ describe("feature funding host linking", () => {
     expect(calls("redeem")).toHaveLength(0);
   });
   it("expires locally without redeeming an expired approval", async () => {
+    await using _setup = setup();
     mocks.command.mockImplementation(async ({ input }) =>
       success(
         input.operation === "create"

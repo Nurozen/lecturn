@@ -1,36 +1,40 @@
 import "../../index.css";
 
 import type { SquireIndicatorStateName } from "@lecturn/client-runtime/state/squireIndicator";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { render, type Screen } from "../../../test/render";
 import { Toggle } from "../ui/toggle";
 import { COMPANION_PALETTES, type CompanionPalette } from "./companion/types";
 import { SquireIndicator } from "./SquireIndicator";
 import { SquireMark } from "./SquireMark";
 
 let container: HTMLDivElement;
-let root: Root;
+let screen: Screen | undefined;
 let focused = true;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+// One fixed container per test: renderIndicator mounts into it first and rerenders after.
+// Disposing unmounts it and restores the focus spy.
+function setup(): AsyncDisposable {
   focused = true;
   // The test page's focus depends on the runner, so the window's focus is driven by hand.
   vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
   container = document.createElement("div");
   container.style.cssText = "position:fixed;top:0;left:0";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(() => root.unmount());
-  container.remove();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+  screen = undefined;
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen?.[Symbol.asyncDispose]();
+      } finally {
+        screen = undefined;
+        container.remove();
+        vi.restoreAllMocks();
+      }
+    },
+  };
+}
 
 const forms = {
   portrait: (state: SquireIndicatorStateName) => (
@@ -49,7 +53,8 @@ const forms = {
 };
 
 async function renderIndicator(element: React.ReactElement) {
-  await act(() => root.render(element));
+  if (screen) await screen.rerender(element);
+  else screen = await render(element, { container });
   const indicator = container.querySelector<HTMLElement>('[role="img"]');
   if (indicator === null) throw new Error("indicator did not render");
   return indicator;
@@ -74,11 +79,13 @@ async function expectPlayState(indicator: HTMLElement, playState: AnimationPlayS
 
 describe.each(Object.entries(forms))("%s indicator", (form, render) => {
   it.each(["idle", "waiting"] as const)("runs no animation while %s", async (state) => {
+    await using _env = setup();
     const indicator = await renderIndicator(render(state));
     expect(indicator.getAnimations({ subtree: true })).toEqual([]);
   });
 
   it("animates while working, only when focused and on screen", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(render("working"));
     await expectPlayState(indicator, "running");
     const [animation] = indicator.getAnimations({ subtree: true });
@@ -101,9 +108,10 @@ describe.each(Object.entries(forms))("%s indicator", (form, render) => {
   });
 
   it("drops the animation when work ends", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(render("working"));
     await expectPlayState(indicator, "running");
-    await act(() => root.render(render("waiting")));
+    await renderIndicator(render("waiting"));
     expect(indicator.getAnimations({ subtree: true })).toEqual([]);
   });
 });
@@ -121,6 +129,7 @@ describe("portrait stills", () => {
   }
 
   it("tells idle, waiting, and working apart from a single still", async () => {
+    await using _env = setup();
     // Muted, not disabled: idle keeps some cloth color and most of its brightness.
     const idle = stillFacts(await renderIndicator(forms.portrait("idle")));
     expect(idle.grayscale).toBeCloseTo(0.6);
@@ -142,6 +151,7 @@ describe("portrait stills", () => {
   });
 
   it("caps the working arc at half the ring, with a fainter, thinner tail behind its head", async () => {
+    await using _env = setup();
     const working = await renderIndicator(forms.portrait("working"));
     // Where a stroke starts and ends along the ring's path; round caps extend it by half its width.
     const segment = (slot: string) => {
@@ -178,6 +188,7 @@ describe("portrait stills", () => {
   });
 
   it("gives each palette its own face, and the Lead the gold one", async () => {
+    await using _env = setup();
     const source = async (palette: CompanionPalette, isLead = false) => {
       const indicator = await renderIndicator(
         <SquireIndicator
@@ -201,6 +212,7 @@ describe("portrait stills", () => {
   });
 
   it("badges the Lead's smallest portrait with a star held apart from its thread", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(
       <SquireIndicator
         state="waiting"
@@ -222,6 +234,7 @@ describe("portrait stills", () => {
   });
 
   it("dims the Lead's crest with the portrait only while idle", async () => {
+    await using _env = setup();
     const crestFacts = async (state: SquireIndicatorStateName) => {
       const indicator = await renderIndicator(
         <SquireIndicator
@@ -246,6 +259,7 @@ describe("portrait stills", () => {
   });
 
   it("keeps its own state look inside an unpressed team chip", async () => {
+    await using _env = setup();
     // Toggle fades svgs that carry no opacity class; the chip shows selection, not the portrait.
     const indicator = await renderIndicator(
       <Toggle size="sm-label" variant="outline" pressed={false}>
@@ -271,6 +285,7 @@ describe("portrait stills", () => {
   });
 
   it("switches to the mark below portrait size", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(
       <SquireIndicator
         state="idle"
@@ -324,6 +339,7 @@ describe("mark stills", () => {
   }
 
   it("shows a faint base under a bold, long, full-color segment while working", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(forms.mark("working"));
     const working = strokes(indicator);
     expect(working.baseOpacity).toBeLessThanOrEqual(0.3);
@@ -341,6 +357,7 @@ describe("mark stills", () => {
   });
 
   it("shows one solid, full-strength stroke in one tone while waiting", async () => {
+    await using _env = setup();
     expect(strokes(await renderIndicator(forms.mark("waiting")))).toEqual({
       baseOpacity: 1,
       baseDashed: false,
@@ -350,6 +367,7 @@ describe("mark stills", () => {
   });
 
   it("stays dimmed and still while idle", async () => {
+    await using _env = setup();
     const indicator = await renderIndicator(forms.mark("idle"));
     const svg = getComputedStyle(indicator.querySelector("svg")!);
     expect(Number(svg.opacity)).toBeLessThan(1);

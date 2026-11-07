@@ -2,6 +2,8 @@ import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
 import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
+import { resolveSendEnvMode } from "@lecturn/shared/projectSettings";
+import type { ComposerDraftWorkspaceSelection } from "../../state/use-composer-drafts";
 
 type WorkspaceMode = "local" | "worktree";
 
@@ -17,6 +19,16 @@ export function resolveNewTaskGitCwd(
   project: NewTaskProjectLike | null | undefined,
 ): string | null {
   return resolveProjectGitCwd({ project }) || null;
+}
+
+export function resolveNewTaskWorkspaceSelection(input: {
+  readonly selection: ComposerDraftWorkspaceSelection | undefined;
+  readonly fallback: ComposerDraftWorkspaceSelection;
+  readonly isGitRepo: boolean;
+}): ComposerDraftWorkspaceSelection {
+  const selection = input.selection ?? input.fallback;
+  const mode = resolveSendEnvMode({ requestedEnvMode: selection.mode, isGitRepo: input.isGitRepo });
+  return input.isGitRepo ? selection : { mode, branch: null, worktreePath: null };
 }
 
 export function resolveNewTaskWorkspaceLabel(input: {

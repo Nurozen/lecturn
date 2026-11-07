@@ -7,21 +7,21 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
+import { AsyncResult } from "effect/reactivity";
 import {
   createMemoryHistory,
   createRootRoute,
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import "~/index.css";
 
@@ -39,6 +39,19 @@ const fixture = vi.hoisted(() => ({
   project: null as unknown,
   environments: [] as unknown[],
   providers: new Map<string, unknown>(),
+  respondToApproval: (async () => undefined) as unknown,
+  annotation: {
+    id: "annotation-1",
+    pageUrl: "http://localhost:5173/",
+    pageTitle: null,
+    comment: "tighten this",
+    elements: [],
+    regions: [],
+    strokes: [],
+    styleChanges: [],
+    screenshot: null,
+    createdAt: "2026-10-16T00:00:00.000Z",
+  },
 }));
 
 vi.mock(import("../../state/entities"), async (original) => ({
@@ -87,15 +100,40 @@ vi.mock(import("../../state/session"), async (original) => ({
   useEnvironmentScope: (() => true) as never,
   readEnvironmentScope: (() => true) as never,
 }));
+vi.mock(import("./usePendingThreadRequests"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    usePendingThreadRequests: ((input: Parameters<typeof actual.usePendingThreadRequests>[0]) => ({
+      ...actual.usePendingThreadRequests(input),
+      onRespondToApproval: fixture.respondToApproval,
+    })) as never,
+  };
+});
+// The preview's own "send annotation" control, without a browser surface behind it.
+vi.mock(import("./RightPanelSurfaceContent"), () => ({
+  RightPanelSurfaceContent: ((props: {
+    onSendAnnotation: (annotation: unknown, image: null) => void;
+  }) => (
+    <button type="button" onClick={() => props.onSendAnnotation(fixture.annotation, null)}>
+      Send annotation
+    </button>
+  )) as never,
+}));
 
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../../test-fixtures";
 import ChatView from "../ChatView";
+import { toastManager } from "../ui/toast";
+import { render } from "../../../test/render";
 import {
   SQUIRE_THREAD_CONTROLS,
   type ChatViewControl,
   type ChatViewControls,
 } from "./chatViewControls";
+import { QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON } from "./composerApprovalState";
 
 const time = (second: number) => DateTime.makeUnsafe(Date.UTC(2026, 9, 1, 12, 0, second));
 
@@ -322,14 +360,9 @@ function seedHomeThread() {
   ]);
 }
 
-let root: Root | null = null;
-let host: HTMLDivElement | null = null;
-
 async function mount(controls?: ChatViewControls) {
-  host = document.createElement("div");
+  const host = document.createElement("div");
   host.style.cssText = "position:fixed;inset:0;display:flex;";
-  document.body.append(host);
-  root = createRoot(host);
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
@@ -344,26 +377,13 @@ async function mount(controls?: ChatViewControls) {
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
-  await act(async () => {
-    root!.render(
-      <AppAtomRegistryProvider>
-        <RouterProvider router={router} />
-      </AppAtomRegistryProvider>,
-    );
-  });
+  return render(
+    <AppAtomRegistryProvider>
+      <RouterProvider router={router} />
+    </AppAtomRegistryProvider>,
+    { container: host, router: false },
+  );
 }
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-});
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  host?.remove();
-  root = null;
-  host = null;
-  vi.unstubAllGlobals();
-});
 
 /** Every control a user can reach in the mounted view, by accessible name. */
 function interactiveNames(): string[] {
@@ -420,7 +440,7 @@ const SQUIRE_PLACEHOLDER = "Ask Release about anything it watches…";
 describe("ChatView controls", () => {
   it("shows only the Squire allowlist on a home thread", async () => {
     seedHomeThread();
-    await mount(SQUIRE_THREAD_CONTROLS);
+    await using _screen = await mount(SQUIRE_THREAD_CONTROLS);
     await waitForTimeline();
 
     const names = interactiveNames();
@@ -438,7 +458,7 @@ describe("ChatView controls", () => {
 
   it("keeps today's controls when no allowlist is given", async () => {
     seedHomeThread();
-    await mount();
+    await using _screen = await mount();
     await waitForTimeline();
 
     const names = interactiveNames();
@@ -462,15 +482,136 @@ describe("ChatView controls", () => {
 
   it("prompts with the Squire's name on its home thread, with or without the allowlist", async () => {
     seedHomeThread();
-    await mount(SQUIRE_THREAD_CONTROLS);
-    await vi.waitFor(() => expect(document.body.innerHTML).toContain(SQUIRE_PLACEHOLDER));
-    await act(async () => root?.unmount());
-    host?.remove();
+    {
+      await using _squireScreen = await mount(SQUIRE_THREAD_CONTROLS);
+      await vi.waitFor(() => expect(document.body.innerHTML).toContain(SQUIRE_PLACEHOLDER));
+    }
 
     seedHomeThread();
     fixture.shell = { ...(fixture.shell as object), squire: undefined };
-    await mount();
+    await using _screen = await mount();
     await waitForTimeline();
     expect(document.body.innerHTML).not.toContain(SQUIRE_PLACEHOLDER);
+  });
+});
+
+describe("sends and pending approvals", () => {
+  const THREAD_REF = { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID };
+  const PROVIDER = RuntimeRequestId.make("provider-approval");
+  const APP_TOOL = RuntimeRequestId.make("app-tool-approval");
+  const REDIRECT_PLACEHOLDER = "Send a message to decline and redirect the agent";
+  const DRAFT = "Try the other migration";
+
+  const approvalRequest = (id: RuntimeRequestId, second: number) => ({
+    id,
+    threadId: THREAD_ID,
+    runId: RUN_2_ID,
+    kind: "command",
+    status: "pending",
+    responseCapability: { type: "live" },
+    createdAt: time(second),
+    ...(id === APP_TOOL
+      ? {
+          connectedAppTool: {
+            appId: "dev.rocketwright",
+            appName: "RocketWright",
+            toolName: "rw_simulate",
+            reason: null,
+            source: "static",
+          },
+        }
+      : {}),
+  });
+
+  /** A plain thread with these approvals pending, oldest first, and the right panel open. */
+  async function mountWithApprovals(requests: ReadonlyArray<RuntimeRequestId>) {
+    seedHomeThread();
+    fixture.shell = { ...(fixture.shell as object), squire: undefined };
+    fixture.projection = {
+      ...(fixture.projection as object),
+      runtimeRequests: requests.map((id, index) => approvalRequest(id, 10 + index)),
+    };
+    const respondToApproval = vi.fn(async () => AsyncResult.success(undefined));
+    fixture.respondToApproval = respondToApproval;
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "");
+    useRightPanelStore.setState(useRightPanelStore.getInitialState(), true);
+    useRightPanelStore.getState().openFile(THREAD_REF, "src/release.ts");
+    const screen = await mount();
+    await vi.waitFor(() => expect(sendAnnotationButton()).not.toBeNull());
+    return { screen, respondToApproval };
+  }
+
+  function sendAnnotationButton() {
+    return (
+      [...document.querySelectorAll("button")].find(
+        (candidate) => candidate.textContent === "Send annotation",
+      ) ?? null
+    );
+  }
+
+  /** The send control once the composer holds a draft, so only an approval can disable it. */
+  async function sendButtonWithDraft() {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, DRAFT);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(DRAFT));
+    return document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
+  }
+
+  const annotationKeptToast = expect.objectContaining({ title: "Annotation attached to draft" });
+
+  it("keeps an annotation send from declining an app tool approval", async () => {
+    const { screen, respondToApproval } = await mountWithApprovals([APP_TOOL]);
+    await using _screen = screen;
+    using add = vi.spyOn(toastManager, "add");
+
+    sendAnnotationButton()!.click();
+
+    await vi.waitFor(() => expect(add).toHaveBeenCalledWith(annotationKeptToast));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it("blocks the send when an app tool waits behind a provider approval", async () => {
+    const { screen, respondToApproval } = await mountWithApprovals([PROVIDER, APP_TOOL]);
+    await using _screen = screen;
+    using add = vi.spyOn(toastManager, "add");
+
+    expect(document.body.innerHTML).toContain(QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
+    expect(document.body.innerHTML).not.toContain(REDIRECT_PLACEHOLDER);
+    expect((await sendButtonWithDraft()).disabled).toBe(true);
+
+    sendAnnotationButton()!.click();
+
+    await vi.waitFor(() => expect(add).toHaveBeenCalledWith(annotationKeptToast));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it("blocks the send the same way when the app tool arrived first", async () => {
+    const { screen, respondToApproval } = await mountWithApprovals([APP_TOOL, PROVIDER]);
+    await using _screen = screen;
+
+    expect(document.body.innerHTML).not.toContain(REDIRECT_PLACEHOLDER);
+    expect((await sendButtonWithDraft()).disabled).toBe(true);
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it("still declines and redirects when only provider approvals are pending", async () => {
+    const { screen, respondToApproval } = await mountWithApprovals([PROVIDER]);
+    await using _screen = screen;
+
+    expect(document.body.innerHTML).toContain(REDIRECT_PLACEHOLDER);
+    const send = await sendButtonWithDraft();
+    expect(send.disabled).toBe(false);
+
+    send.click();
+
+    await vi.waitFor(() => expect(respondToApproval).toHaveBeenCalledWith(PROVIDER, "decline"));
+  });
+
+  it("still declines a provider approval for an annotation send", async () => {
+    const { screen, respondToApproval } = await mountWithApprovals([PROVIDER]);
+    await using _screen = screen;
+
+    sendAnnotationButton()!.click();
+
+    await vi.waitFor(() => expect(respondToApproval).toHaveBeenCalledWith(PROVIDER, "decline"));
   });
 });

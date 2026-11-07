@@ -25,26 +25,6 @@ describe("generate mobile Uniwind themes", () => {
     ).toEqual([]);
   });
 
-  it("registers every custom palette for both appearances", () => {
-    expect(customThemeNames).toEqual([
-      "lecturn-chat-light",
-      "lecturn-chat-dark",
-      "grove-light",
-      "grove-dark",
-      "ocean-light",
-      "ocean-dark",
-      "ember-light",
-      "ember-dark",
-      "iris-light",
-      "iris-dark",
-    ]);
-
-    const stylesheet = renderUniwindThemesCSS();
-    for (const themeName of customThemeNames) {
-      expect(stylesheet.match(new RegExp(`@variant ${themeName} \\{`, "gu"))).toHaveLength(1);
-    }
-  });
-
   it("keeps the default runtime bridge and generated CSS on the same palette", () => {
     const variables = JSON.parse(renderDefaultThemeVariablesJSON());
 

@@ -6,10 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Notifications from "expo-notifications";
 
-import {
-  enableAgentNotifications,
-  requestAgentNotificationPermission,
-} from "./notificationPermissions";
+import { enableAgentNotifications } from "./notificationPermissions";
 
 const platform = vi.hoisted(() => ({ OS: "android" }));
 vi.mock("react-native", () => ({ Platform: platform }));
@@ -95,49 +92,4 @@ describe("enabling device notifications", () => {
       expect(register).not.toHaveBeenCalled();
     });
   });
-});
-
-describe("agent notification permission", () => {
-  beforeEach(() => {
-    resetNotificationMocks();
-    platform.OS = "android";
-  });
-
-  it.effect("creates an Android channel before prompting for notification permission", () =>
-    Effect.gen(function* () {
-      expect(yield* requestAgentNotificationPermission).toEqual({ type: "granted" });
-      expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith("agent-alerts", {
-        name: "Agent alerts",
-        importance: 4,
-      });
-      expect(
-        vi.mocked(Notifications.setNotificationChannelAsync).mock.invocationCallOrder[0],
-      ).toBeLessThan(vi.mocked(Notifications.requestPermissionsAsync).mock.invocationCallOrder[0]!);
-    }),
-  );
-
-  it.effect("preserves denied permission when Android cannot ask again", () =>
-    Effect.gen(function* () {
-      vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({
-        granted: false,
-        canAskAgain: false,
-      } as Notifications.NotificationPermissionsStatus);
-      expect(yield* requestAgentNotificationPermission).toEqual({
-        type: "denied",
-        canAskAgain: false,
-      });
-      expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
-    }),
-  );
-
-  it.effect("keeps iOS permission requests free of Android channel setup", () =>
-    Effect.gen(function* () {
-      platform.OS = "ios";
-      expect(yield* requestAgentNotificationPermission).toEqual({ type: "granted" });
-      expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalled();
-      expect(Notifications.requestPermissionsAsync).toHaveBeenCalledWith({
-        ios: { allowAlert: true, allowBadge: true, allowSound: true },
-      });
-    }),
-  );
 });

@@ -3,10 +3,11 @@ import "../../../index.css";
 import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import { SquireId, SquireSnapshot } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
-import { act, createElement, useRef, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createElement, useRef, type ReactElement } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+
+import { render as renderScreen, type Screen } from "../../../../test/render";
 
 import { SquireCompanion } from "../SquireCompanion";
 import { createManualCompanionClock, setCompanionClockForTests } from "./companionClock";
@@ -82,27 +83,39 @@ const entry = (id: string, recentActivity: ReadonlyArray<Activity> = []): Squire
 });
 
 let clock: ReturnType<typeof createManualCompanionClock>;
-let container: HTMLDivElement;
-let root: Root;
+// The current mount; render() mounts on first use and rerenders after, remount() starts over.
+let screen: Screen | undefined;
+let screens: Screen[] = [];
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+// A manual clock for one test; disposing unmounts every mount and resets the clock and gestures.
+function setup(): AsyncDisposable {
   clock = createManualCompanionClock({ frameMs: 1000 / 60 });
   setCompanionClockForTests(clock);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
+  screen = undefined;
+  screens = [];
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        for (const mounted of screens) await mounted[Symbol.asyncDispose]();
+      } finally {
+        screen = undefined;
+        screens = [];
+        setCompanionClockForTests(null);
+        resetSquireGesturesForTests();
+      }
+    },
+  };
+}
 
-afterEach(async () => {
-  await act(() => root.unmount());
-  container.remove();
-  setCompanionClockForTests(null);
-  resetSquireGesturesForTests();
-  vi.unstubAllGlobals();
-});
-
-const render = (element: ReactElement) => act(() => root.render(element));
+async function render(element: ReactElement) {
+  if (screen) return screen.rerender(element);
+  screen = await renderScreen(element, { router: false });
+  screens.push(screen);
+}
+async function remount() {
+  await screen?.unmount();
+  screen = undefined;
+}
 const rigIn = (selector: string) =>
   document.querySelector<SquireRigElement>(`${selector} squire-rig`);
 const hoverBusts = () => document.querySelectorAll('[data-testid="squire-hover-bust"] squire-rig');
@@ -145,6 +158,7 @@ async function framesWhile(rig: SquireRigElement, ms: number) {
 
 describe("single live rig across the panel and the sidebar hover card", () => {
   it("stills the panel while one hover card is open and hands the lease back on unmount", async () => {
+    await using _env = setup();
     await render(createElement("div", null, panel(), portrait("a", 0), portrait("b", 60)));
     const panelRig = rigIn("[data-panel]")!;
     await vi.waitFor(() => expect(panelRig.debugState.reason).toBeNull(), { timeout: 10_000 });
@@ -201,6 +215,7 @@ describe("gesture player", () => {
         // One at a time: a gesture starts only after the previous one finished.
         expect(running).toBe(0);
         running += 1;
+        // oxlint-disable-next-line lecturn/no-frame-waits-in-browser-tests -- the fake gesture's own duration, so an overlapping play would be seen.
         await new Promise((resolve) => setTimeout(resolve, 5));
         played.push(name);
         running -= 1;
@@ -211,6 +226,7 @@ describe("gesture player", () => {
   }
 
   it("plays unseen activity once, in order, and never replays after a remount", async () => {
+    await using _env = setup();
     const first = recorder();
     const history = [activity(1, "greet"), activity(2, "ponder")];
     await render(createElement(Player, { recentActivity: history, target: first.target }));
@@ -222,8 +238,7 @@ describe("gesture player", () => {
     await vi.waitFor(() => expect(first.played).toEqual(["greet", "listen", "nod"]));
 
     // A reconnect re-sends the same log to a fresh mount: nothing at or below 5 plays again.
-    await act(() => root.unmount());
-    root = createRoot(container);
+    await remount();
     const second = recorder();
     await render(createElement(Player, { recentActivity: live, target: second.target }));
     const reconnected = [...live.slice(1), activity(6, "flourish")];
@@ -232,6 +247,7 @@ describe("gesture player", () => {
   });
 
   it("baselines an empty log on first open so the first new entry still plays", async () => {
+    await using _env = setup();
     const { played, target } = recorder();
     await render(createElement(Player, { recentActivity: [], target }));
     await render(createElement(Player, { recentActivity: [activity(1, "glance")], target }));

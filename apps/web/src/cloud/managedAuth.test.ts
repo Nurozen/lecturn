@@ -1,3 +1,4 @@
+/* oxlint-disable lecturn/require-disposable-render -- A node-environment test that renders into a stubbed document and window; the browser render helper cannot load here. */
 import {
   MULTI_ACCOUNT_ENABLED_MARKER_KEY,
   isMultiAccountMarkerFresh,
@@ -177,6 +178,7 @@ describe("single-account guard in front of account transitions", () => {
       root.render(createElement(ManagedRelayAuthProvider, null));
     });
     await act(async () => {
+      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
       await new Promise<void>((resolve) => setImmediate(resolve));
     });
   };
@@ -253,8 +255,11 @@ describe("single-account guard in front of account transitions", () => {
     openConnectSignIn({ isSignedIn: false, openSignIn }, {});
     expect(openSignIn).toHaveBeenCalledTimes(2);
   });
+
   describe("multi-account lifecycle", () => {
     it("lets a second account join the first and follows Clerk's active user", async () => {
+      const now = 1_800_000_000_000;
+      using _now = vi.spyOn(Date, "now").mockReturnValue(now);
       await observe([sessionA], sessionA);
       const relaySessionA = appAtomRegistry.get(managedRelaySessionsAtom).get("account-a");
       await observe([sessionA, sessionB], sessionB);
@@ -272,7 +277,7 @@ describe("single-account guard in front of account transitions", () => {
       expect(
         isMultiAccountMarkerFresh(
           sharedStorage.entries.get(MULTI_ACCOUNT_ENABLED_MARKER_KEY) ?? null,
-          Date.now(),
+          now,
         ),
       ).toBe(true);
     });

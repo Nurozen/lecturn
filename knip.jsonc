@@ -66,11 +66,13 @@
     },
     "apps/web": {
       // Worktree setup runs warm-dep-cache directly; the Squire companion lab and its
-      // capture script are run by hand, and the lab's index.html loads main.tsx.
+      // capture script are run by hand, the lab's index.html loads main.tsx, and
+      // evidence fixtures run under node.
       "entry": [
         "scripts/warm-dep-cache.ts",
         "scripts/squire-b4-capture.ts",
         "scripts/squire-lab/main.tsx",
+        "test/fixtures/**/*.mjs",
       ],
       // Replaced in the sidebar by useSagaSidebarTree; kept until the fork decides its fate.
       "ignore": ["src/components/stave/SagaSidebarSection.tsx"],
@@ -80,6 +82,8 @@
     "apps/marketing": {
       // The fork's legal pages are hand-written and do not use this layout.
       "ignore": ["src/components/LegalPage.astro"],
+      // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.
+      "ignoreDependencies": ["@astrojs/check"],
     },
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.
@@ -115,8 +119,10 @@
       // icon exporters stay beside export-lecturn-icons.ts, which icons:export runs instead.
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
       // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
-      // setup-worktree.ts runs directly from the lecturn.json setup action, and
-      // smoke-pack-install.ts runs by hand against a built vendoring kit.
+      // setup-worktree.ts runs directly from the lecturn.json setup action,
+      // smoke-pack-install.ts runs by hand against a built vendoring kit,
+      // verify-windows-desktop-artifact.ts checks a Windows payload built on another host, and
+      // electron-builder loads the macOS signer (sign-macos.ts) by path.
       "entry": [
         "export-android-icons.ts",
         "export-brand-icons.ts",
@@ -125,7 +131,9 @@
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
+        "sign-macos.ts",
         "smoke-pack-install.ts",
+        "verify-windows-desktop-artifact.ts",
       ],
     },
     "packages/*": {

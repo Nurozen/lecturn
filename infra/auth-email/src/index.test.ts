@@ -1,8 +1,9 @@
 // @effect-diagnostics globalDate:off - Signed webhook freshness uses wall-clock Unix timestamps.
 import * as NodeCrypto from "node:crypto";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { handleRequest, type Env } from "./index.ts";
 
+const NOW = Date.parse("2026-10-13T12:00:00Z");
 const secretBytes = Buffer.from("test signing secret is not a credential");
 const env: Env = {
   CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${secretBytes.toString("base64")}`,
@@ -17,7 +18,7 @@ const email = {
   body: "<p>Your code: 123456</p>",
   body_plain: "Your code: 123456",
 };
-function signed(data: unknown = email, timestamp = Math.floor(Date.now() / 1000)) {
+function signed(data: unknown = email, timestamp = Math.floor(NOW / 1000)) {
   const body = JSON.stringify({ type: "email.created", data });
   const signature = NodeCrypto.createHmac("sha256", secretBytes)
     .update(`msg_test.${timestamp}.${body}`)
@@ -34,6 +35,13 @@ function signed(data: unknown = email, timestamp = Math.floor(Date.now() / 1000)
 }
 
 describe("Clerk email delivery", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("verifies signed messages and preserves content with a stable idempotency key", async () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(new Response('{"id":"sent"}'));
     expect((await handleRequest(signed(), env, send)).status).toBe(204);

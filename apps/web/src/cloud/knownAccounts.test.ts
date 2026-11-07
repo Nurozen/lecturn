@@ -210,7 +210,7 @@ describe("known-account store", () => {
       KNOWN_ACCOUNTS_STORAGE_KEY,
       {
         ...document,
-        signingOut: [{ ...active("account-b"), startedAt: Date.now() }],
+        signingOut: [{ ...active("account-b"), startedAt: vi.getMockedSystemTime()!.getTime() }],
       },
       KnownAccountsDocument,
     );

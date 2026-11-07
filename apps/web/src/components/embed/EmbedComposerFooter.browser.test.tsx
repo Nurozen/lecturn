@@ -4,9 +4,9 @@ import "../../embed/embedComposer.css";
 
 import { scopeProjectRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@lecturn/contracts";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ReactNode } from "react";
+import { describe, expect, it } from "vite-plus/test";
+import { render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { measureRestingComposerControls } from "../chat/restingComposerControlsMeasurement";
@@ -16,23 +16,22 @@ const presentation = {
   projectRef: scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1")),
 };
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   container.style.width = "360px";
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+    },
+  };
+}
 
 // The footer's two children as ChatComposer passes them: the controls, then the actions.
 const controlsChild = (
@@ -76,13 +75,11 @@ const footer = (stacked: boolean) => (
 
 const render = (node: ReactNode, embedded: boolean) => {
   if (embedded) document.documentElement.dataset.lecturnEmbed = "";
-  return act(async () =>
-    root.render(
-      embedded ? (
-        <EmbedPresentationContext value={presentation}>{node}</EmbedPresentationContext>
-      ) : (
-        node
-      ),
+  return testScreen.rerender(
+    embedded ? (
+      <EmbedPresentationContext value={presentation}>{node}</EmbedPresentationContext>
+    ) : (
+      node
     ),
   );
 };
@@ -119,6 +116,7 @@ const composer = (stacked: boolean) => (
 
 describe("EmbedComposerFooter", () => {
   it("puts model, effort and access on the first row and Contextual on the second", async () => {
+    await using _setup = await setup();
     await render(footer(true), true);
 
     const rows = container.querySelectorAll(
@@ -138,6 +136,7 @@ describe("EmbedComposerFooter", () => {
   });
 
   it("puts attach and send at the end of the one-line input", async () => {
+    await using _setup = await setup();
     await render(composer(true), true);
 
     const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]')!;
@@ -164,6 +163,7 @@ describe("EmbedComposerFooter", () => {
   });
 
   it("keeps the editor's own height while the footer rests in one row", async () => {
+    await using _setup = await setup();
     await render(composer(false), true);
 
     const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]')!;
@@ -174,6 +174,7 @@ describe("EmbedComposerFooter", () => {
   });
 
   it("keeps the controls and actions mounted when the embed footer stops stacking", async () => {
+    await using _setup = await setup();
     await render(footer(true), true);
     const controls = container.querySelector("[data-chat-composer-footer-controls]");
     const actions = container.querySelector("[data-chat-composer-actions]");
@@ -194,6 +195,7 @@ describe("EmbedComposerFooter", () => {
   });
 
   it("draws Contextual as text only, without its sparkles icon", async () => {
+    await using _setup = await setup();
     const contextual = (
       <button type="button">
         <svg data-testid="sparkles" className="size-3.5" />
@@ -230,6 +232,7 @@ describe("EmbedComposerFooter", () => {
   });
 
   it("renders the plain footer div outside the embed", async () => {
+    await using _setup = await setup();
     await render(
       <div
         data-chat-composer-footer="true"

@@ -1,5 +1,3 @@
-"use client";
-
 import type { PreviewViewportSetting, PreviewViewportSize } from "@lecturn/contracts";
 import {
   useEffect,

@@ -399,14 +399,14 @@ socket-bound fiber would die with the tab). Its public shape provides `run`, `ob
   attach first (so the very first event is seen live), then fork the body into the service scope
   (`Effect.forkIn`). Known id with the same fingerprint → attach from `afterSequence`, whatever
   the state. Known id with a different fingerprint → `StaveOperationRejectedError { code:
-"invalid_arguments" }`. Reaped id → `operation_expired`. The stream ends after the terminal
+  "invalid_arguments" }`. Reaped id → `operation_expired`. The stream ends after the terminal
   event.
 - **`observe { operationId, afterSequence? }`** attaches only: unknown id → `invalid_arguments`,
   reaped → `operation_expired`.
 - **`attach`** subscribes to the PubSub _before_ snapshotting the buffer (running entries only),
   replays every buffered event with `sequence > afterSequence`, then concatenates the live
   subscription filtered by sequence and `takeUntil` a terminal event. When `afterSequence + 1 <
-earliestSequence` (the cursor was evicted) the replay is prefixed with
+  earliestSequence` (the cursor was evicted) the replay is prefixed with
   `reset { earliestSequence }`, numbered `earliestSequence - 1`, and the client is expected to
   drop what it holds.
 - **Events** (`StaveProgressEvent`): `phase_started { phase, commandLine? }`,
@@ -433,7 +433,7 @@ earliestSequence` (the cursor was evicted) the replay is prefixed with
      `--spec`, otherwise `specPath` passes through; `edits` become `repo[:base]`, `references`
      `repo[:ref]`, `memory[].spec` → `--memory`, plus `saga`, `after`, `common`, `includeWeak`,
      `noLearn`. As soon as it returns, `entry.partialSpace = { spaceId, spacePath,
-manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: memory rides
+     manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: memory rides
      on `--memory` of the create (the plan's phase list named one).
   3. `verify`: `space status <id>`; `incarnation_mismatch` unless `manifest.createdAt` equals
      the stamp the create returned. Then `workspaceReader.invalidate(spacePath)`.
@@ -468,7 +468,7 @@ manifestCreatedAt }` is recorded. There is no separate "attach memory" phase: me
   participant fingerprints. `STAVE_OPERATION_VERB` maps each kind to its verb so errors raised
   before a spawn still name it.
 - `summary(operationId)` exposes `{ kind, state, earliestSequence, nextSequence,
-bufferedEvents, manifestCreatedAt }` for tests and diagnostics.
+  bufferedEvents, manifestCreatedAt }` for tests and diagnostics.
 
 ### RPC surface
 
@@ -499,8 +499,8 @@ other streaming RPCs.
 and `sequence`:
 
 - `StaveOperationState { operationId, status: idle | running | finished | failed |
-disconnected, phases[], lastSequence, earliestSequence?, truncated, result?, error?,
-disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?`,
+  disconnected, phases[], lastSequence, earliestSequence?, truncated, result?, error?,
+  disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?`,
   `durationMs?`, and its retained `lines[]` (`{ stream, text }`).
 - `reduceStaveProgressEvent` is pure: it ignores events for another id, events at or below
   `lastSequence` (replays, reordering), and anything after a terminal event; `reset` drops the
@@ -542,7 +542,7 @@ disconnectReason? }`; each phase keeps `commandLine?`, `startedAt`, `finishedAt?
   chosen kind.
 - `packages/client-runtime/src/state/staveSpaceWizard.ts` holds every rule of the wizard (shared with mobile), so
   the dialog and step components only render. Steps `identity → repos → memory → saga → review →
-progress`, with `memory` present only when some `stave.memoryProviders` row is `available`
+  progress`, with `memory` present only when some `stave.memoryProviders` row is `available`
   (`wizardSteps`). `validateSpaceId`: charset via `isValidStaveSpaceId`, a live row (`id` or
   `logicalId`) blocks, archived matches (`logicalId`, `archiveBasename`, or `<id>-<14 digits>`)
   only warn. Kind chips `ticket | spike | audit | custom`; `review` and `saga` are reserved.
@@ -678,7 +678,7 @@ Rules built on them:
 - **Operations** (`apps/server/src/stave/StaveOperations.test.ts`): a `scenario` harness builds
   the service over a recording `StaveCli` mock (every call's method and input is captured) with
   real temp roots for `agentWorkDir` and `.archive/`, a fake `ProcessRunner` for the `git branch
---list` probe, and stubbed engine/snapshot services so the server-side `project.create` is
+  --list` probe, and stubbed engine/snapshot services so the server-side `project.create` is
   observable. Streams are collected with `Stream.runCollect(ops.run(...))` and asserted by
   event outline; `Deferred` gates hold a phase open to test attach-from-cursor, `reset` after
   eviction (small `layerWith` limits), a second attacher following live, and the same-id

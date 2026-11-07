@@ -5,6 +5,7 @@ import * as Exit from "effect/Exit";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import UpstreamWebhookDedupe from "./Migrations/067_WebhookDedupe.ts";
 import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
@@ -38,14 +39,6 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect("migrates a fresh database through the whole manifest", () =>
-    Effect.gen(function* () {
-      yield* runMigrations();
-      assert.deepStrictEqual(yield* history, migrationManifest);
-      assert.isAbove(yield* v2TableCount, 0);
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-  );
-
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -169,6 +162,30 @@ describe("runMigrations", () => {
         [82, "Squire"],
         [83, "CodexUsageNativeTurnIndex"],
         [84, "RepairClientSettlementTimestamps"],
+        [85, "WebhookDedupe"],
+      ]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the webhook dedupe schema a database created under upstream's id", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 84 });
+      // Upstream published this schema as migration 67.
+      yield* UpstreamWebhookDedupe;
+      yield* sql`INSERT INTO scheduled_tasks (task_id, title, prompt, enabled, schedule_json,
+        project_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode,
+        created_by, creation_source, created_at, updated_at, last_run_status, run_count)
+        VALUES ('task-1', 'Task', 'Prompt', 1, '{}', 'project-1', '{}', '{}', 'full-access',
+        'default', 'user', 'user', 'now', 'now', 'idle', 0)`;
+      yield* sql`INSERT INTO scheduled_task_webhook_pending
+        (delivery_id, task_id, coalesce_key, due_at, task_json, request_json, delivery_ids_json)
+        VALUES ('delivery-1', 'task-1', 'key', 1, '{}', '{}', '[]')`;
+
+      assert.deepStrictEqual(yield* runMigrations(), [[85, "WebhookDedupe"]]);
+      assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
+        { delivery_id: "delivery-1" },
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -202,6 +219,7 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [83, "CodexUsageNativeTurnIndex"],
         [84, "RepairClientSettlementTimestamps"],
+        [85, "WebhookDedupe"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

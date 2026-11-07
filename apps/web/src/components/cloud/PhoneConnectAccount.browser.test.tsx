@@ -1,9 +1,7 @@
-import { act, cloneElement, type ReactElement, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("symbaHost", { protocolVersion: 2, connectAccount: true });
   return {
     openNative: vi.fn(),
@@ -77,9 +75,10 @@ vi.mock(import("@tanstack/react-router"), async (original) => ({
 
 import { phoneConnectAccount } from "../../cloud/phoneConnectAccount";
 import { useConnectAccountAuth } from "../../cloud/useConnectAccountAuth";
+import { act, render, type Screen } from "../../../test/render";
 import { PhoneConnectAccountSection, PhoneConnectSidebarEntry } from "./PhoneConnectAccount";
-let root: Root | null = null;
-let container: HTMLDivElement;
+let screen: Screen | undefined;
+let container: HTMLElement;
 const button = (label: string) =>
   [...container.querySelectorAll("button")].find((node) => node.textContent === label)!;
 const displayedText = () => container.textContent ?? "";
@@ -89,10 +88,8 @@ function AuthState() {
   const { isLoaded, isSignedIn, userId } = useConnectAccountAuth();
   return <output>{JSON.stringify({ isLoaded, isSignedIn, userId })}</output>;
 }
-beforeEach(async () => {
+async function setup(): Promise<AsyncDisposable> {
   vi.spyOn(window, "open").mockImplementation(() => null);
-  container = document.createElement("div");
-  document.body.append(container);
   state.configured = true;
   state.nativeConnect = true;
   state.status.mockReset();
@@ -100,29 +97,31 @@ beforeEach(async () => {
   state.openNative.mockClear();
   state.closeSidebar.mockClear();
   await phoneConnectAccount.logout();
-});
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  root = null;
-  container.remove();
-  vi.restoreAllMocks();
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      const current = screen;
+      screen = undefined;
+      await current?.[Symbol.asyncDispose]();
+      vi.restoreAllMocks();
+    },
+  };
+}
 
 async function mount() {
-  root = createRoot(container);
-  await act(async () => {
-    root!.render(
-      <>
-        <PhoneConnectSidebarEntry />
-        <PhoneConnectAccountSection />
-        <AuthState />
-      </>,
-    );
-  });
+  screen = await render(
+    <>
+      <PhoneConnectSidebarEntry />
+      <PhoneConnectAccountSection />
+      <AuthState />
+    </>,
+    { router: false },
+  );
+  container = screen.container;
 }
 
 describe("phone Connect controls", () => {
   it("shows restoration progress and blocks duplicate sign-in until native settles", async () => {
+    await using _setup = await setup();
     state.status.mockReturnValue({
       configured: true,
       state: "loading",
@@ -151,6 +150,7 @@ describe("phone Connect controls", () => {
   });
 
   it("keeps the account entry discoverable and reaches the Connections body while disabled", async () => {
+    await using _setup = await setup();
     state.configured = false;
     await phoneConnectAccount.refresh();
     await mount();
@@ -165,6 +165,7 @@ describe("phone Connect controls", () => {
   });
 
   it("opens native sign-in directly and settles success/cancel from native status", async () => {
+    await using _setup = await setup();
     await mount();
     await press("Sign in to Lecturn Connect");
     expect(state.openNative).toHaveBeenCalledOnce();
@@ -196,6 +197,7 @@ describe("phone Connect controls", () => {
   ])(
     "recovers a refresh/credential error with $action before starting again",
     async ({ account, action }) => {
+      await using _setup = await setup();
       state.status.mockReturnValue({
         configured: true,
         state: "error",
@@ -222,6 +224,7 @@ describe("phone Connect controls", () => {
   );
 
   it("shows explicit update guidance for older native binaries", async () => {
+    await using _setup = await setup();
     state.nativeConnect = false;
     await phoneConnectAccount.refresh();
     await mount();

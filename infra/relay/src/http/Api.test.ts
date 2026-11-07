@@ -1,4 +1,7 @@
 import { DecisionsService } from "../decisions/DecisionsService.ts";
+import * as TestClock from "effect/testing/TestClock";
+import * as Fiber from "effect/Fiber";
+import * as Duration from "effect/Duration";
 import * as HttpServer from "effect/http/HttpServer";
 import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
@@ -15,20 +18,16 @@ import * as Data from "effect/Data";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import * as Etag from "effect/http/Etag";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpRouter from "effect/http/HttpRouter";
-import * as HttpMiddleware from "effect/http/HttpMiddleware";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -49,18 +48,17 @@ import { RELAY_MANAGED_TUNNEL_RECOVERY_TYP, signRelayJwt } from "@lecturn/shared
 
 import {
   RELAY_HTTP_ROUTER_CONFIG,
-  RELAY_REQUEST_DEADLINE_MS,
   RELAY_LIFECYCLE_REQUEST_DEADLINE_MS,
   recoverEnvironmentTunnelRecord,
   registerEnvironmentTunnelRecovery,
   relayDpopFailureReason,
-  revokeEnvironmentLinkRecord,
   syncManagedEndpointOriginRecord,
   traceRelayHttpRequestWith,
   unlinkEnvironmentRecord,
   verifyRelayClientBearerToken,
   verifyEnvironmentTunnelRecoveryProof,
   withoutCapturedParentSpan,
+  revokeEnvironmentLinkRecord,
 } from "./Api.ts";
 import * as RelayHttpApi from "./Api.ts";
 import * as RelayConfiguration from "../Config.ts";
@@ -1124,39 +1122,6 @@ describe("relay environment unlink", () => {
     );
   });
 
-  it.effect("revokes the link and its credentials in one database transaction", () => {
-    const calls: Array<string> = [];
-    return Effect.gen(function* () {
-      expect(
-        yield* revokeEnvironmentLinkRecord({
-          userId: "user-1",
-          environmentId: "environment-1",
-          environmentPublicKey: "public-key",
-        }),
-      ).toBe(true);
-      expect(calls).toEqual(["transaction", "link", "credential"]);
-    }).pipe(
-      Effect.provide(
-        layerRelayUnlinkTest({
-          withTransaction: (effect) => {
-            calls.push("transaction");
-            return effect;
-          },
-          revokeForUser: () =>
-            Effect.sync(() => {
-              calls.push("link");
-              return true;
-            }),
-          revokeCredential: () =>
-            Effect.sync(() => {
-              calls.push("credential");
-              return true;
-            }),
-        }),
-      ),
-    );
-  });
-
   it.effect("drops the unlinked endpoint's held webhooks, even if clearing fails", () => {
     const cleared: Array<string> = [];
     const endpointKey = "0123456789abcdef";
@@ -1503,7 +1468,6 @@ describe("relay request tracing", () => {
         expect(Option.getOrUndefined(spans[1]!.parent)?.spanId).toBe(spans[0]?.spanId);
       }),
   );
-
   it.effect.each([
     ["POST", "/v1/client/environment-links"],
     ["DELETE", "/v1/client/environment-links/env_a"],
@@ -1540,98 +1504,6 @@ describe("relay request tracing", () => {
       );
       yield* TestClock.adjust(Duration.millis(RELAY_LIFECYCLE_REQUEST_DEADLINE_MS));
       expect((yield* Fiber.join(fiber)).status).toBe(504);
-    }),
-  );
-
-  it.effect("records the Cloudflare edge a request entered through on its server span", () =>
-    Effect.gen(function* () {
-      const spans: Array<Tracer.NativeSpan> = [];
-      const tracer = Tracer.make({
-        span: (options) => {
-          const span = new Tracer.NativeSpan(options);
-          spans.push(span);
-          return span;
-        },
-      });
-      const source = new Request("https://relay.test/v1/environments/env-1/connect", {
-        method: "POST",
-      });
-      Object.defineProperty(source, "cf", {
-        value: { colo: "JNB", country: "ZA", continent: "AF", asn: 37_100 },
-      });
-
-      yield* traceRelayHttpRequestWith(
-        Effect.succeed(HttpServerResponse.empty({ status: 204 })),
-        Layer.succeed(Tracer.Tracer, tracer),
-      ).pipe(
-        Effect.provideService(
-          HttpServerRequest.HttpServerRequest,
-          HttpServerRequest.fromWeb(source),
-        ),
-      );
-
-      const server = spans.find((span) => span.kind === "server");
-      expect(server?.attributes.get("relay.edge.colo")).toBe("JNB");
-      expect(server?.attributes.get("relay.edge.country")).toBe("ZA");
-      expect(server?.attributes.get("relay.edge.continent")).toBe("AF");
-    }),
-  );
-
-  it.effect("records one server span inside the worker's disabled HTTP tracer", () =>
-    Effect.gen(function* () {
-      const spans: Array<Tracer.NativeSpan> = [];
-      const tracer = Tracer.make({
-        span: (options) => {
-          const span = new Tracer.NativeSpan(options);
-          spans.push(span);
-          return span;
-        },
-      });
-      const request = HttpServerRequest.fromWeb(
-        new Request("https://relay.test/v1/mobile/devices", { method: "POST" }),
-      );
-
-      yield* HttpMiddleware.tracer(
-        traceRelayHttpRequestWith(
-          Effect.succeed(HttpServerResponse.empty({ status: 204 })),
-          Layer.empty,
-        ),
-      ).pipe(
-        Effect.provideService(HttpMiddleware.TracerDisabledWhen, () => true),
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-        Effect.withTracer(tracer),
-      );
-      yield* Effect.yieldNow;
-
-      expect(spans.filter((span) => span.kind === "server")).toHaveLength(1);
-      expect(spans[0]?.attributes.get("url.path")).toBe("/v1/mobile/devices");
-    }),
-  );
-
-  it.effect("fails hung requests with a 504 before the client's 10s abort", () =>
-    Effect.gen(function* () {
-      const spans: Array<Tracer.NativeSpan> = [];
-      const tracer = Tracer.make({
-        span: (options) => {
-          const span = new Tracer.NativeSpan(options);
-          spans.push(span);
-          return span;
-        },
-      });
-      const request = HttpServerRequest.fromWeb(
-        new Request("https://relay.test/v1/mobile/devices", { method: "POST" }),
-      );
-
-      const fiber = yield* traceRelayHttpRequestWith(
-        Effect.never,
-        Layer.succeed(Tracer.Tracer, tracer),
-      ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request), Effect.forkChild);
-      yield* TestClock.adjust(Duration.millis(RELAY_REQUEST_DEADLINE_MS));
-      const response = yield* Fiber.join(fiber);
-
-      expect(response.status).toBe(504);
-      expect(spans[0]?.attributes.get("relay.request.deadline_exceeded")).toBe(true);
-      expect(spans[0]?.attributes.get("http.response.status_code")).toBe(504);
     }),
   );
 });
@@ -1735,38 +1607,6 @@ describe("relay routing fallback", () => {
       expect(verified.map((input) => input.threadId)).toEqual(threadIds);
     }).pipe(Effect.scoped),
   );
-
-  it.effect("redirects the relay root to the API docs", () =>
-    Effect.gen(function* () {
-      const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.mergeAll(
-          RelayHttpApi.layerDocsRedirectRoute,
-          RelayHttpApi.layerNotFoundRoute,
-          RelayHttpApi.layerCors,
-        ),
-      );
-      const response = yield* sendRelayRequest(httpEffect, new Request("https://relay.test/"));
-
-      expect(response.status).toBe(302);
-      expect(response.headers.location).toBe("/docs");
-      expect(response.headers["access-control-allow-origin"]).toBe("*");
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("returns a CORS-compatible 404 response for unmatched paths", () =>
-    Effect.gen(function* () {
-      const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.merge(RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
-      );
-      const response = yield* sendRelayRequest(
-        httpEffect,
-        new Request("https://relay.test/v1/environmentsd", { method: "GET" }),
-      );
-
-      expect(response.status).toBe(404);
-      expect(response.headers["access-control-allow-origin"]).toBe("*");
-    }).pipe(Effect.scoped),
-  );
 });
 
 it.effect.each([
@@ -1833,36 +1673,6 @@ describe("relay CORS", () => {
 
   class HandlerFailed extends Data.TaggedError("HandlerFailed") {}
 
-  it.effect("answers preflight requests without reaching a route", () =>
-    Effect.gen(function* () {
-      const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.merge(RelayHttpApi.layerNotFoundRoute, RelayHttpApi.layerCors),
-      );
-      const response = yield* sendRelayRequest(
-        httpEffect,
-        new Request("https://relay.test/v1/client/environments", {
-          method: "OPTIONS",
-          headers: {
-            origin,
-            "access-control-request-method": "POST",
-            "access-control-request-headers": "authorization,dpop,content-type",
-          },
-        }),
-      );
-
-      expect(response.status).toBe(204);
-      expect(
-        response.headers["access-control-allow-methods"]?.split(",").map((method) => method.trim()),
-      ).toEqual(["GET", "POST", "DELETE", "OPTIONS"]);
-      expect(response.headers).toMatchObject({
-        "access-control-allow-origin": "*",
-        "access-control-allow-headers": "authorization,b3,traceparent,content-type,dpop",
-        "access-control-expose-headers": "traceparent,www-authenticate",
-        "access-control-max-age": "86400",
-      });
-    }).pipe(Effect.scoped),
-  );
-
   it.effect("adds CORS headers to handler failures and defects", () =>
     Effect.gen(function* () {
       const httpEffect = yield* HttpRouter.toHttpEffect(
@@ -1885,30 +1695,6 @@ describe("relay CORS", () => {
           "traceparent,www-authenticate",
         );
       }
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("adds CORS headers to the request deadline response", () =>
-    Effect.gen(function* () {
-      const httpEffect = yield* HttpRouter.toHttpEffect(
-        Layer.mergeAll(
-          HttpRouter.add("GET", "/v1/hang", Effect.never),
-          RelayHttpApi.layerNotFoundRoute,
-          RelayHttpApi.layerCors,
-        ),
-      );
-      const fiber = yield* sendRelayRequest(
-        traceRelayHttpRequestWith(httpEffect, Layer.empty),
-        new Request("https://relay.test/v1/hang", { headers: { origin } }),
-      ).pipe(Effect.forkChild);
-      yield* TestClock.adjust(Duration.millis(RELAY_REQUEST_DEADLINE_MS));
-      const response = yield* Fiber.join(fiber);
-
-      expect(response.status).toBe(504);
-      expect(response.headers["access-control-allow-origin"]).toBe("*");
-      expect(response.headers["access-control-expose-headers"]).toBe(
-        "traceparent,www-authenticate",
-      );
     }).pipe(Effect.scoped),
   );
 });

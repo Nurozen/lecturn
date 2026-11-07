@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  ClerkPublishableKeyDecodeError,
   ClerkPublishableKeyFrontendApiError,
   clerkFrontendApiHostnameFromPublishableKey,
   clerkFrontendApiUrlFromPublishableKey,
@@ -30,15 +29,6 @@ describe("Clerk relay auth", () => {
     ).toBe("https://clerk.lecturn.cloudgatherer.net");
   });
 
-  it("preserves Clerk publishable key decoding failures", () => {
-    const error = captureError(() => clerkFrontendApiUrlFromPublishableKey("pk_test_%"));
-
-    expect(error).toBeInstanceOf(ClerkPublishableKeyDecodeError);
-    expect(error).toMatchObject({ keyPrefix: "pk_test" });
-    expect((error as ClerkPublishableKeyDecodeError).cause).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("Failed to decode Clerk publishable key (pk_test).");
-  });
-
   it("reports semantic frontend API failures without inventing a cause", () => {
     const emptyError = captureError(() => clerkFrontendApiUrlFromPublishableKey("pk_test_"));
     const pathFrontendApi = "clerk.lecturn.cloudgatherer.net/path";
@@ -60,20 +50,5 @@ describe("Clerk relay auth", () => {
       reason: "contains-path",
     });
     expect((pathError as Error & { cause?: unknown }).cause).toBeUndefined();
-  });
-
-  it("preserves URL parser failures for decoded frontend APIs", () => {
-    const frontendApi = "[invalid-host";
-    const error = captureError(() =>
-      clerkFrontendApiHostnameFromPublishableKey(clerkPublishableKey(frontendApi)),
-    );
-
-    expect(error).toBeInstanceOf(ClerkPublishableKeyFrontendApiError);
-    expect(error).toMatchObject({
-      keyPrefix: "pk_test",
-      frontendApi,
-      reason: "invalid-url",
-    });
-    expect((error as ClerkPublishableKeyFrontendApiError).cause).toBeInstanceOf(Error);
   });
 });

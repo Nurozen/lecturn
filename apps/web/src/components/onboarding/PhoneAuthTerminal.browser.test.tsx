@@ -1,24 +1,27 @@
-import { act, useEffect, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { useEffect, type ReactElement } from "react";
+import { expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 import { PhoneAuthTerminal } from "./PhoneAuthTerminal";
 
-let root: Root;
 let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
-const render = (element: ReactElement) => act(async () => root.render(element));
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+const render = (element: ReactElement) => testScreen.rerender(element);
 
 it("keeps output mounted while collapsed and requires explicit input opt-in each time", async () => {
+  await using _setup = await setup();
   const mounted = vi.fn();
   const unmounted = vi.fn();
   function Terminal() {
@@ -49,6 +52,7 @@ it("keeps output mounted while collapsed and requires explicit input opt-in each
 });
 
 it("leaves desktop and remote terminals visible and interactive", async () => {
+  await using _setup = await setup();
   await render(
     <PhoneAuthTerminal enabled={false}>
       {(visible) => (visible ? <textarea /> : null)}

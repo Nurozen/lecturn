@@ -38,7 +38,8 @@ export function ThreadHeader(
   const terminalShown = allows("terminal");
   const mergeBackShown = allows("merge-back");
   const goBack = useWorkspaceBackNavigation("threads");
-  const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
+  const { layout, panes, toggleAuxiliaryPane, composerKeyboardActive } =
+    useAdaptiveWorkspaceLayout();
   const { onOpenTerminal, onMergeBack } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const { threadActionsHeaderItem } = props;
@@ -146,6 +147,7 @@ export function ThreadHeader(
         onBack={layout.usesSplitView ? undefined : goBack}
         actions={androidHeaderActions}
         hideBottomBorder
+        compact={composerKeyboardActive}
       />
       {gitHeaderShown ? native.fallback : null}
     </>

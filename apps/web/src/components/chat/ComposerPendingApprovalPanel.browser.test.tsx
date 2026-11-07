@@ -2,30 +2,28 @@ import "../../index.css";
 
 import { AppId, RuntimeRequestId } from "@lecturn/contracts";
 import { ShieldIcon } from "lucide-react";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
+import { render as renderUi, type Screen } from "../../../test/render";
 
 import type { PendingApproval } from "../../session-logic";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 
 const approval: PendingApproval = {
   requestId: RuntimeRequestId.make("approval-1"),
@@ -61,28 +59,26 @@ async function render(
       ...(toolTitle === undefined ? {} : { toolTitle }),
     },
   };
-  await act(async () =>
-    root.render(
-      <ComposerBanner.Root variant="warning" density="spacious">
-        <ComposerBanner.Row layout="approval">
-          <ComposerBanner.Icon>
-            <ShieldIcon />
-          </ComposerBanner.Icon>
-          <ComposerBanner.Content>
-            <ComposerPendingApprovalPanel approval={shown} pendingCount={1} />
-          </ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <ComposerPendingApprovalActions
-              requestId={approval.requestId}
-              canRespond
-              isResponding={false}
-              options={approval.options}
-              onRespondToApproval={async () => undefined}
-            />
-          </ComposerBanner.Actions>
-        </ComposerBanner.Row>
-      </ComposerBanner.Root>,
-    ),
+  await testScreen.rerender(
+    <ComposerBanner.Root variant="warning" density="spacious">
+      <ComposerBanner.Row layout="approval">
+        <ComposerBanner.Icon>
+          <ShieldIcon />
+        </ComposerBanner.Icon>
+        <ComposerBanner.Content>
+          <ComposerPendingApprovalPanel approval={shown} pendingCount={1} />
+        </ComposerBanner.Content>
+        <ComposerBanner.Actions>
+          <ComposerPendingApprovalActions
+            requestId={approval.requestId}
+            canRespond
+            isResponding={false}
+            options={approval.options}
+            onRespondToApproval={async () => undefined}
+          />
+        </ComposerBanner.Actions>
+      </ComposerBanner.Row>
+    </ComposerBanner.Root>,
   );
 }
 
@@ -102,6 +98,7 @@ const actionsCenter = (box: DOMRect) => box.top + box.height / 2;
 
 describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
   it("stacks the reason under the tool with the actions beside both while they fit", async () => {
+    await using _setup = await setup();
     await render(560);
     const { title, titleBox, reasonBox, actionsBox } = layout();
 
@@ -115,6 +112,7 @@ describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
   });
 
   it("wraps a long reason to two sans lines, then truncates, without moving the actions", async () => {
+    await using _setup = await setup();
     await render(560, "Flashes the Embed Host window ".repeat(8));
     const { titleBox, reasonBox, actionsBox } = layout();
     const reason = container.querySelector<HTMLElement>('[data-testid="app-approval-reason"]')!;
@@ -129,6 +127,7 @@ describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
   });
 
   it("wraps the actions below the reason instead of cutting the tool name short", async () => {
+    await using _setup = await setup();
     await render(300);
     const { title, titleBox, reasonBox, actionsBox } = layout();
 
@@ -139,6 +138,7 @@ describe("ComposerPendingApprovalPanel for a connected app's tool", () => {
   });
 
   it("names the tool by its declared title when it has one", async () => {
+    await using _setup = await setup();
     await render(380, approval.connectedAppTool!.reason, "Flash window");
     const { title } = layout();
 

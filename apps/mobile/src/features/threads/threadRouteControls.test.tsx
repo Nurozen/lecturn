@@ -121,6 +121,12 @@ function CopyTextButton(props: { readonly accessibilityLabel: string }) {
   pressed.push(props.accessibilityLabel);
   return null;
 }
+/** The `planSaveEnabled` each rendered work log received. */
+let planSaves: Array<boolean | undefined> = [];
+function ThreadWorkLog(props: { readonly planSaveEnabled?: boolean }) {
+  planSaves.push(props.planSaveEnabled);
+  return null;
+}
 
 // Imports the message rows never reach. Callable and chainable, so module-level setup like
 // `FadeIn.delay(…).duration(…)` evaluates; never a class, so React would not construct one.
@@ -160,6 +166,12 @@ const stubs: Record<string, unknown> = {
   "../../lib/wideMarkdownBlocks": WideMarkdownBlocks,
   "./userMessageIntentBadge": UserMessageIntentBadge,
   "./CopyTextButton": { CopyTextButton },
+  "./thread-work-log": { ThreadWorkLog },
+  "../../lib/threadActivity": {
+    isContextCompactionActivityGroup: () => false,
+    isContextHandoffActivityGroup: () => false,
+    isSecretRequestActivityGroup: () => false,
+  },
   "./ThreadMarkdownImage": { MarkdownImageAvailableWidthContext: Nothing },
   "../../components/ui/Menu": { Menu: Passthrough },
   "../../components/ui/AppText": { AppText: Nothing },
@@ -277,5 +289,40 @@ describe("thread feed controls", () => {
       "Copy message",
       "Fork from this response",
     ]);
+  });
+});
+
+describe("proposed plan controls", () => {
+  const planEntry = {
+    type: "activity-group",
+    id: "plan",
+    activities: [{ projectedItem: { item: { type: "proposed_plan", markdown: "# Plan" } } }],
+  };
+
+  /** The work log's plan save switch as ThreadDetailScreen wires it from the resolved controls. */
+  function planSaveEnabled(resolved: typeof homeControls) {
+    planSaves = [];
+    renderToStaticMarkup(
+      <>
+        {renderFeedEntry(
+          { item: planEntry, index: 0 },
+          {
+            environmentId: "environment-1",
+            threadId: "thread-1",
+            planSaveEnabled: allowsThreadRouteControl(resolved, "files"),
+            workRowSizing: { textSizeKey: "default" },
+          },
+        )}
+      </>,
+    );
+    return planSaves;
+  }
+
+  it("hides Save to workspace on a home thread", () => {
+    expect(planSaveEnabled(homeControls)).toEqual([false]);
+  });
+
+  it("keeps Save to workspace on an ordinary thread", () => {
+    expect(planSaveEnabled(ordinaryControls)).toEqual([true]);
   });
 });

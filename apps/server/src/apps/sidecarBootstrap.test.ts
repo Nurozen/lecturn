@@ -213,6 +213,7 @@ describe("sidecar parent watch", () => {
           { probe: { parentPid, isAlive, openPipe: () => pipe } },
         ).pipe(Effect.timeout(Duration.seconds(10))),
       );
+      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- nothing marks "still watching" while a real peer process lives; the negative needs a real pause.
       yield* Effect.sleep(Duration.millis(300));
       assert.isUndefined(watch.pollUnsafe());
 

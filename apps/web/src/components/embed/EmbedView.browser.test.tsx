@@ -1,9 +1,8 @@
 import type { EmbedHostCommand } from "@lecturn/client-runtime/embed/guest";
 import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import "../../embed/embed.css";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 const state = vi.hoisted(() => ({
   threads: [] as Array<Record<string, unknown>>,
@@ -137,11 +136,11 @@ const shell = (id: string, updatedAt: string, extra: Record<string, unknown> = {
   ...extra,
 });
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   Object.assign(state, {
     threads: [shell("thread-1", "2026-10-25T01:00:00.000Z")],
     projection: null,
@@ -159,28 +158,26 @@ beforeEach(() => {
   });
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  __resetAppRefLabelsForTests();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      __resetAppRefLabelsForTests();
+    },
+  };
+}
 
 const render = (
   props: { threadId?: string | null; switcher?: boolean; panel?: "providers" | null } = {},
 ) =>
-  act(async () =>
-    root.render(
-      <EmbedView
-        environmentId={environmentId}
-        projectId={projectId}
-        threadId={props.threadId ? ThreadId.make(props.threadId) : null}
-        panel={props.panel ?? null}
-        switcher={props.switcher ?? false}
-      />,
-    ),
+  testScreen.rerender(
+    <EmbedView
+      environmentId={environmentId}
+      projectId={projectId}
+      threadId={props.threadId ? ThreadId.make(props.threadId) : null}
+      panel={props.panel ?? null}
+      switcher={props.switcher ?? false}
+    />,
   );
 const chipText = (ref: string) =>
   container.querySelector(`[data-app-ref="${ref}"]`)?.textContent ?? null;
@@ -198,6 +195,7 @@ const hostSends = (command: EmbedHostCommand) =>
 
 describe("EmbedView", () => {
   it("creates a host's new thread on the server with its appData, then shows that thread", async () => {
+    await using _setup = await setup();
     await render({ threadId: "thread-1" });
     await hostSends({
       method: "lecturn/thread.new",
@@ -228,6 +226,7 @@ describe("EmbedView", () => {
   });
 
   it("hands mentions and drafts to the composer on screen", async () => {
+    await using _setup = await setup();
     await render({ threadId: "thread-1" });
     await hostSends({
       method: "lecturn/composer.insertMention",
@@ -241,6 +240,7 @@ describe("EmbedView", () => {
   });
 
   it("opens the thread a host names", async () => {
+    await using _setup = await setup();
     await render({ threadId: "thread-1" });
     await hostSends({ method: "lecturn/thread.open", params: { threadId: "thread-7" } });
     expect(state.navigations).toEqual([
@@ -252,14 +252,14 @@ describe("EmbedView", () => {
   });
 
   it("opens the host's parent once the app's origins are known, and reports ready once loaded", async () => {
+    await using _setup = await setup();
     state.appContext = null;
     await render({ threadId: "thread-1" });
     expect(state.bridgeCalls.filter(([kind]) => kind === "authorize")).toEqual([]);
     expect(state.bridgeCalls.filter(([kind]) => kind === "ready")).toEqual([]);
 
     // The mocked hooks do not subscribe, so the loaded state needs a fresh mount to be read.
-    await act(async () => root.unmount());
-    root = createRoot(container);
+    await testScreen.rerender(null);
     state.appContext = appContext;
     state.projection = { runtimeRequests: [], turnItems: [] };
     await render({ threadId: "thread-1" });
@@ -268,6 +268,7 @@ describe("EmbedView", () => {
   });
 
   it("hands an activated reference in the thread to the host", async () => {
+    await using _setup = await setup();
     await render({ threadId: "thread-1" });
     const chip = container.querySelector<HTMLButtonElement>('button[data-app-ref="rw:c/fins"]');
     await act(async () => chip?.click());
@@ -275,6 +276,7 @@ describe("EmbedView", () => {
   });
 
   it("swaps the chat for the providers panel the host opens, then returns to the thread the user left", async () => {
+    await using _setup = await setup();
     state.threads = [
       shell("thread-1", "2026-10-25T01:00:00.000Z"),
       shell("thread-latest", "2026-10-25T03:00:00.000Z"),
@@ -303,6 +305,7 @@ describe("EmbedView", () => {
   });
 
   it("shows a thread continued in Lecturn read-only, with the way to its copy", async () => {
+    await using _setup = await setup();
     state.threads = [
       shell("thread-1", "2026-10-25T01:00:00.000Z", {
         source: {
@@ -340,6 +343,7 @@ describe("EmbedView", () => {
   });
 
   it("shows the switcher unless the host lists threads itself, and falls back to the latest thread", async () => {
+    await using _setup = await setup();
     state.threads = [
       shell("thread-old", "2026-10-25T00:00:00.000Z"),
       shell("thread-latest", "2026-10-25T03:00:00.000Z"),
@@ -355,6 +359,7 @@ describe("EmbedView", () => {
   });
 
   it("names the thread's references through the host, asking once for all the chips on screen", async () => {
+    await using _setup = await setup();
     state.describe = async () => ({ "rw:c/fins": "Fins", "rw:cfg/baseline": "Baseline config" });
     await render({ threadId: "thread-1" });
     expect(state.describeCalls).toEqual([["rw:c/fins", "rw:cfg/baseline"]]);
@@ -371,6 +376,7 @@ describe("EmbedView", () => {
   });
 
   it("shows the label a sent chip stored, and asks the host only about the rest", async () => {
+    await using _setup = await setup();
     state.visibleItems = [sentMessage([{ ref: "rw:c/fins", label: "Fins" }])];
     state.describe = async () => ({});
     await render({ threadId: "thread-1" });
@@ -381,6 +387,7 @@ describe("EmbedView", () => {
   });
 
   it("falls back to the reference itself when the host cannot answer", async () => {
+    await using _setup = await setup();
     state.describe = () => Promise.reject(new Error("Unknown method lecturn/appRefs.describe."));
     await render({ threadId: "thread-1" });
     expect(state.describeCalls).toHaveLength(1);

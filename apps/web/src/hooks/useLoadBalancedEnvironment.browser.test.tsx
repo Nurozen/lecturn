@@ -2,9 +2,10 @@ import { RegistryContext } from "@effect/atom-react";
 import { EnvironmentId, type HostResourcesSnapshot } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
-import { act, useEffect } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { useEffect } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { act, render } from "../../test/render";
 import { useLoadBalancedEnvironment } from "./useLoadBalancedEnvironment";
 
 const { hostResources } = vi.hoisted(() => ({ hostResources: vi.fn() }));
@@ -13,19 +14,8 @@ vi.mock(import("../state/server"), async (original) => {
   return { ...actual, serverEnvironment: { ...actual.serverEnvironment, hostResources } as never };
 });
 
-let root: Root | undefined;
-let registry: AtomRegistry.AtomRegistry;
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  root = undefined;
-  registry?.dispose();
-  vi.unstubAllGlobals();
-  vi.clearAllMocks();
-});
-
 async function mount() {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  registry = AtomRegistry.make();
+  const registry = AtomRegistry.make();
   const environmentId = EnvironmentId.make("fixture-machine");
   const resource = Atom.make<AsyncResult.AsyncResult<HostResourcesSnapshot, never>>(
     AsyncResult.initial(),
@@ -41,25 +31,33 @@ async function mount() {
     }, [current]);
     return null;
   }
-  root = createRoot(document.createElement("div"));
-  await act(async () =>
-    root!.render(
-      <RegistryContext.Provider value={registry}>
-        <Fixture />
-      </RegistryContext.Provider>,
-    ),
-  );
+  const screen = await render(
+    <RegistryContext.Provider value={registry}>
+      <Fixture />
+    </RegistryContext.Provider>,
+  ).catch((error: unknown) => {
+    registry.dispose();
+    throw error;
+  });
   return {
     environmentId,
     selection: () => selection,
     update: (result: AsyncResult.AsyncResult<HostResourcesSnapshot, never>) =>
       act(async () => registry.set(resource, result)),
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen[Symbol.asyncDispose]();
+      } finally {
+        registry.dispose();
+        vi.clearAllMocks();
+      }
+    },
   };
 }
 
 describe("automatic environment selection", () => {
   it("reports unavailable only after a failed probe, and clears it during retry", async () => {
-    const fixture = await mount();
+    await using fixture = await mount();
     expect(fixture.selection()).toMatchObject({
       pending: true,
       failed: false,
@@ -82,9 +80,11 @@ describe("automatic environment selection", () => {
   });
 
   it("keeps capacity exhaustion distinct from failure and selects a recovered machine", async () => {
-    const fixture = await mount();
+    await using fixture = await mount();
+    const sampledAt = 1_800_000_000_000;
+    using _now = vi.spyOn(Date, "now").mockReturnValue(sampledAt);
     const snapshot = {
-      sampledAt: Date.now(),
+      sampledAt,
       cpuCount: 8,
       cpuUtilization: 0.99,
       totalMemoryBytes: 16_000_000_000,

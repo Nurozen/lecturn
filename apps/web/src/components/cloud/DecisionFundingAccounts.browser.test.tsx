@@ -1,6 +1,6 @@
-import { act, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { type ReactElement } from "react";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 const mocks = vi.hoisted(() => ({ list: vi.fn(), revoke: vi.fn() }));
 vi.mock(import("../../cloud/decisionFundingAccounts"), async (original) => ({
   ...(await original()),
@@ -8,10 +8,25 @@ vi.mock(import("../../cloud/decisionFundingAccounts"), async (original) => ({
 }));
 import { DecisionFundingAccounts } from "./DecisionFundingAccounts";
 const row = { environmentId: "host-a", environmentLabel: "My workstation", generation: 7 };
-let root: Root;
 let container: HTMLDivElement;
+
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
+  vi.clearAllMocks();
+  mocks.list.mockResolvedValue({ environments: [row], nextCursor: null });
+  mocks.revoke.mockResolvedValue({ state: "revoked" });
+  container = document.createElement("div");
+  document.body.append(container);
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+    },
+  };
+}
 async function render(element: ReactElement) {
-  await act(async () => root.render(element));
+  await testScreen.rerender(element);
 }
 const buttons = () => [...container.querySelectorAll("button")];
 async function click(label: string) {
@@ -19,22 +34,9 @@ async function click(label: string) {
   expect(button).toBeDefined();
   await act(async () => button!.click());
 }
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.clearAllMocks();
-  mocks.list.mockResolvedValue({ environments: [row], nextCursor: null });
-  mocks.revoke.mockResolvedValue({ state: "revoked" });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
 describe("account funding reverse action", () => {
   it("requires confirmation, revokes the displayed generation, and removes the host only after success", async () => {
+    await using _setup = await setup();
     await render(<DecisionFundingAccounts accountId="payer-a" />);
     await vi.waitFor(() =>
       expect(mocks.list).toHaveBeenCalledWith("payer-a", undefined, expect.any(AbortSignal)),
@@ -53,6 +55,7 @@ describe("account funding reverse action", () => {
     );
   });
   it("aborts old account requests and clears its pending confirmation when account selection changes", async () => {
+    await using _setup = await setup();
     await render(<DecisionFundingAccounts accountId="payer-a" />);
     await vi.waitFor(() => expect(container.textContent).toContain("My workstation"));
     const signal = mocks.list.mock.calls[0]![2] as AbortSignal;
@@ -67,6 +70,7 @@ describe("account funding reverse action", () => {
     expect(mocks.revoke).not.toHaveBeenCalled();
   });
   it("retains the host and shows recovery when generation changed", async () => {
+    await using _setup = await setup();
     mocks.revoke.mockRejectedValueOnce(new Error("conflict"));
     await render(<DecisionFundingAccounts accountId="payer-a" />);
     await vi.waitFor(() => expect(container.textContent).toContain("My workstation"));

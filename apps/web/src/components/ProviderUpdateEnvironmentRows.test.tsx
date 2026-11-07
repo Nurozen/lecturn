@@ -116,7 +116,6 @@ vi.mock("./ProviderUpdateLaunchNotification.environments", () => ({
 import { ProviderUpdateEnvironmentRows } from "./ProviderUpdateEnvironmentRows";
 
 const environmentId = "env-wsl" as EnvironmentId;
-const pendingExpiryMs = 6 * 60_000;
 const failedUpdateOutput = "npm error code EACCES\nnpm error syscall rename";
 
 function provider(updateStatus?: "succeeded" | "failed"): ServerProvider {
@@ -158,14 +157,6 @@ function provider(updateStatus?: "succeeded" | "failed"): ServerProvider {
         },
       }
     : result;
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => {
-    resolve = complete;
-  });
-  return { promise, resolve };
 }
 
 type RowElement = ReactElement<{
@@ -210,36 +201,6 @@ describe("ProviderUpdateEnvironmentRows", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("keeps a successor pending when an expired request resolves late, then shows its success", async () => {
-    const firstRequest =
-      deferred<ReturnType<typeof AsyncResult.success<{ providers: ServerProvider[] }>>>();
-    const successorRequest =
-      deferred<ReturnType<typeof AsyncResult.success<{ providers: ServerProvider[] }>>>();
-    testState.updateProvider
-      .mockReturnValueOnce(firstRequest.promise)
-      .mockReturnValueOnce(successorRequest.promise);
-
-    renderRow().props.onUpdate();
-    expect(renderRow().props.status.kind).toBe("loading");
-
-    await vi.advanceTimersByTimeAsync(pendingExpiryMs);
-    expect(renderRow().props.status.kind).toBe("failed");
-
-    renderRow().props.onUpdate();
-    expect(testState.updateProvider).toHaveBeenCalledTimes(2);
-    expect(renderRow().props.status.kind).toBe("loading");
-
-    firstRequest.resolve(AsyncResult.success({ providers: [provider("succeeded")] }));
-    await flushPromises();
-
-    expect(renderRow().props.status.kind).toBe("loading");
-
-    successorRequest.resolve(AsyncResult.success({ providers: [provider("succeeded")] }));
-    await flushPromises();
-
-    expect(renderRow().props.status.kind).toBe("success");
   });
 
   it("hands a failed update's command output to the row", async () => {

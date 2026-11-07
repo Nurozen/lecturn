@@ -1,13 +1,12 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeEach, describe, expect, vi } from "vite-plus/test";
+import { describe, expect, vi } from "vite-plus/test";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { managedRelaySessionAtom, managedRelaySessionsAtom } from "@lecturn/client-runtime/relay";
+
+import { act, render, type Screen } from "../../test/render";
 import type { PhoneConnectStatus } from "./phoneConnectAccount";
 
 const test = vi.hoisted(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   return {
     status: vi.fn(),
     begin: vi.fn(),
@@ -103,7 +102,6 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-let root: Root;
 // The page is visible in headless Chromium; an own getter shadows Document's.
 function setVisibility(visibilityState: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", {
@@ -111,7 +109,9 @@ function setVisibility(visibilityState: DocumentVisibilityState) {
     get: () => visibilityState,
   });
 }
-beforeEach(async () => {
+// Resets the account and its mocks for one test; disposing unmounts the shell (if mounted)
+// and drops the visibility override.
+async function setup() {
   await phoneConnectAccount.logout();
   test.status.mockReset().mockResolvedValue(signedIn);
   test.begin.mockReset().mockResolvedValue(authorizing);
@@ -122,27 +122,36 @@ beforeEach(async () => {
   test.persist.mockReset();
   test.token.mockClear();
   appAtomRegistry.set(knownConnectAccountsAtom, { accountIds: [], needsSignIn: [], synced: false });
-});
-afterEach(async () => {
-  await act(async () => root?.unmount());
-});
-afterAll(() => {
-  Reflect.deleteProperty(document, "visibilityState");
-});
-const mount = () =>
-  act(async () => {
-    root = createRoot(document.createElement("div"));
-    root.render(
-      <PhoneManagedAuthShell>
-        <div />
-      </PhoneManagedAuthShell>,
-    );
-  });
+  let screen: Screen | undefined;
+  return {
+    async mount() {
+      screen = await render(
+        <PhoneManagedAuthShell>
+          <div />
+        </PhoneManagedAuthShell>,
+        { router: false },
+      );
+    },
+    unmount: async () => screen?.unmount(),
+    async [Symbol.asyncDispose]() {
+      try {
+        await screen?.[Symbol.asyncDispose]();
+      } finally {
+        Reflect.deleteProperty(document, "visibilityState");
+      }
+    },
+  };
+}
+// it.effect tests acquire the same setup through their scope.
+const scopedSetup = Effect.acquireRelease(Effect.promise(setup), (env) =>
+  Effect.promise(() => env[Symbol.asyncDispose]()),
+);
 
 describe("phone account runtime binding", () => {
   it.each([null, signedIn.account])(
     "preserves cached account data through loading with account %s and native restoration",
     async (account) => {
+      await using env = await setup();
       const saved = {
         accounts: { accountIds: ["phone-account"] },
         connections: new Map([["removed-environment", { accountId: "phone-account" }]]),
@@ -170,7 +179,7 @@ describe("phone account runtime binding", () => {
         needsSignIn: [],
         synced: false,
       });
-      await mount();
+      await env.mount();
       expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
       test.status.mockResolvedValue({ ...signedIn, state: "loading", account });
       await act(async () => {
@@ -206,6 +215,7 @@ describe("phone account runtime binding", () => {
   );
 
   it("keeps persisted accounts without installing credentials on an initially loading SDK", async () => {
+    await using env = await setup();
     test.status.mockResolvedValue({ ...signedOut, state: "loading" });
     await phoneConnectAccount.refresh();
     appAtomRegistry.set(knownConnectAccountsAtom, {
@@ -213,7 +223,7 @@ describe("phone account runtime binding", () => {
       needsSignIn: [],
       synced: false,
     });
-    await mount();
+    await env.mount();
     expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
     expect(appAtomRegistry.get(knownConnectAccountsAtom).accountIds).toEqual(["phone-account"]);
     expect(test.persist).not.toHaveBeenCalled();
@@ -230,7 +240,8 @@ describe("phone account runtime binding", () => {
   });
 
   it("suspends credentials on refresh failure without deleting saved connections or drafts", async () => {
-    await mount();
+    await using env = await setup();
+    await env.mount();
     test.status.mockResolvedValue({ ...signedIn, state: "error", error: "Refresh failed" });
     await act(async () => {
       await phoneConnectAccount.refresh();
@@ -258,8 +269,9 @@ describe("phone account runtime binding", () => {
   ])(
     "automatically settles native sign-in and cancellation on %s while %s",
     async (event, visibilityState) => {
+      await using env = await setup();
       test.status.mockResolvedValue(signedOut);
-      await mount();
+      await env.mount();
       await act(async () => phoneConnectAccount.begin());
       expect(phoneConnectAccount.getSnapshot().status?.state).toBe("authorizing");
       expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
@@ -299,8 +311,9 @@ describe("phone account runtime binding", () => {
   );
 
   it("queues native return during the opening receipt without concurrent mutations", async () => {
+    await using env = await setup();
     test.status.mockResolvedValue(signedOut);
-    await mount();
+    await env.mount();
     const opening = deferred<PhoneConnectStatus>();
     test.begin.mockReturnValueOnce(opening.promise);
     await act(async () => {
@@ -320,9 +333,10 @@ describe("phone account runtime binding", () => {
   });
 
   it("queues native return behind an earlier status read without concurrent reads", async () => {
+    await using env = await setup();
     const earlier = deferred<PhoneConnectStatus>();
     test.status.mockReturnValueOnce(earlier.promise);
-    await mount();
+    await env.mount();
     expect(test.status).toHaveBeenCalledOnce();
     test.status.mockResolvedValue(signedIn);
     await act(async () => {
@@ -339,8 +353,9 @@ describe("phone account runtime binding", () => {
   });
 
   it("stops lifecycle refreshes and relay activation after unmount", async () => {
-    await mount();
-    await act(async () => root.unmount());
+    await using env = await setup();
+    await env.mount();
+    await env.unmount();
     test.status.mockClear();
     await act(async () => {
       window.dispatchEvent(new Event("lecturn:connect-changed"));
@@ -352,7 +367,8 @@ describe("phone account runtime binding", () => {
   });
 
   it("preserves saved connections during native sign-in and transport errors", async () => {
-    await mount();
+    await using env = await setup();
+    await env.mount();
     test.status.mockResolvedValue({ ...signedIn, state: "authorizing", account: null });
     await act(async () => phoneConnectAccount.refresh());
     expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
@@ -372,8 +388,9 @@ describe("phone account runtime binding", () => {
     "binds identity, profile and native token into existing managed sessions without refreshing their identity",
     () =>
       Effect.gen(function* () {
+        const env = yield* scopedSetup;
         const session = yield* Effect.promise(async () => {
-          await mount();
+          await env.mount();
           const session = appAtomRegistry.get(managedRelaySessionAtom);
           expect(session?.accountId).toBe("phone-account");
           expect(appAtomRegistry.get(knownConnectAccountsAtom)).toEqual({
@@ -395,7 +412,8 @@ describe("phone account runtime binding", () => {
   );
 
   it("revokes managed sessions and cleans account-owned remote data on logout", async () => {
-    await mount();
+    await using env = await setup();
+    await env.mount();
     await act(async () => {
       await phoneConnectAccount.logout();
     });
@@ -416,10 +434,11 @@ describe("phone account runtime binding", () => {
 
   it.effect("restores A when A signs in again while sign-out cleanup is pending", () =>
     Effect.gen(function* () {
+      const env = yield* scopedSetup;
       const session = yield* Effect.promise(async () => {
         const cleanup = deferred<{ _tag: "Success"; value: string[] }>();
         const started = deferred<void>();
-        await mount();
+        await env.mount();
         expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("phone-account");
         test.persist.mockClear();
         test.remove.mockImplementationOnce(() => {
@@ -460,13 +479,14 @@ describe("phone account runtime binding", () => {
   );
 
   it("blocks new account activation until failed cleanup is retried", async () => {
+    await using env = await setup();
     appAtomRegistry.set(knownConnectAccountsAtom, {
       accountIds: ["old-account"],
       needsSignIn: [],
       synced: true,
     });
     test.remove.mockResolvedValue({ _tag: "Failure" });
-    await mount();
+    await env.mount();
     expect(appAtomRegistry.get(managedRelaySessionsAtom).size).toBe(0);
     expect(phoneConnectAccount.getSnapshot().error).toContain("previous account");
     test.remove.mockResolvedValue({ _tag: "Success", value: ["removed-environment"] });

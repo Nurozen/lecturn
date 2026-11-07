@@ -10,10 +10,10 @@ import {
   type ServerProvider,
 } from "@lecturn/contracts";
 import { BrainIcon, LockOpenIcon, PaperclipIcon, SendIcon, SparklesIcon } from "lucide-react";
-import { act, createRef, useLayoutEffect, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createRef, useLayoutEffect, useState } from "react";
+import { describe, expect, it } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { observeResize } from "../../lib/observeResize";
@@ -41,26 +41,25 @@ const presentation = {
 };
 const TARGET = "thread-1";
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   document.documentElement.dataset.lecturnEmbed = "";
   document.documentElement.classList.add("dark");
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  document.documentElement.classList.remove("dark");
-  useAppRefChipStore.getState().clear(TARGET);
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+      document.documentElement.classList.remove("dark");
+      useAppRefChipStore.getState().clear(TARGET);
+    },
+  };
+}
 
 const instanceId = ProviderInstanceId.make("codex");
 const provider: ServerProvider = {
@@ -234,12 +233,10 @@ async function renderAt(paneWidth: number, labels: Labels) {
   // The pane is the embed's whole viewport, so its width is the viewport's.
   await page.viewport(paneWidth, 800);
   useAppRefChipStore.getState().add(TARGET, { ref: "rw:c/fins", label: "rw:c/fins" });
-  await act(async () =>
-    root.render(
-      <EmbedPresentationContext value={presentation}>
-        <EmbedComposer labels={labels} />
-      </EmbedPresentationContext>,
-    ),
+  await testScreen.rerender(
+    <EmbedPresentationContext value={presentation}>
+      <EmbedComposer labels={labels} />
+    </EmbedPresentationContext>,
   );
   await act(async () => document.fonts.ready);
 }
@@ -266,6 +263,7 @@ describe("EmbedComposerFooter in a narrow pane", () => {
     [320, TYPICAL],
     [320, LONGEST],
   ])("keeps the footer to two single-line rows at %i px (%o)", async (width, labels) => {
+    await using _setup = await setup();
     await renderAt(width, labels);
 
     const rows = Array.from(
@@ -300,6 +298,7 @@ describe("EmbedComposerFooter in a narrow pane", () => {
 
   // RocketWright's frozen composer region is 187 px tall with one chip in the strip.
   it("matches RocketWright's composer height with one chip at 352 px", async () => {
+    await using _setup = await setup();
     await renderAt(352, TYPICAL);
 
     expect(container.querySelectorAll('[data-testid="app-ref-chip"]')).toHaveLength(1);

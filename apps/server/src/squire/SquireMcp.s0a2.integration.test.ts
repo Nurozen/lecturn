@@ -110,6 +110,7 @@ const awaitSettled = (threadId: ThreadId, runs: number) =>
       yield* events.streamApplicationEvents({ afterSequence: head }).pipe(
         Stream.filter((stored) => "event" in stored && stored.event.threadId === threadId),
         Stream.runHead,
+        // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a live provider is on a real clock, and no thread event announces an effect retry.
         Effect.raceFirst(Effect.sleep("2 seconds")),
       );
     }
@@ -373,6 +374,7 @@ const codexResumeEvidence = (input: {
 };
 
 describe.runIf(enabled)(`S0a2 MCP surface live on ${provider} (${model})`, () => {
+  // oxlint-disable-next-line lecturn/no-test-timeout-or-unreasoned-skip -- a live provider run behind an env gate, on real model latency, not a hidden wait.
   it.live(
     "home and probe list and call only what A5.9 and D9 allow, on start, resume, and fork",
     () =>

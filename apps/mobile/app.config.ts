@@ -499,7 +499,7 @@ const config: ExpoConfig = {
   },
   owner: "nurozen",
   experiments: {
-    // Metro only runs babel-plugin-react-compiler when this is set; see src/reactCompilerCoverage.test.ts.
+    // Metro only runs babel-plugin-react-compiler when this is set.
     reactCompiler: true,
   },
 };

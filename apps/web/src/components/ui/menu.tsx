@@ -1,5 +1,3 @@
-"use client";
-
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
@@ -27,6 +25,7 @@ function MenuPopup({
   anchor,
   keepMounted = false,
   surface = "default",
+  width = "default",
   ...props
 }: MenuPrimitive.Popup.Props & {
   /** "panel-glass" is the right panel's glass menu (components/right-panel-glass.css). */
@@ -37,6 +36,7 @@ function MenuPopup({
   side?: MenuPrimitive.Positioner.Props["side"];
   anchor?: MenuPrimitive.Positioner.Props["anchor"];
   keepMounted?: boolean;
+  width?: "default" | "content";
 }) {
   return (
     <MenuPrimitive.Portal keepMounted={keepMounted}>
@@ -56,7 +56,8 @@ function MenuPopup({
             // the Review panel header). Drag hit-testing ignores z-index, so
             // the topmost row would stay unhoverable without this opt-out.
             "[-webkit-app-region:no-drag]",
-            "min-w-[min(10rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]",
+            "max-w-[calc(100vw-2rem)]",
+            width === "content" ? "w-max min-w-0" : "min-w-[min(10rem,calc(100vw-2rem))]",
             surface === "panel-glass" && "lecturn-panel-menu",
             className,
           )}

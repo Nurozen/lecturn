@@ -5,9 +5,9 @@ import {
   createRouter,
   RouterContextProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
+
+import { act, render } from "../../../test/render";
 
 const close = vi.hoisted(() => vi.fn());
 vi.mock(import("../ui/sidebar"), async (original) => ({
@@ -16,27 +16,15 @@ vi.mock(import("../ui/sidebar"), async (original) => ({
 }));
 import { SettingsNavigationProvider, useBackToChat } from "./SettingsNavigation";
 
-let reactRoot: Root | null = null;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.clearAllMocks();
-  container = document.createElement("div");
-  document.body.append(container);
-});
-afterEach(async () => {
-  await act(async () => reactRoot?.unmount());
-  reactRoot = null;
-  container.remove();
-  vi.unstubAllGlobals();
-});
 function Back() {
   return <button onClick={useBackToChat()}>Back to chat</button>;
 }
+// Renders under the test's own router (not the helper's), which disposing unmounts.
 async function fixture(
   initialEntries = ["/earlier", "/local/thread-1"],
   beforeSettings?: () => Promise<void>,
 ) {
+  vi.clearAllMocks();
   const root = createRootRoute();
   const chat = createRoute({ getParentRoute: () => root, id: "_chat" });
   const routeTree = root.addChildren([
@@ -56,16 +44,14 @@ async function fixture(
   const history = createMemoryHistory({ initialEntries });
   const router = createRouter({ routeTree, history, isServer: false });
   await router.load();
-  reactRoot = createRoot(container);
-  await act(async () => {
-    reactRoot!.render(
-      <RouterContextProvider router={router}>
-        <SettingsNavigationProvider>
-          <Back />
-        </SettingsNavigationProvider>
-      </RouterContextProvider>,
-    );
-  });
+  const screen = await render(
+    <RouterContextProvider router={router}>
+      <SettingsNavigationProvider>
+        <Back />
+      </SettingsNavigationProvider>
+    </RouterContextProvider>,
+    { router: false },
+  );
   const visit = async (to: string) => {
     await act(async () => {
       await router.navigate({ to });
@@ -80,10 +66,18 @@ async function fixture(
     });
     return event.defaultPrevented;
   };
-  return { history, router, visit, nativeBack };
+  return {
+    history,
+    router,
+    visit,
+    nativeBack,
+    container: screen.container,
+    [Symbol.asyncDispose]: () => screen[Symbol.asyncDispose](),
+  };
 }
 it("unwinds all settings sections to the existing chat entry, then Back reaches earlier history", async () => {
-  const { history, visit, nativeBack } = await fixture();
+  await using view = await fixture();
+  const { history, visit, nativeBack } = view;
   await visit("/pull-requests");
   close.mockClear();
   await visit("/settings/general");
@@ -99,12 +93,13 @@ it("unwinds all settings sections to the existing chat entry, then Back reaches 
   expect(history.location.pathname).toBe("/earlier");
 });
 it("returns to draft chat through the same history entry from the Chat button", async () => {
-  const { history, router, visit, nativeBack } = await fixture();
+  await using view = await fixture();
+  const { history, router, visit, nativeBack } = view;
   await visit("/draft/new-draft");
   await visit("/settings/general");
   await visit("/settings/appearance");
   await act(async () => {
-    container.querySelector("button")!.click();
+    view.container.querySelector("button")!.click();
     await router.load();
   });
   expect(history.location.pathname).toBe("/draft/new-draft");
@@ -113,7 +108,8 @@ it("returns to draft chat through the same history entry from the Chat button", 
   expect(history.location.pathname).toBe("/local/thread-1");
 });
 it("unwinds sections from a direct settings entry before replacing it with chat landing", async () => {
-  const { history, visit, nativeBack } = await fixture(["/earlier", "/settings/connections"]);
+  await using view = await fixture(["/earlier", "/settings/connections"]);
+  const { history, visit, nativeBack } = view;
   await visit("/settings/providers");
   await visit("/settings/general");
   expect(await nativeBack()).toBe(true);
@@ -123,7 +119,8 @@ it("unwinds sections from a direct settings entry before replacing it with chat 
   expect(history.location.pathname).toBe("/earlier");
 });
 it("replaces a direct settings entry without adding history", async () => {
-  const { history, nativeBack } = await fixture(["/settings/general"]);
+  await using view = await fixture(["/settings/general"]);
+  const { history, nativeBack } = view;
   await nativeBack();
   expect(history.location.pathname).toBe("/");
   expect(history.location.state.__TSR_index).toBe(0);
@@ -136,7 +133,8 @@ it("keeps the chat destination while the new settings location waits for its rou
   const waiting = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const { history, router, nativeBack } = await fixture(undefined, () => waiting);
+  await using view = await fixture(undefined, () => waiting);
+  const { history, router, nativeBack } = view;
   let navigation: Promise<void>;
   await act(async () => {
     navigation = router.navigate({ to: "/settings/general" });

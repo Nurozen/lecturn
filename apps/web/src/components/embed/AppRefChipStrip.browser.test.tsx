@@ -1,9 +1,8 @@
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import { appReferenceLabelsFromRecords } from "@lecturn/shared/appReferences";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import { buildMessageContext } from "../../lib/composerContextRecords";
@@ -19,33 +18,31 @@ const presentation = {
   projectRef: scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1")),
 };
 
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  useAppRefChipStore.setState({ chipsByTarget: {} });
-  __resetAppRefLabelsForTests();
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      useAppRefChipStore.setState({ chipsByTarget: {} });
+      __resetAppRefLabelsForTests();
+    },
+  };
+}
 
 const renderStrip = (embedded = true) =>
-  act(async () =>
-    root.render(
-      embedded ? (
-        <EmbedPresentationContext value={presentation}>
-          <AppRefChipStrip targetKey={TARGET} />
-        </EmbedPresentationContext>
-      ) : (
+  testScreen.rerender(
+    embedded ? (
+      <EmbedPresentationContext value={presentation}>
         <AppRefChipStrip targetKey={TARGET} />
-      ),
+      </EmbedPresentationContext>
+    ) : (
+      <AppRefChipStrip targetKey={TARGET} />
     ),
   );
 const insert = (ref: string, label = ref) =>
@@ -55,6 +52,7 @@ const chipLabels = () =>
 
 describe("AppRefChipStrip", () => {
   it("shows inserted mentions once each, and × removes one", async () => {
+    await using _setup = await setup();
     await renderStrip();
     expect(container.querySelector('[data-testid="app-ref-chip-strip"]')).toBeNull();
 
@@ -69,12 +67,14 @@ describe("AppRefChipStrip", () => {
   });
 
   it("is not part of full Lecturn's composer", async () => {
+    await using _setup = await setup();
     await renderStrip(false);
     await insert("rw:c/fins");
     expect(container.querySelector("[data-app-ref]")).toBeNull();
   });
 
   it("sends the chips with the prompt, then clears them and gives the editor its text back", async () => {
+    await using _setup = await setup();
     await renderStrip();
     await insert("rw:c/fins");
     const promptRef = { current: "Check the fins." };
@@ -91,6 +91,7 @@ describe("AppRefChipStrip", () => {
   });
 
   it("keeps the chips when the send does not go out, and leaves a prompt the send consumed", async () => {
+    await using _setup = await setup();
     await renderStrip();
     await insert("rw:c/fins");
     const promptRef = { current: "Hi" };
@@ -108,7 +109,8 @@ describe("AppRefChipStrip", () => {
     expect(chipLabels()).toEqual([]);
   });
 
-  it("leaves an answer to a pending question alone", () => {
+  it("leaves an answer to a pending question alone", async () => {
+    await using _setup = await setup();
     useAppRefChipStore.getState().add(TARGET, { ref: "rw:c/fins", label: "rw:c/fins" });
     const promptRef = { current: "yes" };
     const sent: string[] = [];
@@ -120,6 +122,7 @@ describe("AppRefChipStrip", () => {
   });
 
   it("stores the labels of the chips a sent message names, and its bubble shows them", async () => {
+    await using _setup = await setup();
     await renderStrip();
     await insert("rw:c/fins", "Fins");
     await insert("rw:c/nose", "rw:c/nose");
@@ -143,15 +146,13 @@ describe("AppRefChipStrip", () => {
     ]);
 
     // Full Lecturn has no host to ask, so the label comes only from what the message stored.
-    await act(async () =>
-      root.render(
-        <AppReferencesContext
-          value={{ refPrefixes: ["rw:"], iconUrl: null, activate: null, labelScope: TARGET }}
-        >
-          <AppRefChip reference="rw:c/fins" />
-          <AppRefChip reference="rw:c/nose" />
-        </AppReferencesContext>,
-      ),
+    await testScreen.rerender(
+      <AppReferencesContext
+        value={{ refPrefixes: ["rw:"], iconUrl: null, activate: null, labelScope: TARGET }}
+      >
+        <AppRefChip reference="rw:c/fins" />
+        <AppRefChip reference="rw:c/nose" />
+      </AppReferencesContext>,
     );
     expect(chipLabels()).toEqual(["Fins", "rw:c/nose"]);
   });

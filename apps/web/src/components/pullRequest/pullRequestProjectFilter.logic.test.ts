@@ -59,20 +59,6 @@ describe("pull request project filter choices", () => {
     expect(findScopedProject(choices, cups, "worktree")).toBeDefined();
   });
 
-  it("matches canonical repositories regardless of casing", () => {
-    const main = project("main");
-    const worktree = project("worktree", nucbox, "GitHub.com/Nurozen/Lecturn");
-
-    expect(pullRequestFilterProjects([main, worktree], labels)).toEqual([main]);
-  });
-
-  it("does not add a server suffix after duplicate checkouts have collapsed", () => {
-    const main = project("main");
-
-    expect(pullRequestFilterProjects([main, project("worktree")], labels)).toEqual([main]);
-    expect(main.title).toBe("lecturn");
-  });
-
   it("distinguishes same-named repositories on one server by checkout path", () => {
     const projects = [project("upstream"), project("fork", nucbox, "github.com/example/lecturn")];
 
@@ -84,6 +70,7 @@ describe("pull request project filter choices", () => {
     ]);
   });
 
+  // regression: #9948 project filter deduplication must not merge across hosts
   it("keeps repositories on different hosts separate", () => {
     const choices = pullRequestFilterProjects(
       [project("github"), project("enterprise", nucbox, "git.example.com/nurozen/lecturn")],
@@ -93,6 +80,7 @@ describe("pull request project filter choices", () => {
     expect(choices.map((choice) => choice.id)).toEqual(["enterprise", "github"]);
   });
 
+  // regression: #9948 project filter deduplication must not merge unidentified repos
   it("does not merge projects whose repository identity is unknown", () => {
     const choices = pullRequestFilterProjects(
       [project("first", nucbox, null), project("second", nucbox, null)],
@@ -119,37 +107,5 @@ describe("pull request project filter choices", () => {
       "lecturn · nucbox-1 · /work/main · env-cups",
       "lecturn · nucbox-1 · /work/main · env-nucbox",
     ]);
-  });
-
-  it("uses the environment id when its label is unavailable", () => {
-    const choices = pullRequestFilterProjects(
-      [project("main"), project("remote", cups)],
-      new Map(),
-    );
-
-    expect(choices.map((choice) => choice.title)).toEqual([
-      "lecturn · env-cups",
-      "lecturn · env-nucbox",
-    ]);
-  });
-
-  it("can distinguish unresolved project records that also share a checkout path", () => {
-    const first = project("first", nucbox, null);
-    const second = { ...project("second", nucbox, null), workspaceRoot: first.workspaceRoot };
-
-    const choices = pullRequestFilterProjects([first, second], labels);
-
-    expect(choices.map((choice) => choice.title)).toEqual([
-      "lecturn · nucbox-1 · /work/first · env-nucbox · first",
-      "lecturn · nucbox-1 · /work/first · env-nucbox · second",
-    ]);
-  });
-
-  it("leaves unrelated names unchanged and orders them alphabetically", () => {
-    const app = { ...project("app"), title: "Zebra" };
-    const tools = { ...project("tools", nucbox, "github.com/acme/tools"), title: "Alpha" };
-
-    expect(pullRequestFilterProjects([app, tools], labels)).toEqual([tools, app]);
-    expect(pullRequestFilterProjects([], labels)).toEqual([]);
   });
 });

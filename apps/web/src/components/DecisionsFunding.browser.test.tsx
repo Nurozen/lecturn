@@ -1,6 +1,4 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, AuthRelayWriteScope } from "@lecturn/contracts";
 const mocks = vi.hoisted(() => ({
   scopes: ["relay:write"] as string[],
@@ -86,53 +84,50 @@ vi.mock(import("../env"), async (original) => ({
   ...(await original()),
   isElectron: false as never,
 }));
+import { act, render as renderUi, type Screen } from "../../test/render";
 import { DecisionsFunding } from "./DecisionsFunding";
 const environmentId = EnvironmentId.make("env");
-type View = { root: Root; container: HTMLDivElement };
+type View = Screen;
 const mounted: View[] = [];
 async function render(): Promise<View> {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const view = { root: createRoot(container), container };
+  const view = await renderUi(
+    <DecisionsFunding environmentId={environmentId} onChange={mocks.changed} />,
+    { router: false },
+  );
   mounted.push(view);
-  await act(async () => {
-    view.root.render(<DecisionsFunding environmentId={environmentId} onChange={mocks.changed} />);
-  });
   // The lazy view replaces the empty Suspense fallback only after its import settles.
   await vi.waitFor(() => expect(view.container.firstElementChild).not.toBeNull());
   return view;
 }
 async function unmount(view: View) {
   mounted.splice(mounted.indexOf(view), 1);
-  await act(async () => view.root.unmount());
-  view.container.remove();
+  await view[Symbol.asyncDispose]();
 }
 const buttons = (view: View) => [...view.container.querySelectorAll("button")];
 async function click(view: View, text: string) {
   const button = buttons(view).find((b) => b.textContent === text);
   expect(button).toBeDefined();
-  await act(async () => {
-    button!.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  await act(async () => button!.click());
 }
-// Both funding views are lazy chunks; load them once so a cold transform cannot outlast a render.
-beforeAll(() => Promise.all([import("./ExtensionsFunding"), import("./LegacyDecisionsFunding")]));
-afterEach(async () => {
-  for (const view of mounted.toReversed()) await unmount(view);
-  vi.unstubAllGlobals();
-});
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+async function setup(): Promise<AsyncDisposable> {
+  // Both funding views are lazy chunks; load them first so a cold transform cannot outlast a render.
+  await Promise.all([import("./ExtensionsFunding"), import("./LegacyDecisionsFunding")]);
   vi.clearAllMocks();
   mocks.scopes = [AuthRelayWriteScope];
   mocks.contextual = true;
   mocks.funding.state = "unfunded";
   mocks.funding.generation = 1;
   vi.spyOn(console, "error").mockImplementation(() => {});
-});
+  return {
+    async [Symbol.asyncDispose]() {
+      for (const view of mounted.toReversed()) await unmount(view);
+      vi.restoreAllMocks();
+    },
+  };
+}
 describe("funding controls without cloud auth configured", () => {
   it("reads status and completes a separately approved challenge with the challenge generation", async () => {
+    await using _setup = await setup();
     const challenge = {
       featureId: "decisions",
       environmentId: "env",
@@ -169,6 +164,7 @@ describe("funding controls without cloud auth configured", () => {
     await unmount(renderer);
   });
   it("retains legacy Decisions membership setup when the host does not support shared funding", async () => {
+    await using _setup = await setup();
     mocks.contextual = false;
     mocks.command.mockResolvedValue({
       _tag: "Success",
@@ -194,6 +190,7 @@ describe("funding controls without cloud auth configured", () => {
     await unmount(renderer);
   });
   it("requires a second explicit click before revoking and preserves read-only allowance access", async () => {
+    await using _setup = await setup();
     mocks.funding.state = "active";
     mocks.command.mockResolvedValue({
       _tag: "Success",

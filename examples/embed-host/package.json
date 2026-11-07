@@ -7,11 +7,12 @@
   "scripts": {
     "start": "node scripts/start.ts",
     "e2e": "node e2e/run.ts",
+    "test": "vp test run",
     "typecheck": "tsc-rs --noEmit"
   },
   "dependencies": {
     "@lecturn/embed": "workspace:*",
-    "electron": "44.4.5",
+    "electron": "44.9.3",
     "lecturn": "workspace:*"
   },
   "devDependencies": {

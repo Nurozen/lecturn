@@ -76,6 +76,7 @@ const ALLOWED_FROM_ANY_CALLER: ReadonlySet<string> = new Set([
   "message.dispatch",
   "run.interrupt",
   "queue.resume",
+  "queued-run.start",
   "thread.visit",
   "thread.mark-unread",
   "runtime-request.respond",

@@ -44,7 +44,11 @@ vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
   Platform: { OS: "android" },
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: native.noop } }));
+vi.mock("react-native-reanimated", () => ({
+  default: { View: native.noop },
+  FadeInDown: { duration: () => ({ reduceMotion: () => undefined }) },
+  ReduceMotion: { System: "system" },
+}));
 vi.mock("react-native-keyboard-controller", () => ({
   KeyboardController: { dismiss: vi.fn() },
   KeyboardStickyView: native.noop,
@@ -162,6 +166,8 @@ vi.mock("../../state/query", () => ({
 vi.mock("../../state/queries", () => ({
   useDebouncedValue: (value: string) => value,
   usePaginatedBranches: () => native.branches,
+  // The unfiltered ref list answers the repository check (upstream #21404).
+  useBranches: () => ({ data: { isRepo: true }, isPending: false }),
 }));
 vi.mock("../../state/projects", () => ({
   projectEnvironment: {

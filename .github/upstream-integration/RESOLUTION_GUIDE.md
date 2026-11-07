@@ -154,13 +154,13 @@ their tests.
 
 Call sites in upstream files, which must survive a merge:
 
-- `apps/web/src/components/Sidebar.tsx` (very high churn): one import and one
-  `<AccountMark environmentId={thread.environmentId} />` line before
-  `{pinIndicator}` in each visible `SidebarThreadRow` layout, slim and card.
+- `apps/web/src/components/sidebar/SidebarThreadRow.tsx` (very high churn): one
+  import and one `<AccountMark environmentId={thread.environmentId} />` line before
+  `{pinIndicator}` in each visible row layout, slim and card.
   If upstream reshapes a row, re-add the single line; never the tooltip.
 - `apps/web/src/components/Sidebar.tsx`, segmented sidebar. Wrap, never
-  extract: upstream's list body stays where it is. Nine sites, all small:
-  1. the `./sidebar/*` imports next to `AccountMark`;
+  extract: upstream's list body stays where it is. Eight sites, all small:
+  1. the `./sidebar/*` imports;
   2. `const sidebarSegmentation = useSidebarSegmentation();` before
      `unsortedProjectGroups`, whose memo calls
      `snapshotsPerAccount(sidebarSegmentation, buildSidebarProjectSnapshots)({...})`
@@ -184,15 +184,11 @@ Call sites in upstream files, which must survive a merge:
      `<li>` after it stays as the second child: it renders in the one-list
      sidebar only, and `SidebarSegments.tsx` carries a copy for segments, so
      restyle both together;
-  7. `SidebarDraftBlock` reads `const ownsEnvironment = useSegmentOwnsEnvironment();`,
+  7. `sidebar/SidebarDraftBlock.tsx` reads `const ownsEnvironment = useSegmentOwnsEnvironment();`,
      skips a session when `!ownsEnvironment(session.environmentId)`, and lists
      `ownsEnvironment` in the `drafts` memo's deps. It is how a draft whose
      project is not loaded still lands in its account's segment;
-  8. `handlePinnedDragEnd` plans with
-     `orderedIds: pinnedReorderKeysWithinSegment(sidebarSegments.segments, newOrder, activeKey)`
-     and lists `sidebarSegments.segments` in its deps, so a drop never writes to
-     another account's environment. The optimistic order stays the whole block's;
-  9. `projectScopeItems` maps `nameGroupsByAccount(sidebarSegmentation, projectGroups)`
+  8. `projectScopeItems` maps `nameGroupsByAccount(sidebarSegmentation, projectGroups)`
      and lists `sidebarSegmentation` in its deps.
 - `apps/web/src/components/LegacySidebar.tsx`: the `AccountMark` and
   `accountProjectGroups` imports, `<AccountMark environmentId={thread.environmentId} />`
@@ -228,18 +224,18 @@ Call sites in upstream files, which must survive a merge:
   the gate, and renders `account.picker` on the publish step.
 - `apps/web/src/components/CommandPalette.tsx` (very high churn): three lines.
   The `useConnectAccountPaletteItems` import, `const connectAccountItems =
-useConnectAccountPaletteItems();` above `const actionItems`, and
+  useConnectAccountPaletteItems();` above `const actionItems`, and
   `actionItems.push(...connectAccountItems);` right before `buildRootGroups`.
   The builder is in `clerk/connectAccountCommands.ts`, not in
   `CommandPalette.logic.ts`. Never import `@clerk/react` from the palette.
-- `apps/web/src/components/settings/ConnectionsSettings.tsx` (very high churn),
+- `apps/web/src/components/settings/SavedEnvironmentRows.tsx` (very high churn),
   all inside `ConfiguredCloudLinkRow`: the `useConnectAccountPicker("publish", ...)`
   call, the options passed to `useCloudLinkController`, `unlinkBlocked` in the
   destructure, the `unlinkButton` constant, the "Publish as" `SettingsRow`, the
   gate's `accountId`, and the unlink row's control, which shows the mismatch
   action next to `unlinkButton`. Take upstream's rows and re-add these.
 - `apps/web/src/cloud/useCloudLinkController.ts`: takes `{ accountId,
-onSelectAccount }`, reads every token through `readToken(accountId)`, and gets
+  onSelectAccount }`, reads every token through `readToken(accountId)`, and gets
   its mismatch state from `describePublishAccount`. It must not call
   `useClerk` or `setActive`.
 - `apps/web/src/components/cloud/{BillingAccount,TeamsAccount,TeamSelector}.tsx`:
@@ -397,11 +393,15 @@ line or one spread unless noted:
   wakeups) and the `embedPersistence` import first in `main.tsx`. Losing any
   one lets the embed authenticate with the user's cookie.
 - `apps/web/src/components/ChatView.tsx`: `useEmbedPresentation()` and
-  `useEmbedAwareNavigate()` instead of `useNavigate()`; the
+  `useEmbedAwareNavigate()` instead of `useNavigate()`, also in the `chat/use*`
+  hooks that navigate (`useComposerSend`, `useProposedPlanSend`,
+  `useComposerSelection`, `useThreadLifecycle`, `useMultipleModelSend`,
+  `usePullRequestDraftThread`, `useSystemComposerBanners`); the
   `embedPresentation === null` guards on the right panel, preview mini
   player, open-in picker, header, git controls, thread details panel and
   terminals; `useAppClosedBanner` joined into the banner items;
-  `AppThreadImportSessionLink` under the composer; `useFollowEndWhenDrawerDocks`.
+  `AppThreadImportSessionLink` under the composer. `useFollowEndWhenDrawerDocks`
+  is in `chat/useTimelineFollow.ts`.
 - `apps/web/src/components/chat/ChatComposer.tsx`: `insertMention` and
   `setDraft` on `ChatComposerHandle`; `<AppRefChipStrip>` above the prompt
   editor; `foldAppRefChips` before submit and `settleAppRefChips` after;
@@ -409,15 +409,18 @@ line or one spread unless noted:
   `appApprovalTestId` attributes on the approval banner;
   `useComposerPhoneViewport()` for `isMobileViewport`; the footer wrapped in
   `<EmbedComposerFooter>` with `embedFooterStacked` beside `isComposerResting`.
+  `embedFooterStacked` is also read by `chat/ComposerControlsBar.tsx`.
 - `apps/web/src/components/chat/MessagesTimeline.tsx`: `<AppThreadTitle>` at
-  the top of the conversation, `<EmbedUserAvatar />` in the user row,
-  `timelineMinimapShown(items.length, embedded)`, and the
-  `appToolRowOutcome` selector choosing `AppToolWorkRow` over `WorkLogRow`.
+  the top of the conversation. Moved rows: `<EmbedUserAvatar />` in
+  `chat/TimelineUserMessageRow.tsx`, `timelineMinimapShown(items.length, embedded)`
+  in `chat/TimelineMinimap.tsx`, and the `appToolRowOutcome` selector choosing
+  `AppToolWorkRow` over `WorkLogRow` in `chat/TimelineWorkEntryRow.tsx`.
 - `apps/web/src/components/Sidebar.tsx`: the apps imports;
   `appProjectKeys` from `useListedProjects()` and through
   `partitionForkSidebarThreads` (`partitionThreadsByProjectKeys`, which
   keeps app threads out of the list and in `appSearchThreads`);
-  `<AppThreadBadge>` in search rows; `sidebarMode` with its early returns in
+  `<AppThreadBadge>` in the search rows of `sidebar/SidebarThreadRow.tsx`;
+  `sidebarMode` with its early returns in
   keyboard navigation and new thread; the `modeSwitch`, `showScopeRow`,
   `SidebarScopeTrigger`, `onScopeAdd` and `newThreadDisabled` props of
   `SidebarThreadHeader`; `<AppsSidebar />` swapped for the project list in
@@ -428,8 +431,8 @@ line or one spread unless noted:
   shows `<StandaloneAppsSidebar />` instead of the legacy sidebar in Apps
   mode; `LegacySidebar.tsx` has `<AppsModeSwitch />` in its fixed header.
 - `apps/web/src/components/CommandPalette.tsx`: the `useAppsPaletteItems`
-  call, `actionItems.push(...appsPalette.actions)`, the `open-app` intent
-  and view, and `<AppThreadBadge>` on thread items.
+  call, `actionItems.push(...appsPalette.actions)`, and the `open-app` intent
+  and view. `<AppThreadBadge>` on thread items is in `CommandPaletteThreadItems.tsx`.
 - `apps/mobile/src/Stack.tsx`: the `AppThreads` screen and the
   `APP_THREAD_LINKING_PATH` alias on the thread screen's linking.
 
@@ -913,8 +916,9 @@ from upstream's side.
   gating lives in fork `ClaudeCapabilitiesCache.ts`, and an unauthenticated
   status invalidates it. #20413 launch append text is ignored for Squire homes
   and probes.
-- **Idle compaction (#21682)** stays an opt-in beta (`compactIdleThreads`
-  defaults to false), and `idleCompactionWindow` skips Squire threads.
+- **Idle compaction (#21682).** `compactIdleThreads` defaults to `"onReturn"`, the
+  resume prompt, and legacy booleans still decode. Background compaction
+  (`"beforeCacheExpires"`) stays opt-in, and `idleCompactionWindow` skips Squire threads.
 - **Owner analytics (#21506).** `readClientOwnerParams` hashes the primary
   signed-in Connect account. `ws.ts` `readClientOwners` records only
   `isTelemetryIdHash` values. The web device id key is
@@ -966,6 +970,140 @@ from upstream's side.
     (`HostFreezeToastCoordinator`, `AddProjectToMachineDialogHost`) go into
     `AppShell.tsx`.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream c3540a78).**
+
+- **Server migrations.** Upstream 67 (`067_WebhookDedupe.ts`) runs as fork
+  id 85, after 84. `WebhookDedupeCompatibility` skips it when
+  `scheduled_task_webhook_replay_keys` exists, because upstream's DDL has no
+  `IF NOT EXISTS`. The file keeps its upstream name, as 064-066 do.
+- **Webhook filters and dedupe (#22194, #22234)** are taken whole into the
+  fork webhook automations. The fork keeps the `lecturn/` service keys,
+  `x-lecturn-hook-outcome`, CloudLink and `RelayDeliveryProof`. Tool and docs
+  copy says "Lecturn Connect".
+- **Disposable render lint (#22187).** Upstream's rule runs as
+  `lecturn/require-disposable-render`, with upstream's scope:
+  `apps/web/**/*.test.{ts,tsx}`, error. Fork-only browser tests use a per-file
+  `setup()` that renders through `apps/web/test/render.tsx`
+  (`router: false`) and returns an `AsyncDisposable`. Tests start with
+  `await using _setup = await setup()`, and `root.render` becomes
+  `screen.rerender`. The node-env `apps/web/src/cloud/managedAuth.test.ts`
+  turns the rule off with a file-level `oxlint-disable` and a reason, because
+  the browser helper cannot load in node. Squire companion tests capture
+  console and page errors at module scope, and the file's last test checks
+  them.
+- **Release CI.** `release-desktop.yml` and `scripts/build-npm-launcher.ts`
+  stay deleted. The upstream Windows arm64 cross-build (jsign plus the
+  esbuild verify bundle) is not wired into fork `release.yml`. The supporting
+  `scripts/lib/windows-jsign.ts`, `windows-tar.ts` and
+  `verify-windows-desktop-artifact.ts` stay for when it is. Server tests keep
+  3 shards on `ubuntu-24.04` in both `ci.yml` and `release.yml`; upstream's
+  8-shard Blacksmith split is not taken. The jsign env var is
+  `LECTURN_JSIGN`.
+- **Relay alert throttle (#21405).** The throttle bypass uses upstream
+  `rowPhasesChanged`. The fork's `newlyTerminalRows` still drives finished
+  alerts.
+- **Mobile.**
+  - `ThreadComposer` keeps the fork model tray under the composer and does not
+    render upstream's inline `ComposerModelControl` (#21406, #20812) in the
+    row or the card. The one-row-until-wrap layout and the queued-edit
+    submission lock (#21390) are taken. The new-task draft screen does use
+    `ComposerModelControl`.
+  - The settled thread card keeps Unsettle. Upstream's floating lifecycle
+    pill shows only the snoozed and woke states, behind
+    `allows("thread-actions")`.
+  - The new-task repository check (#21404) queries `resolveNewTaskGitCwd`
+    (the Stave primary repo), so a Stave space root never reads as non-git.
+    `staveForcedEnvMode` outranks the resolved workspace selection.
+- **Web.**
+  - The `ProjectSettingsPanel` removal dialog uses upstream
+    `planProjectRemoval` for the thread and target logic. Its copy stays
+    local, because the fork lists Stave worktree deletions where upstream has
+    the files-on-disk line.
+  - The `ChatOverlayHosts` test covers only `BranchRestoreConfirmHost`. The
+    fork has no `RevertConfirmHost`.
+  - `MenuPopup` (`ui/menu.tsx`) keeps the fork `surface` prop
+    (`panel-glass`) alongside upstream's `width` (#22566 compact approval
+    menu).
+  - Mermaid via pele (#21472) is taken whole, including its MathML
+    allowlist. Upstream deleted `MermaidDiagram.browser.test.tsx`; the fork
+    exports `sanitizeDiagramSvg` and `sanitizeMathDiagramSvg` and keeps a
+    rewritten test of their MathML and link/script stripping.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream a12d6ed9).**
+
+- **Web splits.** A fork edit in a moved block moves with it. Call sites above are
+  updated; the rest:
+  - Sidebar rows (#22696, #22729): `sidebar/SidebarThreadRow.tsx` holds the fork
+    row props, `SidebarRowStatusLine` and the search row; `SidebarDraftBlock.tsx`
+    the draft block. `SidebarListMarkers.tsx` and `SortableThreadRow` are not
+    taken; fork markers and sorting stay in `SidebarDragScope.tsx`.
+  - #22730: the live shell read sits inside the fork rows. `Sidebar.tsx` reads
+    `useQuietThreadShells`. `quietThreadShellsAtom` does not filter, so
+    `useSidebarProjectGroups` filters with `isHiddenSquireThread`.
+  - CommandPalette: `useSortedProjectGroups` in `CommandPaletteLookups.ts`; the
+    archived-Stave filter in `CommandPaletteThreadItems.tsx`.
+  - Connections: `settings/SavedEnvironmentRows.tsx` also holds `CloudLinkRow` and
+    the Lecturn Connect rows; `AuthorizedClientsSettings.tsx` the client rows.
+  - PR page: the route only validates search. Project scoping and the watch
+    section are in `pullRequest/PullRequestsPage.tsx`, the row watch button in
+    `PullRequestListGroups.tsx`, Stave repository match and expected hosts in
+    `usePullRequestListView.ts`, `AccountSurface` in `PullRequestsColumn.tsx`, the
+    lowercase host key in `usePullRequestDetail.ts`.
+  - ChatView hooks: load balancing in `useDraftEnvironmentRouting`; the send path
+    (settled, Stave, `/fork`, app refs, title seed, contextual) in `useComposerSend`;
+    the unsent-import guard in `useComposerSelection`; the settled status line in
+    `useThreadLifecycle`; revert state and forks in `useTimelineRewind`, with the
+    dialog still in `ChatView`.
+  - `ChatBannerLane` takes upstream's props; the fork's lane height lives in
+    `ChatBannerLaneFrame`.
+  - `ComposerAttachButton` is not taken: its input sits in the button and can
+    unmount during the file dialog, so the attach input stays hoisted in `ChatComposer`.
+  - Upstream moved composer chords inside `useChatShortcuts`, which bypasses the
+    Squire allowlist, so `chatViewControls.ts` denies them.
+  - #21503 applies to provider approvals only: the footer stays and a send
+    declines and redirects. App tool approvals keep the send block;
+    `approvalReplacesComposer` now only picks the placeholder.
+  - Sends never decline Lecturn Apps tool approvals, on web or mobile. Web blocks the
+    send while any shown approval is an app tool, including one queued behind a provider
+    card and a preview annotation send, which calls `onSend` past the composer. Mobile
+    never had a block, so with one pending a send declines nothing and follows
+    `followUpBehavior` as before #21503.
+- **Mobile.**
+  - Composer chips (#22518): the Android icon object is `LecturnChipIcons`; the iOS
+    chip font stays system, in `makeAttachmentString`.
+  - `useThreadFeedPresentation` (#22913) carries `importedFrom` and Squire grouping.
+    `TurnDiffStat` opens Review, so `ThreadFeed` hides it unless `allows("git")`
+    (`turnDiffEnabled`).
+  - Thread rows keep the fork's relative time on working rows, not #21394's elapsed
+    label; Woke and Waiting take the duration.
+- **Server and packages.**
+  - `orchestrationInstructions` keeps fork text and `lecturn_*` names, plus upstream's
+    sentence about `search` (#22889), because the model list is now capped.
+  - `providerMaintenanceRunner` keeps `instanceId` and the capped output in the
+    failure log, with upstream's `describeCommand`.
+  - `migrate-dev-db` copies settled threads too (upstream); Squire rows stay out.
+  - A one-line security fix in a block the fork re-indented can fall out of a merge,
+    as the `ws.ts` `isNetworkPath` guard from a12d6ed942 did. Check such fixes on the
+    tree, not in the conflict list.
+- **Identity sweep.** It must map `t3_` tool names, and the `t3-thread-cli` client
+  and `t3` MCP server names. `lecturn thread` (#22732) called `t3_*` tools, and its test stubs the names, so that test cannot catch it. macOS `git grep -E`
+  has no `\b`; scan with Python or `rg`.
+- **Deps and CI.**
+  - Lockfile: seed `:2`, then `pnpm install --lockfile-only --ignore-scripts` with
+    pnpm 12. `packages/embed` and `examples/embed-host` Electron pins move with
+    `apps/desktop`.
+  - `release.yml` stays fork-native Windows: #22584 (Windows on Linux with jsign) is
+    not ported, because it never ran with fork secrets and only saves time.
+  - `vercel-deployment-output.test.cjs` covers only `web-preview.yml`; the fork's
+    `release.yml` has no Vercel step and `web-production.yml` reads no URL back.
+- **Test lints (#22560-#22565).** Rules run under `lecturn/`. Fork tests use
+  `fakeTimers()`, `vi.waitFor` and project timeouts. Suppressions with a reason remain
+  for macrotask boundaries (upstream's wording), env-gated live provider runs, CPU-bound
+  rig and bundle tests, and the `squireRig` per-frame budget.
+- **McpAppFrame activation.** Vitest 5.0.5's first `vi.mock` probes with
+  `page.evaluate`, and Playwright grants about 5 s of real activation. The two
+  idle-page tests wait it out with `idlePage()` before they render.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's
@@ -993,8 +1131,6 @@ domains. The fork's copies expect Lecturn strings. Take upstream's assertion _lo
 the fork's expected strings. Files:
 `apps/server/src/cli/{config.test.ts,triagePrompt.ts}`,
 `apps/mobile/src/lib/mobileTheme.test.ts`, `.github/triage/PLAYBOOK.md`,
-`apps/web/src/components/desktopUpdate.toast.test.tsx`,
-`apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.test.tsx`,
 `apps/desktop/src/app/*.test.ts`.
 
 **`pnpm-lock.yaml`.** Resolve dependency manifests and fork patches first,
@@ -1009,6 +1145,113 @@ fails on the `duplicatePackage` diagnostic.
 `apps/web/src/routeTree.gen.ts`,
 `apps/desktop/src/preview/AnnotationStyles.generated.ts`,
 `apps/mobile/generated-uniwind-*`, `packages/*/src/_generated/*.gen.ts`.
+
+## Upstream test pruning (sync to upstream 05696c63, #22557)
+
+Upstream deletes tests it judges low-signal for its own code, and removes
+exports only those tests used. Lecturn's own tests must not be lost with them.
+Apply these per test, not per file, and judge what a test pins, not just the size
+of the fork's test-file delta. R4 overrides R2 and R3:
+
+- **R1.** A fork-added test (title absent from the same file in the translated merge
+  base) stays, even when upstream deleted the file. A retained file holds the fork
+  tests and only the setup they need.
+- **R2.** An upstream-origin test with only identity delta: take the deletion.
+- **R3.** An upstream-origin test the fork edited: keep it if the edit makes it
+  assert fork-owned behavior (a fork feature or fork fix); take the deletion if the
+  edit only adapted names, APIs or the harness.
+- **R4.** Tests pinning stop targets or past sync regressions stay whatever their
+  origin: `McpAppFrame.browser.test.tsx` and server `mcpApps/McpAppRequests.test.ts`
+  (#18548), `HtmlRenderDialog.browser.test.tsx`
+  (#20281 `p-4`), `apps/server/src/htmlRender/HtmlRender.test.ts` (#16872 exit code
+  and signal), the `lockedHtmlRenderDocument` tests in
+  `packages/shared/src/htmlRender.test.ts` (#165), and the
+  `MermaidDiagram.browser.test.tsx` sanitizers. So does the only guard of a
+  fork-carried patch to a dependency or of generated output that a fork-editable
+  input can drift: in `apps/mobile/scripts/`, `notification-center-manager.test.ts`
+  (`patches/expo-notifications@58.1.5.patch`), `permissions-service.test.ts`
+  (`EXPermissionsService` in the `expo-modules-core` patch) and
+  `generate-uniwind-themes.test.ts`. So does the fork migration ledger: "keeps
+  released migrations contiguous" in `055_OrchestrationV2.test.ts`, the only pin on
+  ids below 70. "Fork-carried" means the patch differs from upstream's:
+  `network-module.test.ts` guarded `patches/expo-network@58.0.3.patch`, which is
+  identical upstream, so it went under R2.
+- **R5.** Fork-only test files stay and are repaired when a removed helper breaks
+  them. Keep a production export, helper or non-TS fixture (`.swift`, `.m`, `.ndjson`
+  read by URL, which typecheck cannot catch) upstream removed when a fork file or
+  kept test needs it. Otherwise take the removal. Upstream #26238 deletes both Expo
+  guard fixtures, and `PermissionsServiceRegression.m` would go without a conflict:
+  restore them then.
+- **R6.** "Obsolete" means the code under test is gone from the merged tree or an
+  exact duplicate remains. "Low signal" is not obsolete for a fork test. Record
+  each drop with its path, title and reason in the batch's `obsolete-tests.tsv`.
+- **R7.** Later prune passes (#22588, #22589, #22591, #22592, #22593, #22599) follow
+  the same rule.
+
+**Audit.** Per file, list the `(path, title)` pairs in fork `main` whose title is
+absent from the same file in the merge base, plus the test files only the fork has.
+A repo-wide comparison hides pairs. Each must be on the merged tree or recorded
+under R6. Translate base paths and titles first, in this order: `com.t3tools.t3code`
+to `com.cloudgatherer.lecturn`, `@t3tools/` to `@lecturn/`, `T3 Code` to `Lecturn`,
+`T3CODE_` to `LECTURN_`, `t3code` to `lecturn`, then at a word start `T3Code` to
+`Lecturn`, `T3_` to `LECTURN_`, `.t3` to `.lecturn`, and `T3`/`t3` (standalone, before
+a capital, or `t3-`) to `Lecturn`/`lecturn`.
+The translation misses mid-word camelCase `T3`, `t3_`, and owner or host names,
+and `t3-context://` is mapped although the fork keeps it, so some pairs and deltas
+are false positives; check those by hand. A title regex misses dynamic titles
+(`scenario.name`, `$name`) and `.each`/`.for` rows, so compare those with a parser or
+by hand. A clean re-merge can also drop an import a kept fork test still uses, so
+typecheck after it.
+
+**CI wiring, on each prune.** Re-check:
+
+- Package `test` scripts: a package with surviving tests keeps one.
+- `test:perf:v2-wire` in the root `package.json` and `reactTests` in
+  `apps/mobile/vite.config.ts`: a kept file stays listed, a deleted one goes. Upstream
+  dropped `packages/client-runtime/src/state/threadDetail.test.ts`; the fork lists it.
+- Test paths hard-coded in `.github/workflows`, and the `ci.yml` relay step's
+  `git grep -l BILLING_TEST_DATABASE_URL`, which fails if it finds no test.
+- `apps/server/src/testUtils/shardWeights.json`: leave upstream's re-recorded weights.
+  Unrecorded files fall back to 0.6s. Re-record with
+  `apps/server/scripts/update-test-shard-weights.ts` when shard times skew.
+
+The two Expo guards under R4 skip off macOS and CI's mobile tests run on Ubuntu, so
+run them on a Mac.
+
+**R5 keeps.**
+
+- `apps/server/src/orchestration-v2/builtInProviderAdapterDrivers.ts` (upstream
+  deleted the file): `CopilotAdapterV2.test.ts` reads its driver kinds.
+- `packages/provider-grok/src/server.ts` `GrokAdapterV2Driver`:
+  `builtInProviderAdapterDrivers.ts` imports it.
+- `apps/server/src/http.ts` `isLoopbackHostname`: `apps/server/src/apps/pairingGuard.ts`
+  imports it.
+- `apps/server/src/cli/invocation.ts` `formatCliCommand`: `invocation.test.ts`.
+- `apps/server/src/relay/AgentAwarenessRelay.ts` `shouldPublishAgentAwarenessEvent`:
+  `AgentAwarenessRelay.test.ts`.
+- `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`
+  `projectCodexDynamicToolItem`: `CodexAdapterV2.test.ts` and `codexMcpToolResult.test.ts`.
+- `apps/web/src/uiStateStore.ts` `setSidebarProjectScopeKey`: `uiStateStore.test.ts`.
+- `packages/provider-grok/src/server/adapter.ts` `GrokProviderCapabilitiesV2`:
+  `presentationParity.test.ts`.
+- `packages/ssh/src/tunnel.ts` `buildRemoteLaunchScript`: `tunnel.test.ts`.
+
+One export stays with no caller, marked `@public` for knip because the fork's code
+no longer uses it and upstream's deleted test was its last consumer:
+`cliArchivePlatformKey` (`packages/shared/src/cliRelease.ts`). Upstream still calls
+it, so keeping it lets its edits merge. `formatWorkingDurationLabel` left
+`Sidebar.logic.ts` for good: upstream's callers now use client-runtime's `state/models.ts`.
+
+**Package test scripts.** Upstream removed the `test` script from `apps/marketing`
+and `packages/provider-testing` when they lost their tests. The fork keeps both
+scripts, because `homeMotion.test.ts` and `releases.test.ts` (marketing) and
+`replayGate.test.ts` (provider-testing, which also keeps its `vite-plus` devDependency)
+remain. `examples/embed-host` gained a `test` script so its fork tests reach CI.
+
+**Generated Uniwind guard.** `apps/mobile/scripts/generate-uniwind-themes.test.ts`
+keeps "keeps the committed outputs current", which upstream deleted. No other check
+catches a stale `generated-uniwind-theme-names.json` or `clerk-theme.json`, and the
+fork's palette edits can drift them.
 
 ## Verifying
 

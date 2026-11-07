@@ -23,10 +23,10 @@ import {
 } from "@lecturn/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import * as DateTime from "effect/DateTime";
-import { act, createRef } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createRef } from "react";
+import { describe, expect, it } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
+import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
 import {
@@ -235,24 +235,23 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
 }
 
 let threadCount = 0;
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+let testScreen: Screen;
+
+async function setup(): Promise<AsyncDisposable> {
   document.documentElement.classList.add("dark");
   container = document.createElement("div");
   document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  delete document.documentElement.dataset.lecturnEmbed;
-  document.documentElement.classList.remove("dark");
-  vi.unstubAllGlobals();
-});
+  testScreen = await renderUi(null, { container, router: false });
+  return {
+    async [Symbol.asyncDispose]() {
+      await testScreen[Symbol.asyncDispose]();
+      delete document.documentElement.dataset.lecturnEmbed;
+      document.documentElement.classList.remove("dark");
+    },
+  };
+}
 
 async function mount(embedded: boolean, parallel = true, raced = false) {
   await page.viewport(PANE_WIDTH, 900);
@@ -264,16 +263,14 @@ async function mount(embedded: boolean, parallel = true, raced = false) {
     const timeline = (
       <Timeline stage={stage} parallel={parallel} raced={raced} threadKey={threadKey} />
     );
-    await act(async () =>
-      root.render(
-        <RegistryProvider>
-          {embedded ? (
-            <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
-          ) : (
-            timeline
-          )}
-        </RegistryProvider>,
-      ),
+    await testScreen.rerender(
+      <RegistryProvider>
+        {embedded ? (
+          <EmbedPresentationContext value={presentation}>{timeline}</EmbedPresentationContext>
+        ) : (
+          timeline
+        )}
+      </RegistryProvider>,
     );
   };
 }
@@ -295,6 +292,7 @@ const liveMarks = () => container.querySelectorAll(".live-tool-shine, .live-acti
 
 describe(`a turn held on an app approval in a ${PANE_WIDTH} px embed pane`, () => {
   it("shows neither the working row nor the held call's row until the card is answered", async () => {
+    await using _setup = await setup();
     const render = await mount(true);
 
     await render("pending");
@@ -313,6 +311,7 @@ describe(`a turn held on an app approval in a ${PANE_WIDTH} px embed pane`, () =
   });
 
   it("leaves nothing live beside the card when no other call runs", async () => {
+    await using _setup = await setup();
     const render = await mount(true, false);
 
     await render("pending");
@@ -328,6 +327,7 @@ describe(`a turn held on an app approval in a ${PANE_WIDTH} px embed pane`, () =
 
 describe("the same turn in full Lecturn", () => {
   it("leaves the held call and its approval to the card and stops the working timer", async () => {
+    await using _setup = await setup();
     const render = await mount(false);
 
     await render("pending");
@@ -360,6 +360,7 @@ describe.each([false, true])(
   "a waiting app approval in full Lecturn, raced before its call: %s",
   (raced) => {
     it("repeats the card nowhere in the timeline, folded or expanded, and nothing ticks", async () => {
+      await using _setup = await setup();
       const render = await mount(false, false, raced);
 
       await render("pending");
@@ -382,6 +383,7 @@ describe.each([false, true])(
 
 describe("an approval that committed before the call it holds", () => {
   it("sits just below that call in full Lecturn once answered and settled", async () => {
+    await using _setup = await setup();
     const render = await mount(false, true, true);
 
     await render("settled");
@@ -393,6 +395,7 @@ describe("an approval that committed before the call it holds", () => {
   });
 
   it("still hides the held call's row in the embed", async () => {
+    await using _setup = await setup();
     const render = await mount(true, true, true);
 
     await render("pending");

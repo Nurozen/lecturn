@@ -221,7 +221,7 @@ function summary(contractVersion: number = USAGE_CONTRACT_VERSION): UsageSummary
   return {
     ...window,
     contractVersion,
-    readAt: new Date().toISOString(),
+    readAt: "2026-09-16T12:00:00.000Z",
     buckets: [
       {
         day: window.untilDay,

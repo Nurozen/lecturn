@@ -583,6 +583,7 @@ describe("app RPC allowlist", () => {
         "thread.visit",
         "thread.mark-unread",
         "queue.resume",
+        "queued-run.start",
         "thread.user-input.dismiss",
       ]) {
         const dispatch = (threadId: ThreadId) =>

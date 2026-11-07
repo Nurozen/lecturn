@@ -11,7 +11,7 @@ import type {
   ConnectedAppThreadSummary,
   ConnectedAppThreadsStreamEvent,
 } from "@lecturn/contracts/apps";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { type ConnectionEvent, type ConnectionModeEvent, followConnectionMode } from "../target.ts";
 import type { AttachLedger } from "./copyLedger.ts";
@@ -1076,9 +1076,8 @@ describe("connect", () => {
   });
 });
 
-const until = async (condition: () => boolean) => {
-  while (!condition()) await new Promise((resolve) => setTimeout(resolve, 5));
-};
+const until = (condition: () => boolean) =>
+  vi.waitFor(() => expect(condition()).toBe(true), { timeout: 10_000, interval: 5 });
 
 /** A sidecar start that never gets ready; an abort ends it as a killed process would, a moment later. */
 function neverReadySidecar() {

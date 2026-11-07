@@ -105,7 +105,7 @@ describe("release downloads", () => {
   it("rejects cached releases from the other channel", async () => {
     values.set(
       "lecturn-stable-release",
-      JSON.stringify({ fetchedAt: Date.now(), release: nightly }),
+      JSON.stringify({ fetchedAt: Date.parse("2026-10-13T12:00:00Z"), release: nightly }),
     );
     respond(stable);
     expect(await fetchLatestRelease()).toEqual(stable);

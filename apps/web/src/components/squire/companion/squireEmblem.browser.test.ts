@@ -1,15 +1,6 @@
 // The v5 <squire-emblem> contract (v5 validation/emblem-check.cjs), ported to an injected
 // clock. Behavior the port adds lives in squireEmblem.port.browser.test.ts.
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createManualCompanionClock, setCompanionClockForTests } from "./companionClock";
 import { defineSquireEmblem, SquireEmblemElement, type EmblemPose } from "./squireEmblem";
@@ -155,6 +146,7 @@ function poseDelta(a: EmblemPose | null, b: EmblemPose | null, rotation = true) 
   return d;
 }
 
+// oxlint-disable-next-line lecturn/no-frame-waits-in-browser-tests -- a zero-delay macrotask boundary, not a wait for time.
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 // Advances one rendered frame at a time until `done` holds (bounded).
@@ -333,38 +325,41 @@ function setReducedMotion(matches: boolean) {
 
 const onWindowError = (event: ErrorEvent) => problems.push(`pageerror: ${event.message}`);
 
-beforeAll(() => {
-  window.addEventListener("error", onWindowError);
+// File-wide capture, checked by the last test; this file's page goes away with it.
+window.addEventListener("error", onWindowError);
+{
   const record =
     (type: string) =>
     (...args: unknown[]) =>
       problems.push(`${type}: ${args.map(String).join(" ")}`);
   vi.spyOn(console, "error").mockImplementation(record("error"));
   vi.spyOn(console, "warn").mockImplementation(record("warn"));
-});
+}
 
-afterAll(() => {
-  window.removeEventListener("error", onWindowError);
-});
-
-beforeEach(() => {
+// A manual clock and a controllable prefers-reduced-motion for one test; disposing unmounts
+// the emblems and restores both.
+function setup(): Disposable {
   clock = createManualCompanionClock({ frameMs: 1000 / 120 });
   setCompanionClockForTests(clock);
   reducedMotion = Object.assign(new EventTarget(), {
     matches: false,
     media: "(prefers-reduced-motion: reduce)",
   });
-  vi.spyOn(window, "matchMedia").mockReturnValue(reducedMotion as MediaQueryList);
-});
-
-afterEach(() => {
-  unmountAll();
-  setCompanionClockForTests(null);
-  vi.mocked(window.matchMedia).mockRestore();
-});
+  const matchMedia = vi
+    .spyOn(window, "matchMedia")
+    .mockReturnValue(reducedMotion as MediaQueryList);
+  return {
+    [Symbol.dispose]() {
+      unmountAll();
+      setCompanionClockForTests(null);
+      matchMedia.mockRestore();
+    },
+  };
+}
 
 describe("<squire-emblem> v5 contract", () => {
   it("defines squire-emblem standalone (no rig, FX or art) and draws every instance", async () => {
+    using _env = setup();
     defineSquireEmblem();
     expect(() => defineSquireEmblem()).not.toThrow();
     expect(customElements.get("squire-emblem")).toBe(SquireEmblemElement);
@@ -387,6 +382,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("configuration: shape, defaults, every listed value, normalization, invalid fallbacks, seed", async () => {
+    using _env = setup();
     const e = await mount();
     const defaults = e.getConfiguration();
     const copy = e.configuration;
@@ -440,6 +436,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("setPose determinism: identical rendered SVG after unrelated poses and attribute churn", async () => {
+    using _env = setup();
     const e = await mount({ frame: "orbit", palette: "moonstone", seed: "7" });
     e.resume();
     clock.advance(600);
@@ -471,6 +468,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("setPose determinism across instances with the same seed", async () => {
+    using _env = setup();
     const a = await mount({ frame: "orbit", seed: "11" });
     const b = await mount({ frame: "orbit", seed: "11" }, { keep: true });
     clock.advance(1200);
@@ -496,6 +494,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("hold reproduces the live frame (setPose at the live time does not jump)", async () => {
+    using _env = setup();
     const e = await mount({ frame: "orbit", seed: "5" });
     clock.advance(1500);
     let worst = 0;
@@ -510,6 +509,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("setPose validation: clamping and TypeErrors without side effects; state override", async () => {
+    using _env = setup();
     const e = await mount();
     e.setPose({ time: -3, gaze: 9 });
     expect(e.debugState).toMatchObject({ time: 0, gaze: 1, reason: "scrub" });
@@ -536,6 +536,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("anchors: knots never move and the star stays at the top across time, states, frames, gestures", async () => {
+    using _env = setup();
     const found: string[] = [];
     const inspect = (label: string, emblem: SquireEmblemElement) => {
       const ends = threads(emblem).flatMap((t) => [t.start, t.end]);
@@ -574,6 +575,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("play(): all six gestures resolve, emit squire-gesture-end, report activeGesture, visibly move", async () => {
+    using _env = setup();
     const e = await mount({ frame: "orbit", seed: "9" });
     clock.advance(1200);
     for (const name of COMPANION_GESTURES) {
@@ -668,6 +670,7 @@ describe("<squire-emblem> v5 contract", () => {
   };
 
   it("every gesture visibly moves for every idle seed, subtle and lively, with a motif at its peak", async () => {
+    using _env = setup();
     const report: Record<string, number> = {};
     const low = (key: string, value: number) => {
       report[key] = Math.min(report[key] ?? Infinity, value);
@@ -702,6 +705,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("each state reads distinctly in one still frame, at panel size and at 24 px", async () => {
+    using _env = setup();
     const layer = (e: SquireEmblemElement, name: string) =>
       e.shadowRoot!.querySelector<SVGElement>(`[data-l="${name}"]`)!;
     const shown = (el: SVGElement) =>
@@ -759,6 +763,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("a still, reduced-motion or held emblem never takes the lease from a live one", async () => {
+    using _env = setup();
     const live = await mount({ transitions: "off" });
     await mount({ motion: "still" }, { keep: true, style: "left:260px" });
     const reduced = Object.assign(new EventTarget(), {
@@ -784,6 +789,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("play() is ignored (immediate, no change) in still, reduced motion and scrub holds", async () => {
+    using _env = setup();
     const ignored = async (e: SquireEmblemElement, label: string) => {
       const before = serial(e);
       const outcome: { value: unknown } = { value: null };
@@ -816,6 +822,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("animated transitions emit events (palette, frame, weight, glow, entrance); off/still swap instantly", async () => {
+    using _env = setup();
     const kinds: string[] = [];
     const onEnd = (event: Event) => {
       if (event instanceof CustomEvent) kinds.push(event.detail.kind);
@@ -868,6 +875,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("pause reasons stop frames and RAF (still, scrub, reduced motion, hidden, offscreen, unfocused, yielded, settled, disconnected)", async () => {
+    using _env = setup();
     const e = await mount({ transitions: "off" });
     await liveAgain(e, "initial");
     e.setAttribute("motion", "still");
@@ -923,6 +931,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("offscreen emblem renders one static frame without running", async () => {
+    using _env = setup();
     defineSquireEmblem();
     const e = document.createElement("squire-emblem");
     e.style.cssText = "display:block;width:128px;height:128px;position:absolute;left:0;top:3000px";
@@ -943,6 +952,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("size-aware rendering switches below ~40 px (small drawing, no floating) and back", async () => {
+    using _env = setup();
     const out = new Map<number, { small: boolean; threads: number }>();
     for (const size of [24, 32, 39, 41, 48, 64, 128]) {
       const e = await mount({ frame: "orbit", transitions: "off" }, { size });
@@ -979,6 +989,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("only one live emblem: of twenty, the others yield and hold their frames", async () => {
+    using _env = setup();
     defineSquireEmblem();
     const grid = document.createElement("div");
     grid.style.cssText = "display:flex;flex-wrap:wrap;width:400px;position:absolute;left:0;top:0";
@@ -1010,6 +1021,7 @@ describe("<squire-emblem> v5 contract", () => {
   });
 
   it("no console errors, page errors or squire warnings", () => {
+    using _env = setup();
     expect(problems).toEqual([]);
   });
 });

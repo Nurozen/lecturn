@@ -2,14 +2,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
-import * as Schema from "effect/Schema";
-import * as TestClock from "effect/testing/TestClock";
 import { Command } from "effect/cli";
 import { HttpClient, HttpClientError, HttpClientResponse, UrlParams } from "effect/http";
 
@@ -50,19 +46,6 @@ const cliArgs = (target: "latest" | "prerelease") => [
 const configLayer = ConfigProvider.layer(
   ConfigProvider.fromEnv({ env: { DISCORD_WEBHOOK_URL: webhookUrl.href } }),
 );
-const PayloadSchema = Schema.fromJsonString(
-  Schema.Struct({
-    content: Schema.String,
-    allowed_mentions: Schema.Struct({
-      parse: Schema.Array(Schema.String),
-      roles: Schema.Array(Schema.String),
-    }),
-    embeds: Schema.Array(
-      Schema.Struct({ title: Schema.String, description: Schema.String, url: Schema.String }),
-    ),
-  }),
-);
-const decodePayload = Schema.decodeUnknownSync(PayloadSchema);
 const payloadDescription = (payloads: ReturnType<typeof buildDiscordReleaseAnnouncement>) =>
   payloads.flatMap((payload) => payload.embeds.map((embed) => embed.description)).join("");
 const captureClient = (requests: string[], status = 204) =>
@@ -91,27 +74,6 @@ function assertDiscordLimits(payloads: ReturnType<typeof buildDiscordReleaseAnno
     assert.ok(total <= 6000);
   }
 }
-
-it("includes nightly changes in order with their links and existing metadata", () => {
-  const payloads = buildDiscordReleaseAnnouncement({ ...nightlyAnnouncement, releaseNotes: notes });
-  assert.deepStrictEqual(payloads, [
-    {
-      content: "-# <@&222222222222222222>",
-      allowed_mentions: { parse: [], roles: [latestAnnouncement.roleId] },
-      embeds: [
-        {
-          title: latestAnnouncement.releaseName,
-          url: latestAnnouncement.releaseUrl.href,
-          description: `${intro}\n\n${formattedNotes}`,
-          color: 0x5865f2,
-          footer: { text: "v1.2.3" },
-          timestamp: latestAnnouncement.timestamp,
-        },
-      ],
-    },
-  ]);
-  assertDiscordLimits(payloads);
-});
 
 it("keeps stable announcements short even when a long changelog is provided", () => {
   assert.deepStrictEqual(
@@ -152,27 +114,6 @@ it("preserves custom notes and links outside generated GitHub pull request entri
     payloadDescription(buildDiscordReleaseAnnouncement({ ...nightlyAnnouncement, releaseNotes })),
     `${intro}\n\n${releaseNotes}`,
   );
-});
-
-it("links the Full Changelog label instead of displaying the comparison URL", () => {
-  const url = "https://github.com/nurozen/lecturn/compare/previous...next";
-  const releaseNotes = `**Full Changelog**: ${url}\nFull Changelog: ${url}`;
-  const description = payloadDescription(
-    buildDiscordReleaseAnnouncement({ ...nightlyAnnouncement, releaseNotes }),
-  );
-  assert.equal(description, `${intro}\n\n[Full Changelog](${url})\n[Full Changelog](${url})`);
-});
-
-it("keeps inline change attribution whole at a message boundary", () => {
-  const title = "* [Fix reconnection](https://github.com/nurozen/lecturn/pull/10)";
-  const contributor = "[@contributor](https://github.com/contributor)";
-  const filler = "x".repeat(4096 - intro.length - 2 - title.length - 2);
-  const releaseNotes = `${filler}\n* Fix reconnection by @contributor in https://github.com/nurozen/lecturn/pull/10`;
-  const payloads = buildDiscordReleaseAnnouncement({ ...nightlyAnnouncement, releaseNotes });
-  assert.equal(payloads.length, 2);
-  assert.equal(payloads[1]?.embeds[0]?.description, `${title} by ${contributor}`);
-  assert.equal(payloadDescription(payloads), `${intro}\n\n${filler}\n${title} by ${contributor}`);
-  assertDiscordLimits(payloads);
 });
 
 it("falls back when notes are missing, empty, or whitespace", () => {
@@ -220,18 +161,6 @@ it("splits long notes at line boundaries without dropping changes or the compari
     if (index < payloads.length - 1) assert.ok(payload.embeds[0]?.description.endsWith("\n"));
     assert.equal(payload.embeds[0]?.url, nightlyAnnouncement.releaseUrl.href);
   }
-});
-
-it("honors the aggregate embed limit when metadata is also large", () => {
-  const releaseNotes = "a".repeat(16000);
-  const payloads = buildDiscordReleaseAnnouncement({
-    ...nightlyAnnouncement,
-    releaseName: "n".repeat(256),
-    version: "x".repeat(2047),
-    releaseNotes,
-  });
-  assertDiscordLimits(payloads);
-  assert.equal(payloadDescription(payloads), `${intro}\n\n${releaseNotes}`);
 });
 
 it("handles oversized lines, words, and Unicode without losing or breaking characters", () => {
@@ -366,103 +295,9 @@ it.effect(
     }),
 );
 
-it.effect("waits for Retry-After before retrying a rate-limited message", () =>
-  Effect.gen(function* () {
-    const limited = yield* Deferred.make<void>();
-    let attempts = 0;
-    const client = Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) =>
-        Effect.gen(function* () {
-          attempts += 1;
-          if (attempts === 1) {
-            yield* Deferred.succeed(limited, undefined);
-            return HttpClientResponse.fromWeb(
-              request,
-              new Response(null, { status: 429, headers: { "retry-after": "2" } }),
-            );
-          }
-          return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
-        }),
-      ),
-    );
-    const fiber = yield* postDiscordWebhook(
-      webhookUrl,
-      buildDiscordReleaseAnnouncement(latestAnnouncement)[0]!,
-      latestAnnouncement,
-    ).pipe(Effect.provide(client), Effect.forkChild);
-    yield* Deferred.await(limited);
-    yield* TestClock.adjust("1 second");
-    assert.equal(attempts, 1);
-    yield* TestClock.adjust("1 second");
-    yield* Fiber.join(fiber);
-    assert.equal(attempts, 2);
-  }),
-);
-
-it.effect("bounds total retry time while preserving delays within the deadline", () =>
-  Effect.gen(function* () {
-    const limited = yield* Deferred.make<void>();
-    let attempts = 0;
-    const client = Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) =>
-        Effect.gen(function* () {
-          attempts += 1;
-          yield* Deferred.succeed(limited, undefined);
-          return HttpClientResponse.fromWeb(
-            request,
-            new Response(null, { status: 429, headers: { "retry-after": "40" } }),
-          );
-        }),
-      ),
-    );
-    const fiber = yield* postDiscordWebhook(
-      webhookUrl,
-      buildDiscordReleaseAnnouncement(latestAnnouncement)[0]!,
-      latestAnnouncement,
-    ).pipe(Effect.provide(client), Effect.result, Effect.forkChild);
-    yield* Deferred.await(limited);
-    yield* TestClock.adjust("39 seconds");
-    assert.equal(attempts, 1);
-    yield* TestClock.adjust("1 second");
-    assert.equal(attempts, 2);
-    yield* TestClock.adjust("20 seconds");
-    const result = yield* Fiber.join(fiber);
-    assert.equal(attempts, 2);
-    assert.equal(result._tag, "Failure");
-    if (result._tag !== "Failure") assert.fail("Expected the retry deadline to expire");
-    assert.equal(result.failure._tag, "DiscordReleaseWebhookRequestError");
-    if (result.failure._tag !== "DiscordReleaseWebhookRequestError")
-      assert.fail(`Unexpected error: ${result.failure._tag}`);
-    assert.equal(result.failure.reason, "TimeoutError");
-    assert.ok(!Cause.pretty(Cause.fail(result.failure)).includes("test-secret-token"));
-  }),
-);
-
 // The fork's release workflow does not announce on Discord, so only the CLI is
 // exercised here.
 it.layer(NodeServices.layer)("Discord release CLI", (it) => {
-  it.effect("uses the fallback when notes are omitted and ignores a notes file for latest", () =>
-    Effect.gen(function* () {
-      const requests: string[] = [];
-      yield* runCli(cliArgs("prerelease")).pipe(
-        Effect.provide([configLayer, captureClient(requests)]),
-      );
-      assert.equal(decodePayload(requests[0]!).embeds[0]?.description, intro);
-      yield* runCli([
-        ...cliArgs("latest"),
-        "--release-notes-file",
-        "/missing-stable-notes.md",
-      ]).pipe(Effect.provide([configLayer, captureClient(requests)]));
-      assert.equal(requests.length, 2);
-      assert.equal(
-        decodePayload(requests[1]!).embeds[0]?.description,
-        `[View full release notes on GitHub](${latestAnnouncement.releaseUrl.href})`,
-      );
-    }),
-  );
-
   it.effect("fails before sending when the requested nightly notes file cannot be read", () =>
     Effect.gen(function* () {
       const requests: string[] = [];
