@@ -80,9 +80,6 @@ export function SettingsRouteScreen() {
 }
 
 function ConfiguredSettingsRouteScreen() {
-  // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
-  // the sidebar's surface so the bar doesn't darken over content at rest.
-  const listSurface = use(NativePrimaryColumnContext) ? "bg-drawer" : "bg-screen";
   const insets = useSafeAreaInsets();
   const { selectedAccountId, setPickedAccountId } = useSettingsConnectAccount();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -93,7 +90,9 @@ function ConfiguredSettingsRouteScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        className={`flex-1 ${listSurface}`}
+        // Stay transparent: the screen draws ArcaneBackdrop once behind the list,
+        // and an opaque scroll surface would hide it.
+        className="flex-1 bg-transparent"
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
@@ -128,9 +127,6 @@ function ConfiguredSettingsRouteScreen() {
 }
 
 function LocalSettingsRouteScreen() {
-  // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
-  // the sidebar's surface so the bar doesn't darken over content at rest.
-  const listSurface = use(NativePrimaryColumnContext) ? "bg-drawer" : "bg-screen";
   const insets = useSafeAreaInsets();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const environmentCount = Object.keys(savedConnectionsById).length;
@@ -141,7 +137,9 @@ function LocalSettingsRouteScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
-        className={`flex-1 ${listSurface}`}
+        // Stay transparent: the screen draws ArcaneBackdrop once behind the list,
+        // and an opaque scroll surface would hide it.
+        className="flex-1 bg-transparent"
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 18) + 18,

@@ -1234,6 +1234,9 @@ from upstream's side.
   - A new thread-route control needs a `ThreadRouteControl` entry; the guest bar reuses
     `thread-actions`. New upstream imports in `ThreadFeed` or `AdaptiveWorkspaceLayout`
     need a stub in `threadRouteControls.test`, whose proxy treats unknown imports as truthy.
+  - Scroll views over an `ArcaneBackdrop` stay `bg-transparent` on every platform; do not
+    take upstream's `bg-screen`/`bg-drawer` scroll surface (UIKit scroll-edge note) on the
+    Settings list, Home or Pull requests.
 - **Web.** Upstream additions to `__root`'s shell go in the lazy `AppShell.tsx`; guest,
   embed and billing branches return before it loads. The Lecturn Connect row shows on web
   and desktop (upstream's `isElectron` gate stays out).
