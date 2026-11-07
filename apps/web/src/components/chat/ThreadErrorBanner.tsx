@@ -3,15 +3,34 @@ import type {
   OrchestrationV2ProviderFailureClass,
   ServerProvider,
 } from "@lecturn/contracts";
+import {
+  CHATGPT_USAGE_LIMIT_CODE,
+  CHATGPT_WORKSPACE_ADMIN_REQUEST,
+  CHATGPT_WORKSPACE_USAGE_LIMIT_CODE,
+} from "@lecturn/shared/usageLimits";
 import { ProviderDetectionRecovery } from "../ProviderDetectionProgress";
 import { isProviderExecutableError } from "../providerDetection";
 import { memo } from "react";
+import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
 import { CircleAlertIcon, XIcon } from "lucide-react";
 import { OpenAI } from "../Icons";
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
 import { ExpandableText } from "../settings/ExpandableText";
+
+function copyAdminRequest() {
+  void writeTextToClipboard(CHATGPT_WORKSPACE_ADMIN_REQUEST, "admin request").then(
+    () =>
+      toastManager.add({
+        type: "success",
+        title: "Request copied",
+        description: "Send it to your workspace admin.",
+      }),
+    () => toastManager.add({ type: "error", title: "Could not copy the request" }),
+  );
+}
 
 export function getThreadErrorBannerMessage(error: string): string {
   let payload: unknown;
@@ -62,14 +81,14 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   environmentId,
   provider,
   errorClass,
-  chatGptUsageLimit = false,
+  errorCode,
 }: {
   error: string | null;
   environmentId?: EnvironmentId;
   provider?: ServerProvider | null;
   errorClass?: OrchestrationV2ProviderFailureClass | null;
+  errorCode?: string | null;
   onDismiss?: () => void;
-  chatGptUsageLimit?: boolean;
 }) {
   if (!error) return null;
   if (environmentId && provider && isProviderExecutableError(error)) {
@@ -88,28 +107,40 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
       </div>
     );
   }
-  const variant = errorClass === "usage_limit" ? "warning" : "error";
+  const workspaceLimit = errorCode === CHATGPT_WORKSPACE_USAGE_LIMIT_CODE;
+  const chatGptLimit = workspaceLimit || errorCode === CHATGPT_USAGE_LIMIT_CODE;
+  const variant = errorClass === "usage_limit" || chatGptLimit ? "warning" : "error";
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
       <Alert variant={variant} surface="glass" controlAlignment="first-line" data-variant={variant}>
-        {chatGptUsageLimit ? (
+        {chatGptLimit ? (
           <OpenAI className="size-4 text-foreground!" aria-hidden="true" />
         ) : (
           <CircleAlertIcon />
         )}
         <AlertDescription>
-          {chatGptUsageLimit ? (
+          {chatGptLimit ? (
             <div className="space-y-1">
               <p className="font-medium">ChatGPT usage limit reached</p>
-              <p>Review your usage settings in ChatGPT to continue.</p>
+              <p>
+                {workspaceLimit
+                  ? "You've reached your workspace's limit for using your ChatGPT plan in other apps. Copy a request to ask your workspace admin for increased usage limits."
+                  : "Review your usage settings in ChatGPT."}
+              </p>
             </div>
           ) : (
             <ExpandableText text={error} collapsedText={getThreadErrorBannerMessage(error)} />
           )}
         </AlertDescription>
-        {(chatGptUsageLimit || onDismiss) && (
+        {(chatGptLimit || onDismiss) && (
           <AlertAction>
-            {chatGptUsageLimit ? <ChatGptUsageButton variant="default" size="sm" /> : null}
+            {workspaceLimit ? (
+              <Button variant="default" size="sm" onClick={copyAdminRequest}>
+                Copy request for admin
+              </Button>
+            ) : chatGptLimit ? (
+              <ChatGptUsageButton variant="default" size="sm" />
+            ) : null}
             {onDismiss ? (
               <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
                 <XIcon />

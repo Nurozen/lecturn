@@ -9,6 +9,7 @@ import Animated from "react-native-reanimated";
 import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
 import { useAccountRowColors } from "./useAccountRowColors";
 import { computeScopedThreadMoveAvailability } from "../threads/threadOrder";
+import { useActiveNewTask } from "../../state/active-new-task";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import type { ThreadMoveDestination } from "../threads/threadOrder";
 import {
@@ -27,10 +28,7 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
-import {
-  threadSearchMatchKey,
-  type EnvironmentThreadSearchMatch,
-} from "@lecturn/client-runtime/state/thread-search";
+import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, type Atom } from "effect/reactivity";
@@ -72,6 +70,8 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useThreadSearch } from "../../state/queries";
+import { requestThreadMessageJump } from "../threads/threadMessageJump";
+import { useThreadListSearchMatches } from "../threads/useThreadListSearchMatches";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom, threadListEnvironmentsAtom } from "../../state/server";
@@ -299,7 +299,6 @@ function HomeTopContentSpacer() {
 }
 
 function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
-  const insets = useSafeAreaInsets();
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
 
   // v5 needs the actual content scroll view registered with its screen controller.
@@ -317,12 +316,6 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
         // Stay transparent: the screen draws ArcaneBackdrop once behind the list,
         // and an opaque scroll surface would hide it.
         className={cn(props.className, "bg-transparent")}
-        // Use the column's measured inset so UIKit recognizes the resting top.
-        // Padding visually clears the bar but leaves the native scroll offset
-        // past its edge, activating scroll-edge protection before any scroll.
-        automaticallyAdjustContentInsets={false}
-        contentInsetAdjustmentBehavior="never"
-        contentOffset={props.contentOffset ?? { x: 0, y: -insets.top }}
       />
     </ScrollViewMarker>
   );
@@ -351,7 +344,8 @@ export function HomeScreen(props: HomeScreenProps) {
     Platform.OS === "android" ? "bg-header" : contentBackground,
   );
   const columnMetrics = useNativeColumnLayoutMetrics();
-  const selectedThreadKey = primaryColumn?.selectedThreadKey ?? null;
+  const activeNewTask = useActiveNewTask();
+  const selectedThreadKey = activeNewTask ? null : (primaryColumn?.selectedThreadKey ?? null);
   const fullSwipeWidth = primaryColumn && columnMetrics ? columnMetrics.width - 20 : undefined;
   const queuedThreadKeys = useQueuedThreadKeys();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
@@ -391,16 +385,8 @@ export function HomeScreen(props: HomeScreenProps) {
         ? [props.selectedEnvironmentId]
         : [];
   const threadSearch = useThreadSearch(searchEnvironmentIds, props.searchQuery);
-  const threadSearchMatchByKey = (() => {
-    const matches = new Map<string, EnvironmentThreadSearchMatch>();
-    for (const match of threadSearch.matches) {
-      if (match.source === "user" || match.source === "assistant") {
-        matches.set(threadSearchMatchKey(match), match);
-      }
-    }
-    return matches;
-  })();
-  const matchedThreadKeys = new Set(threadSearch.matches.map(threadSearchMatchKey));
+  const threadSearchMatchByKey = useThreadListSearchMatches(props.threads, threadSearch);
+  const matchedThreadKeys = new Set(threadSearchMatchByKey.keys());
   const effectiveGroupDisplayStates = withPersistedCollapsedGroups(
     groupDisplayStates,
     preferencesResult,
@@ -787,7 +773,19 @@ export function HomeScreen(props: HomeScreenProps) {
   const shortcutItems = threadListV2Items.filter(
     (item): item is HomeHierarchyV2Item & ThreadListV2ListItem => isThreadListV2ListItem(item),
   );
-  useThreadJumpShortcuts(shortcutItems, props.onSelectThread);
+  // A row listed for a message match opens the thread at that message, by
+  // tap or by shortcut.
+  const selectThread = (thread: EnvironmentThreadShell) => {
+    const key = threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id });
+    const messageId = threadListV2Layout.contentOnlyThreadKeys.has(key)
+      ? threadSearchMatchByKey.get(key)?.messageId
+      : undefined;
+    if (messageId) {
+      requestThreadMessageJump(scopedThreadKey(thread.environmentId, thread.id), messageId);
+    }
+    props.onSelectThread(thread);
+  };
+  useThreadJumpShortcuts(shortcutItems, selectThread);
   useEffect(() => {
     if (swipeEnabled) activateVisibleRows(threadListV2Items);
   }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
@@ -828,7 +826,14 @@ export function HomeScreen(props: HomeScreenProps) {
       );
       return (
         <ThreadListV2PendingRow
+          pane={primaryColumn ? "sidebar" : "screen"}
           pendingTask={item.pendingTask}
+          selected={
+            activeNewTask?.pendingKey === item.pendingTask.key ||
+            (item.pendingTask.kind === "pending" &&
+              scopedThreadKey(item.pendingTask.environmentId, item.pendingTask.message.threadId) ===
+                selectedThreadKey)
+          }
           project={projectByKey.get(pendingScopeKey) ?? null}
           projectTitle={v2ProjectTitleByProjectKey.get(pendingScopeKey)}
           environmentLabel={
@@ -841,6 +846,11 @@ export function HomeScreen(props: HomeScreenProps) {
           showPendingDivider={item.showPendingDivider}
           onSelectPendingTask={props.onSelectPendingTask}
           onDeletePendingTask={props.onDeletePendingTask}
+          fullSwipeWidth={fullSwipeWidth}
+          onSwipeableClose={handleSwipeableClose}
+          onSwipeableWillOpen={handleSwipeableWillOpen}
+          simultaneousSwipeGesture={homeScrollGesture}
+          activationKey={item.key}
         />
       );
     }
@@ -906,14 +916,18 @@ export function HomeScreen(props: HomeScreenProps) {
             : null
         }
         environmentMachine={machineByEnvironmentId.get(thread.environmentId)}
-        searchMatch={threadSearchMatchByKey.get(
-          threadSearchMatchKey({
-            environmentId: thread.environmentId,
-            threadId: thread.id,
-          }),
-        )}
-        searchQuery={props.searchQuery}
-        onSelectThread={props.onSelectThread}
+        searchMatch={
+          // Only rows listed for their messages show one and open at it.
+          threadListV2Layout.contentOnlyThreadKeys.has(
+            threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+          )
+            ? threadSearchMatchByKey.get(
+                threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+              )
+            : undefined
+        }
+        searchQuery={threadSearch.query}
+        onSelectThread={selectThread}
         onOpenThreadPullRequests={handleOpenThreadPullRequests}
         onDeleteThread={handleDeleteThread}
         onArchiveThread={props.onArchiveThread}
@@ -975,6 +989,7 @@ export function HomeScreen(props: HomeScreenProps) {
   // the same reason: the clock text is precomputed per item instead.
   const v2ExtraData = {
     queuedThreadKeys,
+    activeNewTask,
     projectByKey,
     projectTitleByProjectKey: v2ProjectTitleByProjectKey,
     listEnvironments,
@@ -1158,8 +1173,9 @@ export function HomeScreen(props: HomeScreenProps) {
                 ListEmptyComponent={v2ListEmpty}
                 style={{ flex: 1 }}
                 automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-                contentInsetAdjustmentBehavior="never"
-                contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
+                // UIKit owns the bar's inset, so a minimizing bar and a resized column move
+                // the list in the same frame as the bar.
+                contentInsetAdjustmentBehavior="automatic"
                 contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
                 initialScrollOffset={
                   initialScrollOffset > 0
@@ -1178,7 +1194,7 @@ export function HomeScreen(props: HomeScreenProps) {
                     (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0) + androidListGutter,
                   paddingBottom:
                     Platform.OS === "ios"
-                      ? iosBottomClearance
+                      ? iosBottomClearance - (columnMetrics?.safeArea.bottom ?? insets.bottom)
                       : (workspace?.bottomClearance ??
                         Math.max(insets.bottom, 16) +
                           (Platform.OS === "android" ? fabClearance : 88)),

@@ -474,6 +474,28 @@ const ConnectedAppThreadFields = {
   squire: Schema.optionalKey(SquireThreadMarker),
 };
 
+/**
+ * How often the user opens a thread, for search ranking. `score` is an open
+ * count that halves every two weeks, as of `openedAt`. `picks` holds the last
+ * few palette queries that picked the thread, folded to lowercase, newest
+ * first, each with when it was picked. Times are epoch milliseconds: ranking
+ * does arithmetic on them.
+ */
+export const OrchestrationV2ThreadOpens = Schema.Struct({
+  openedAt: Schema.Finite,
+  score: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  picks: Schema.Array(
+    Schema.Struct({ query: Schema.String.check(Schema.isMaxLength(32)), at: Schema.Finite }),
+  ).check(Schema.isMaxLength(3)),
+});
+export type OrchestrationV2ThreadOpens = typeof OrchestrationV2ThreadOpens.Type;
+
+// Open stats only rank search results, so a value this build cannot read (an
+// older or newer shape) becomes null instead of failing the whole thread.
+const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   ...ConnectedAppThreadFields,
@@ -528,6 +550,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -1129,13 +1152,18 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   ]),
   status: Schema.Literals(["pending", "resolved", "expired", "cancelled"]),
   responseCapability: Schema.Union([
-    Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
+    Schema.Struct({
+      type: Schema.Literal("live"),
+      providerSessionId: ProviderSessionId,
+      supportsFeedback: Schema.optional(Schema.Boolean),
+    }),
     Schema.Struct({ type: Schema.Literal("message") }),
     Schema.Struct({ type: Schema.Literal("not_resumable"), reason: Schema.String }),
   ]),
   createdAt: Schema.DateTimeUtc,
   resolvedAt: Schema.NullOr(Schema.DateTimeUtc),
   decision: Schema.optional(ProviderApprovalDecision),
+  feedback: Schema.optional(Schema.String),
   answers: Schema.optional(ProviderUserInputAnswers),
   /** Lecturn: set when Lecturn itself raised the request to gate an app tool call. */
   connectedAppTool: Schema.optionalKey(ConnectedAppToolApprovalInfo),
@@ -1993,6 +2021,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   status: OrchestrationV2ShellThreadStatus,
   lastError: Schema.optional(Schema.NullOr(Schema.String)),
   lastErrorClass: Schema.optional(Schema.NullOr(OrchestrationV2ProviderFailureClass)),
+  lastErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
   usageLimitResetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummary),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
@@ -2026,6 +2055,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   lastVisitedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  opens: Schema.optional(LenientThreadOpens),
   titleRegeneration: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -2732,6 +2762,11 @@ export const OrchestrationV2Command = Schema.Union([
     reason: Schema.optional(Schema.String),
     /** Lecturn: see run.interrupt createdBy. */
     createdBy: Schema.optionalKey(OrchestrationV2Actor),
+    /**
+     * False when the caller stops the thread's delegated tasks itself, as the server's tree walks
+     * do under their caller's dispatch limit. Otherwise Stop also stops every task under the thread.
+     */
+    stopDelegatedTasks: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.create"),
@@ -2870,6 +2905,10 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     visitedAt: IsoDateTime,
+    // The user opened the thread, as opposed to new activity on an open one.
+    // Older servers ignore both fields and only move the read watermark.
+    opened: Schema.optional(Schema.Boolean),
+    searchQuery: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.mark-unread"),
@@ -3112,6 +3151,7 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     requestId: RuntimeRequestId,
     decision: Schema.optional(ProviderApprovalDecision),
+    feedback: Schema.optional(Schema.String),
     answers: Schema.optional(ProviderUserInputAnswers),
     attachmentsByQuestionId: Schema.optional(UserInputAttachments),
   }),

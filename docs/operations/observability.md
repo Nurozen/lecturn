@@ -626,6 +626,13 @@ Service names are fixed: `lecturn-server` for the backend and `lecturn-desktop` 
 process, both in `service.namespace` `lecturn`. `OTEL_SERVICE_NAME` and a `service.name` or
 `service.namespace` in `OTEL_RESOURCE_ATTRIBUTES` are ignored. Tell installations apart with other
 resource attributes, such as `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=development`.
+The UI reports `deployment.environment.name` from its build: `development` under the Vite dev server
+and `production` otherwise.
+
+Attributes specific to Lecturn use the `lecturn.` prefix. The UI runs as `lecturn-web` in both a
+browser and the desktop window, since it is the same code, and `lecturn.client.surface` is `desktop`
+or `web`. The server's `lecturn.server.managed_by` is `desktop` when the desktop app launched it and
+`standalone` otherwise.
 
 If the OTLP URLs are unset, local tracing still works, metrics stay in-process only, and logs stay
 on stdout only.

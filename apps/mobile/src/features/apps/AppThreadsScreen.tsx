@@ -131,9 +131,8 @@ export function AppsTree(props: {
     const project = appCardTargetWorkspace(card);
     if (project === null) return null;
     return () =>
-      navigation.navigate("NewTaskSheet", {
-        screen: "NewTaskDraft",
-        params: {
+      navigation.navigate("Thread", {
+        draft: {
           environmentId: String(project.environmentId),
           projectId: String(project.id),
           title: project.title,

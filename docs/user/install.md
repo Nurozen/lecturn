@@ -73,7 +73,7 @@ published; see [Running in the background](./background-service.md).
 
 There is no `lecturn` executable for Intel Macs (the desktop app is available)
 because Node cannot produce a single executable there. Use `npx lecturn`, or
-build a server from source with Node.js 24 and `vp` (see
+build a server from source with `vp`, which provides the Node version it needs (see
 [Vite+](https://viteplus.dev/guide/)):
 
 ```bash

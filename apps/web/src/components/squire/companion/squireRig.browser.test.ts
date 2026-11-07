@@ -417,6 +417,7 @@ async function gestureRun(rig: Rig, name: CompanionGesture | null, T0 = 40) {
     active: string | null;
     points: (readonly [number, number])[];
   }[] = [];
+  // oxlint-disable-next-line lecturn/no-polling-loop-in-tests -- steps a fake clock a fixed frame at a time, so the samples do not depend on load.
   for (;;) {
     const ds = rig.debugState;
     samples.push({

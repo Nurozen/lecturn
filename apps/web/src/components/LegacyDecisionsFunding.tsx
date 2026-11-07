@@ -230,7 +230,7 @@ function FundingControls({
               </a>
               <div>
                 <Button size="xs" disabled={busy} onClick={() => void act("redeem")}>
-                  I approved — finish linking
+                  I approved, finish linking
                 </Button>
               </div>
             </div>

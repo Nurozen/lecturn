@@ -44,17 +44,9 @@ vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
   Platform: { OS: "android" },
 }));
-vi.mock("react-native-reanimated", () => ({
-  default: { View: native.noop },
-  FadeInDown: { duration: () => ({ reduceMotion: () => undefined }) },
-  ReduceMotion: { System: "system" },
-}));
 vi.mock("react-native-keyboard-controller", () => ({
   KeyboardController: { dismiss: vi.fn() },
-  KeyboardStickyView: native.noop,
-  useKeyboardState: () => false,
 }));
-vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     dispatch: native.dispatch,
@@ -66,29 +58,6 @@ vi.mock("@react-navigation/native", () => ({
   usePreventRemove: () => {},
   StackActions: { replace: (name: string) => ({ type: "replace", name }), push: vi.fn() },
   CommonActions: { navigate: vi.fn() },
-}));
-vi.mock("../../native/StackHeader", () => ({
-  NativeStackScreenOptions: native.noop,
-}));
-vi.mock("../../components/ui/SheetHeader", () => ({ SheetHeader: native.noop }));
-vi.mock("../../components/ui/Button", () => ({ Button: native.noop }));
-vi.mock("../../lib/useUniwindTheme", () => ({ useUniwindTheme: () => ({}) }));
-vi.mock("../settings/appearance/useScaledTextRole", () => ({ useScaledTextRole: () => ({}) }));
-vi.mock("./use-thread-settings-sheet-presentation", () => ({
-  useThreadSettingsSheetPresentation: () => ({
-    isVisible: false,
-    onDismissed: vi.fn(),
-    onStackTransitionsFinished: vi.fn(),
-  }),
-}));
-vi.mock("./use-composer-command-menu", () => ({
-  useComposerCommandMenu: () => ({ skills: [], selection: null, items: [] }),
-}));
-vi.mock("../voice-input/useVoiceInputController", () => ({
-  useVoiceInputController: () => ({ state: { status: "idle" }, elapsedSeconds: 0 }),
-}));
-vi.mock("../voice-input/voiceInputPresentation", () => ({
-  resolveVoiceComposerPresentation: () => ({ statusLabel: null }),
 }));
 vi.mock("./use-import-thread", () => ({
   useThreadImportAvailability: () => ({ available: false }),
@@ -149,6 +118,8 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
   useSavedRemoteConnections: () => ({ savedConnectionsById: {} }),
   setPendingConnectionError: vi.fn(),
   useRemoteConnectionStatus: () => ({ connectedEnvironments: [] }),
+  useRemoteConnections: () => ({ onReconnectEnvironment: vi.fn() }),
+  useRemoteEnvironmentRuntime: () => null,
 }));
 // Fixture connections hold every grant; the real session module pulls the
 // connection runtime into this screen test.
@@ -208,38 +179,33 @@ vi.mock("../../state/composer-attachment-uploads", async () => {
 vi.mock("../../components/ArcaneBackdrop", () => ({ ArcaneBackdrop: native.noop }));
 vi.mock("../../components/ComposerEditor", () => ({ ComposerEditor: native.noop }));
 vi.mock("../../components/ComposerToolbar", () => ({
-  ComposerActionButton: native.noop,
   ComposerInlineControl: native.noop,
-  ComposerToolbarRow: native.noop,
-  ComposerToolbarScroller: native.noop,
 }));
-vi.mock("../../components/ui/AndroidScreenHeader", () => ({ AndroidScreenHeader: native.noop }));
-vi.mock("./ComposerAttachmentButton", () => ({
-  ComposerAttachmentButton: native.noop,
+vi.mock("../../components/ui/AppBar", () => ({ AppBar: native.noop }));
+vi.mock("../../components/ui/ScreenScrollView", () => ({ ScreenScrollView: native.noop }));
+vi.mock("../../native/NativeScrollViewMarker", () => ({
+  NativeScrollEdgeEffectsContext: native.noop,
 }));
-vi.mock("../../components/ComposerAttachmentStrip", () => ({
-  ComposerAttachmentStrip: native.noop,
+vi.mock("../../native/native-glass", () => ({ NATIVE_LIQUID_GLASS_SUPPORTED: false }));
+vi.mock("../../state/use-composer-attachment-actions", () => ({
+  useComposerAttachmentActions: () => ({}),
 }));
-vi.mock("../../components/EnvironmentMachineSymbol", () => ({
-  EnvironmentMachineSymbol: native.noop,
+vi.mock("../workspace/useAndroidWorkspaceNavigation", () => ({
+  useWorkspaceBackNavigation: () => vi.fn(),
 }));
-vi.mock("../../components/FilePreviewModal", () => ({ FilePreviewModal: native.noop }));
-vi.mock("../../components/VideoPreviewModal", () => ({ VideoPreviewModal: native.noop }));
-vi.mock("../../components/ProviderIcon", () => ({ ProviderIcon: native.noop }));
+vi.mock("../connection/connectionTone", () => ({ connectionTone: () => null }));
+vi.mock("./DraftEnvironmentControl", () => ({ DraftEnvironmentControl: native.noop }));
+vi.mock("./DraftThreadHeader", () => ({ DraftThreadHeader: native.noop }));
+vi.mock("./ProjectCloneBanner", () => ({ ProjectCloneBanner: native.noop }));
+vi.mock("./ThreadScreenHost", () => ({
+  ThreadScreenBinding: native.noop,
+  ThreadScreenFallback: native.noop,
+}));
+vi.mock("./draft-thread-shell", () => ({ draftThreadShell: () => ({}) }));
+vi.mock("./thread-header-appearance", () => ({ threadHeaderAppearance: () => ({}) }));
 vi.mock("../../components/ui/AppSymbol", () => ({ SymbolView: native.noop }));
 vi.mock("../../components/ui/AppText", () => ({ AppText: native.noop }));
-vi.mock("./ThreadComposer", () => ({
-  ComposerSurface: native.noop,
-  COMPOSER_LAYOUT_TRANSITION: undefined,
-}));
-vi.mock("./ComposerCommandPopover", () => ({ ComposerCommandPopover: native.noop }));
 vi.mock("../contextual/ContextualDraftControl", () => ({ ContextualDraftControl: native.noop }));
-vi.mock("../voice-input/ComposerDictationControl", () => ({
-  ComposerDictationCancelAction: native.noop,
-  ComposerDictationPrimaryAction: native.noop,
-  ComposerDictationStatus: native.noop,
-  ComposerDictationToolbar: native.noop,
-}));
 
 import { NewTaskDraftScreen } from "./NewTaskDraftScreen";
 import { NewTaskFlowProvider, useNewTaskFlow } from "./new-task-flow-provider";

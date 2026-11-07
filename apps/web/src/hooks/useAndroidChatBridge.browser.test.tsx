@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, fakeTimers, render } from "../../test/render";
-import { useAndroidChatBridge } from "./useAndroidChatBridge";
+import { useAndroidChatCompose, useAndroidChatPublisher } from "./useAndroidChatBridge";
 import type { AndroidHost } from "../lib/androidHostAccess";
 
 // The real window: the hook listens on it, and the host bridge lives on it.
@@ -12,13 +12,13 @@ const target = window as unknown as Window & {
 const focusComposer = vi.fn();
 const publishChatWidget = vi.fn().mockResolvedValue({ published: true });
 function Chat({ scope, ready = true }: { scope: string; ready?: boolean }) {
-  const composerExpanded = useAndroidChatBridge({
+  useAndroidChatPublisher({
     scope,
     thread: ready
       ? { id: scope, title: "Chat", messages: [{ role: "assistant", text: scope }] }
       : null,
-    focusComposer,
   });
+  const composerExpanded = useAndroidChatCompose({ scope, ready, focusComposer });
   return <output>{composerExpanded ? "expanded" : "collapsed"}</output>;
 }
 // Fake timers, the host bridge and frame stubs live for one test; disposing restores them.

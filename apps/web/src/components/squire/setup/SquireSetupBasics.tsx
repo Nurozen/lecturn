@@ -40,7 +40,7 @@ export function SquireIdentitySection(
       />
       <SetupRow label="Home project" description="Its own thread lives here.">
         {projects === null ? (
-          <span className="text-sm text-muted-foreground">{props.homeProjectTitle ?? "—"}</span>
+          <span className="text-sm text-muted-foreground">{props.homeProjectTitle ?? "-"}</span>
         ) : (
           <Select
             value={draft.homeProjectId ?? ""}

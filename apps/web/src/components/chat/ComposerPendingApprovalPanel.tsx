@@ -13,7 +13,7 @@ import { cn } from "~/lib/utils";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
 import { appApprovalReasonLine } from "./composerApprovalState";
 
-const NOT_RESUMABLE_DETAIL = "Provider process is gone — interrupt or restart the run to respond.";
+const NOT_RESUMABLE_DETAIL = "Provider process is gone. Interrupt or restart the run to respond.";
 
 interface ComposerPendingApprovalPanelProps {
   approval: PendingApproval;

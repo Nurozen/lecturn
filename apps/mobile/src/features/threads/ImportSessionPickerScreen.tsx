@@ -7,7 +7,7 @@ import type {
   OrchestrationV2ThreadShell,
 } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { Atom } from "effect/reactivity";
 import * as Haptics from "expo-haptics";
 import { memo, useEffect, useRef, useState } from "react";
@@ -31,6 +31,7 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET,
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../layout/native-mail-search-toolbar";
+import { replaceNewTaskFlowWithThread } from "../projects/replaceNewTaskFlowWithThread";
 import { useNewTaskFlow } from "./new-task-flow-provider";
 import {
   collectImportedSessionIds,
@@ -310,12 +311,10 @@ export function ImportSessionPickerRouteScreen() {
     if (imported === null) return;
     // The Thread route renders its loading state until the imported
     // thread's shell arrives, matching the fork flow.
-    (navigation.getParent() ?? navigation).dispatch(
-      StackActions.replace("Thread", {
-        environmentId: String(imported.environmentId),
-        threadId: String(imported.threadId),
-      }),
-    );
+    replaceNewTaskFlowWithThread(navigation, {
+      environmentId: String(imported.environmentId),
+      threadId: String(imported.threadId),
+    });
   };
 
   const renderRow = ({ item, index }: { readonly item: SessionRow; readonly index: number }) => (

@@ -199,6 +199,8 @@ import {
   PullRequestListResult,
   PullRequestListStatsInput,
   PullRequestListStatsResult,
+  PullRequestFilterOptions,
+  PullRequestFilterOptionsInput,
   PullRequestOperationError,
   PullRequestReactionInput,
   PullRequestRef,
@@ -736,6 +738,7 @@ export const WS_METHODS = {
 
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
+  pullRequestsFilterOptions: "pullRequests.filterOptions",
   pullRequestsSummary: "pullRequests.summary",
   pullRequestsRouting: "pullRequests.routing",
   pullRequestsRoutingIdentity: "pullRequests.routingIdentity",
@@ -1691,6 +1694,12 @@ const WsPullRequestWatchConfigureRpc = Rpc.make(WS_METHODS.pullRequestWatchConfi
   payload: PullRequestWatch.PullRequestWatchConfigureInput,
   success: PullRequestWatch.PullRequestWatchSnapshot,
   error: Schema.Union([PullRequestWatch.PullRequestWatchError, EnvironmentAuthorizationError]),
+});
+
+const WsPullRequestsFilterOptionsRpc = Rpc.make(WS_METHODS.pullRequestsFilterOptions, {
+  payload: PullRequestFilterOptionsInput,
+  success: PullRequestFilterOptions,
+  error: PullRequestRpcError,
 });
 
 const WsPullRequestsRoutingRpc = Rpc.make(WS_METHODS.pullRequestsRouting, {
@@ -2782,6 +2791,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestWatchTrackRpc,
   WsPullRequestWatchCommandRpc,
   WsPullRequestWatchConfigureRpc,
+  WsPullRequestsFilterOptionsRpc,
   WsPullRequestsSummaryRpc,
   WsPullRequestsRoutingRpc,
   WsPullRequestsRoutingIdentityRpc,

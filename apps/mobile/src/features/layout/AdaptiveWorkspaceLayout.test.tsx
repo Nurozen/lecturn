@@ -6,7 +6,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import * as Layout from "../../lib/layout";
 import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
+import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
+import * as DeferredNavigation from "./deferred-navigation";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
 // derived objects keep their identity between renders. So this suite runs the layout module
@@ -21,6 +23,8 @@ const openThreadPullRequests = vi.fn();
 // Stable like the real hook's handler, so it never changes the sidebar's props identity.
 const openPendingTaskStub = vi.fn();
 const preferences = { value: { threadListFilters: undefined } };
+// Stable like the real atom's value, so it never changes the context value's identity.
+const noProjects: readonly never[] = [];
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
   return <>{props.children}</>;
@@ -48,6 +52,14 @@ const stubModules: Record<string, unknown> = {
   "react/jsx-runtime": ReactJsxRuntime,
   "react/compiler-runtime": ReactCompilerRuntime,
   "../../lib/layout": Layout,
+  "./adaptive-workspace-context": AdaptiveWorkspaceContextModule,
+  "./deferred-navigation": DeferredNavigation,
+  "../../lib/uuid": { uuidv4: () => "uuid" },
+  "../../state/atom-registry": { appAtomRegistry: { get: () => [] } },
+  "../../state/entities": { useProjects: () => noProjects },
+  "../../state/threads": { environmentThreadShells: { navigationThreadShellsAtom: {} } },
+  "../threads/new-task-project-selection": { newTaskDestination: () => ({ route: "Home" }) },
+  "../workspace/WorkspaceTabsContext": { useWorkspaceTabs: () => null },
   "@lecturn/contracts": {
     EnvironmentId: { make: (value: string) => value },
     ThreadId: { make: (value: string) => value },

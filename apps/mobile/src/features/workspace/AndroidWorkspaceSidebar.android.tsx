@@ -1,3 +1,5 @@
+import { WorkspaceNoTabs } from "./WorkspaceNoTabs";
+import { useEnabledNavigationTabs } from "./navigation-tabs";
 import { useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { ScreenContent } from "../../components/ui/ScreenContent";
@@ -16,7 +18,9 @@ export function AndroidWorkspaceSidebar(props: {
   readonly selectedPullRequestKey: string | null;
 }) {
   const workspace = useWorkspaceTabs()!;
+  const enabled = useEnabledNavigationTabs();
   const context = useMemo(() => ({ ...workspace, bottomClearance: 16 }), [workspace]);
+  if (enabled.length === 0) return <WorkspaceNoTabs />;
   return (
     <WorkspaceTabPanes
       tabs={WORKSPACE_TABS}
@@ -33,6 +37,8 @@ export function AndroidWorkspaceSidebar(props: {
               </ScreenContent>
             </View>
           </WorkspaceTabsContext>
+        ) : tab !== "pullRequests" ? (
+          <View className="flex-1 bg-screen" />
         ) : (
           <WorkspaceTabsContext value={context}>
             <PullRequestFilterMenuProvider>

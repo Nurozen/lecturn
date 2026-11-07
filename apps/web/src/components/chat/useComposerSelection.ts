@@ -12,7 +12,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@lecturn/contracts";
-import { deriveThreadRuntime } from "@lecturn/client-runtime/state/thread-execution";
+import type { deriveThreadStructureRuntime } from "@lecturn/client-runtime/state/thread-execution";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { type SetStateAction, useEffect, useRef } from "react";
 import { useEmbedAwareNavigate } from "../../embed/embedNavigation";
@@ -31,7 +31,7 @@ interface ComposerSelectionInput {
   readonly composerDraftTarget: ComposerThreadTarget;
   readonly draftThread: DraftSessionState | null;
   readonly activeThread: EnvironmentThreadShell | undefined;
-  readonly activeRuntime: ReturnType<typeof deriveThreadRuntime>;
+  readonly activeRuntime: ReturnType<typeof deriveThreadStructureRuntime>;
   readonly activeProjectSettings: {
     readonly settings: { readonly newWorktreesStartFromOrigin: boolean };
   };

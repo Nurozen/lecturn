@@ -313,15 +313,17 @@ const settleFirstRun = (input: {
     });
   });
 
-/** Lets the orchestrator's terminal-run tail react. */
-const eventually = <E, R>(label: string, done: () => Effect.Effect<boolean, E, R>) =>
+/** Re-reads `done` after each event the orchestrator's terminal-run tail writes. */
+const afterEvents = <E, R>(done: () => Effect.Effect<boolean, E, R>) =>
   Effect.gen(function* () {
-    for (let step = 0; step < 2_000; step++) {
-      if (yield* done()) return;
-      // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
-      yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-    }
-    assert.fail(`timed out waiting for: ${label}`);
+    const eventSink = yield* EventSink.EventSinkV2;
+    const head = yield* eventSink.latestSequence();
+    if (yield* done()) return;
+    yield* eventSink.stream({ afterSequence: head }).pipe(
+      Stream.mapEffect(() => done()),
+      Stream.filter((holds) => holds),
+      Stream.runHead,
+    );
   });
 
 const queuedRunState = (threadId: ThreadId, runId: RunId) =>
@@ -359,7 +361,7 @@ it.layer(TestLayer)("withdrawn fork-hook turns and the thread queue (Lecturn)", 
     Effect.gen(function* () {
       const { threadId, first, next } = yield* setup("hold-cancelled");
       yield* settleFirstRun({ threadId, runId: first.runId, outcome: "cancelled" });
-      yield* eventually("the next queued run was promoted", () =>
+      yield* afterEvents(() =>
         queuedRunState(threadId, next.runId).pipe(Effect.map((run) => run?.status !== "queued")),
       );
       assert.notEqual((yield* queuedRunState(threadId, next.runId))?.queueHeld, true);
@@ -370,7 +372,7 @@ it.layer(TestLayer)("withdrawn fork-hook turns and the thread queue (Lecturn)", 
     Effect.gen(function* () {
       const { threadId, first, next } = yield* setup("policy-refused");
       yield* settleFirstRun({ threadId, runId: first.runId, outcome: "failed" });
-      yield* eventually("the queue was held", () =>
+      yield* afterEvents(() =>
         queuedRunState(threadId, next.runId).pipe(Effect.map((run) => run?.queueHeld === true)),
       );
       assert.equal((yield* queuedRunState(threadId, next.runId))?.status, "queued");

@@ -173,6 +173,7 @@ import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as CodexManagedTokenBroker from "./provider/CodexManagedTokenBroker.ts";
 import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
 import * as RelayDeliveryProof from "./scheduledTasks/RelayDeliveryProof.ts";
 import * as HeldHooksWaker from "./relay/HeldHooksWaker.ts";
@@ -218,6 +219,7 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ProcessGroupMetrics from "./resourceTelemetry/ProcessGroupMetrics.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AntigravityUsage from "./provider/Drivers/AntigravityUsage.ts";
+import { MuseUsageHome } from "@lecturn/provider-muse/server";
 import * as CursorAccountReader from "@lecturn/provider-cursor/server/CursorAccountReader";
 import * as CursorKeychain from "@lecturn/provider-cursor/server/CursorKeychain";
 import * as CursorUsageAccounts from "@lecturn/provider-cursor/server/CursorUsageAccounts";
@@ -317,6 +319,7 @@ const layerUsage = UsageService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AntigravityUsage.layer,
+      MuseUsageHome.layer,
       CodexUsageHistory.layer,
       CursorUsageAccounts.layer.pipe(
         Layer.provide(CursorAccountReader.layer.pipe(Layer.provide(CursorKeychain.layer))),
@@ -962,7 +965,14 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   // Folded into one step: this pipe is at Effect's 20-argument ceiling. Layer
   // memoisation keeps a single resolver instance for the reader and the rest;
   // layerStave carries the Forgejo-refining layerRepositoryIdentityResolver.
-  Layer.provideMerge(Layer.mergeAll(layerStave, layerStaveProjectShells, layerStaveRuntimeFence)),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      layerStave,
+      layerStaveProjectShells,
+      layerStaveRuntimeFence,
+      CodexManagedTokenBroker.layer,
+    ),
+  ),
   Layer.provideMerge(layerServerEnvironment),
   Layer.provideMerge(layerSquireSwitch),
   Layer.provideMerge(layerAuth),

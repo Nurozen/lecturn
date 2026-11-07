@@ -53,6 +53,7 @@ import { SettingsNavigationProvider } from "./settings/SettingsNavigation";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import type { SidebarRouteReveal } from "./sidebar/routeReveal";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
 import {
@@ -158,12 +159,12 @@ function SidebarControl() {
         return;
       }
       if (
-        isRichTextBoldShortcut(event) &&
+        isRichTextBoldShortcut(event, window.getSelection()) &&
         event.target instanceof HTMLElement &&
         event.target.closest('[data-composer-rich-text="true"]')
       ) {
-        // The rich-text composer claims Mod+B for bold; the toggle stays
-        // available everywhere else, including the plain-text composer.
+        // The rich-text composer claims Mod+B only to bold selected text;
+        // the toggle stays available everywhere else.
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, { context: { usagePageOpen } });
@@ -349,6 +350,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const sidebarMode = useUiStateStore((state) => state.sidebarMode);
+  const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
+    observedKey: null,
+    pendingKey: null,
+  }));
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   useThreadVisitedMigration();
@@ -447,10 +452,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               sidebarMode === "apps" ? (
                 <StandaloneAppsSidebar />
               ) : (
-                <LegacyThreadSidebar />
+                <LegacyThreadSidebar routeReveal={sidebarRouteReveal} />
               )
             ) : (
-              <ThreadSidebar />
+              <ThreadSidebar routeReveal={sidebarRouteReveal} />
             )}
             <SidebarRail onDoubleClick={resetSidebarWidth} />
           </Sidebar>

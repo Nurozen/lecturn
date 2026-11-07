@@ -1,9 +1,25 @@
-import { Toolbar } from "../../components/ui/Toolbar";
-import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
+import {
+  navigationCustomizationAvailable,
+  overflowNavigationTabs,
+} from "../workspace/navigation-tab-order";
+import {
+  NAVIGATION_TAB_ICONS,
+  WORKSPACE_TAB_LABELS,
+  useNavigationTabOrder,
+  useHiddenNavigationTabs,
+} from "../workspace/navigation-tabs";
+import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
+import {
+  ScreenScrollView as ScrollView,
+  ScreenScrollViewBottomInset,
+} from "../../components/ui/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText as Text } from "../../components/ui/AppText";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import { Platform, View } from "react-native";
+import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
+import { useDeviceType } from "../../native/native-layout-metrics";
+import { useCompactWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import { deriveProjectGroupLabel } from "@lecturn/client-runtime/state/project-grouping";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -11,7 +27,6 @@ import { TeamSelector } from "../cloud/TeamSelector";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ContextualButton } from "../contextual/ContextualControls";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useEnvironments } from "../../state/environments";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
@@ -27,8 +42,9 @@ import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { useSettingsConnectAccount } from "./useSettingsConnectAccount";
 
 export function SettingsRouteScreen() {
-  const navigation = useNavigation();
-  const { layout } = useAdaptiveWorkspaceLayout();
+  const surface = useWorkspaceSurface();
+  const deviceType = useDeviceType();
+  const compactTabs = useCompactWorkspaceTabs();
   const content = hasCloudPublicConfig() ? (
     <ConfiguredSettingsRouteScreen />
   ) : (
@@ -36,30 +52,18 @@ export function SettingsRouteScreen() {
   );
 
   return (
-    <>
-      {Platform.OS === "ios" ? (
-        <NativeStackScreenOptions options={{ headerBackVisible: !layout.usesSplitView }} />
-      ) : null}
-      {Platform.OS === "ios" && layout.usesSplitView ? (
-        <>
-          <Toolbar placement="left">
-            <Toolbar.Button
-              accessibilityLabel="Go back"
-              icon="chevron.left"
-              onPress={() => navigation.goBack()}
-            />
-          </Toolbar>
-        </>
-      ) : null}
-      <SettingsEnvironmentFilterHeader closeSettings />
-      {Platform.OS === "android" ? (
-        <SettingsScreen title="Settings" trailing={<AndroidSettingsEnvironmentFilter />}>
-          {content}
-        </SettingsScreen>
-      ) : (
-        content
-      )}
-    </>
+    <View className={`flex-1 ${surface.className}`}>
+      <SettingsEnvironmentFilterHeader />
+      <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
+        {Platform.OS === "android" ? (
+          <SettingsScreen title="Settings" trailing={<AndroidSettingsEnvironmentFilter />}>
+            {content}
+          </SettingsScreen>
+        ) : (
+          content
+        )}
+      </ScreenScrollViewBottomInset>
+    </View>
   );
 }
 
@@ -69,7 +73,7 @@ function ConfiguredSettingsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
+    <View collapsable={false} className="flex-1">
       <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
@@ -78,6 +82,7 @@ function ConfiguredSettingsRouteScreen() {
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
+        <OverflowSection />
         <View className="gap-3">
           <ConnectAccountsSettings
             selectedAccountId={selectedAccountId}
@@ -113,7 +118,7 @@ function LocalSettingsRouteScreen() {
   const environmentCount = Object.keys(savedConnectionsById).length;
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
+    <View collapsable={false} className="flex-1">
       <ArcaneBackdrop emphasis="sidebar" />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
@@ -124,6 +129,7 @@ function LocalSettingsRouteScreen() {
           paddingBottom: Math.max(insets.bottom, 18) + 18,
         }}
       >
+        <OverflowSection />
         <SettingsSection title="Connections">
           <SettingsRow
             icon="desktopcomputer"
@@ -161,6 +167,13 @@ function SettingsIndexSections() {
     <>
       <SettingsSection title="Interface">
         <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
+        {navigationCustomizationAvailable() ? (
+          <SettingsRow
+            icon="line.3.horizontal"
+            label="Navigation tabs"
+            target="SettingsNavigation"
+          />
+        ) : null}
         {Platform.OS === "ios" ? (
           <>
             <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
@@ -224,7 +237,6 @@ function SettingsIndexSections() {
       </SettingsSection>
 
       <SettingsSection title="App">
-        <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
         <SettingsRow icon="info.circle" label="About Lecturn" target="SettingsAbout" />
       </SettingsSection>
     </>
@@ -251,4 +263,25 @@ function ContextualSettingsSection() {
       ))}
     </SettingsSection>
   );
+}
+
+function OverflowSection() {
+  const order = useNavigationTabOrder();
+  const hidden = useHiddenNavigationTabs();
+  const { layout } = useAdaptiveWorkspaceLayout();
+  const tabs =
+    Platform.OS === "android" && layout.usesSplitView ? [] : overflowNavigationTabs(order, hidden);
+  const selectTab = useSelectWorkspaceTab();
+  return tabs.length ? (
+    <SettingsSection>
+      {tabs.map((tab) => (
+        <SettingsRow
+          key={tab}
+          icon={NAVIGATION_TAB_ICONS[tab]}
+          label={WORKSPACE_TAB_LABELS[tab]}
+          onPress={() => selectTab(tab)}
+        />
+      ))}
+    </SettingsSection>
+  ) : null;
 }

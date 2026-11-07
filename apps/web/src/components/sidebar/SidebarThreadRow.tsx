@@ -87,6 +87,7 @@ import { formatRelativeTimeLabel, parseTimestampDate } from "../../timestampForm
 import type { SidebarThreadSummary } from "../../types";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
+import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   type SidebarDropVerb,
@@ -1048,6 +1049,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       <input
         autoFocus
         value={renamingTitle}
+        dir="auto"
         aria-label="Thread title"
         onChange={(event) => onRenameTitleChange(event.target.value)}
         onFocus={(event) => event.currentTarget.select()}
@@ -1061,7 +1063,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       <span
         aria-hidden
         className={cn(
-          "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+          "min-w-0 flex-1 text-start text-sm transition-opacity motion-reduce:transition-none",
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(
@@ -1087,6 +1089,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           variantAction === "unsettle" && "lecturn-settled-label",
           isRegeneratingTitle && "opacity-55",
         )}
+        dir={textDirection(thread.title)}
       >
         {thread.title}
       </span>
@@ -1484,8 +1487,12 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                       ) : null}
                       {/* The label alone is the live region: a role="status"
                         wrapper around the ticking duration would make
-                        screen readers announce every second. */}
-                      <span role="status">{topStatus.label}</span>
+                        screen readers announce every second. The open
+                        thread announces its own status, so its row stays
+                        quiet instead of saying everything twice. */}
+                      <span role={props.isRouteThread ? undefined : "status"}>
+                        {topStatus.label}
+                      </span>
                     </span>
                   )
                 ) : (
@@ -1697,6 +1704,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   resultId: string;
   searchMatch: EnvironmentThreadSearchMatch | null;
   searchQuery: string;
+  /** The query `searchMatch` was found for, which lags `searchQuery` while a search runs. */
+  searchMatchQuery?: string;
   onHighlight: () => void;
   onSelect: () => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
@@ -1842,7 +1851,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                 match={{
                   source: props.searchMatch.source,
                   snippet: props.searchMatch.snippet,
-                  query: props.searchQuery,
+                  query: props.searchMatchQuery ?? props.searchQuery,
                 }}
               />
             ) : null}

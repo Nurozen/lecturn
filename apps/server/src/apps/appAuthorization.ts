@@ -58,7 +58,11 @@ import { type AppSubject, formatEmbedSubject, parseAppSubject } from "./subjects
 
 type WsRpc = RpcGroup.Rpcs<typeof WsRpcGroup>;
 export type WsRpcMethod = WsRpc["_tag"];
-type PayloadOf<M extends WsRpcMethod> = Rpc.Payload<Rpc.ExtractTag<WsRpc, M>>;
+/**
+ * One pass over the union. `Rpc.ExtractTag<WsRpc, M>` per method is quadratic in the method
+ * count, and past about 320 methods the table's lookup hits TS2589.
+ */
+type PayloadByMethod = { readonly [R in WsRpc as R["_tag"]]: Rpc.Payload<R> };
 
 export type AccessTarget =
   | { readonly projectId: ProjectId }
@@ -92,7 +96,7 @@ export interface AppRpcRule<P> {
   readonly embed: boolean;
 }
 
-type AppRpcTable = { readonly [M in WsRpcMethod]?: AppRpcRule<PayloadOf<M>> };
+type AppRpcTable = { readonly [M in WsRpcMethod]?: AppRpcRule<PayloadByMethod[M]> };
 
 /** What an embedded chat may do to its own threads; creation goes through `apps.createEmbedThread`. */
 const EMBED_COMMAND_TYPES: ReadonlySet<OrchestrationV2Command["type"]> = new Set([

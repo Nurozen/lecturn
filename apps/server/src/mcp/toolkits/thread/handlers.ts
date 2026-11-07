@@ -105,17 +105,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   lecturn_thread_search: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { caller, scope } = yield* readCaller();
-      const { projectId: requested, ...query } = input;
-      const projectId = requested ?? caller?.projectId;
+      const projectId = input.projectId ?? caller?.projectId;
       if (projectId !== undefined) yield* McpInvocationContext.assertProjectReach(scope, projectId);
       const threadSearch = yield* ThreadSearch.ThreadSearch;
-      const result = yield* threadSearch.search(query).pipe(Effect.mapError(unavailable));
-      return {
-        matches:
-          projectId === undefined
-            ? result.matches
-            : result.matches.filter((match) => match.projectId === projectId),
-      };
+      return yield* threadSearch
+        .searchThreads({ ...input, projectId })
+        .pipe(Effect.mapError(unavailable));
     }),
   ),
   lecturn_thread_fork: writesThread((input) =>

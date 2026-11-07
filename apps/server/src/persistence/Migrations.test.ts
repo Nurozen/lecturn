@@ -6,6 +6,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import UpstreamWebhookDedupe from "./Migrations/067_WebhookDedupe.ts";
+import UpstreamShellStopRequestIndex from "./Migrations/068_ShellStopRequestIndex.ts";
+import UpstreamThreadMessageSearch from "./Migrations/069_ThreadMessageSearch.ts";
 import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
@@ -36,6 +38,34 @@ const v2TableCount = Effect.gen(function* () {
     SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'orchestration_v2_%'
   `;
   return rows.length;
+});
+
+const insertSearchMessage = (messageId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO orchestration_v2_projection_messages (
+        message_id, thread_id, run_id, node_id, role, streaming, created_at, updated_at, payload_json
+      )
+      VALUES (
+        ${messageId}, 'thread-1', NULL, NULL, 'user', 0,
+        '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z',
+        ${JSON.stringify({ text: "needle", createdBy: "user" })}
+      )
+    `;
+  });
+
+const searchedMessageIds = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly messageId: string }>`
+    SELECT messages.message_id AS "messageId"
+    FROM orchestration_v2_message_search AS search
+    INNER JOIN orchestration_v2_projection_messages AS messages
+      ON messages.rowid = search.rowid
+    WHERE orchestration_v2_message_search MATCH '"needle"'
+    ORDER BY messages.message_id
+  `;
+  return rows.map((row) => row.messageId);
 });
 
 describe("runMigrations", () => {
@@ -163,6 +193,8 @@ describe("runMigrations", () => {
         [83, "CodexUsageNativeTurnIndex"],
         [84, "RepairClientSettlementTimestamps"],
         [85, "WebhookDedupe"],
+        [86, "ShellStopRequestIndex"],
+        [87, "ThreadMessageSearch"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -183,10 +215,56 @@ describe("runMigrations", () => {
         (delivery_id, task_id, coalesce_key, due_at, task_json, request_json, delivery_ids_json)
         VALUES ('delivery-1', 'task-1', 'key', 1, '{}', '{}', '[]')`;
 
-      assert.deepStrictEqual(yield* runMigrations(), [[85, "WebhookDedupe"]]);
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [85, "WebhookDedupe"],
+        [86, "ShellStopRequestIndex"],
+        [87, "ThreadMessageSearch"],
+      ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
       ]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("builds message search from the history of a released database at 85", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 85 });
+      yield* insertSearchMessage("before-upgrade");
+
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [86, "ShellStopRequestIndex"],
+        [87, "ThreadMessageSearch"],
+      ]);
+      yield* insertSearchMessage("after-upgrade");
+
+      assert.deepStrictEqual(yield* searchedMessageIds, ["after-upgrade", "before-upgrade"]);
+      assert.deepStrictEqual(
+        yield* sql`
+          SELECT name FROM sqlite_master
+          WHERE name = 'orchestration_v2_projection_turn_items_stop_request_idx'
+        `,
+        [{ name: "orchestration_v2_projection_turn_items_stop_request_idx" }],
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the stop index and message search a database built under upstream's ids", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 85 });
+      // Upstream published these as migrations 68 and 69.
+      yield* UpstreamShellStopRequestIndex;
+      yield* UpstreamThreadMessageSearch;
+      yield* insertSearchMessage("under-upstream-id");
+
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [86, "ShellStopRequestIndex"],
+        [87, "ThreadMessageSearch"],
+      ]);
+
+      assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -220,6 +298,8 @@ describe("runMigrations", () => {
         [83, "CodexUsageNativeTurnIndex"],
         [84, "RepairClientSettlementTimestamps"],
         [85, "WebhookDedupe"],
+        [86, "ShellStopRequestIndex"],
+        [87, "ThreadMessageSearch"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

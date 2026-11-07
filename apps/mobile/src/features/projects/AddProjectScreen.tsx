@@ -61,7 +61,7 @@ import {
   resolveEnvironmentMachineKind,
   SourceControlProviderKind,
 } from "@lecturn/contracts";
-import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, View } from "react-native";
@@ -86,6 +86,7 @@ import { ErrorBanner } from "../../components/ui/ErrorBanner";
 import { SourceControlIcon } from "./SourceControlIcon";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { uuidv4 } from "../../lib/uuid";
+import { replaceNewTaskFlowWithThread } from "./replaceNewTaskFlowWithThread";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import {
@@ -742,7 +743,7 @@ export function useDispatchProjectCreate() {
 }
 
 function openNewTaskDraft(
-  navigation: { dispatch: (action: ReturnType<typeof CommonActions.reset>) => void },
+  navigation: Parameters<typeof replaceNewTaskFlowWithThread>[0],
   params: {
     environmentId: EnvironmentId;
     projectId: ProjectId;
@@ -751,9 +752,7 @@ function openNewTaskDraft(
     draftId?: string;
   },
 ) {
-  navigation.dispatch(
-    CommonActions.reset({ index: 0, routes: [{ name: "NewTaskDraft", params }] }),
-  );
+  replaceNewTaskFlowWithThread(navigation, { draft: params });
 }
 
 async function draftWithPrompt(
@@ -792,21 +791,11 @@ function useCreateProject(environment: EnvironmentOption | null) {
     });
     if (existing) {
       Dialog.alert("Project already exists", existing.title);
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [
-            {
-              name: "NewTaskDraft",
-              params: {
-                environmentId: existing.environmentId,
-                projectId: existing.id,
-                title: existing.title,
-              },
-            },
-          ],
-        }),
-      );
+      openNewTaskDraft(navigation, {
+        environmentId: existing.environmentId,
+        projectId: existing.id,
+        title: existing.title,
+      });
       return;
     }
 
@@ -817,21 +806,11 @@ function useCreateProject(environment: EnvironmentOption | null) {
     if (AsyncResult.isFailure(result)) {
       return result;
     }
-    navigation.dispatch(
-      CommonActions.reset({
-        index: 0,
-        routes: [
-          {
-            name: "NewTaskDraft",
-            params: {
-              environmentId: environment.environmentId,
-              projectId,
-              title: inferProjectTitleFromPath(workspaceRoot),
-            },
-          },
-        ],
-      }),
-    );
+    openNewTaskDraft(navigation, {
+      environmentId: environment.environmentId,
+      projectId,
+      title: inferProjectTitleFromPath(workspaceRoot),
+    });
     return result;
   };
 }

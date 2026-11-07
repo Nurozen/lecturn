@@ -133,7 +133,7 @@ function StaveDiagnosticsSection({ status }: { status: StaveStatusView }) {
   const isInitialLoading = data === null && isPending;
   const runnable = data?.runnable ?? null;
   const roots = data?.roots ?? null;
-  const rootsFallback = data === null ? "—" : "Config not readable";
+  const rootsFallback = data === null ? "-" : "Config not readable";
   const marmotValue =
     data === null
       ? "..."
@@ -203,15 +203,15 @@ function StaveDiagnosticsSection({ status }: { status: StaveStatusView }) {
         minTableWidth="min-w-[480px]"
         columnWidths={["w-[176px]", "w-auto"]}
       >
-        <StaveSettingRow label="Resolved path" value={runnable?.path ?? "—"} />
+        <StaveSettingRow label="Resolved path" value={runnable?.path ?? "-"} />
         <StaveSettingRow
           label="Source"
-          value={runnable ? STAVE_SOURCE_LABELS[runnable.source] : "—"}
+          value={runnable ? STAVE_SOURCE_LABELS[runnable.source] : "-"}
         />
-        <StaveSettingRow label="Config path" value={data?.configPath ?? "—"} />
+        <StaveSettingRow label="Config path" value={data?.configPath ?? "-"} />
         <StaveSettingRow
           label="Config exists"
-          value={data === null ? "—" : data.configExists ? "Yes" : "No"}
+          value={data === null ? "-" : data.configExists ? "Yes" : "No"}
         />
         <StaveSettingRow label="Root" value={roots?.root ?? rootsFallback} />
         <StaveSettingRow label="Bare repos dir" value={roots?.bareReposDir ?? rootsFallback} />

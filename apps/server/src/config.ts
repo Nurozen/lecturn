@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
-import type { AppSidecarBootstrap } from "@lecturn/contracts";
+import type { AppSidecarBootstrap, OtlpEndpointSource } from "@lecturn/contracts";
 
 import { sweepStalePendingAttachments } from "./attachmentStore.ts";
 import { DEFAULT_SIGNAL_EXPORT, type SignalExport } from "@lecturn/shared/observability";
@@ -63,6 +63,12 @@ export class ServerConfig extends Context.Service<
     readonly otlpTracesExport: SignalExport;
     readonly otlpMetricsExport: SignalExport;
     readonly otlpLogsExport: SignalExport;
+    readonly otlpTracesSource?: OtlpEndpointSource;
+    readonly otlpTracesVariable?: string;
+    readonly otlpMetricsSource?: OtlpEndpointSource;
+    readonly otlpMetricsVariable?: string;
+    readonly otlpLogsSource?: OtlpEndpointSource;
+    readonly otlpLogsVariable?: string;
     readonly otelEnvironment: OtelEnvironment.OtelEnvironment;
     readonly mode: RuntimeMode;
     readonly port: number;
@@ -138,7 +144,7 @@ export const otlpResource = (
   attributes: {
     "service.namespace": "lecturn",
     "service.runtime": "lecturn-server",
-    "service.mode": config.mode,
+    "lecturn.server.managed_by": config.mode === "desktop" ? "desktop" : "standalone",
     "host.name": config.otelEnvironment.resourceAttributes["host.name"] || hostName,
   },
 });

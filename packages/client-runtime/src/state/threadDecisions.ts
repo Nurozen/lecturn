@@ -36,7 +36,7 @@ export function decisionStatusLabel(status: DecisionProcessingStatus): string {
         "allowance-exhausted": "Allowance exhausted",
         "provider-unsupported": "Writer not supported",
         "provider-unavailable": "Waiting for your agent",
-        "detector-unavailable": "Detection paused — retry when the service is available",
+        "detector-unavailable": "Detection paused. Retry when the service is available",
         "provider-foreground": "Waiting for your conversation to finish",
         "provider-changed": "Agent configuration changed",
         "host-policy": "Waiting for host power policy",

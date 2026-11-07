@@ -47,6 +47,7 @@ import {
 } from "../lib/chatThreadActions";
 import { readLecturnProjectFile } from "../lib/lecturnProjectFileDefaults";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -167,8 +168,14 @@ export function useNewThreadHandler() {
     const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
       const { forcedMode } = resolveNewThreadEnvModeSources(project);
       if (forcedMode !== undefined) return forcedMode;
+      // Environment queries wait for a connection, so reading the project file on an
+      // offline machine would never settle and the draft would never open.
       const consultProjectFile =
-        project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
+        project !== undefined &&
+        projectSettings.settings.defaultThreadEnvMode === null &&
+        appAtomRegistry
+          .get(environmentSummaries.connectedEnvironmentIdsAtom)
+          .includes(project.environmentId);
       const projectFile = consultProjectFile
         ? await readLecturnProjectFile(project.environmentId, project.workspaceRoot)
         : null;

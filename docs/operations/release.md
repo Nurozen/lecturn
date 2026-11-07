@@ -41,7 +41,7 @@ This document covers the unified release workflow for stable and nightly desktop
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
 - Builds a self-contained CLI archive (`lecturn-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) for three targets, macOS arm64, Linux x64, and Windows x64, and attaches them to the GitHub Release with a `SHA256SUMS` file. Linux comes from `build_linux_cli`; macOS arm64 and Windows x64 are built in the same job as that target's desktop artifact. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS. The x64 desktop app is Electron and unaffected.
   - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`) plus the web client, resource monitor, native externals, and the platform's Stave binary at `stave/<platform>-<arch>/`, so unpacking it needs neither Node, npm, nor a compiler. The install scripts (`scripts/install.sh`, `scripts/install.ps1`) and desktop SSH environments on macOS arm64 and Linux x64 remotes download this archive and verify it against `SHA256SUMS`; other SSH remotes run `npx lecturn@<version>`, and the install scripts point other platforms at `npx lecturn`. The desktop WSL backend embeds the Linux archive. The boot service and `lecturn update` also install from these archives but stay disabled until `RuntimeReleaseArchivesPublished` (`apps/server/src/cloud/pinnedRuntime.ts`) is enabled for published Lecturn archives; until then they fail with an explicit unavailable error.
-  - The executable is built with a Node that supports `--build-sea` (`VP_NODE_VERSION=26.8.2`, kept in step with `SEA_NODE_VERSION` in `apps/server/vite.config.ts`), while the repo stays on `engines.node`.
+  - The root `package.json` pins `engines.node` to the exact Node version used by development, CI and standalone executables. Keep it exact: cross-target builds download that version, and native executable builds reject a different host Node version. Runtime changes need a new Lecturn release version because installed runtimes are cached by that version.
   - macOS archives are signed with the Developer ID certificate (`CSC_LINK`) and notarized when the Apple API secrets are present, and signed ad hoc otherwise. Windows executables use the installer's Azure Trusted Signing setup when its secrets are present and stay unsigned otherwise.
   - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
 - Publishes the CLI package (`apps/server`, npm package `lecturn`) with OIDC trusted publishing from the same workflow file:
@@ -122,7 +122,7 @@ database. Local personal stages provision isolated branches from it and are neve
 Production adopts the configured relay API and tunnel DNS zones as retained Cloudflare resources.
 Personal stages reference the production-owned zones.
 
-Developers deploy personal stages locally rather than through pull-request automation:
+Developers deploy personal stages locally:
 
 ```sh
 vp run --filter lecturn-relay deploy -- --stage "$USER" --env-file .env.local

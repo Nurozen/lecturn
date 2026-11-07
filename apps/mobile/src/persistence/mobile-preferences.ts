@@ -58,6 +58,8 @@ export interface Preferences {
     readonly preset: string;
   }>;
   readonly connectAccountsRemoving?: ReadonlyArray<string>;
+  readonly navigationTabOrder?: readonly string[];
+  readonly hiddenNavigationTabs?: readonly string[];
   readonly pullRequestHideTestFiles?: boolean;
   readonly pullRequestMergeMethod?: PullRequestMergeMethod;
   readonly liveActivitiesEnabled?: boolean;
@@ -136,6 +138,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     connectAccounts?: Preferences["connectAccounts"];
     connectAccountsRemoving?: ReadonlyArray<string>;
+    navigationTabOrder?: readonly string[];
+    hiddenNavigationTabs?: readonly string[];
     pullRequestHideTestFiles?: boolean;
     pullRequestMergeMethod?: PullRequestMergeMethod;
     liveActivitiesEnabled?: boolean;
@@ -183,6 +187,19 @@ function sanitizePreferences(parsed: Preferences): Preferences {
       (id) => typeof id === "string",
     );
   }
+
+  if (Array.isArray(parsed.hiddenNavigationTabs)) {
+    preferences.hiddenNavigationTabs = parsed.hiddenNavigationTabs.filter(
+      (tab): tab is string => typeof tab === "string",
+    );
+  }
+
+  if (Array.isArray(parsed.navigationTabOrder)) {
+    preferences.navigationTabOrder = parsed.navigationTabOrder.filter(
+      (tab): tab is string => typeof tab === "string",
+    );
+  }
+
   if (typeof parsed.pullRequestHideTestFiles === "boolean") {
     preferences.pullRequestHideTestFiles = parsed.pullRequestHideTestFiles;
   }

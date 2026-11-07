@@ -17,6 +17,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -24,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { GitManager, type GitBranchPullRequest } from "../git/GitManager.ts";
 import { RepositoryIdentityResolver } from "../project/RepositoryIdentityResolver.ts";
 import { PullRequestService } from "../pullRequest/PullRequestService.ts";
@@ -174,12 +176,14 @@ const run = Effect.fn("ThreadPullRequestService.stave.run")(function* (options: 
   const invalidations = yield* Ref.make<ReadonlyArray<string>>([]);
   const summaryCalls = yield* Ref.make(0);
   const reads = yield* Ref.make<ReadonlyArray<boolean | undefined>>([]);
+  const firstRead = yield* Deferred.make<void>();
   const { stave, ...plainShell } = options.project;
   const dependencies = Layer.mergeAll(
     Layer.mock(Orchestrator.OrchestratorV2)({
       streamDomainEvents: Stream.never,
       getShellSnapshot: (input) =>
         Ref.update(reads, (all) => [...all, input?.unsettledOnly]).pipe(
+          Effect.andThen(Deferred.succeed(firstRead, undefined)),
           Effect.as({
             schemaVersion: 2,
             snapshotSequence: 7,
@@ -237,6 +241,9 @@ const run = Effect.fn("ThreadPullRequestService.stave.run")(function* (options: 
         digest: (_algorithm, data) => Effect.succeed(data),
       }),
     ),
+    Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+      shouldRunOpportunisticWork: Effect.succeed(true),
+    }),
     FileSystem.layerNoop({
       exists: (path) => Effect.succeed(options.existing.includes(path)),
     }),
@@ -245,7 +252,7 @@ const run = Effect.fn("ThreadPullRequestService.stave.run")(function* (options: 
     const service = yield* ThreadPullRequestService.make;
     yield* service.start();
     // The startup backfill is enqueued by a forked root; wait for its read.
-    while ((yield* Ref.get(reads)).length === 0) yield* Effect.yieldNow;
+    yield* Deferred.await(firstRead);
     yield* service.drain;
   }).pipe(Effect.provide(dependencies));
   return {

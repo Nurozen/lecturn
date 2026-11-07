@@ -27,6 +27,7 @@ import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
+import rootPackageJson from "../../../package.json" with { type: "json" };
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import { STAVE_PLATFORM_KEYS } from "@lecturn/shared/stave";
 import serverPackageJson from "../package.json" with { type: "json" };
@@ -188,7 +189,7 @@ const buildCmd = Command.make(
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
       } else {
-        yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
+        yield* Effect.logWarning("[cli] Web dist not found. Skipping client bundle.");
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
@@ -265,7 +266,7 @@ const buildExeCmd = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
+    `Build the server as a Node single-executable. Native builds require Node ${rootPackageJson.engines.node}; explicit cross-target builds need a Node 25.7+ host for --build-sea. The binary still resolves native packages from a node_modules tree beside it.`,
   ),
 );
 

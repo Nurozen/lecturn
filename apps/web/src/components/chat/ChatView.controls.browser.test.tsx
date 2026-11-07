@@ -62,7 +62,12 @@ vi.mock(import("../../state/entities"), async (original) => ({
     ref === null || fixture.projection === null
       ? null
       : { projection: fixture.projection }) as never,
+  useQuietThreadProjection: ((ref: unknown) =>
+    ref === null || fixture.projection === null
+      ? null
+      : { projection: fixture.projection }) as never,
   useThreadVisibleTurnItems: ((ref: unknown) => (ref === null ? [] : fixture.items)) as never,
+  useQuietThreadVisibleTurnItems: ((ref: unknown) => (ref === null ? [] : fixture.items)) as never,
   useThreadCheckpointSummaries: ((ref: unknown) =>
     ref === null ? [] : fixture.summaries) as never,
   useThreadStatus: (() => "live") as never,

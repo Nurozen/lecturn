@@ -59,6 +59,7 @@ import * as ProcessRunner from "../../processRunner.ts";
 import { makeCodexStaveMemoryMcpResolver } from "../StaveMemoryMcp.ts";
 import { codexUsageReader } from "./codexUsage.ts";
 import * as CodexInstallation from "../CodexInstallation.ts";
+import * as CodexManagedTokenBroker from "../CodexManagedTokenBroker.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
@@ -104,7 +105,8 @@ export type CodexDriverEnv =
   | ServerConfig.ServerConfig
   | ServerSecretStore.ServerSecretStore
   | ServerEnvironment.ServerEnvironmentIdentity
-  | CodexInstallation.CodexInstallation;
+  | CodexInstallation.CodexInstallation
+  | CodexManagedTokenBroker.CodexManagedTokenBroker;
 
 export const CodexDriver: ProviderDriver<
   CodexSettings,

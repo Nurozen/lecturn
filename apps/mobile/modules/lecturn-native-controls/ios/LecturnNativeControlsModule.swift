@@ -32,6 +32,17 @@ public final class LecturnNativeControlsModule: Module {
       Prop("appearance") { (view: LecturnSegmentedControlView, value: String) in view.appearance = value }
     }
 
+    View(LecturnSidebarTabBarView.self) {
+      ViewName("SidebarTabBar")
+      Events("onSelectionChange", "onCompose")
+      Prop("tabs") { (view: LecturnSidebarTabBarView, value: [String]) in view.tabs = value }
+      Prop("selectedTab") { (view: LecturnSidebarTabBarView, value: String) in view.selectedTab = value }
+      Prop("selectedColor") { (view: LecturnSidebarTabBarView, value: UIColor) in view.selectedColor = value }
+      Prop("showsCompose") { (view: LecturnSidebarTabBarView, value: Bool) in view.showsCompose = value }
+      Prop("compact") { (view: LecturnSidebarTabBarView, value: Bool) in view.compact = value }
+      Prop("appearance") { (view: LecturnSidebarTabBarView, value: String) in view.appearance = value }
+    }
+
     View(LecturnLayoutMetricsView.self) {
       ViewName("LayoutMetrics")
       Events("onMetricsChange")

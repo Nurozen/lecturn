@@ -2,6 +2,8 @@ import { HStack, Image, Link, Rectangle, Spacer, Text, VStack, ZStack } from "@e
 import type { ComponentProps, ReactNode } from "react";
 import type { RelayPullRequestActivity } from "@lecturn/contracts";
 import {
+  accessibilityElement,
+  accessibilityLabel,
   activityBackgroundTint,
   background,
   clipShape,
@@ -10,6 +12,7 @@ import {
   frame,
   layoutPriority,
   lineLimit,
+  minimumScaleFactor,
   padding,
   opacity,
   resizable,
@@ -190,6 +193,7 @@ export function AgentActivity(
     : environment.isStale
       ? "Out of date"
       : `${props.activeCount} active`;
+  const showCompactGlyph = !attentionRow && !failedRow && !allDone && !environment.isStale;
   const summary = attentionSuffix || activeLabel;
 
   // Any registered scheme variant routes back to this app; taps are delivered
@@ -218,7 +222,8 @@ export function AgentActivity(
         return "clock.arrow.circlepath";
       case "running":
       default:
-        return "arrow.triangle.2.circlepath";
+        // Matches the thread list's Working indicator.
+        return "circle.dashed";
     }
   };
 
@@ -469,11 +474,27 @@ export function AgentActivity(
       </VStack>,
     ),
     compactLeading: renderLogo(16, subdued ? "secondary" : systemGold, linkModifiers),
-    compactTrailing: (
+    // While agents are only working, stay quiet: the thread list's Working
+    // glyph marks the activity without a count. Labels appear only for
+    // attention or outcomes.
+    compactTrailing: showCompactGlyph ? (
+      <HStack
+        modifiers={[
+          padding({ trailing: 2 }),
+          accessibilityElement("ignore"),
+          accessibilityLabel(agentsLabel),
+          ...linkModifiers,
+        ]}
+      >
+        {renderGlyph(phaseSymbol(heroRow?.phase ?? "running"), 14, phaseTint(heroRow?.phase, true))}
+      </HStack>
+    ) : (
       <Text
         modifiers={[
           font({ weight: "semibold", size: 11 }),
           foregroundStyle(phaseTint(heroRow?.phase, true)),
+          lineLimit(1),
+          minimumScaleFactor(0.5),
           ...linkModifiers,
         ]}
       >
@@ -481,13 +502,14 @@ export function AgentActivity(
           ? attentionRow.phase === "waiting_for_approval"
             ? "Approval"
             : "Input"
-          : activeLabel}
+          : failedRow
+            ? "Failed"
+            : activeLabel}
       </Text>
     ),
-    minimal:
-      (attentionRow || failedRow || allDone) && heroRow
-        ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true), linkModifiers)
-        : renderLogo(14, subdued ? "secondary" : systemGold, linkModifiers),
+    minimal: heroRow
+      ? renderGlyph(phaseSymbol(heroRow.phase), 15, phaseTint(heroRow.phase, true), linkModifiers)
+      : renderLogo(14, subdued ? "secondary" : systemGold, linkModifiers),
     expandedLeading: (
       <HStack
         spacing={5}

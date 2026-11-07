@@ -146,7 +146,7 @@ function poseDelta(a: EmblemPose | null, b: EmblemPose | null, rotation = true) 
   return d;
 }
 
-// oxlint-disable-next-line lecturn/no-frame-waits-in-browser-tests -- a zero-delay macrotask boundary, not a wait for time.
+// oxlint-disable-next-line lecturn/no-frame-waits-in-browser-tests, lecturn/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time.
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 // Advances one rendered frame at a time until `done` holds (bounded).
@@ -281,6 +281,7 @@ async function runGesture(e: SquireEmblemElement, name: CompanionGesture) {
     signature: Signature;
   }> = [];
   const finished = () => outcome.result !== null && clock.now() - start > outcome.result.at + 100;
+  // oxlint-disable-next-line lecturn/no-polling-loop-in-tests -- steps a fake clock a fixed frame at a time, so the samples do not depend on load.
   while (clock.now() - start < 4000 && !finished()) {
     clock.advance(FRAME);
     // One microtask turn delivers a resolution queued during the frame.

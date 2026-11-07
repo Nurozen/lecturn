@@ -41,7 +41,7 @@ import {
   type StaveArchiveTaskState,
 } from "@lecturn/client-runtime/state/stave-archive";
 import type { EnvironmentId, ProjectId, StaveOperation } from "@lecturn/contracts";
-import { CommonActions, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -54,6 +54,7 @@ import { GlassCard } from "../../components/GlassCard";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { uuidv4 } from "../../lib/uuid";
+import { replaceNewTaskFlowWithThread } from "./replaceNewTaskFlowWithThread";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import {
@@ -126,12 +127,7 @@ function useOpenNewTaskInProject() {
   const navigation = useNavigation();
   return useCallback(
     (environmentId: EnvironmentId, projectId: ProjectId, title: string) =>
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [{ name: "NewTaskDraft", params: { environmentId, projectId, title } }],
-        }),
-      ),
+      replaceNewTaskFlowWithThread(navigation, { draft: { environmentId, projectId, title } }),
     [navigation],
   );
 }

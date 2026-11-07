@@ -559,6 +559,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         otlpLogsUrl: "http://localhost:4318/v1/logs",
+        otlpTracesSource: "bootstrap",
+        otlpMetricsSource: "bootstrap",
+        otlpLogsSource: "bootstrap",
         mode: "desktop",
         port: 4888,
         cwd: process.cwd(),
@@ -718,6 +721,79 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+      });
+    }),
+  );
+
+  it.effect("reports the desktop bootstrap as the source of endpoints it supplied", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-cli-config-otlp-bootstrap-",
+      });
+      const fd = yield* openBootstrapFd(
+        makeDesktopBootstrap({
+          otlpTracesUrl: "http://localhost:4318/v1/traces",
+          otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+          otlpLogsUrl: "http://localhost:4318/v1/logs",
+        }),
+      );
+
+      const resolved = yield* resolveServerConfig(
+        { ...minimalDesktopFlags(baseDir), bootstrapFd: Option.some(fd) },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved).toMatchObject({
+        otlpTracesUrl: "http://localhost:4318/v1/traces",
+        otlpTracesSource: "bootstrap",
+        otlpMetricsSource: "bootstrap",
+        otlpLogsSource: "bootstrap",
+      });
+    }),
+  );
+
+  it.effect("reports saved settings as the source of endpoints read from settings.json", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "lecturn-cli-config-otlp-settings-",
+      });
+      const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
+      yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
+      yield* fs.writeFileString(
+        derivedPaths.settingsPath,
+        `${JSON.stringify({
+          observability: {
+            otlpTracesUrl: "http://localhost:4318/v1/traces",
+            otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+            otlpLogsUrl: "http://localhost:4318/v1/logs",
+          },
+        })}\n`,
+      );
+
+      const resolved = yield* resolveServerConfig(minimalDesktopFlags(baseDir), Option.none()).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved).toMatchObject({
+        otlpTracesUrl: "http://localhost:4318/v1/traces",
+        otlpTracesSource: "settings",
+        otlpMetricsSource: "settings",
+        otlpLogsSource: "settings",
       });
     }),
   );
@@ -1005,6 +1081,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         });
         expect(resolved.otlpLogsUrl).toBe("http://settings:4318/v1/logs");
         expect(resolved.otlpLogsExport.headers).toEqual({ "x-key": "secret" });
+        expect(resolved).toMatchObject({
+          otlpTracesVariable: "LECTURN_OTLP_TRACES_URL",
+          otlpMetricsVariable: "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        });
+        expect(resolved.otlpLogsVariable).toBeUndefined();
       }),
   );
 

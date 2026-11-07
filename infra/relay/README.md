@@ -128,8 +128,8 @@ one of those outputs changed, and `LECTURN_RELAY_CLIENT_CONFIG_ENV` redirects it
 The relay is versioned separately from client releases. `.github/workflows/deploy-relay.yml` deploys
 the shared Alchemy `prod` stage on every push to `main`. Stable and nightly release builds both
 resolve their static public config from the same
-`production` GitHub environment. Pull requests do not deploy relay stages. Developers can
-deploy personal non-production stages locally with any stage name other than `prod`.
+`production` GitHub environment. Developers can deploy personal non-production stages locally with
+any stage name other than `prod`.
 
 The repository must define these Actions variables shared by relay deployments:
 

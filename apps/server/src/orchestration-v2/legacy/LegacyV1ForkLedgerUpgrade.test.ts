@@ -279,6 +279,8 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [83, "CodexUsageNativeTurnIndex"],
           [84, "RepairClientSettlementTimestamps"],
           [85, "WebhookDedupe"],
+          [86, "ShellStopRequestIndex"],
+          [87, "ThreadMessageSearch"],
         ]);
         for (const table of [
           "orchestration_v2_events",

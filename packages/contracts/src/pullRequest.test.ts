@@ -7,6 +7,7 @@ import {
   PullRequestDetail,
   PullRequestListResult,
   pullRequestHostOf,
+  resolvePullRequestAuthorFilter,
 } from "./pullRequest.ts";
 
 const decodeDetail = Schema.decodeUnknownSync(Schema.toCodecJson(PullRequestDetail));
@@ -157,5 +158,22 @@ it("preserves host-qualified PR actions while accepting legacy references", () =
   expect(decodeAction({ ...input, host: "github.internal.test" })).toEqual({
     ...input,
     host: "github.internal.test",
+  });
+});
+
+describe("resolvePullRequestAuthorFilter", () => {
+  it("reads me as the signed-in account on the host", () => {
+    expect(resolvePullRequestAuthorFilter("me", "bilal")).toBe("bilal");
+    expect(resolvePullRequestAuthorFilter(" @Me ", "bilal")).toBe("bilal");
+  });
+
+  it("keeps me as a literal login when the host has no viewer", () => {
+    expect(resolvePullRequestAuthorFilter("me", null)).toBe("me");
+    expect(resolvePullRequestAuthorFilter("@me", " ")).toBe("@me");
+  });
+
+  it("passes any other login through trimmed", () => {
+    expect(resolvePullRequestAuthorFilter(" ana ", "bilal")).toBe("ana");
+    expect(resolvePullRequestAuthorFilter("meredith", "bilal")).toBe("meredith");
   });
 });
