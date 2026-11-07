@@ -16,8 +16,6 @@ import {
 } from "@lecturn/contracts";
 import * as ProviderLatestVersions from "@lecturn/provider-core/server/ProviderLatestVersions";
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
-import type { GrokSettings } from "@lecturn/provider-grok/settings";
-import type { CursorSettings } from "@lecturn/provider-cursor/settings";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -29,7 +27,6 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
-import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
@@ -37,9 +34,12 @@ import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CopilotDriver, type CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@lecturn/provider-cursor/server";
 import * as CursorSdk from "@lecturn/provider-cursor/server/CursorSdk";
+import type { CursorSettings } from "@lecturn/provider-cursor/settings";
 import { GrokDriver, type GrokDriverEnv } from "@lecturn/provider-grok/server";
+import type { GrokSettings } from "@lecturn/provider-grok/settings";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@lecturn/provider-opencode/server";
 import type { OpenCodeSettings } from "@lecturn/provider-opencode/settings";
+import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as StaveMemoryWiring from "../stave/StaveMemoryWiring.ts";
 import * as OpenCodeRuntime from "@lecturn/provider-opencode/server/OpenCodeRuntime";
@@ -344,46 +344,6 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       expect(instance!.enabled).toBe(false);
       const snapshot = yield* instance!.snapshot.getSnapshot;
       expect(snapshot.enabled).toBe(false);
-    }).pipe(Effect.provide(layerTest)),
-  );
-
-  it.live("reports Codex's answer when a redemption changed nothing", () =>
-    Effect.gen(function* () {
-      if (yield* HostProcess.isWindows) return;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const fixtures = yield* makeTildeProviderFixtures();
-      yield* fileSystem.writeFileString(
-        fixtures.codexScriptPath,
-        JSON.stringify({
-          rootThreadId: "probe-thread",
-          notifications: [],
-          account: { type: "chatgpt", email: "test@example.com", planType: "plus" },
-          failRateLimitsRead: true,
-          resetCreditOutcome: "alreadyRedeemed",
-        }),
-      );
-      const codexId = ProviderInstanceId.make("codex_reset");
-      const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver],
-        configMap: {
-          [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
-            enabled: true,
-            environment: [
-              {
-                name: "LECTURNX_COLLAB_SCRIPT",
-                value: fixtures.codexScriptPath,
-                sensitive: false,
-              },
-            ],
-            config: makeCodexConfig({ enabled: true, binaryPath: fixtures.codexBinaryPath }),
-          },
-        },
-      });
-      const codex = yield* registry.getInstance(codexId);
-      expect(codex).toBeDefined();
-      yield* codex!.snapshot.refresh;
-      expect(yield* codex!.consumeResetCredit!()).toBe("alreadyRedeemed");
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -808,17 +768,6 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       probeLog: fs.readFileString(probeLog),
     };
   });
-
-  it.effect.skipIf(windowsHost)("reuses Claude's successful usage probe on refresh", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeClaudeCacheFixture("ready");
-      const first = yield* fixture.refresh;
-      const second = yield* fixture.refresh;
-      expect(first.usageLimits?.windows.map((window) => window.id)).toEqual(["five_hour"]);
-      expect(second.usageLimits).toEqual(first.usageLimits);
-      expect(yield* fixture.probeLog).toBe("probe\n");
-    }).pipe(Effect.provide(layerTest)),
-  );
 
   for (const state of ["signed-out", "usage-failed"] as const) {
     it.effect.skipIf(windowsHost)(

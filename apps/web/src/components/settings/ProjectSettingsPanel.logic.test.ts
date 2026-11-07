@@ -3,10 +3,7 @@ import { planProjectRemoval } from "@lecturn/client-runtime/state/projects";
 
 import { EnvironmentId, ProjectId } from "@lecturn/contracts";
 import type { Project } from "../../types";
-import {
-  buildSettingsProjectGroups,
-  projectGroupTitleNeedsUpdate,
-} from "./ProjectSettingsPanel.logic";
+import { buildSettingsProjectGroups } from "./ProjectSettingsPanel.logic";
 
 describe("settings project scopes", () => {
   const work = EnvironmentId.make("work");
@@ -114,26 +111,6 @@ describe("settings project scopes", () => {
         accountScope: { accountId: "account-gone", email: null, accountByEnvironmentId: owners },
       }),
     ).toEqual([]);
-  });
-});
-
-describe("projectGroupTitleNeedsUpdate", () => {
-  it("updates divergent member titles even when the next title is the derived group label", () => {
-    expect(
-      projectGroupTitleNeedsUpdate(["local-title", "remote-title"], "Repository name", true),
-    ).toBe(true);
-  });
-
-  it("skips an untouched blur when the derived label differs from member titles", () => {
-    expect(projectGroupTitleNeedsUpdate(["repo-slug", "repo-slug"], "Repository Name", false)).toBe(
-      false,
-    );
-  });
-
-  it("skips an update when every member already has the next title", () => {
-    expect(projectGroupTitleNeedsUpdate(["Shared name", "Shared name"], "Shared name", true)).toBe(
-      false,
-    );
   });
 });
 

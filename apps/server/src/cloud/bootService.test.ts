@@ -21,22 +21,6 @@ import {
   serviceStateHasPendingUpdate,
 } from "./serviceProtocol.ts";
 
-const linuxRuntime = "/home/theo/.lecturn/runtime/versions/1.2.3/lecturn";
-const linuxPlan = {
-  program: [linuxRuntime, "__service-launcher"],
-  baseDir: "/home/theo/.lecturn",
-  logPath: "/home/theo/.lecturn/userdata/logs/boot-service.log",
-  unitPath: "/home/theo/.config/systemd/user/lecturn.service",
-};
-
-it("runs the pinned runtime's own executable as the systemd launcher", () => {
-  const unit = BootService.renderBootServiceUnit(linuxPlan);
-
-  expect(unit).toContain(`ExecStart=${linuxRuntime} __service-launcher`);
-  expect(unit).toContain("KillMode=mixed");
-  expect(unit).not.toContain("node");
-});
-
 it("reads the served Lecturn home back out of a rendered unit or plist", () => {
   const plan = (baseDir: string) => ({
     program: [`${baseDir}/runtime/versions/1.2.3/lecturn`, "__service-launcher"],
@@ -83,12 +67,6 @@ it.each([
   ).toBe(program);
 });
 
-it("survives the kernel OOM-killing a greedy agent child", () => {
-  const unit = BootService.renderBootServiceUnit(linuxPlan);
-
-  expect(unit).toContain("OOMPolicy=continue");
-});
-
 const macRuntime = "/Users/theo/.lecturn/runtime/versions/1.2.3/lecturn";
 const macPlan = {
   program: [macRuntime, "__service-launcher"],
@@ -98,42 +76,6 @@ const macPlan = {
 };
 const macInstallerPath =
   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";
-const macRenderOptions = { homeDir: "/Users/theo", environmentPath: macInstallerPath };
-
-it("runs the pinned runtime's own executable as the launch agent", () => {
-  const plist = BootService.renderBootServicePlist(macPlan, macRenderOptions);
-
-  expect(plist).toContain(
-    `  <array>\n    <string>${macRuntime}</string>\n    <string>__service-launcher</string>\n  </array>`,
-  );
-  expect(plist).not.toContain("node</string>");
-});
-
-it("preserves the installer's provider search path in the launch agent", () => {
-  const plist = BootService.renderBootServicePlist(macPlan, macRenderOptions);
-
-  expect(plist).toContain(`    <key>PATH</key>\n    <string>${macInstallerPath}</string>`);
-});
-
-it("restarts the launch agent on the systemd cadence", () => {
-  const plist = BootService.renderBootServicePlist(macPlan, macRenderOptions);
-
-  expect(plist).toContain("<key>RunAtLoad</key>\n  <true/>");
-  expect(plist).toContain("<key>KeepAlive</key>\n  <true/>");
-  expect(plist).toContain("<key>ThrottleInterval</key>\n  <integer>5</integer>");
-  expect(plist).toContain("<key>ExitTimeOut</key>\n  <integer>90</integer>");
-});
-
-it("appends both stdio streams to the boot service log", () => {
-  const plist = BootService.renderBootServicePlist(macPlan, macRenderOptions);
-
-  expect(plist).toContain(
-    "<key>StandardOutPath</key>\n  <string>/Users/theo/.lecturn/userdata/logs/boot-service.log</string>",
-  );
-  expect(plist).toContain(
-    "<key>StandardErrorPath</key>\n  <string>/Users/theo/.lecturn/userdata/logs/boot-service.log</string>",
-  );
-});
 
 it("escapes XML in host paths", () => {
   const plist = BootService.renderBootServicePlist(
@@ -680,27 +622,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
       }),
     );
 
-    it.effect("restart stops and starts an installed service, and is a no-op otherwise", () =>
-      Effect.gen(function* () {
-        const { service, commands } = yield* makeHarness();
-        expect(yield* service.restart).toBe("skipped");
-        yield* service.install();
-        commands.length = 0;
-
-        expect(yield* service.restart).toBe("restarted");
-        expect(
-          commands.filter(
-            (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
-          ),
-        ).toEqual([
-          "systemctl --user stop lecturn.service",
-          "systemctl --user daemon-reload",
-          "systemctl --user enable lecturn.service",
-          "systemctl --user restart lecturn.service",
-        ]);
-      }),
-    );
-
     it.effect("restart leaves a service that serves another Lecturn home alone", () =>
       Effect.gen(function* () {
         const { service, fs, commands, makeService } = yield* makeHarness();
@@ -712,27 +633,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
         const other = yield* makeService(undefined, "1.2.3", path.join(otherHome, ".lecturn"));
         expect(yield* other.restart).toBe("skipped");
         expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([]);
-      }),
-    );
-
-    it.effect("restart brings the service back when activation fails", () =>
-      Effect.gen(function* () {
-        const { service, commands, control } = yield* makeHarness();
-        yield* service.install();
-        commands.length = 0;
-        control.failCommand = "systemctl --user daemon-reload";
-
-        const error = yield* service.restart.pipe(Effect.flip);
-        expect(error._tag).toBe("BootServiceCommandError");
-        expect(
-          commands.filter(
-            (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
-          ),
-        ).toEqual([
-          "systemctl --user stop lecturn.service",
-          "systemctl --user daemon-reload",
-          "systemctl --user restart lecturn.service",
-        ]);
       }),
     );
 
@@ -873,16 +773,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
       }),
     );
 
-    it.effect("fails closed on Windows", () =>
-      Effect.gen(function* () {
-        const { service } = yield* makeHarness("win32");
-        expect((yield* service.status).supported).toBe(false);
-        expect((yield* service.install().pipe(Effect.flip))._tag).toBe(
-          "BootServiceUnsupportedError",
-        );
-      }),
-    );
-
     it.effect("installs, reports current state, and uninstalls on macOS", () =>
       Effect.gen(function* () {
         const { service, fs, statePath, commands, timeouts, runtime } =
@@ -917,25 +807,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
         expect(
           timeouts.get("launchctl bootout --wait gui/501/com.cloudgatherer.lecturn.service"),
         ).toEqual(Duration.seconds(120));
-      }),
-    );
-
-    it.effect("restarts the launch agent when repair fails", () =>
-      Effect.gen(function* () {
-        const { service, commands, control } = yield* makeHarness("darwin");
-        yield* service.install();
-        const plistPath = (yield* service.status).unitPath;
-        commands.length = 0;
-        control.failCommand = `launchctl bootstrap gui/501 ${plistPath}`;
-
-        const error = yield* service.install().pipe(Effect.flip);
-        expect(error._tag).toBe("BootServiceCommandError");
-        expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-          "launchctl bootout --wait gui/501/com.cloudgatherer.lecturn.service",
-          "launchctl enable gui/501/com.cloudgatherer.lecturn.service",
-          `launchctl bootstrap gui/501 ${plistPath}`,
-          `launchctl bootstrap gui/501 ${plistPath}`,
-        ]);
       }),
     );
 
@@ -1024,37 +895,6 @@ it.layer(Layer.merge(NodeServices.layer, Layer.succeed(RuntimeReleaseArchivesPub
         expect(commands).toContain(bootstrap);
         expect(yield* fs.exists(markerPath)).toBe(false);
         expect((yield* service.status).current).toBe(true);
-      }),
-    );
-
-    it.effect("restarts without overwriting a pending remote update on macOS", () =>
-      Effect.gen(function* () {
-        const { service, fs, statePath, commands } = yield* makeHarness("darwin");
-        yield* service.install();
-        const plistPath = (yield* service.status).unitPath;
-        const pendingState = JSON.stringify({
-          protocol: SERVICE_LAUNCHER_PROTOCOL - 1,
-          activeVersion: "1.2.3",
-          update: {
-            id: "remote-update",
-            fromVersion: "1.2.3",
-            targetVersion: "1.2.4",
-            status: "pending",
-          },
-        });
-        yield* fs.writeFileString(statePath, pendingState);
-        for (const allowDowngrade of [false, true]) {
-          commands.length = 0;
-
-          expect((yield* service.install({ allowDowngrade }).pipe(Effect.flip))._tag).toBe(
-            "BootServiceUpdatePendingError",
-          );
-          expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
-          expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-            "launchctl bootout --wait gui/501/com.cloudgatherer.lecturn.service",
-            `launchctl bootstrap gui/501 ${plistPath}`,
-          ]);
-        }
       }),
     );
   },

@@ -96,8 +96,6 @@ import {
 } from "@lecturn/provider-core/server/subagentProjection";
 import { openCodeToolTurnItem } from "./toolItems.ts";
 
-export { openCodeToolProjectionKind } from "./toolItems.ts";
-
 export const OPENCODE_PROVIDER = ProviderDriverKind.make("opencode");
 
 // Above Lecturn's hour-long wait tools, as Claude and Codex are; it also

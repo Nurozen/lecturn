@@ -28,11 +28,6 @@ describe("tool-group scroll restoration", () => {
       viewOffset: -80,
     });
   });
-
-  it("starts normally when the saved row no longer belongs to the group", () => {
-    expect(resolveThreadWorkGroupInitialScroll([{ id: "other" }], position)).toBeUndefined();
-    expect(resolveThreadWorkGroupInitialScroll([{ id: "read-output" }], undefined)).toBeUndefined();
-  });
 });
 
 describe("tool-group append following", () => {
@@ -108,18 +103,6 @@ describe("resolveThreadFeedSubmissionAnchor", () => {
     ).toBe("first-message");
   });
 
-  it("preserves the first-message anchor after its outbox entry drains", () => {
-    expect(
-      resolveThreadFeedSubmissionAnchor({
-        currentAnchorMessageId: "first-message",
-        submittedMessageId: "second-message",
-        hasStartedTurn: false,
-        hasUserMessage: false,
-        queuedMessageCount: 0,
-      }),
-    ).toBe("first-message");
-  });
-
   it("does not anchor a follow-up after a user message appears", () => {
     expect(
       resolveThreadFeedSubmissionAnchor({
@@ -148,16 +131,6 @@ describe("resolveThreadFeedSubmissionAnchor", () => {
 describe("resolveThreadFeedLiveFollow", () => {
   it("pauses immediately when the user starts scrolling", () => {
     expect(resolveThreadFeedLiveFollow(true, { type: "user-scroll-begin" })).toBe(false);
-  });
-
-  it("stays paused away from the actual end", () => {
-    expect(
-      resolveThreadFeedLiveFollow(false, {
-        type: "scroll",
-        isAtEnd: false,
-        userScrollSessionActive: true,
-      }),
-    ).toBe(false);
   });
 
   it("does not mistake programmatic layout compensation for a user scroll", () => {
@@ -206,20 +179,6 @@ describe("resolveThreadFeedLiveFollow", () => {
         userScrollSessionActive: true,
       }),
     ).toBe(false);
-  });
-
-  it("ignores momentum-end events from programmatic scrolling", () => {
-    expect(
-      resolveThreadFeedLiveFollow(true, {
-        type: "user-scroll-end",
-        isAtEnd: false,
-        userScrollSessionActive: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("re-arms after an explicit reset", () => {
-    expect(resolveThreadFeedLiveFollow(false, { type: "reset" })).toBe(true);
   });
 });
 

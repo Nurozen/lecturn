@@ -30,20 +30,6 @@ it("never suggests package runner commands from cache entry paths", () => {
   }
 });
 
-it("treats stable installs as direct invocations", () => {
-  for (const entryPath of [
-    "/usr/local/lib/node_modules/lecturn/dist/bin.mjs",
-    "/home/theo/Code/work/lecturn/apps/server/dist/bin.mjs",
-    "/home/theo/.lecturn/runtime/0.0.31/node_modules/lecturn/dist/bin.mjs",
-    "",
-  ]) {
-    assert.equal(
-      formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }),
-      "lecturn serve",
-    );
-  }
-});
-
 it("never re-suggests a prerelease channel, even for prerelease builds", () => {
   for (const version of [
     "0.0.31-nightly.20260729",

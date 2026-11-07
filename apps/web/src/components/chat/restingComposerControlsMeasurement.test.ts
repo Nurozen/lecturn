@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  resolveRestingComposerControlsLayout,
-  resolveRestingComposerControlsNaturalWidth,
-} from "../composerFooterLayout";
+import { resolveRestingComposerControlsLayout } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
 
 function measurePicker(input: {
@@ -46,40 +43,6 @@ function measurePicker(input: {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("measureRestingComposerControls", () => {
-  it("keeps controls inline when the model label is deliberately collapsed", () => {
-    const measurement = measurePicker({ clientWidth: 0, flexGrow: "0" });
-
-    expect(measurement.naturalFixedWidth).toBe(52);
-    expect(resolveRestingComposerControlsNaturalWidth(measurement)).toBe(196);
-    expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
-      hiddenCount: 0,
-      iconOnlyCount: 0,
-      visible: true,
-    });
-  });
-
-  it("recovers truncated text while the model label is flexible", () => {
-    const measurement = measurePicker({ clientWidth: 20, flexGrow: "1" });
-
-    expect(measurement.naturalFixedWidth).toBe(192);
-    expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
-      hiddenCount: 1,
-      iconOnlyCount: 1,
-      visible: true,
-    });
-  });
-
-  it("recovers flexible text squeezed to zero instead of mistaking it for collapsed text", () => {
-    const measurement = measurePicker({ clientWidth: 0, flexGrow: "1" });
-
-    expect(measurement.naturalFixedWidth).toBe(212);
-    expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth: 200 })).toEqual({
-      hiddenCount: 1,
-      iconOnlyCount: 1,
-      visible: true,
-    });
-  });
-
   it("keeps every block in the narrow embed footer, which has no overflow menu", () => {
     const measurement = measurePicker({ clientWidth: 20, flexGrow: "1", embedFooterStacked: true });
 
@@ -88,11 +51,5 @@ describe("measureRestingComposerControls", () => {
       iconOnlyCount: 1,
       visible: true,
     });
-  });
-
-  it("still caps recovered text at the model picker's maximum width", () => {
-    expect(
-      measurePicker({ clientWidth: 0, flexGrow: "1", maxWidth: "180px" }).naturalFixedWidth,
-    ).toBe(180);
   });
 });

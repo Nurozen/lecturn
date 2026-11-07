@@ -306,79 +306,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("falls back to effect/config values when flags are omitted", () =>
-    Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-env-base");
-      const derivedPaths = yield* deriveExplicitServerPaths(
-        baseDir,
-        new URL("http://127.0.0.1:5173"),
-      );
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.none(),
-          port: Option.none(),
-          host: Option.none(),
-          baseDir: Option.none(),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: {
-                  LECTURN_LOG_LEVEL: "Warn",
-                  LECTURN_MODE: "desktop",
-                  LECTURN_PORT: "4001",
-                  LECTURN_HOST: "0.0.0.0",
-                  LECTURN_HOME: baseDir,
-                  VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  LECTURN_DEV_ALLOWED_ORIGINS:
-                    "https://host.example.ts.net, https://phone.example.ts.net ",
-                  LECTURN_NO_BROWSER: "true",
-                  LECTURN_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  LECTURN_LOG_WS_EVENTS: "true",
-                },
-              }),
-            ),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      expect(resolved).toEqual({
-        logLevel: "Warn",
-        ...defaultRuntimeConfig,
-        mode: "desktop",
-        port: 4001,
-        cwd: process.cwd(),
-        baseDir,
-        ...derivedPaths,
-        host: "0.0.0.0",
-        staticDir: undefined,
-        devUrl: new URL("http://127.0.0.1:5173"),
-        devAllowedOrigins: ["https://host.example.ts.net", "https://phone.example.ts.net"],
-        noBrowser: true,
-        startupPresentation: "browser",
-        desktopBootstrapToken: undefined,
-        autoBootstrapProjectFromCwd: false,
-        logWebSocketEvents: true,
-        tailscaleServeEnabled: false,
-        tailscaleServePort: 443,
-      });
-      assert.equal(resolved.stateDir, join(baseDir, "userdata"));
-    }),
-  );
-
   it.effect("disables thread forking when LECTURN_THREAD_FORKING is false", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
@@ -496,76 +423,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
         expect(resolved.squireEnabledOverride).toBe(expected);
       }),
-  );
-
-  it.effect("uses CLI flags when provided", () =>
-    Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-flags-base");
-      const derivedPaths = yield* deriveExplicitServerPaths(
-        baseDir,
-        new URL("http://127.0.0.1:4173"),
-      );
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("web"),
-          port: Option.some(8788),
-          host: Option.some("127.0.0.1"),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.some(new URL("http://127.0.0.1:4173")),
-          noBrowser: Option.some(true),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.some(true),
-          logWebSocketEvents: Option.some(true),
-          tailscaleServeEnabled: Option.some(true),
-          tailscaleServePort: Option.some(8443),
-        },
-        Option.some("Debug"),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: {
-                  LECTURN_LOG_LEVEL: "Warn",
-                  LECTURN_MODE: "desktop",
-                  LECTURN_PORT: "4001",
-                  LECTURN_HOST: "0.0.0.0",
-                  LECTURN_HOME: join(NodeOS.tmpdir(), "ignored-base"),
-                  VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
-                  LECTURN_NO_BROWSER: "false",
-                  LECTURN_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
-                  LECTURN_LOG_WS_EVENTS: "false",
-                },
-              }),
-            ),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      expect(resolved).toEqual({
-        logLevel: "Debug",
-        ...defaultRuntimeConfig,
-        mode: "web",
-        port: 8788,
-        cwd: process.cwd(),
-        baseDir,
-        ...derivedPaths,
-        host: "127.0.0.1",
-        staticDir: undefined,
-        devUrl: new URL("http://127.0.0.1:4173"),
-        noBrowser: true,
-        startupPresentation: "browser",
-        desktopBootstrapToken: undefined,
-        autoBootstrapProjectFromCwd: true,
-        logWebSocketEvents: true,
-        tailscaleServeEnabled: true,
-        tailscaleServePort: 8443,
-      });
-      assert.equal(resolved.dbPath, join(baseDir, "userdata", "statev2.sqlite"));
-    }),
   );
 
   it.effect("preserves explicit false CLI boolean flags over env and bootstrap values", () =>
@@ -728,38 +585,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("carries the desktop's shell environment handoff only when the envelope sets it", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "lecturn-cli-config-shell-env-",
-      });
-      const resolveWith = Effect.fn(function* (overrides: Partial<DesktopBackendBootstrapValue>) {
-        const fd = yield* openBootstrapFd(makeDesktopBootstrap(overrides));
-        return yield* resolveServerConfig(
-          {
-            ...minimalDesktopFlags(baseDir),
-            bootstrapFd: Option.some(fd),
-          },
-          Option.none(),
-        ).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
-              NetService.layer,
-            ),
-          ),
-        );
-      });
-
-      assert.equal((yield* resolveWith({})).shellEnvironmentPrepared, undefined);
-      assert.equal(
-        (yield* resolveWith({ shellEnvironmentPrepared: true })).shellEnvironmentPrepared,
-        true,
-      );
-    }),
-  );
-
   it.effect("keeps an app sidecar in web mode and hands its envelope to the registry", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -816,54 +641,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       assert.equal(resolved.desktopBootstrapToken, undefined);
       assert.equal(resolved.appSidecar?.registration.appId, "dev.example.app");
       assert.equal(resolved.appSidecar?.appSeedToken, "sidecar-seed-token");
-    }),
-  );
-
-  it.effect("creates derived runtime directories during config resolution", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-cli-config-dirs-" });
-      const customCwd = path.join(baseDir, "nested", "project");
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("desktop"),
-          port: Option.some(4888),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.some(customCwd),
-          devUrl: Option.some(new URL("http://127.0.0.1:5173")),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      for (const directory of [
-        customCwd,
-        resolved.stateDir,
-        resolved.logsDir,
-        resolved.providerLogsDir,
-        resolved.terminalLogsDir,
-        resolved.attachmentsDir,
-        resolved.worktreesDir,
-        path.dirname(resolved.serverTracePath),
-      ]) {
-        expect(yield* fs.exists(directory)).toBe(true);
-      }
-      expect(resolved.cwd).toBe(path.resolve(customCwd));
     }),
   );
 
@@ -939,77 +716,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         desktopBootstrapToken: "desktop-token",
         autoBootstrapProjectFromCwd: true,
         logWebSocketEvents: true,
-        tailscaleServeEnabled: false,
-        tailscaleServePort: 443,
-      });
-    }),
-  );
-
-  it.effect("falls back to persisted observability settings when env vars are absent", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-cli-config-settings-" });
-      const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
-      yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
-      yield* fs.writeFileString(
-        derivedPaths.settingsPath,
-        `${JSON.stringify({
-          observability: {
-            otlpTracesUrl: "http://localhost:4318/v1/traces",
-            otlpMetricsUrl: "http://localhost:4318/v1/metrics",
-            otlpLogsUrl: "http://localhost:4318/v1/logs",
-          },
-        })}\n`,
-      );
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("desktop"),
-          port: Option.some(4888),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      expect(resolved.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
-      expect(resolved.otlpMetricsUrl).toBe("http://localhost:4318/v1/metrics");
-      expect(resolved.otlpLogsUrl).toBe("http://localhost:4318/v1/logs");
-      expect(resolved).toEqual({
-        logLevel: "Info",
-        ...defaultRuntimeConfig,
-        otlpTracesUrl: "http://localhost:4318/v1/traces",
-        otlpMetricsUrl: "http://localhost:4318/v1/metrics",
-        otlpLogsUrl: "http://localhost:4318/v1/logs",
-        mode: "desktop",
-        port: 4888,
-        cwd: process.cwd(),
-        baseDir,
-        ...derivedPaths,
-        host: "127.0.0.1",
-        staticDir: resolved.staticDir,
-        devUrl: undefined,
-        noBrowser: true,
-        startupPresentation: "browser",
-        desktopBootstrapToken: undefined,
-        autoBootstrapProjectFromCwd: false,
-        logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
@@ -1264,84 +970,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         "x-tenant": "lecturn",
       });
       expect(resolved.otlpTracesUrl).toBe("http://collector.internal:4318");
-    }),
-  );
-
-  it.effect("gives every signal the protocol named without one", () =>
-    Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-otlp-protocol-base");
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("web"),
-          port: Option.some(3773),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({ env: { LECTURN_OTLP_PROTOCOL: "http/protobuf" } }),
-            ),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      expect([
-        resolved.otlpTracesExport.protocol,
-        resolved.otlpMetricsExport.protocol,
-        resolved.otlpLogsExport.protocol,
-      ]).toEqual(["http/protobuf", "http/protobuf", "http/protobuf"]);
-    }),
-  );
-
-  it.effect("reads the OTLP logs URL from env", () =>
-    Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "lecturn-cli-config-otlp-logs-url-base");
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("web"),
-          port: Option.some(3773),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: { LECTURN_OTLP_LOGS_URL: "http://collector.internal:4318/v1/logs" },
-              }),
-            ),
-            NetService.layer,
-          ),
-        ),
-      );
-
-      expect(resolved.otlpLogsUrl).toBe("http://collector.internal:4318/v1/logs");
     }),
   );
 

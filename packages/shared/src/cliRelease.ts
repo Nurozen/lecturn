@@ -33,6 +33,7 @@ export const CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS = [
 ] as const satisfies ReadonlyArray<CliArchivePlatformKey>;
 export type CliPublishedArchivePlatformKey = (typeof CLI_PUBLISHED_ARCHIVE_PLATFORM_KEYS)[number];
 
+/** @public Upstream's pinned runtime calls this; the fork's uses publishedCliArchivePlatformKey. */
 export function cliArchivePlatformKey(
   platform: NodeJS.Platform,
   arch: string,

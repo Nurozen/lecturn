@@ -1052,8 +1052,6 @@ domains. The fork's copies expect Lecturn strings. Take upstream's assertion _lo
 the fork's expected strings. Files:
 `apps/server/src/cli/{config.test.ts,triagePrompt.ts}`,
 `apps/mobile/src/lib/mobileTheme.test.ts`, `.github/triage/PLAYBOOK.md`,
-`apps/web/src/components/desktopUpdate.toast.test.tsx`,
-`apps/web/src/components/sidebar/SidebarUpdateReleaseNotes.test.tsx`,
 `apps/desktop/src/app/*.test.ts`.
 
 **`pnpm-lock.yaml`.** Resolve dependency manifests and fork patches first,
@@ -1068,6 +1066,75 @@ fails on the `duplicatePackage` diagnostic.
 `apps/web/src/routeTree.gen.ts`,
 `apps/desktop/src/preview/AnnotationStyles.generated.ts`,
 `apps/mobile/generated-uniwind-*`, `packages/*/src/_generated/*.gen.ts`.
+
+## Upstream test pruning (sync to upstream 05696c63, #22557)
+
+Upstream deletes tests it judges low-signal for its own code, and removes
+exports only those tests used. Lecturn's own tests must not be lost with them.
+Apply these per test, not per file:
+
+- **R1.** A fork-added test (title absent from the translated merge base) stays,
+  even when upstream deleted the file. A retained file holds the fork tests and
+  only the setup they need.
+- **R2.** An upstream-origin test with only identity delta: take the deletion.
+- **R3.** An upstream-origin test the fork edited: keep it if the edit makes it
+  assert fork-owned behavior; take the deletion if the edit only adapted names,
+  APIs or the harness.
+- **R4.** Tests pinning stop targets or past sync regressions stay whatever their
+  origin: `McpAppFrame.browser.test.tsx` (#18548), `HtmlRenderDialog.browser.test.tsx`
+  (#20281 `p-4`), `apps/server/src/htmlRender/HtmlRender.test.ts` (#16872 exit code
+  and signal), the `lockedHtmlRenderDocument` tests in
+  `packages/shared/src/htmlRender.test.ts` (#165), and the
+  `MermaidDiagram.browser.test.tsx` sanitizers.
+- **R5.** Fork-only test files stay and are repaired when a removed helper breaks
+  them. Keep a production export or helper upstream removed when a fork file or
+  kept test needs it. Otherwise take the removal.
+- **R6.** "Obsolete" means the code under test is gone from the merged tree or an
+  exact duplicate remains. "Low signal" is not obsolete for a fork test. Record
+  each drop with its path, title and reason.
+- **R7.** Later prune passes (#22588-#22599) follow the same rule.
+
+**Audit.** List the `(path, title)` pairs in fork `main` whose title is absent from
+the merge base after translating that base from T3 to Lecturn names, plus the
+test files only the fork has. Each must be on the merged tree or recorded under R6.
+The translation misses `t3_` names, camelCase `T3` and owner or host names, and
+`t3-context://` is mapped although the fork keeps it, so some pairs and deltas are
+false positives; check those by hand. A clean re-merge can also drop an import
+a kept fork test still uses, so typecheck after it.
+
+**R5 keeps.**
+
+- `apps/server/src/orchestration-v2/builtInProviderAdapterDrivers.ts` (upstream
+  deleted the file): `CopilotAdapterV2.test.ts` reads its driver kinds.
+- `packages/provider-grok/src/server.ts` `GrokAdapterV2Driver`: that file imports it.
+- `apps/server/src/http.ts` `isLoopbackHostname`: `apps/server/src/apps/pairingGuard.ts`
+  imports it.
+- `apps/server/src/cli/invocation.ts` `formatCliCommand`: `invocation.test.ts`.
+- `apps/server/src/relay/AgentAwarenessRelay.ts` `shouldPublishAgentAwarenessEvent`:
+  `AgentAwarenessRelay.test.ts`.
+- `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`
+  `projectCodexDynamicToolItem`: `CodexAdapterV2.test.ts` and `codexMcpToolResult.test.ts`.
+- `apps/web/src/uiStateStore.ts` `setSidebarProjectScopeKey`: `uiStateStore.test.ts`.
+- `packages/provider-grok/src/server/adapter.ts` `GrokProviderCapabilitiesV2`:
+  `presentationParity.test.ts`.
+- `packages/ssh/src/tunnel.ts` `buildRemoteLaunchScript`: `tunnel.test.ts`.
+
+Two exports stay with no caller, marked `@public` for knip because the fork's code
+no longer uses them and upstream's deleted test was their last consumer:
+`formatWorkingDurationLabel` (`apps/web/src/components/Sidebar.logic.ts`) and
+`cliArchivePlatformKey` (`packages/shared/src/cliRelease.ts`). Upstream still calls
+both, so keeping them lets its edits merge.
+
+**Package test scripts.** Upstream removed the `test` script from `apps/marketing`
+and `packages/provider-testing` when they lost their tests. The fork keeps both
+scripts, because `homeMotion.test.ts` and `releases.test.ts` (marketing) and
+`replayGate.test.ts` (provider-testing, which also keeps its `vite-plus` devDependency)
+remain. `examples/embed-host` gained a `test` script so its fork tests reach CI.
+
+**Generated Uniwind guard.** `apps/mobile/scripts/generate-uniwind-themes.test.ts`
+keeps "keeps the committed outputs current", which upstream deleted. No other check
+catches a stale `generated-uniwind-theme-names.json` or `clerk-theme.json`, and the
+fork's palette edits can drift them.
 
 ## Verifying
 

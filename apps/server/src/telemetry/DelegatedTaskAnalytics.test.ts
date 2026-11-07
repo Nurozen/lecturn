@@ -29,41 +29,6 @@ const subagentEvent = (status: string, origin = "app_owned", id = "task-private"
     },
   }) as never;
 
-it.effect("records each delegated task's final outcome once, without ids or prompts", () => {
-  const recorded: Array<{ event: string; properties: unknown }> = [];
-  let shellLookups = 0;
-  return Effect.gen(function* () {
-    const analytics = yield* DelegatedTaskAnalytics.DelegatedTaskAnalytics;
-    yield* analytics.onSubagent(subagentEvent("running"));
-    yield* analytics.onSubagent(subagentEvent("completed", "provider_native"));
-    // The first parent lookup fails; the next final update still reports the task.
-    yield* analytics.onSubagent(subagentEvent("completed"));
-    yield* analytics.onSubagent(subagentEvent("completed"));
-    yield* analytics.onSubagent(subagentEvent("completed"));
-    expect(recorded).toEqual([
-      {
-        event: "mcp.delegated_task.finished",
-        properties: {
-          status: "completed",
-          callerProvider: "codex",
-          callerModel: "gpt-5.5",
-          targetProvider: "claudeAgent",
-          targetModel: "claude-opus-5-5",
-          crossProvider: true,
-          completionWake: "always",
-          durationSeconds: 90,
-        },
-      },
-    ]);
-  }).pipe(
-    Effect.provide(
-      analyticsLayer(recorded, () =>
-        ++shellLookups === 1 ? Effect.die("thread store unavailable") : parentShell,
-      ),
-    ),
-  );
-});
-
 it.effect("forgets the oldest reported tasks instead of keeping every id", () => {
   const recorded: Array<{ event: string; properties: unknown }> = [];
   return Effect.gen(function* () {

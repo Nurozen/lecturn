@@ -118,8 +118,9 @@
       // Knip loads its preprocessor (knip-schemas.ts) through a CLI option, not a source import.
       // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
       // setup-worktree.ts runs directly from the lecturn.json setup action,
-      // smoke-pack-install.ts runs by hand against a built vendoring kit, and
-      // verify-windows-desktop-artifact.ts checks a Windows payload built on another host.
+      // smoke-pack-install.ts runs by hand against a built vendoring kit,
+      // verify-windows-desktop-artifact.ts checks a Windows payload built on another host, and
+      // electron-builder loads the macOS signer (sign-macos.ts) by path.
       "entry": [
         "export-android-icons.ts",
         "export-brand-icons.ts",
@@ -128,6 +129,7 @@
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
+        "sign-macos.ts",
         "smoke-pack-install.ts",
         "verify-windows-desktop-artifact.ts",
       ],

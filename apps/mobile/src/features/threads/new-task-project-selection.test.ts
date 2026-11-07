@@ -4,8 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import type { HomeProjectScope } from "../home/homeThreadList";
 import {
-  filterProjectScopes,
-  getProjectScopeSelectionTarget,
   resolveDraftProjectSelection,
   resolveEnvironmentProjectMatch,
   resolveNewTaskDraftProject,
@@ -54,22 +52,6 @@ function makeScope(projects: ReadonlyArray<EnvironmentProject>): HomeProjectScop
     })),
   };
 }
-
-describe("getProjectScopeSelectionTarget", () => {
-  it("keeps the current environment when it hosts the selected logical project", () => {
-    const projects = [makeProject("lecturn-mac", "mac"), makeProject("lecturn-server", "server")];
-    expect(getProjectScopeSelectionTarget(makeScope(projects), EnvironmentId.make("server"))).toBe(
-      projects[1],
-    );
-  });
-
-  it("falls back to the representative when the current environment does not host the project", () => {
-    const projects = [makeProject("lecturn-mac", "mac"), makeProject("lecturn-server", "server")];
-    expect(getProjectScopeSelectionTarget(makeScope(projects), EnvironmentId.make("other"))).toBe(
-      projects[0],
-    );
-  });
-});
 
 describe("resolveNewTaskDraftProject", () => {
   it("waits for the stamped environment even when other accounts have projects", () => {
@@ -122,31 +104,9 @@ describe("resolveEnvironmentProjectMatch", () => {
     expect(resolveEnvironmentProjectMatch([fork, unindexed], selected)).toBe(unindexed);
     expect(resolveEnvironmentProjectMatch([fork], selected)).toBe(fork);
   });
-
-  it("falls back to the first project on the target so the draft has a key to carry over to", () => {
-    const selected = makeProject("lecturn", "mac", { repositoryKey: "github.com/Nurozen/lecturn" });
-    const target = [makeProject("unrelated", "server"), makeProject("also-unrelated", "server")];
-    expect(resolveEnvironmentProjectMatch(target, selected)).toBe(target[0]);
-    expect(resolveEnvironmentProjectMatch([], selected)).toBeNull();
-  });
 });
 
 describe("resolveDraftProjectSelection", () => {
-  it("preserves an explicit project selection", () => {
-    const project = makeProject("lecturn");
-    expect(
-      resolveDraftProjectSelection("environment:lecturn", [project], [makeScope([project])]),
-    ).toEqual({ kind: "preserve" });
-  });
-
-  it("selects the only physical project when no project was explicitly selected", () => {
-    const project = makeProject("lecturn");
-    expect(resolveDraftProjectSelection(null, [project], [makeScope([project])])).toEqual({
-      kind: "select",
-      project,
-    });
-  });
-
   it("selects one logical project even when it has multiple physical workspaces", () => {
     const projects = [makeProject("lecturn"), makeProject("lecturn-2"), makeProject("lecturn-3")];
     expect(resolveDraftProjectSelection(null, projects, [makeScope(projects)])).toEqual({
@@ -163,33 +123,5 @@ describe("resolveDraftProjectSelection", () => {
       kind: "select",
       project,
     });
-  });
-});
-
-describe("filterProjectScopes", () => {
-  const mac = makeProject("code", "mac", { title: "Desktop checkout" });
-  const server = makeProject("remote-code", "server", { workspaceRoot: "/srv/remote-workspace" });
-  const code = makeScope([mac, server]);
-  const docs = { ...makeScope([makeProject("docs")]), key: "docs", title: "Documentation" };
-  const scopes = [code, docs];
-
-  it("keeps all projects for an empty or whitespace-only query", () => {
-    expect(filterProjectScopes(scopes, "")).toBe(scopes);
-    expect(filterProjectScopes(scopes, "  ")).toBe(scopes);
-  });
-
-  it("matches logical names and workspace names or paths without case sensitivity", () => {
-    expect(filterProjectScopes(scopes, "  LECTURN ")).toEqual([code]);
-    expect(filterProjectScopes(scopes, "DESKTOP")).toEqual([code]);
-    expect(filterProjectScopes(scopes, "REMOTE-WORKSPACE")).toEqual([code]);
-    expect(filterProjectScopes(scopes, "documentation")).toEqual([docs]);
-    expect(filterProjectScopes(scopes, "missing-project")).toEqual([]);
-  });
-
-  it("preserves the whole logical project and preferred environment when a workspace matches", () => {
-    const matches = filterProjectScopes(scopes, "REMOTE-WORKSPACE");
-    expect(matches[0]).toBe(code);
-    expect(getProjectScopeSelectionTarget(matches[0]!, EnvironmentId.make("mac"))).toBe(mac);
-    expect(code.projects).toEqual([mac, server]);
   });
 });

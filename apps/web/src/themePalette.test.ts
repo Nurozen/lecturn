@@ -10,25 +10,18 @@ import {
   subscribeToAppliedThemeColors,
   getThemeDefinition,
   getThemeModes,
-  getThemePreviewSidebarArtwork,
-  getThemePreferenceMode,
-  isKnownThemePreference,
   getCustomThemes,
   getStandardThemeColors,
   getStoredCustomThemeCollection,
   invalidateCustomThemes,
   installCustomTheme,
-  canonicalThemePreference,
   parseThemeFile,
-  parseThemeHalves,
   removeCustomTheme,
   removeCustomThemes,
   replaceCustomThemeCollection,
   resolveDesktopTheme,
   resolveThemeAppearance,
   serializeThemeFile,
-  subscribeToThemePreview,
-  subscribeToCustomThemes,
   themeAllowsSidebarArtwork,
   LECTURN_CHAT_THEME,
   EMBER_THEME,
@@ -43,7 +36,6 @@ import {
   themeColorToHex,
   toCanonicalThemeColor,
   THEME_FILE_VERSION,
-  singleAppearanceOf,
 } from "./themePalette";
 
 function asHex(value: string): string {
@@ -84,16 +76,6 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe("theme files", () => {
-  it("keeps every built-in palette value in canonical OKLCH form", () => {
-    for (const theme of BUILT_IN_THEMES) {
-      for (const colors of [theme.colors, ...Object.values(theme.variants ?? {})]) {
-        for (const value of Object.values(colors)) {
-          expect(toCanonicalThemeColor(value)).toBe(value);
-        }
-      }
-    }
-  });
-
   it("keeps built-in and standard search pairs readable and distinct from inline code", () => {
     const toOklab = converter("oklab");
     const distance = (first: string, second: string) => {
@@ -276,29 +258,6 @@ describe("theme files", () => {
     }
   });
 
-  it("merges a small user file onto the matching contrast-safe base palette", () => {
-    const theme = parseThemeFile({
-      version: THEME_FILE_VERSION,
-      name: "Ocean dusk",
-      appearance: "dark",
-      colors: {
-        canvas: "#07152f",
-        accent: "#67c2ff",
-      },
-    });
-
-    expect(theme).toMatchObject({
-      id: "ocean-dusk",
-      label: "Ocean dusk",
-      appearance: "dark",
-      colors: {
-        canvas: canonical("#07152f"),
-        accent: canonical("#67c2ff"),
-        placeholder: canonical("#968d9f"),
-      },
-    });
-  });
-
   it("decodes literal CSS color formats into OKLCH without dropping alpha", () => {
     const theme = parseThemeFile({
       version: THEME_FILE_VERSION,
@@ -371,78 +330,6 @@ describe("theme files", () => {
     ).toThrow('The color for "accent" must be a literal CSS color');
   });
 
-  it("canonicalizes the explicitly exported theme", () => {
-    const serialized = serializeThemeFile({
-      ...LECTURN_CHAT_THEME,
-      colors: { ...LECTURN_CHAT_THEME.colors, accent: "hsl(263 70% 58%)" },
-    });
-    expect(JSON.parse(serialized)).toMatchObject({
-      version: THEME_FILE_VERSION,
-      id: LECTURN_CHAT_THEME.id,
-      name: LECTURN_CHAT_THEME.label,
-      appearance: "light",
-      colors: { accent: canonical("hsl(263 70% 58%)") },
-    });
-  });
-
-  it("serializes a theme back into the importable file shape", () => {
-    const theme = {
-      ...parseThemeFile({
-        version: THEME_FILE_VERSION,
-        id: "community-demo",
-        name: "Community Demo",
-        appearance: "dark",
-        colors: { canvas: "#111111" },
-      }),
-      collection: { id: "open-vsx:demo.theme", label: "Demo Theme" },
-    };
-    const serialized = serializeThemeFile(theme);
-    expect(JSON.parse(serialized)).toMatchObject({
-      version: THEME_FILE_VERSION,
-      id: theme.id,
-      name: theme.label,
-      appearance: "dark",
-      collection: theme.collection,
-    });
-    expect(parseThemeFile(JSON.parse(serialized)).collection).toEqual(theme.collection);
-  });
-
-  it("keeps sidebar artwork disabled for custom theme files", () => {
-    const theme = parseThemeFile({
-      version: THEME_FILE_VERSION,
-      name: "Art sidebar",
-      appearance: "light",
-      colors: { accent: "#5b6cff" },
-      sidebarArtwork: true,
-    });
-
-    expect(theme.sidebarArtwork).toBeUndefined();
-    expect(JSON.parse(serializeThemeFile(theme))).not.toHaveProperty("sidebarArtwork");
-  });
-
-  it("suppresses sidebar artwork during a live custom-theme preview", () => {
-    const listener = vi.fn();
-    const unsubscribe = subscribeToThemePreview(listener);
-    vi.stubGlobal("document", {
-      documentElement: {
-        classList: { toggle: vi.fn(), contains: () => false },
-        dataset: {},
-        style: { removeProperty: vi.fn(), setProperty: vi.fn() },
-      },
-    });
-
-    applyThemeColorPreview(LECTURN_CHAT_THEME.colors, "light");
-    expect(getThemePreviewSidebarArtwork()).toBe(false);
-    expect(listener).toHaveBeenCalledTimes(1);
-
-    applyThemePalette("system");
-    expect(getThemePreviewSidebarArtwork()).toBeNull();
-    expect(listener).toHaveBeenCalledTimes(2);
-
-    unsubscribe();
-    vi.unstubAllGlobals();
-  });
-
   it("publishes palette changes for live tint including previews and restoration", () => {
     vi.stubGlobal("document", {
       documentElement: {
@@ -496,50 +383,6 @@ describe("theme files", () => {
     });
   });
 
-  it("keeps the Lecturn Chat palette faithful and readable", () => {
-    expectThemeColors(LECTURN_CHAT_THEME.colors, {
-      canvas: "#fdf7fd",
-      chrome: "#fdf7fd",
-      toolbarBorder: "#efbdeb",
-      toolbarControl: "#f3e6f5",
-      toolbarControlHover: "#eccfe3",
-      surfaceRaised: "#fdfafd",
-      input: "#e7c1dc",
-      focus: "#db2777",
-      messageSurface: "#f7def2",
-      codeBackground: "#f5ecf9",
-      codeForeground: "#673c8b",
-      accentSurface: "#f3e6f5",
-      sidebar: "#f2e1f4",
-    });
-    expectThemeColors(LECTURN_CHAT_THEME.variants!.dark!, {
-      canvas: "#1f1a24",
-      chrome: "#1f1a24",
-      surface: "#29232d",
-      surfaceRaised: "#2c2631",
-      input: "#302029",
-      focus: "#db2777",
-      messageSurface: "#2b2431",
-      codeBackground: "#1f1a24",
-      sidebar: "#171018",
-      sidebarBorder: "#322028",
-    });
-
-    for (const mode of ["light", "dark"] as const) {
-      const colors = getThemeColorsForMode(LECTURN_CHAT_THEME, mode)!;
-      expect(contrastRatio(colors.text, colors.canvas)).toBeGreaterThanOrEqual(7);
-      expect(contrastRatio(colors.textMuted, colors.canvas)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(colors.messageForeground, colors.messageSurface)).toBeGreaterThanOrEqual(
-        4.5,
-      );
-      expect(contrastRatio(colors.secondaryForeground, colors.secondary)).toBeGreaterThanOrEqual(
-        4.5,
-      );
-      expect(contrastRatio(colors.sidebarForeground, colors.sidebar)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(colors.accentForeground, colors.accent)).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
   it("includes the dual-mode maintainer themes", () => {
     for (const theme of [LECTURN_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
       expect(getThemeDefinition(theme.id)).toBe(theme);
@@ -581,69 +424,6 @@ describe("theme files", () => {
       }
     }
     expect(themeAllowsSidebarArtwork("my-custom-theme")).toBe(false);
-  });
-
-  it("rejects a variant that repeats the base appearance", () => {
-    expect(() =>
-      parseThemeFile({
-        version: THEME_FILE_VERSION,
-        name: "Duplicate light",
-        appearance: "light",
-        colors: { canvas: "#f8fbff" },
-        variants: { light: { canvas: "#101827" } },
-      }),
-    ).toThrow('Theme variants must not repeat the base appearance "light".');
-  });
-
-  it("keeps a single-mode theme on its only palette", () => {
-    const theme = parseThemeFile({
-      version: THEME_FILE_VERSION,
-      id: "midnight-slate",
-      name: "Midnight Slate",
-      appearance: "dark",
-      colors: { canvas: "#111827", messageAction: "#2563eb" },
-    });
-
-    expect(getThemeModes(theme)).toEqual(["dark"]);
-    expect(getThemeColorsForMode(theme, "dark")).toMatchObject({
-      canvas: canonical("#111827"),
-    });
-    expect(getThemeColorsForMode(theme, "light")).toBeNull();
-  });
-
-  it("invalidates cached themes when another tab clears localStorage", () => {
-    let storedThemes: string | null = JSON.stringify([
-      {
-        id: "ocean-dusk",
-        label: "Ocean dusk",
-        appearance: "dark",
-        colors: { canvas: "#07152f" },
-      },
-    ]);
-    let storageHandler: ((event: StorageEvent) => void) | undefined;
-    vi.stubGlobal("window", {
-      addEventListener: (type: string, listener: (event: StorageEvent) => void) => {
-        if (type === "storage") storageHandler = listener;
-      },
-      removeEventListener: vi.fn(),
-      localStorage: {
-        getItem: (key: string) => (key === CUSTOM_THEMES_STORAGE_KEY ? storedThemes : null),
-      },
-    });
-
-    invalidateCustomThemes();
-    expect(getCustomThemes()).toHaveLength(1);
-    const listener = vi.fn();
-    const unsubscribe = subscribeToCustomThemes(listener);
-
-    storedThemes = null;
-    storageHandler?.({ key: null } as StorageEvent);
-
-    expect(listener).toHaveBeenCalledTimes(1);
-    expect(getCustomThemes()).toEqual([]);
-    unsubscribe();
-    invalidateCustomThemes();
-    vi.unstubAllGlobals();
   });
 
   it("preserves valid imported-theme collections and drops malformed metadata", () => {
@@ -1102,42 +882,6 @@ describe("stored theme preferences", () => {
     }
   });
 
-  it("resolves the legacy lecturn-chat-dark preference to dark Lecturn Chat", () => {
-    expect(getThemeDefinition("lecturn-chat-dark")).toBe(LECTURN_CHAT_THEME);
-    expect(getThemePreferenceMode("lecturn-chat-dark")).toBe("dark");
-    expect(resolveThemeAppearance("lecturn-chat-dark", true, false)).toBe("dark");
-    expect(resolveDesktopTheme("lecturn-chat-dark", false)).toBe("dark");
-    expect(isKnownThemePreference("lecturn-chat-dark")).toBe(true);
-  });
-
-  it("resolves legacy lecturn-prefixed ids onto the renamed themes", () => {
-    for (const [legacy, theme] of [
-      ["lecturn-grove", GROVE_THEME],
-      ["lecturn-ocean", OCEAN_THEME],
-      ["lecturn-ember", EMBER_THEME],
-      ["lecturn-iris", IRIS_THEME],
-    ] as const) {
-      expect(getThemeDefinition(legacy)).toBe(theme);
-      expect(isKnownThemePreference(legacy)).toBe(true);
-      expect(canonicalThemePreference(legacy)).toBe(theme.id);
-    }
-    expect(canonicalThemePreference("lecturn-chat-dark")).toBe("lecturn-chat-dark");
-    expect(
-      parseThemeHalves(JSON.stringify({ light: "lecturn-ocean", dark: "lecturn-grove" })),
-    ).toEqual({
-      light: OCEAN_THEME.id,
-      dark: GROVE_THEME.id,
-    });
-  });
-
-  it("recognizes only preferences the runtime can render", () => {
-    for (const preference of ["light", "dark", "system", LECTURN_CHAT_THEME.id, GROVE_THEME.id]) {
-      expect(isKnownThemePreference(preference)).toBe(true);
-    }
-    expect(isKnownThemePreference(`${GROVE_THEME.id}:dark`)).toBe(false);
-    expect(isKnownThemePreference("missing-theme")).toBe(false);
-  });
-
   it("decodes stored colors in memory without writing during reads", () => {
     const storedThemes = JSON.stringify([
       {
@@ -1176,13 +920,5 @@ describe("stored theme preferences", () => {
 
     vi.unstubAllGlobals();
     invalidateCustomThemes();
-  });
-});
-
-describe("singleAppearanceOf", () => {
-  it("reports the only half a theme can claim, and null for a pair", () => {
-    const { variants: _pair, ...base } = LECTURN_CHAT_THEME;
-    expect(singleAppearanceOf({ ...base, id: "x", appearance: "dark" })).toBe("dark");
-    expect(singleAppearanceOf(LECTURN_CHAT_THEME)).toBe(null);
   });
 });

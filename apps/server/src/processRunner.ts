@@ -373,7 +373,7 @@ const resolveEnvOptions = Effect.fnUntraced(function* (
   }
   return { env, extendEnv: false };
 });
-export const commandName = (command: string) => command.replace(/^.*[\\/]/, "");
+const commandName = (command: string) => command.replace(/^.*[\\/]/, "");
 
 const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],

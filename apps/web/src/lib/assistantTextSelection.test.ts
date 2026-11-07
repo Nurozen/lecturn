@@ -465,10 +465,6 @@ describe("createAssistantTextSelector", () => {
       expect(findAssistantCitationText(text, parsed!)).toBeNull();
     },
   );
-
-  it.each(["", " \n\t\r\n"])("rejects empty or whitespace-only selections: %j", (text) => {
-    expect(createAssistantTextSelector(text, 0, text.length)).toBeNull();
-  });
 });
 
 describe("findAssistantCitationText", () => {
@@ -479,15 +475,6 @@ describe("findAssistantCitationText", () => {
     expect(resolveAssistantCitationRange(source, raw)).toBeNull();
     expect(resolveAssistantCitationRanges(source, [raw])).toEqual([null]);
     expect(findAssistantCitationText("SQLite", selector("SQLite"))).toEqual({ start: 0, end: 6 });
-  });
-
-  it("resolves an exact selection with its saved position and context", () => {
-    expect(
-      findAssistantCitationText(
-        "Before the selected text after.",
-        selector("selected text", { start: 11, end: 24, prefix: "Before the ", suffix: " after." }),
-      ),
-    ).toEqual({ start: 11, end: 24 });
   });
 
   it("finds a unique quote when insertion before it shifts its offsets", () => {

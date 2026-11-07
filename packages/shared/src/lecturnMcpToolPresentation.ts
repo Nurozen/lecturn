@@ -439,9 +439,3 @@ export function resolveLecturnMcpToolPresentation(
   const definition = resolveLecturnMcpToolDefinition(toolName);
   return definition === null ? null : { displayName: definition.displayName, logo: "lecturn" };
 }
-
-export function resolveLecturnMcpToolSummaryAction(
-  toolName: string | null | undefined,
-): LecturnMcpToolSummaryAction | null {
-  return resolveLecturnMcpToolDefinition(toolName)?.summaryAction ?? null;
-}

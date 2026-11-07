@@ -22,19 +22,4 @@ describe("toggleThemeEditorForTheme", () => {
       initialAppearance: "dark",
     });
   });
-
-  it("closes an open editor", () => {
-    toggleThemeEditorForTheme({
-      theme: LECTURN_CHAT_THEME_ID,
-      themeHalves: null,
-      initialAppearance: "light",
-    });
-    toggleThemeEditorForTheme({
-      theme: LECTURN_CHAT_THEME_ID,
-      themeHalves: null,
-      initialAppearance: "light",
-    });
-
-    expect(useThemeEditorStore.getState().session).toBeNull();
-  });
 });

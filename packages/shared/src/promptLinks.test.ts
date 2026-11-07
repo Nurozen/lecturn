@@ -120,13 +120,6 @@ describe("link round trips", () => {
     expect(promptLinkAppPath("lecturn-thread://threads/env-1/thread-1")).toBeNull();
   });
 
-  it("hands an in-app path to the installed app", () => {
-    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("lecturn://new?prompt=hi");
-    expect(promptLinkDeepLink("/env-1/thread-1?prompt=hi")).toBe(
-      "lecturn://threads/env-1/thread-1?prompt=hi",
-    );
-  });
-
   it("maps Squire deep links both ways", () => {
     expect(promptLinkAppPath("lecturn://squires/env-1/squire-1?item=card-1")).toBe(
       "/squires/env-1/squire-1?item=card-1",

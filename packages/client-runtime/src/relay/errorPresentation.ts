@@ -99,7 +99,7 @@ export function relayClientErrorDetail(error: ManagedRelayClientError): string |
   return error._tag === "ManagedRelayRequestFailedError" ? relayRequestFailureDetail(error) : null;
 }
 
-export const RELAY_TUNNEL_RELEASED_MESSAGE =
+const RELAY_TUNNEL_RELEASED_MESSAGE =
   "Offline for a while, so its Lecturn Connect tunnel was removed. Start Lecturn on that computer and update it to the latest version to reconnect.";
 
 export function relayOfflineReasonMessage(

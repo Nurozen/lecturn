@@ -1389,7 +1389,7 @@ export function hasRunlessHistory(
   return thread.historyOrigin === "v1_import" || thread.importedFrom != null;
 }
 
-export function isTurnItemAtOrBeforeRun(input: {
+function isTurnItemAtOrBeforeRun(input: {
   readonly historyOrigin: OrchestrationV2ThreadProjection["thread"]["historyOrigin"];
   /** Lecturn: the source thread holds imported run-less history. */
   readonly importedHistory?: boolean;

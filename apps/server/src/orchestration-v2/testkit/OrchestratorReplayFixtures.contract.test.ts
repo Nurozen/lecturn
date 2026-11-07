@@ -174,26 +174,4 @@ describe("orchestrator replay fixture contract", () => {
         }
       }),
   );
-
-  it.effect("keeps Codex fixture transcripts at the codex app-server boundary", () =>
-    Effect.gen(function* () {
-      for (const fixture of ORCHESTRATOR_REPLAY_FIXTURES) {
-        for (const provider of fixture.providers.filter((entry) => entry.driver === "codex")) {
-          const transcript = yield* readTranscript(provider.transcriptFile);
-          const first = transcript.entries[0];
-          const last = transcript.entries.at(-1);
-
-          assert.equal(transcript.protocol, "codex.app-server");
-          assert.equal(first?.type, "expect_outbound");
-          if (first?.type === "expect_outbound") {
-            assert.equal(first.label, "initialize");
-          }
-          assert.deepEqual(last, {
-            type: "runtime_exit",
-            status: "success",
-          });
-        }
-      }
-    }),
-  );
 });

@@ -43,24 +43,6 @@ describe("mobile provider options", () => {
     expect(providerOptionValueLabels(descriptors)).toEqual(["Medium", "Standard"]);
   });
 
-  it("updates generic select options without knowing provider-specific ids", () => {
-    const descriptors = resolveProviderOptionDescriptors({
-      capabilities: CODEX_CAPABILITIES,
-      selections: undefined,
-    });
-
-    expect(
-      applyProviderOptionSelection(descriptors, { id: "serviceTier", value: "priority" }),
-    ).toEqual([
-      { id: "reasoningEffort", value: "medium" },
-      { id: "serviceTier", value: "priority" },
-    ]);
-    expect(
-      applyProviderOptionSelection(descriptors, { id: "serviceTier", value: "turbo" }),
-    ).toBeNull();
-    expect(applyProviderOptionSelection(descriptors, { id: "unknown", value: "high" })).toBeNull();
-  });
-
   it("treats an unspecified boolean capability as off", () => {
     const descriptors = resolveProviderOptionDescriptors({
       capabilities: {

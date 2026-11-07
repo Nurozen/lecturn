@@ -30,10 +30,7 @@ import {
   contextCompactionTokenCounts,
   type ToolGroupSummaryKind,
 } from "@lecturn/client-runtime/work-log/presentation";
-export {
-  normalizeCompactToolLabel,
-  toolGroupAction,
-} from "@lecturn/client-runtime/work-log/presentation";
+export { toolGroupAction } from "@lecturn/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
   formatDuration,
@@ -70,7 +67,6 @@ import {
 } from "@lecturn/client-runtime/state/thread-fork-points";
 import {
   resolveLecturnMcpToolDefinition,
-  resolveLecturnMcpToolPresentation,
   type LecturnMcpToolPresentation,
 } from "@lecturn/shared/lecturnMcpToolPresentation";
 import { compactDynamicToolOutput } from "@lecturn/shared/toolOutput";
@@ -801,7 +797,6 @@ function workGroupId(timelineEntryId: string): string {
 }
 
 export type TimelineToolPresentation = LecturnMcpToolPresentation;
-export const resolveTimelineToolPresentation = resolveLecturnMcpToolPresentation;
 
 function expandedWorkGroupRow(
   groupId: string,

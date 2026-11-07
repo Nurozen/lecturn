@@ -63,7 +63,7 @@ export function HostedEmptyState() {
   );
 }
 
-export function LecturnConnectSteps() {
+function LecturnConnectSteps() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { openAuthPrompt } = useLecturnConnectAuthPrompt();
   // Adding the first computer unmounts this screen. Wait for all health checks

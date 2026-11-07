@@ -1,4 +1,4 @@
-import { sign as signApplication, type SignOptions } from "@electron/osx-sign";
+import { sign as signApplication } from "@electron/osx-sign";
 import { expect, it, vi } from "vite-plus/test";
 
 import { resolveExtensionsBinary } from "../apps/server/src/extensions/ExtensionsBinary.ts";
@@ -9,26 +9,6 @@ vi.mock("../apps/server/src/extensions/ExtensionsBinary.ts", () => ({
 import sign from "./sign-macos.ts";
 
 vi.mock("@electron/osx-sign", () => ({ sign: vi.fn() }));
-
-it("batches codesign calls without changing existing signing options", async () => {
-  const options = {
-    app: "/tmp/Lecturn.app",
-    identity: "Developer ID Application: Cloud Gatherer Labs LLC",
-    keychain: "/tmp/lecturn.keychain",
-    provisioningProfile: "/tmp/lecturn.provisionprofile",
-    optionsForFile: () => ({
-      entitlements: "/tmp/lecturn.entitlements.plist",
-      hardenedRuntime: true,
-    }),
-  } satisfies SignOptions;
-
-  await sign(options);
-
-  expect(signApplication).toHaveBeenCalledExactlyOnceWith({
-    ...options,
-    batchCodesignCalls: true,
-  });
-});
 
 it("preserves only verified helper bytes while signing the rest of the app", async () => {
   vi.mocked(signApplication).mockClear();
