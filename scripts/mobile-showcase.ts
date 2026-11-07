@@ -715,12 +715,19 @@ async function fetchMetroManifest(
   config: ShowcaseConfig,
   timeoutMs: number,
 ): Promise<unknown> {
-  const response = await fetch(`http://${host}:${config.metroPort}/`, {
-    headers: { accept: "application/expo+json,application/json", "expo-platform": platform },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.ok) throw new Error(`Metro manifest request failed with ${response.status}.`);
-  return await response.json();
+  const manifest = await commandOutput("curl", [
+    "--fail",
+    "--silent",
+    "--show-error",
+    "--max-time",
+    String(timeoutMs / 1_000),
+    "--header",
+    "accept: application/expo+json,application/json",
+    "--header",
+    `expo-platform: ${platform}`,
+    `http://${host}:${config.metroPort}/`,
+  ]);
+  return JSON.parse(manifest);
 }
 
 export function manifestBundleUrl(manifest: unknown): string {
