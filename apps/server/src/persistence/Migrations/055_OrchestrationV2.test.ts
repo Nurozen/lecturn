@@ -3,12 +3,21 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { runMigrations } from "../Migrations.ts";
+import { migrationManifest as migrationEntries, runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@lecturn/shared/nodeSqliteClient";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("055_OrchestrationV2", (it) => {
+  it.effect("keeps released migrations contiguous", () =>
+    Effect.sync(() => {
+      assert.deepStrictEqual(
+        migrationEntries.map(([id]) => id),
+        Array.from({ length: 85 }, (_, index) => index + 1),
+      );
+    }),
+  );
+
   // Upstream released V2 as 55 and 56; Lecturn's ledger runs them as 70 and 71.
   it.effect("upgrades released Lecturn schema 69 through the latest migrations", () =>
     Effect.gen(function* () {

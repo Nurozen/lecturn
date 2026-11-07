@@ -1071,42 +1071,74 @@ fails on the `duplicatePackage` diagnostic.
 
 Upstream deletes tests it judges low-signal for its own code, and removes
 exports only those tests used. Lecturn's own tests must not be lost with them.
-Apply these per test, not per file:
+Apply these per test, not per file, and judge what a test pins, not just the size
+of the fork's test-file delta. R4 overrides R2 and R3:
 
-- **R1.** A fork-added test (title absent from the translated merge base) stays,
-  even when upstream deleted the file. A retained file holds the fork tests and
-  only the setup they need.
+- **R1.** A fork-added test (title absent from the same file in the translated merge
+  base) stays, even when upstream deleted the file. A retained file holds the fork
+  tests and only the setup they need.
 - **R2.** An upstream-origin test with only identity delta: take the deletion.
 - **R3.** An upstream-origin test the fork edited: keep it if the edit makes it
-  assert fork-owned behavior; take the deletion if the edit only adapted names,
-  APIs or the harness.
+  assert fork-owned behavior (a fork feature or fork fix); take the deletion if the
+  edit only adapted names, APIs or the harness.
 - **R4.** Tests pinning stop targets or past sync regressions stay whatever their
   origin: `McpAppFrame.browser.test.tsx` (#18548), `HtmlRenderDialog.browser.test.tsx`
   (#20281 `p-4`), `apps/server/src/htmlRender/HtmlRender.test.ts` (#16872 exit code
   and signal), the `lockedHtmlRenderDocument` tests in
   `packages/shared/src/htmlRender.test.ts` (#165), and the
-  `MermaidDiagram.browser.test.tsx` sanitizers.
+  `MermaidDiagram.browser.test.tsx` sanitizers. So does the only guard of a
+  fork-carried patch to a dependency or of generated output that a fork-editable
+  input can drift: in `apps/mobile/scripts/`, `notification-center-manager.test.ts`
+  (`patches/expo-notifications@58.1.5.patch`), `permissions-service.test.ts`
+  (`EXPermissionsService` in the `expo-modules-core` patch) and
+  `generate-uniwind-themes.test.ts`. So does the fork migration ledger: "keeps
+  released migrations contiguous" in `055_OrchestrationV2.test.ts`, the only pin on
+  ids below 70.
 - **R5.** Fork-only test files stay and are repaired when a removed helper breaks
-  them. Keep a production export or helper upstream removed when a fork file or
+  them. Keep a production export, helper or non-TS fixture (`.swift`, `.m`, `.ndjson`
+  read by URL, which typecheck cannot catch) upstream removed when a fork file or
   kept test needs it. Otherwise take the removal.
 - **R6.** "Obsolete" means the code under test is gone from the merged tree or an
   exact duplicate remains. "Low signal" is not obsolete for a fork test. Record
-  each drop with its path, title and reason.
+  each drop with its path, title and reason in the batch's `obsolete-tests.tsv`.
 - **R7.** Later prune passes (#22588-#22599) follow the same rule.
 
-**Audit.** List the `(path, title)` pairs in fork `main` whose title is absent from
-the merge base after translating that base from T3 to Lecturn names, plus the
-test files only the fork has. Each must be on the merged tree or recorded under R6.
-The translation misses `t3_` names, camelCase `T3` and owner or host names, and
-`t3-context://` is mapped although the fork keeps it, so some pairs and deltas are
-false positives; check those by hand. A clean re-merge can also drop an import
-a kept fork test still uses, so typecheck after it.
+**Audit.** Per file, list the `(path, title)` pairs in fork `main` whose title is
+absent from the same file in the merge base, plus the test files only the fork has.
+A repo-wide comparison hides pairs. Each must be on the merged tree or recorded
+under R6. Translate base paths and titles first, in this order: `com.t3tools.t3code`
+to `com.cloudgatherer.lecturn`, `@t3tools/` to `@lecturn/`, `T3 Code` to `Lecturn`,
+`T3CODE_` to `LECTURN_`, `t3code` to `lecturn`, then at a word start `T3Code` to
+`Lecturn`, `T3_` to `LECTURN_`, `.t3` to `.lecturn`, and `T3`/`t3` (standalone, before
+a capital, or `t3-`) to `Lecturn`/`lecturn`.
+The translation misses `t3_` names, mid-word camelCase `T3` and owner or host names,
+and `t3-context://` is mapped although the fork keeps it, so some pairs and deltas
+are false positives; check those by hand. A title regex misses dynamic titles
+(`scenario.name`, `$name`) and `.each`/`.for` rows, so compare those with a parser or
+by hand. A clean re-merge can also drop an import a kept fork test still uses, so
+typecheck after it.
+
+**CI wiring, on each prune.** Re-check:
+
+- Package `test` scripts: a package with surviving tests keeps one.
+- `test:perf:v2-wire` in the root `package.json` and `reactTests` in
+  `apps/mobile/vite.config.ts`: a kept file stays listed, a deleted one goes. Upstream
+  dropped `packages/client-runtime/src/state/threadDetail.test.ts`; the fork lists it.
+- Test paths hard-coded in `.github/workflows`, and the `ci.yml` relay step's
+  `git grep -l BILLING_TEST_DATABASE_URL`, which fails if it finds no test.
+- `apps/server/src/testUtils/shardWeights.json`: leave upstream's re-recorded weights.
+  Unrecorded files fall back to 0.6s. Re-record with
+  `apps/server/scripts/update-test-shard-weights.ts` when shard times skew.
+
+The two Expo guards under R4 skip off macOS and CI's mobile tests run on Ubuntu, so
+run them on a Mac.
 
 **R5 keeps.**
 
 - `apps/server/src/orchestration-v2/builtInProviderAdapterDrivers.ts` (upstream
   deleted the file): `CopilotAdapterV2.test.ts` reads its driver kinds.
-- `packages/provider-grok/src/server.ts` `GrokAdapterV2Driver`: that file imports it.
+- `packages/provider-grok/src/server.ts` `GrokAdapterV2Driver`:
+  `builtInProviderAdapterDrivers.ts` imports it.
 - `apps/server/src/http.ts` `isLoopbackHostname`: `apps/server/src/apps/pairingGuard.ts`
   imports it.
 - `apps/server/src/cli/invocation.ts` `formatCliCommand`: `invocation.test.ts`.
