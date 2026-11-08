@@ -1898,10 +1898,14 @@ it.each([60, 100])("renders all %i pages of a table-heavy Word report", async (p
   expect(screen.container.textContent).not.toContain("Preview limited");
   expect(screen.container.querySelector('[role="alert"]')).toBeNull();
   const scroll = screen.container.querySelector<HTMLElement>("[data-office-pages]")!;
-  await act(() => scroll.scrollTo({ top: scroll.scrollHeight }));
-  await vi.waitFor(() => expect(screen.container.textContent).toContain("page " + pages), {
-    timeout: 30_000,
-  });
+  // Page shells mount in timer batches after the count shows, so each attempt scrolls to the current end.
+  await vi.waitFor(
+    async () => {
+      await act(() => scroll.scrollTo({ top: scroll.scrollHeight }));
+      expect(screen.container.textContent).toContain("page " + pages);
+    },
+    { timeout: 30_000 },
+  );
 });
 
 describe("standalone Mermaid previews", () => {
