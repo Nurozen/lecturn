@@ -1824,11 +1824,9 @@ export interface SquireApprovalEntry<Row> {
 }
 
 /**
- * The rows a Squire's chat shows inline, oldest first, at the time they were raised. Holds wait
- * on nobody and keep their banner; FYIs no longer render, save an open inactivity check. On a
- * chat-first server a row belongs
- * to the chat of the Squire that raised it. Older servers list the Lead's combined queue, so
- * the Lead keeps only what it raised while a Squire keeps what its list already holds.
+ * What a Squire's chat shows inline, oldest first, at the time each was raised. Holds keep their
+ * banner; FYIs no longer render, save an open inactivity check. On a chat-first server a row lives
+ * in its raiser's chat. Older servers list the Lead's combined queue, so the Lead keeps its own.
  */
 export function squireApprovalEntries<
   Row extends Pick<
