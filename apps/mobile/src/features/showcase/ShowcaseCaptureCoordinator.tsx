@@ -121,6 +121,9 @@ const CAPTURE_FLOWS: Partial<Record<string, (c: CaptureFlowContext) => Navigatio
   "settings-microphone": settingsPage("SettingsMicrophone"),
   "settings-environments": settingsPage("SettingsEnvironments"),
   connections: homeAnd(() => [{ name: "Connections" }]),
+  // Capture-only (batch-001704 AFTER): Labs with the linked environments beta turned on by real taps.
+  "settings-labs-on": settingsPage("SettingsLabs"),
+  "connections-end": homeAnd(() => [{ name: "Connections" }]),
   zip: homeAnd((c) => [
     threadRoute(c),
     {

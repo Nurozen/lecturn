@@ -57,6 +57,8 @@ const SHOWCASE_SCENES = [
   "settings-environments",
   "connections",
   "zip",
+  "settings-labs-on",
+  "connections-end",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 

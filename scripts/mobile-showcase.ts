@@ -7,6 +7,7 @@ import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeURL from "node:url";
 
 import { PNG } from "pngjs";
@@ -698,6 +699,39 @@ export async function startShowcaseEnvironments(
       `${environment.label} environment id`,
     );
     started.push({ baseDir, environmentId, label: environment.label, port, start });
+  }
+  // Capture-only (batch-001704 AFTER): Moonbase Terminal links to the other two fixture servers (#16698).
+  const [primary, ...peers] = started;
+  if (primary) {
+    try {
+      const database = new NodeSqlite.DatabaseSync(
+        NodePath.join(primary.baseDir, "userdata", "statev2.sqlite"),
+        { timeout: 30_000 },
+      );
+      const now = Date.now();
+      const insert = database.prepare(
+        `INSERT OR REPLACE INTO peer_environment_links (
+          environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
+          last_reached_at, last_error, fenced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
+      );
+      for (const [index, peer] of peers.entries()) {
+        insert.run(
+          peer.environmentId,
+          `showcase-peer-link-${index}`,
+          peer.label,
+          JSON.stringify([`http://127.0.0.1:${peer.port}/`]),
+          index === 0 ? "approval-required" : "read-only",
+          new Date(now - 2 * 86_400_000).toISOString(),
+          new Date(now + (index === 0 ? 28 : 3) * 86_400_000).toISOString(),
+          new Date(now - 60_000).toISOString(),
+        );
+      }
+      database.close();
+      NodeProcess.stdout.write(`showcase peer links seeded: ${peers.length}\n`);
+    } catch (error) {
+      NodeProcess.stdout.write(`showcase peer links not seeded: ${String(error)}\n`);
+    }
   }
   return started;
 }
@@ -1527,6 +1561,19 @@ async function captureIos(
       }
       await delay(2_000);
     }
+    if ((scene as string) === "settings-labs-on") {
+      // Capture-only (batch-001704): turn on each "Beta: Linked environments" switch that is off.
+      const labels = new Set(["Moonbase Terminal", "Kernel Cabin", "Suspense Station"]);
+      const switches = (await iosNodes()).filter((n) => labels.has(String(n.AXLabel ?? "")) && /Switch|CheckBox|Toggle/i.test(iosKind(n)));
+      NodeProcess.stdout.write(`ios settings-labs-on switches=${JSON.stringify(switches.map((n) => `${String(n.AXLabel)}=${String(n.AXValue ?? "")}|${iosKind(n).trim()}`))}\n`);
+      for (const n of switches) {
+        const value = String(n.AXValue ?? "");
+        if (value === "1" || /^on$/i.test(value)) continue;
+        await iosTapNode(n, `switch ${String(n.AXLabel)}`);
+        await delay(1_500);
+      }
+      await delay(3_000);
+    }
     const iosTabLabel = ({ apps: "Apps", pulls: "PRs", "usage-tab": "Usage" } as Record<string, string>)[scene];
     if (iosTabLabel !== undefined) {
       await runAxe(simulator.udid, ["tap", "--label", iosTabLabel]).catch((error: unknown) =>
@@ -1951,6 +1998,25 @@ async function captureAndroid(
         }
         await delay(4_000);
       }
+    }
+    if ((scene as string) === "settings-labs-on") {
+      // Capture-only (batch-001704): turn on each "Beta: Linked environments" switch that is off.
+      const xml = await Promise.race([
+        adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+        delay(30_000).then(() => ""),
+      ]);
+      const nodes = [...xml.matchAll(/<node [^>]*>/g)].map((m) => m[0]);
+      const switches = nodes.filter(
+        (n) => /content-desc="(?:Moonbase Terminal|Kernel Cabin|Suspense Station)"/.test(n) && /checkable="true"/.test(n),
+      );
+      NodeProcess.stdout.write(`settings-labs-on switches=${switches.length} off=${switches.filter((n) => /checked="false"/.test(n)).length}\n`);
+      for (const n of switches.filter((x) => /checked="false"/.test(x))) {
+        const b = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(n)?.slice(1).map(Number);
+        if (!b) continue;
+        await runAdb(serial, ["shell", "input", "tap", String(Math.round((b[0]! + b[2]!) / 2)), String(Math.round((b[1]! + b[3]!) / 2))]);
+        await delay(2_500);
+      }
+      await delay(3_000);
     }
     if ((scene as string) === "drafts-swipe") {
       // Capture-only: open the swipe action on the first unsent row.

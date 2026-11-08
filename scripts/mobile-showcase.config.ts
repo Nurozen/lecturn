@@ -90,7 +90,7 @@ const config: ShowcaseConfig = {
       simulatorDeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
       appearance: "dark",
       theme: DEFAULT_SHOWCASE_THEME,
-      scenes: ["thread", "terminal", "review", "threads", "apps", "environments", "pulls", "settings", "usage", "pull-request", "usage-tab", "composer-long", "thread-open", "composer-open", "settings-appearance", "settings-notifications", "settings-threads", "settings-providers", "settings-about", "settings-navigation", "settings-projects", "settings-search", "settings-select", "settings-back", "git-sheet", "draft-long", "settings-end", "settings-threads-end", "settings-general", "settings-labs", "settings-microphone", "settings-environments", "connections", "zip"],
+      scenes: ["thread", "terminal", "review", "threads", "apps", "environments", "pulls", "settings", "usage", "pull-request", "usage-tab", "composer-long", "thread-open", "composer-open", "settings-appearance", "settings-notifications", "settings-threads", "settings-providers", "settings-about", "settings-navigation", "settings-projects", "settings-search", "settings-select", "settings-back", "git-sheet", "draft-long", "settings-end", "settings-threads-end", "settings-general", "settings-labs", "settings-microphone", "settings-environments", "connections", "zip", "settings-labs-on", "connections-end"],
       storeAsset: {
         store: "apple",
         directory: "apple/iphone-6.9",
@@ -107,7 +107,7 @@ const config: ShowcaseConfig = {
       simulatorDeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-14-Plus",
       appearance: "dark",
       theme: DEFAULT_SHOWCASE_THEME,
-      scenes: ["thread", "terminal", "review", "threads", "apps", "environments", "pulls", "settings", "usage", "pull-request", "usage-tab", "composer-long", "thread-open", "composer-open", "settings-appearance", "settings-notifications", "settings-threads", "settings-providers", "settings-about", "settings-navigation", "settings-projects", "settings-search", "settings-select", "settings-back", "git-sheet", "draft-long", "settings-end", "settings-threads-end", "settings-general", "settings-labs", "settings-microphone", "settings-environments", "connections", "zip"],
+      scenes: ["thread", "terminal", "review", "threads", "apps", "environments", "pulls", "settings", "usage", "pull-request", "usage-tab", "composer-long", "thread-open", "composer-open", "settings-appearance", "settings-notifications", "settings-threads", "settings-providers", "settings-about", "settings-navigation", "settings-projects", "settings-search", "settings-select", "settings-back", "git-sheet", "draft-long", "settings-end", "settings-threads-end", "settings-general", "settings-labs", "settings-microphone", "settings-environments", "connections", "zip", "settings-labs-on", "connections-end"],
       storeAsset: {
         store: "apple",
         directory: "apple/iphone-6.5",
@@ -222,6 +222,8 @@ const config: ShowcaseConfig = {
         "settings-environments",
         "connections",
         "zip",
+        "settings-labs-on",
+        "connections-end",
       ],
       storeAsset: {
         store: "google-play",
@@ -321,6 +323,8 @@ const config: ShowcaseConfig = {
         "settings-environments",
         "connections",
         "zip",
+        "settings-labs-on",
+        "connections-end",
       ],
       storeAsset: {
         store: "google-play",
