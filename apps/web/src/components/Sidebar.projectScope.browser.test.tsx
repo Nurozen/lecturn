@@ -16,7 +16,7 @@ import {
   threadWithHistory,
   type FakeDriver,
 } from "../../test/fakeEnvironment";
-import { act, render } from "../../test/render";
+import { render } from "../../test/render";
 
 // The socket is the only fake layer, as in test/appScenarios.renders.tsx.
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
@@ -48,10 +48,23 @@ function setup() {
   return stack;
 }
 
+const threadRouter = () =>
+  getRouter(createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${THREAD.id}`] }));
+
+// Fetching the lazy app shell and route chunks is import cost, not behavior under test. On a
+// cold CI runner it took 11s of the test's 15s budget, so it runs before the test starts.
+const warmRouter = threadRouter();
+await Promise.all([
+  import("~/components/AppShell"),
+  ...warmRouter
+    .matchRoutes(warmRouter.state.location)
+    .map((match) => warmRouter.looseRoutesById[match.routeId])
+    .filter((route) => route !== undefined)
+    .map((route) => warmRouter.loadRouteChunk(route)),
+]);
+
 async function mountThread() {
-  const router = getRouter(
-    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${THREAD.id}`] }),
-  );
+  const router = threadRouter();
   await router.load();
   const container = document.createElement("div");
   container.style.cssText = "height: 900px; width: 1400px;";
@@ -68,10 +81,7 @@ it("keeps the thread open when a project scope is chosen and after a reload", as
     await using _app = await mountThread();
     await expect.element(scopeLabel).toHaveTextContent("All projects");
     await userEvent.click(scopeLabel);
-    const option = page.getByRole("option", { name: "render" });
-    await expect.element(option).toBeVisible();
-    // Playwright's click outlasts CI's short action timeout while the popup opens.
-    await act(async () => (option.element() as HTMLElement).click());
+    await userEvent.click(page.getByRole("option", { name: "render" }));
     await expect.element(scopeLabel).toHaveTextContent("render");
     await expect.element(lastAnswer).toBeVisible();
   }
