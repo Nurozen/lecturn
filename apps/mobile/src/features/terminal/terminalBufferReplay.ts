@@ -1,3 +1,5 @@
+import type { TerminalOutputState } from "@lecturn/client-runtime/state/terminal";
+
 import { terminalDebugLog } from "./terminalDebugLog";
 
 export const TERMINAL_BUFFER_REPLAY_STABILITY_DELAY_MS = 180;
@@ -24,4 +26,15 @@ export function getTerminalSurfaceReplayBuffer(input: {
   }
 
   return input.buffer;
+}
+
+/** Streaming native surfaces draw from `output` and never materialize `buffer`. */
+export function hasTerminalReplayContent(input: {
+  readonly buffer: string;
+  readonly output: TerminalOutputState;
+  readonly replayKey: string;
+  readonly readyReplayKey: string | null;
+}): boolean {
+  if (input.readyReplayKey !== input.replayKey) return false;
+  return input.buffer.length > 0 || input.output.retainedBytes > 0;
 }
