@@ -16,7 +16,7 @@ import { isSummaryBearing, squireEventToggle, squireEventTogglesOf } from "./squ
  * exclusion, or a delete does not lose it. Thread events only: anything else was addressed to
  * this Squire. Returns the rows it moved; the caller drops the rest, in its transaction.
  */
-export const handOverQueuedEvents = Effect.fn("squireScopeCascade.handOverQueuedEvents")(function* (
+const handOverQueuedEvents = Effect.fn("squireScopeCascade.handOverQueuedEvents")(function* (
   repository: SquireRepository.SquireRepository["Service"],
   scope: SquireScope.SquireScope["Service"],
   input: {
