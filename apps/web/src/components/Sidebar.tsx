@@ -7,7 +7,7 @@ import {
 import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import { StaveIcon } from "./StaveIcon";
 import {
-  listSettledInParts,
+  listSettledByOwnEnvironment,
   projectOlderSettledScopes,
   projectSettledPage,
   withUnloadedSettled,
@@ -1091,30 +1091,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
   })();
-  // A segment or nested project lists settled rows against its own environments' frontier only.
+  // A segment or nested project lists each settled row against its own environment's frontier.
   const segmentOf = (environmentId: EnvironmentId) =>
     sidebarSegmentation === null
       ? null
       : segmentIdOfEnvironment(sidebarSegmentation, environmentId);
   const sagaNodes = scopedSagaTree.flatMap((root) => [root, ...root.children]);
-  const nodeEnvironmentIds = new Map<string, ReadonlyArray<EnvironmentId>>();
-  for (const node of nestSagaProjects ? sagaNodes : []) {
-    const environmentIds = [
-      ...new Set(node.group.memberProjectRefs.map((ref) => ref.environmentId)),
-    ];
-    for (const ref of node.group.memberProjectRefs) {
-      const key = `${ref.environmentId}:${ref.projectId}`;
-      if (!nodeEnvironmentIds.has(key)) nodeEnvironmentIds.set(key, environmentIds);
-    }
-  }
   const partListedSettledThreads = partSettledShelves
-    ? listSettledInParts(settledThreads, olderSettledShelf.environments, (thread) => {
-        const segment = segmentOf(thread.environmentId);
-        const environmentIds =
-          nodeEnvironmentIds.get(`${thread.environmentId}:${thread.projectId}`) ??
-          shelfEnvironmentIds;
-        return environmentIds.filter((environmentId) => segmentOf(environmentId) === segment);
-      })
+    ? listSettledByOwnEnvironment(settledThreads, olderSettledShelf.environments)
     : listedSettledThreads;
   const [projectSettledShelves, setProjectSettledShelves] = useState<
     Readonly<Record<string, { expanded: boolean; limit: number }>>
@@ -1172,8 +1156,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     unloadedSettledCountOf: (owns) =>
       olderSettledShelf.unloadedCountIn(segmentOlderSettledScopes(owns), visibleThreads),
   });
-  // A segment or nested project shelf that shows more rows than it lists reads older pages of
-  // its own environments. A nested project spanning segments pages once per segment.
+  // A segment or nested project shelf that shows more rows than it lists reads older pages of its
+  // own environments that still hold unread threads for it. A nested project spanning segments
+  // pages once per segment. Listing and reading use the same project-filtered scopes.
+  const unloadedByEnvironment = (scopes: ReadonlyArray<OlderSettledScope>) =>
+    scopes.map((scope) => ({
+      environmentId: scope.environmentId,
+      count: olderSettledShelf.unloadedCountIn([scope], visibleThreads),
+    }));
   const settledShelfParts: ReadonlyArray<SettledShelfPart> | null = !partSettledShelves
     ? null
     : nestSagaProjects
@@ -1187,9 +1177,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             const refs = node.group.memberProjectRefs.filter(
               (ref) => segmentOf(ref.environmentId) === segment,
             );
-            const scopes = nodeOlderSettledScopes(refs);
             return {
-              environmentIds: scopes.map((scope) => scope.environmentId),
               expanded: page.expanded,
               listed: partListedSettledThreads.filter((thread) =>
                 refs.some(
@@ -1199,16 +1187,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 ),
               ).length,
               limit: page.limit,
-              unloaded: olderSettledShelf.unloadedCountIn(scopes, visibleThreads),
+              unloaded: unloadedByEnvironment(nodeOlderSettledScopes(refs)),
             };
           });
         })
       : (sidebarSegments.segments ?? []).map((segment) => ({
-          environmentIds: shelfEnvironmentIds.filter(segment.ownsEnvironment),
           expanded: segment.settledShelfExpanded,
           listed: segment.settledThreads.length,
           limit: segment.settledVisibleCount,
-          unloaded: segment.unloadedSettledCount,
+          unloaded: unloadedByEnvironment(segmentOlderSettledScopes(segment.ownsEnvironment)),
         }));
   useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads, settledShelfParts);
   const orderedThreads = (() => {

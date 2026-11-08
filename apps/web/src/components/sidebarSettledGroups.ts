@@ -3,7 +3,6 @@ import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/model
 import {
   isListedSettledThread,
   settledShelfFrontier,
-  wantedOlderSettledPages,
   type OlderSettledScope,
   type OlderSettledShelfEnvironment,
 } from "@lecturn/client-runtime/state/threads";
@@ -49,56 +48,47 @@ export function projectOlderSettledScopes(
 
 type ShelfEnvironments = ReadonlyMap<EnvironmentId, OlderSettledShelfEnvironment>;
 
-const environmentsIn = (environments: ShelfEnvironments, environmentIds: Iterable<EnvironmentId>) =>
-  new Map(
-    [...new Set(environmentIds)].flatMap((environmentId) => {
-      const environment = environments.get(environmentId);
-      return environment === undefined ? [] : [[environmentId, environment] as const];
-    }),
-  );
-
 /**
- * Settled rows an account segment or nested project lists: each row against the frontier of its
- * own part's environments only, so a busier environment elsewhere never hides a quieter one's rows.
+ * Settled rows an account segment or nested project lists: each row against its own
+ * environment's frontier only, so a busier environment never hides a quieter one's loaded rows.
+ * A merged list over several environments can show a quiet environment's older row before the
+ * busier one's next page loads; the order fills in as pages arrive.
  */
-export function listSettledInParts<
-  T extends { readonly source: Parameters<typeof isListedSettledThread>[0] },
->(
-  threads: ReadonlyArray<T>,
-  environments: ShelfEnvironments,
-  partEnvironmentsOf: (thread: T) => ReadonlyArray<EnvironmentId>,
-): T[] {
-  const listedIn = new Map<string, (thread: T) => boolean>();
+export function listSettledByOwnEnvironment<
+  T extends {
+    readonly environmentId: EnvironmentId;
+    readonly source: Parameters<typeof isListedSettledThread>[0];
+  },
+>(threads: ReadonlyArray<T>, environments: ShelfEnvironments): T[] {
+  const frontiers = new Map<EnvironmentId, ReturnType<typeof settledShelfFrontier>>();
   return threads.filter((thread) => {
-    const environmentIds = partEnvironmentsOf(thread);
-    const key = [...environmentIds].sort().join("\0");
-    let listed = listedIn.get(key);
-    if (listed === undefined) {
-      const frontier = settledShelfFrontier([
-        ...environmentsIn(environments, environmentIds).values(),
-      ]);
-      listed = (row) => isListedSettledThread(row.source, frontier);
-      listedIn.set(key, listed);
+    let frontier = frontiers.get(thread.environmentId);
+    if (frontier === undefined) {
+      const environment = environments.get(thread.environmentId);
+      frontier = environment === undefined ? null : settledShelfFrontier([environment]);
+      frontiers.set(thread.environmentId, frontier);
     }
-    return listed(thread);
+    return isListedSettledThread(thread.source, frontier);
   });
 }
 
 /** An account segment's or nested project's Settled shelf, over its own environments. */
 export interface SettledShelfPart {
-  readonly environmentIds: ReadonlyArray<EnvironmentId>;
   readonly expanded: boolean;
   readonly listed: number;
   readonly limit: number;
-  /** Older settled threads in the part that the client does not hold. */
-  readonly unloaded: number;
+  /** Per environment of the part: its older settled threads that the client does not hold. */
+  readonly unloaded: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly count: number;
+  }>;
 }
 
 /**
  * The pages to read for segment or nested project shelves: an open shelf that lists fewer rows
- * than it shows, while its part has older threads unread, reads one more page of each of its own
- * environments at its own frontier. Other environments read nothing for it, and an environment
- * stops at its end.
+ * than it shows reads one more page of each of its environments that still has older threads
+ * unread for it. Other environments read nothing for it; an environment reads one page at a time
+ * and stops at its end or a failed read.
  */
 export function wantedPartSettledPages(input: {
   readonly requested: ReadonlyMap<EnvironmentId, number>;
@@ -107,14 +97,18 @@ export function wantedPartSettledPages(input: {
 }): ReadonlyMap<EnvironmentId, number> {
   let next: Map<EnvironmentId, number> | null = null;
   for (const part of input.parts) {
-    if (!part.expanded || part.listed >= part.limit || part.unloaded <= 0) continue;
-    const wanted = wantedOlderSettledPages({
-      requested: input.requested,
-      environments: environmentsIn(input.environments, part.environmentIds),
-      listedCount: part.listed,
-      visibleCount: part.limit,
-    });
-    for (const [environmentId, pages] of wanted) {
+    if (!part.expanded || part.listed >= part.limit) continue;
+    for (const { environmentId, count } of part.unloaded) {
+      const environment = input.environments.get(environmentId);
+      if (
+        count <= 0 ||
+        environment?.older == null ||
+        environment.pages.status !== "ready" ||
+        environment.pages.frontier === null
+      ) {
+        continue;
+      }
+      const pages = (input.requested.get(environmentId) ?? 0) + 1;
       if (pages <= ((next ?? input.requested).get(environmentId) ?? 0)) continue;
       next ??= new Map(input.requested);
       next.set(environmentId, pages);
