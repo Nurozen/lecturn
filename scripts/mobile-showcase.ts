@@ -1566,11 +1566,27 @@ async function captureIos(
       const labels = new Set(["Moonbase Terminal", "Kernel Cabin", "Suspense Station"]);
       const switches = (await iosNodes()).filter((n) => labels.has(String(n.AXLabel ?? "")) && /Switch|CheckBox|Toggle/i.test(iosKind(n)));
       NodeProcess.stdout.write(`ios settings-labs-on switches=${JSON.stringify(switches.map((n) => `${String(n.AXLabel)}=${String(n.AXValue ?? "")}|${iosKind(n).trim()}`))}\n`);
+      const switchState = async (label: string) =>
+        (await iosNodes()).find((x) => String(x.AXLabel ?? "") === label && /Switch|CheckBox|Toggle/i.test(iosKind(x)));
       for (const n of switches) {
+        const label = String(n.AXLabel);
         const value = String(n.AXValue ?? "");
         if (value === "1" || /^on$/i.test(value)) continue;
-        await iosTapNode(n, `switch ${String(n.AXLabel)}`);
-        await delay(1_500);
+        NodeProcess.stdout.write(`ios settings-labs-on ${label} node=${JSON.stringify(Object.fromEntries(Object.entries(n).filter(([k]) => k !== "children")))}\n`);
+        await iosTapNode(n, `switch ${label}`);
+        await delay(3_000);
+        let after = await switchState(label);
+        NodeProcess.stdout.write(`ios settings-labs-on ${label} after tap value=${String(after?.AXValue ?? "?")}\n`);
+        const f = n.frame as { x: number; y: number; width: number; height: number } | undefined;
+        if (f && String(after?.AXValue ?? "") !== "1") {
+          // Fallback: slide the thumb from left to right, as a finger would.
+          const y = String(Math.round(f.y + f.height / 2));
+          await runAxe(simulator.udid, ["swipe", "--start-x", String(Math.round(f.x + 10)), "--start-y", y, "--end-x", String(Math.round(f.x + f.width - 6)), "--end-y", y, "--duration", "0.3"]).catch((error: unknown) =>
+            NodeProcess.stdout.write(`ios settings-labs-on swipe failed: ${String(error)}\n`));
+          await delay(3_000);
+          after = await switchState(label);
+          NodeProcess.stdout.write(`ios settings-labs-on ${label} after swipe value=${String(after?.AXValue ?? "?")}\n`);
+        }
       }
       await delay(3_000);
     }
