@@ -575,7 +575,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
     promptHistoryMessages,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
@@ -2529,7 +2529,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) : activeThreadId ? (
       <ContextualControl
         environmentId={environmentId}
-        threadId={activeThreadId}
+        threadId={isServerThread ? activeThreadId : null}
         size={size}
         hidden={hidden}
       />
@@ -3481,7 +3481,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-form="true"
       {...threadContextDropTargetProps()}
     >
-      {routeKind === "server" && activeThreadId ? (
+      {routeKind === "server" && isServerThread && activeThreadId ? (
         <ContextualPreparationPanel environmentId={environmentId} threadId={activeThreadId} />
       ) : null}
       {composerControlsCollapsed && restingControlsHost

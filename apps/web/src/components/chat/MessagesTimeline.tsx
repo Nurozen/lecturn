@@ -354,6 +354,8 @@ interface MessagesTimelineProps {
   detailLoading?: boolean;
   /** Lecturn: false hides saving thread notes (ChatView `controls`). */
   notesAllowed?: boolean;
+  /** False until the server has the thread, so message Contextual reads wait for it. */
+  contextualAllowed?: boolean;
   /**
    * Lecturn: open at the newest row's top, not the end, when it is an MCP App card and no
    * reading position is remembered, as a user-scrolled position so live follow leaves it there.
@@ -466,6 +468,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   topFadeEnabled = false,
   detailLoading = false,
   notesAllowed = true,
+  contextualAllowed = true,
   openAtNewestAppCard = false,
   compactSquireEvents = false,
   minimapEnabled = true,
@@ -1306,6 +1309,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     timestampFormat,
     routeThreadKey,
     threadRef: citationThreadRef,
+    contextualAllowed,
     markdownCwd,
     resolvedTheme,
     workspaceRoot,

@@ -13,8 +13,9 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2TurnItem,
 } from "@lecturn/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import { AsyncResult } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -35,11 +36,15 @@ const fixture = vi.hoisted(() => ({
   shell: null as unknown,
   projection: null as unknown,
   items: [] as unknown[],
+  // Stable like the real hooks: a fresh empty array per render loops ChatView's memoized rows.
+  noItems: [] as unknown[],
   summaries: [] as unknown[],
   project: null as unknown,
   environments: [] as unknown[],
   providers: new Map<string, unknown>(),
   respondToApproval: (async () => undefined) as unknown,
+  contextual: false,
+  contextualStatusReads: new Map<string, unknown>(),
   annotation: {
     id: "annotation-1",
     pageUrl: "http://localhost:5173/",
@@ -66,8 +71,10 @@ vi.mock(import("../../state/entities"), async (original) => ({
     ref === null || fixture.projection === null
       ? null
       : { projection: fixture.projection }) as never,
-  useThreadVisibleTurnItems: ((ref: unknown) => (ref === null ? [] : fixture.items)) as never,
-  useQuietThreadVisibleTurnItems: ((ref: unknown) => (ref === null ? [] : fixture.items)) as never,
+  useThreadVisibleTurnItems: ((ref: unknown) =>
+    ref === null ? fixture.noItems : fixture.items) as never,
+  useQuietThreadVisibleTurnItems: ((ref: unknown) =>
+    ref === null ? fixture.noItems : fixture.items) as never,
   useThreadCheckpointSummaries: ((ref: unknown) =>
     ref === null ? [] : fixture.summaries) as never,
   useThreadStatus: (() => "live") as never,
@@ -105,6 +112,20 @@ vi.mock(import("../../state/session"), async (original) => ({
   useEnvironmentScope: (() => true) as never,
   readEnvironmentScope: (() => true) as never,
 }));
+// A sent draft's headline needs machine presentations this harness leaves out.
+vi.mock(import("./DraftHeroHeadline"), () => ({ DraftHeroHeadline: (() => null) as never }));
+vi.mock(import("../../state/contextual"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    useContextualAvailable: (() => fixture.contextual) as never,
+    contextualEnvironment: {
+      ...actual.contextualEnvironment,
+      status: ((target: { input: { threadId: string } }) =>
+        contextualStatus(target.input.threadId)) as never,
+    },
+  };
+});
 vi.mock(import("./usePendingThreadRequests"), async (original) => {
   const actual = await original();
   return {
@@ -126,7 +147,11 @@ vi.mock(import("./RightPanelSurfaceContent"), () => ({
   )) as never,
 }));
 
-import { useComposerDraftStore } from "../../composerDraftStore";
+import {
+  DraftId,
+  finalizePromotedDraftThreadByRef,
+  useComposerDraftStore,
+} from "../../composerDraftStore";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../../test-fixtures";
@@ -139,6 +164,26 @@ import {
   type ChatViewControls,
 } from "./chatViewControls";
 import { QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON } from "./composerApprovalState";
+
+/** Like the query family, a thread's status keeps its first answer; not-found until the thread exists. */
+function contextualStatus(threadId: string) {
+  let read = fixture.contextualStatusReads.get(threadId);
+  if (read === undefined) {
+    read = Atom.make(
+      fixture.shell === null
+        ? AsyncResult.failure(Cause.fail(new Error("Thread unavailable.")))
+        : AsyncResult.success({
+            thread: { enabled: false, sourceIds: [], revision: 0 },
+            project: { projectId: PROJECT_ID, sourceIds: [] },
+            effective: { enabled: false, effective: false, reason: "off" },
+            hostName: "Local",
+            preparation: null,
+          }),
+    );
+    fixture.contextualStatusReads.set(threadId, read);
+  }
+  return read;
+}
 
 const time = (second: number) => DateTime.makeUnsafe(Date.UTC(2026, 9, 1, 12, 0, second));
 
@@ -197,6 +242,8 @@ function seedHomeThread() {
     title: "Release",
   });
   fixture.shell = { ...base, squire: { squireId: "squire-release", role: "home" } };
+  fixture.contextual = false;
+  fixture.contextualStatusReads.clear();
   const items = [
     turnItem("user-item", 1, RUN_ID, {
       type: "user_message",
@@ -618,5 +665,36 @@ describe("sends and pending approvals", () => {
     sendAnnotationButton()!.click();
 
     await vi.waitFor(() => expect(respondToApproval).toHaveBeenCalledWith(PROVIDER, "decline"));
+  });
+});
+
+describe("Contextual on a sent draft", () => {
+  it("reads the thread's Contextual status once the server has the thread", async () => {
+    seedHomeThread();
+    const shell = { ...(fixture.shell as object), squire: undefined };
+    const projection = fixture.projection;
+    const threadRef = { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID };
+    const draftId = DraftId.make("draft-contextual");
+    // The sent draft renders as its thread before the server has created it.
+    fixture.contextual = true;
+    fixture.shell = null;
+    fixture.projection = null;
+    const drafts = useComposerDraftStore.getState();
+    drafts.setProjectDraftThreadId(
+      { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+      draftId,
+      { threadId: THREAD_ID },
+    );
+    drafts.markDraftThreadPromoting(draftId, threadRef);
+    await using _screen = await mount();
+    const control = () =>
+      document.querySelector<HTMLButtonElement>('button[aria-label="Contextual off"]');
+    await vi.waitFor(() => expect(control()).not.toBeNull());
+
+    fixture.shell = shell;
+    fixture.projection = projection;
+    finalizePromotedDraftThreadByRef(threadRef);
+
+    await vi.waitFor(() => expect(control()?.disabled).toBe(false));
   });
 });
