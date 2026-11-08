@@ -1369,9 +1369,16 @@ async function captureIos(
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
-    const stall = showcaseStallText(
-      await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(() => ""),
-    );
+    // The lock screen is not the app, and an accessibility query there can
+    // disturb the lit, locked state the capture needs.
+    const stall =
+      scene === "agent-activity"
+        ? null
+        : showcaseStallText(
+            await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(
+              () => "",
+            ),
+          );
     if (stall !== null) {
       throw new Error(`iOS showcase scene '${scene}' shows a stall screen ("${stall}").`);
     }
