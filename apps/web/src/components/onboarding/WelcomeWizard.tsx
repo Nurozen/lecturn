@@ -1255,7 +1255,6 @@ function AgentInstallTerminal({
               providerInstanceId={providerInstanceId}
               advancedTypography={advancedTypography}
               onSessionExited={phoneLocalAuth ? () => setSessionEnded(true) : onClose}
-              focusRequestId={1}
               autoFocus={!phoneLocalAuth}
               visible={visible}
               resizeEpoch={0}

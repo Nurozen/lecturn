@@ -263,7 +263,7 @@ export const make = Effect.fn("StaveConfigReader.make")(function* (
       });
 
     const raw = yield* fileSystem.readFileString(configPath).pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catch((error) =>
         Effect.logDebug("Stave config file not readable; using defaults").pipe(
           Effect.annotateLogs({ configPath, reason: error.reason._tag }),

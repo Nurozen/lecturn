@@ -56,16 +56,17 @@ function WorkspaceRootTitle(props: {
   readonly maxWidth: number;
   readonly onOpenEnvironments: () => void;
 }) {
-  const { state } = useWorkspaceTabs()!;
+  const { state, settingsOpen } = useWorkspaceTabs()!;
   const enabled = useEnabledNavigationTabs();
+  const tabTitle = settingsOpen
+    ? "Settings"
+    : enabled.length
+      ? TAB_TITLES[state.selectedTab]
+      : "Navigation";
   return (
     <View style={{ width: props.maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
-        brand={
-          <CompactBrandTitle
-            accessibilityLabel={`Lecturn, ${enabled.length ? TAB_TITLES[state.selectedTab] : "Navigation"}`}
-          />
-        }
+        brand={<CompactBrandTitle accessibilityLabel={`Lecturn, ${tabTitle}`} />}
         maxWidth={props.maxWidth}
         onPress={props.onOpenEnvironments}
       />
@@ -108,9 +109,9 @@ function WorkspaceRootContent() {
     ),
     [width, navigation],
   );
-  const tab = state.tabs[state.selectedTab];
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
+  const tab = state.tabs[settingsOpen ? "settings" : state.selectedTab];
   const bottomClearance =
     layout.primarySidebarOverlaysContent && state.selectedTab === "usage"
       ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
@@ -166,8 +167,12 @@ function WorkspaceRootContent() {
                 ? { headerSearchBarOptions: undefined, unstable_headerRightItems: () => [] }
                 : {}),
               unstable_headerLeftItems: () => [],
+              // Beside a detail column the tab bar names the tab and the detail header the page,
+              // so the sidebar keeps the brand.
               headerTitle:
-                settingsOpen || state.selectedTab === "usage" ? undefined : renderHeaderTitle,
+                sidebarNavigation || (!settingsOpen && state.selectedTab !== "usage")
+                  ? renderHeaderTitle
+                  : undefined,
             }}
           />
         ) : (
@@ -200,10 +205,7 @@ function WorkspaceRootContent() {
           }
         >
           {settingsOpen ? (
-            <>
-              <NativeStackScreenOptions options={{ headerSearchBarOptions: undefined }} />
-              <SettingsRouteScreen />
-            </>
+            <SettingsRouteScreen />
           ) : enabled.length === 0 ? (
             <WorkspaceNoTabs />
           ) : state.selectedTab === "threads" ? (
@@ -219,8 +221,10 @@ function WorkspaceRootContent() {
         {deviceType !== "pad" && deviceType !== "phone" && sidebarPicker ? (
           <WorkspaceSidebarTabs />
         ) : null}
-        {enabled.length === 0 && !settingsOpen ? null : !settingsOpen &&
-          state.selectedTab !== "usage" ? (
+        {/* Android's Settings list carries its own search in its app bar. */}
+        {enabled.length === 0 && !settingsOpen ? null : (
+            settingsOpen ? Platform.OS === "ios" : state.selectedTab !== "usage"
+          ) ? (
           <WorkspaceToolbar sidebar={sidebarNavigation} onNewTask={startNewTask} />
         ) : (
           <WorkspaceSectionToolbar onNewTask={startNewTask} showCompose={false} />

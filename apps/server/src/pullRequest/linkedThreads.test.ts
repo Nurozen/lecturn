@@ -171,3 +171,37 @@ it.effect(
       );
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("leaves out a Squire's hidden home and probe threads", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const createdAt = "2026-09-01T00:00:00.000Z";
+    const link = { host: "github.com", repository: "acme/web", number: 7, source: "manual" };
+    for (const [id, squire] of [
+      ["ordinary", undefined],
+      ["squire-home", { squireId: "squire-1", role: "home" }],
+      ["squire-probe", { squireId: "squire-1", role: "probe" }],
+    ] as const) {
+      const payload = yield* encodePayload({
+        linkedPullRequest: null,
+        pullRequests: [{ ...link, linkedAt: createdAt, snapshot: null, stack: null }],
+        ...(squire === undefined ? {} : { squire }),
+      });
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        ) VALUES (
+          ${id}, 'project-1', ${id}, 'codex', 'full-access', 'default',
+          ${createdAt}, ${createdAt}, ${payload}
+        )
+      `;
+    }
+    const result = yield* listLinkedPullRequestThreads({
+      host: "github.com",
+      repository: "acme/web",
+      number: 7,
+    });
+    expect(result.threads.map((thread) => thread.id)).toEqual(["ordinary"]);
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

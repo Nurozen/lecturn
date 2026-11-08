@@ -63,6 +63,7 @@ export function useShowcaseSceneRendered(
     getShowcaseRenderSignal,
   );
   const reported = signal.get(scene) === themeId;
+  // oxlint-disable-next-line lecturn/react-effect-budget -- publishes to the external capture signal after the surface commits.
   useEffect(() => {
     if (SHOWCASE_ENABLED && rendered && !reported) reportShowcaseSceneRendered({ scene, themeId });
   }, [rendered, reported, scene, themeId]);

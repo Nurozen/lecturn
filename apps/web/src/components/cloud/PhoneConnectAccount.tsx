@@ -4,6 +4,7 @@ import { useId } from "react";
 import { phoneConnectAccount, type PhoneConnectSnapshot } from "../../cloud/phoneConnectAccount";
 import { usePhoneConnectAccount } from "../../cloud/useConnectAccountAuth";
 import { hasPhoneConnectAccount } from "../../lib/androidHostAccess";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 
@@ -17,7 +18,9 @@ function phoneConnectLabel({ status, error }: PhoneConnectSnapshot): string {
   return "Signed out";
 }
 
-export function PhoneConnectSidebarEntry() {
+export function PhoneConnectSidebarEntry({
+  labelClassName,
+}: { readonly labelClassName?: string | undefined } = {}) {
   const snapshot = usePhoneConnectAccount();
   const { setOpenMobile } = useSidebar();
   if (!hasPhoneConnectAccount()) return null;
@@ -29,7 +32,7 @@ export function PhoneConnectSidebarEntry() {
           render={<Link to="/settings/connections" onClick={() => setOpenMobile(false)} />}
         >
           <RadioTowerIcon />
-          <span className="min-w-0">
+          <span className={cn("min-w-0", labelClassName)}>
             <span className="block">Lecturn Connect</span>
             <span className="block truncate text-xs text-muted-foreground">
               {phoneConnectLabel(snapshot)}

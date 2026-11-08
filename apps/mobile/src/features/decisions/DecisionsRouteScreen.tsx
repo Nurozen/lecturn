@@ -26,6 +26,7 @@ import { threadDecisionEnvironment as decisions } from "../../state/thread-decis
 import { environmentSession } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type DecisionsRouteParams = { environmentId: string; projectId: string; threadId?: string };
 function Button({
@@ -404,7 +405,7 @@ function DecisionSourceModal({
   evidence: DecisionEvidence;
   onClose: () => void;
 }) {
-  const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const source = useEnvironmentQuery(
     decisions.sourceWindow({
       environmentId,
@@ -421,7 +422,7 @@ function DecisionSourceModal({
             label="Open conversation"
             onPress={() => {
               onClose();
-              navigation.navigate("Thread", { environmentId, threadId: evidence.threadId });
+              openThread({ environmentId, threadId: evidence.threadId });
             }}
           />
         ) : null}

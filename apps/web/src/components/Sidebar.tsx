@@ -6,7 +6,13 @@ import {
 } from "./sidebar/SidebarDragScope";
 import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import { StaveIcon } from "./StaveIcon";
-import { projectSettledPage } from "./sidebarSettledGroups";
+import {
+  listSettledByOwnEnvironment,
+  projectOlderSettledScopes,
+  projectSettledPage,
+  withUnloadedSettled,
+  type SettledShelfPart,
+} from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
 import {
@@ -53,10 +59,12 @@ import {
   type ContextMenuItem,
   type EnvironmentId,
   AuthOrchestrationOperateScope,
+  ProjectId,
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
 } from "@lecturn/contracts";
+import type { OlderSettledScope } from "@lecturn/client-runtime/state/threads";
 import { ChevronDownIcon, CircleCheckIcon, FolderIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import {
   useEffect,
@@ -64,6 +72,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -133,6 +142,7 @@ import { environmentPresentations } from "../state/presentation";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { environmentProjects } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
+import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../state/olderSettledShelf";
 import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
@@ -158,7 +168,6 @@ import {
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
   isSidebarNestedLinkClick,
-  isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   reduceSidebarProjectScopeMenuState,
@@ -221,7 +230,13 @@ import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { SidebarSegments } from "./sidebar/SidebarSegments";
-import { flattenSegmentsForNavigation, nameGroupsByAccount } from "./sidebar/sidebarSegments.logic";
+import {
+  flattenSegmentsForNavigation,
+  nameGroupsByAccount,
+  OWNS_EVERY_ENVIRONMENT,
+  segmentIdOfEnvironment,
+  type OwnsEnvironment,
+} from "./sidebar/sidebarSegments.logic";
 import { useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
@@ -368,12 +383,12 @@ function partitionForkSidebarThreads(input: {
     ),
     appProjectKeys,
   );
-  inboxReturns.observe(workingShelfEnabled ? threads : null);
+  const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
   const inbox = (thread: EnvironmentThreadShell) =>
-    workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
+    workingShelfEnabled && inboxObservation.isWorking(thread) ? working : active;
   const snoozed: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   for (const thread of visible) {
@@ -400,7 +415,7 @@ function partitionForkSidebarThreads(input: {
   return {
     pinnedThreads: sortPinnedThreadsForSidebar(pinned),
     activeThreads: workingShelfEnabled
-      ? sortInboxForSidebar(active)
+      ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
       : sortThreadsForSidebar(active),
     workingThreads: sortWorkingThreadsBySend(working),
     snoozedThreads: snoozed.toSorted(
@@ -410,8 +425,26 @@ function partitionForkSidebarThreads(input: {
     ),
     settledThreads: sortSettledThreads(settled),
     appSearchThreads: sortThreadsForSidebar(appSearchThreads),
+    visibleThreads: visible,
     snoozeNow: preciseNow,
   };
+}
+
+/** The sidebar's scope per environment: the scoped projects there, or every project. */
+function olderSettledScopes(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+  scopedProjectKeys: ReadonlySet<string> | null,
+): ReadonlyArray<OlderSettledScope> {
+  if (scopedProjectKeys === null) {
+    return environmentIds.map((environmentId) => ({ environmentId, projectIds: null }));
+  }
+  return environmentIds.flatMap((environmentId) => {
+    const prefix = `${environmentId}:`;
+    const projectIds = [...scopedProjectKeys].flatMap((key) =>
+      key.startsWith(prefix) ? [ProjectId.make(key.slice(prefix.length))] : [],
+    );
+    return projectIds.length === 0 ? [] : [{ environmentId, projectIds }];
+  });
 }
 
 export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReveal }) {
@@ -613,6 +646,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const nowMinute = useNowMinute();
+  // The Working shelf's exit grace expires on the tracker's timer, which repartitions.
+  const inboxReturnsVersion = useSyncExternalStore(
+    inboxReturns.subscribe,
+    inboxReturns.getSnapshot,
+  );
   // Snooze wake times are second-precise, so classifying with the quantized
   // minute would hold a woken thread on the shelf for up to a minute.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
@@ -770,6 +808,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     snoozedThreads,
     settledThreads,
     appSearchThreads,
+    visibleThreads,
     snoozeNow,
   } = partitionForkSidebarThreads({
     threads,
@@ -779,7 +818,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     serverConfigs,
     listing: threadListing,
     workingShelfEnabled,
-    clockKey: `${nowMinute}:${snoozeWakeTick}`,
+    clockKey: `${nowMinute}:${snoozeWakeTick}:${inboxReturnsVersion}`,
   });
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
@@ -795,7 +834,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     ...appSearchThreads,
   ];
   const searchEnvironmentIds = useConnectedEnvironmentIds();
-  const threadSearch = useThreadSearch(searchEnvironmentIds, threadSearchQuery);
+  const threadSearch = useThreadSearch(
+    searchEnvironmentIds,
+    threadSearchQuery,
+    scopedProjectGroup === null
+      ? {}
+      : {
+          projectIds: scopedProjectGroup.memberProjectRefs.map(
+            (projectRef) => projectRef.projectId,
+          ),
+        },
+  );
 
   // History, the command palette, and links can open a thread the project
   // scope hides or the list has scrolled away. A remount starts the list at
@@ -937,27 +986,57 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
   const setSettledVisibleCount = (update: (count: number) => number) =>
     setSettledTail((current) => ({ scopeKey: current.scopeKey, count: update(current.count) }));
-  const visibleSettledThreads = (() => {
-    if (settledThreads.length <= settledVisibleCount) return settledThreads;
-    const visible = settledThreads.slice(0, settledVisibleCount);
-    if (routeRowThreadKey !== null) {
-      const routeThread = settledThreads
-        .slice(settledVisibleCount)
-        .find(
-          (thread) =>
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeRowThreadKey,
-        );
-      if (routeThread !== undefined) visible.push(routeThread);
-    }
-    return visible;
-  })();
-  const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
-  const showMoreSettled = () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT);
   const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
     SETTLED_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
   );
+  // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
+  // Account segments and nested projects page their own shelves (see `settledShelfParts`).
+  const partSettledShelves = sidebarSegmentation !== null || nestSagaProjects;
+  const shelfEnvironmentIds = [...serverConfigs.keys()];
+  const olderSettledShelf = useOlderSettledShelf({
+    scopes: olderSettledScopes(shelfEnvironmentIds, scopedProjectKeys),
+    expanded: settledShelfExpanded && !partSettledShelves,
+    visibleCount: settledVisibleCount,
+    partShelves: partSettledShelves,
+  });
+  const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
+  const segmentOlderSettledScopes = (owns: (environmentId: EnvironmentId) => boolean) =>
+    olderSettledScopes(shelfEnvironmentIds.filter(owns), scopedProjectKeys);
+  // A nested project's members in scope (and in one segment), as older-settled scopes.
+  const nodeOlderSettledScopes = (
+    refs: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly projectId: ProjectId }>,
+    owns: OwnsEnvironment = OWNS_EVERY_ENVIRONMENT,
+  ) =>
+    projectOlderSettledScopes(
+      refs.filter(
+        (ref) =>
+          owns(ref.environmentId) &&
+          (scopedProjectKeys === null ||
+            scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`)),
+      ),
+    );
+  const settledCount = settledThreads.length + olderSettledShelf.unloadedCount(visibleThreads);
+  const visibleSettledThreads = (() => {
+    const visible = listedSettledThreads.slice(0, settledVisibleCount);
+    if (
+      routeRowThreadKey !== null &&
+      !visible.some(
+        (thread) =>
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeRowThreadKey,
+      )
+    ) {
+      const routeThread = settledThreads.find(
+        (thread) =>
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeRowThreadKey,
+      );
+      if (routeThread !== undefined) visible.push(routeThread);
+    }
+    return visible.length === settledThreads.length ? settledThreads : visible;
+  })();
+  const hiddenSettledCount = Math.max(0, settledCount - visibleSettledThreads.length);
+  const showMoreSettled = () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT);
   const toggleSettledShelf = () => setSettledShelfExpanded((value) => !value);
   const renderedSettledThreads = (() => {
     if (settledShelfExpanded) return visibleSettledThreads;
@@ -1012,6 +1091,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
   })();
+  // A segment or nested project lists each settled row against its own environment's frontier.
+  const segmentOf = (environmentId: EnvironmentId) =>
+    sidebarSegmentation === null
+      ? null
+      : segmentIdOfEnvironment(sidebarSegmentation, environmentId);
+  const sagaNodes = scopedSagaTree.flatMap((root) => [root, ...root.children]);
+  const partListedSettledThreads = partSettledShelves
+    ? listSettledByOwnEnvironment(settledThreads, olderSettledShelf.environments)
+    : listedSettledThreads;
   const [projectSettledShelves, setProjectSettledShelves] = useState<
     Readonly<Record<string, { expanded: boolean; limit: number }>>
   >({});
@@ -1020,8 +1108,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       string,
       ReturnType<typeof projectSettledPage<EnvironmentThreadShell>>
     >();
-    for (const node of scopedSagaTree.flatMap((root) => [root, ...root.children])) {
-      const rows = settledThreads.filter((thread) =>
+    for (const node of sagaNodes) {
+      const rows = partListedSettledThreads.filter((thread) =>
         node.group.memberProjectRefs.some(
           (ref) => ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
         ),
@@ -1048,7 +1136,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     visibleWorkingThreads,
     snoozedThreads,
     visibleSnoozedThreads,
-    settledThreads,
+    settledThreads: partListedSettledThreads,
     renderedSettledThreads,
     nestedSettledThreads,
     scopedSagaTree,
@@ -1065,7 +1153,51 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleSettledShelf,
     showMoreSettled,
     routeThreadKey: routeRowThreadKey,
+    unloadedSettledCountOf: (owns) =>
+      olderSettledShelf.unloadedCountIn(segmentOlderSettledScopes(owns), visibleThreads),
   });
+  // A segment or nested project shelf that shows more rows than it lists reads older pages of its
+  // own environments that still hold unread threads for it. A nested project spanning segments
+  // pages once per segment. Listing and reading use the same project-filtered scopes.
+  const unloadedByEnvironment = (scopes: ReadonlyArray<OlderSettledScope>) =>
+    scopes.map((scope) => ({
+      environmentId: scope.environmentId,
+      count: olderSettledShelf.unloadedCountIn([scope], visibleThreads),
+    }));
+  const settledShelfParts: ReadonlyArray<SettledShelfPart> | null = !partSettledShelves
+    ? null
+    : nestSagaProjects
+      ? sagaNodes.flatMap((node) => {
+          const page = settledByProject.get(node.group.key);
+          if (page === undefined) return [];
+          const segments = [
+            ...new Set(node.group.memberProjectRefs.map((ref) => segmentOf(ref.environmentId))),
+          ];
+          return segments.map((segment) => {
+            const refs = node.group.memberProjectRefs.filter(
+              (ref) => segmentOf(ref.environmentId) === segment,
+            );
+            return {
+              expanded: page.expanded,
+              listed: partListedSettledThreads.filter((thread) =>
+                refs.some(
+                  (ref) =>
+                    ref.environmentId === thread.environmentId &&
+                    ref.projectId === thread.projectId,
+                ),
+              ).length,
+              limit: page.limit,
+              unloaded: unloadedByEnvironment(nodeOlderSettledScopes(refs)),
+            };
+          });
+        })
+      : (sidebarSegments.segments ?? []).map((segment) => ({
+          expanded: segment.settledShelfExpanded,
+          listed: segment.settledThreads.length,
+          limit: segment.settledVisibleCount,
+          unloaded: unloadedByEnvironment(segmentOlderSettledScopes(segment.ownsEnvironment)),
+        }));
+  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads, settledShelfParts);
   const orderedThreads = (() => {
     if (sidebarSegments.segments !== null) {
       return flattenSegmentsForNavigation(sidebarSegments.segments);
@@ -2649,7 +2781,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       activeThreads.length +
                       workingThreads.length +
                       snoozedThreads.length +
-                      settledThreads.length >
+                      settledCount >
                       0 &&
                     "flex-1",
                 )}
@@ -3044,24 +3176,35 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onSettle={settleFromDrag}
                               >
                                 {({ pinned, active, working = [], snoozed, settled }) => {
+                                  const olderCount = olderSettledShelf.unloadedCountIn(
+                                    nodeOlderSettledScopes(
+                                      node.group.memberProjectRefs,
+                                      segment.ownsEnvironment,
+                                    ),
+                                    visibleThreads,
+                                  );
                                   if (
                                     !pinned.length &&
                                     !active.length &&
                                     !working.length &&
                                     !snoozed.length &&
-                                    !settled.length
+                                    !settled.length &&
+                                    olderCount === 0
                                   )
                                     return null;
-                                  const settledPage = projectSettledPage(
-                                    settled,
-                                    {
-                                      expanded: true,
-                                      limit:
-                                        projectSettledShelves[node.group.key]?.limit ??
-                                        SETTLED_TAIL_INITIAL_COUNT,
-                                    },
-                                    routeRowThreadKey,
-                                    SETTLED_TAIL_INITIAL_COUNT,
+                                  const settledPage = withUnloadedSettled(
+                                    projectSettledPage(
+                                      settled,
+                                      {
+                                        expanded: true,
+                                        limit:
+                                          projectSettledShelves[node.group.key]?.limit ??
+                                          SETTLED_TAIL_INITIAL_COUNT,
+                                      },
+                                      routeRowThreadKey,
+                                      SETTLED_TAIL_INITIAL_COUNT,
+                                    ),
+                                    olderCount,
                                   );
                                   return (
                                     <>
@@ -3470,7 +3613,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 <span className="text-xs font-medium text-muted-foreground/50">
                                   {settledShelfExpanded
                                     ? "Settled"
-                                    : `Settled (${settledThreads.length})`}
+                                    : `Settled (${"id" in segment ? settledThreads.length + (segment.unloadedSettledCount ?? 0) : settledCount})`}
                                 </span>
                                 <span className="h-px flex-1 bg-sidebar-border/60" />
                                 <ChevronDownIcon
@@ -3520,11 +3663,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   <li className="list-none">
                     <button
                       type="button"
-                      onClick={showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                      disabled={olderSettledShelf.loading}
+                      onClick={() => {
+                        olderSettledShelf.retry();
+                        showMoreSettled();
+                      }}
+                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:cursor-default"
                     >
                       <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                      {olderSettledShelf.loading
+                        ? "Loading"
+                        : olderSettledShelf.failed
+                          ? "Could not load older threads. Retry"
+                          : `Show ${Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more`}
                     </button>
                   </li>
                 ) : null}
@@ -3538,7 +3689,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             activeThreads.length +
             workingThreads.length +
             snoozedThreads.length +
-            settledThreads.length ===
+            settledCount ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (

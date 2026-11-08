@@ -51,6 +51,30 @@ describe("workspace tab selections", () => {
     expect(workspaceSelectionsIn([home, appThread], {}, isAppThread).threads).toBe(undefined);
   });
 
+  it("doesn't remember a draft started from Apps as the Threads draft", () => {
+    const appDraft = {
+      key: "app-draft",
+      name: "Thread",
+      params: { draft: { environmentId: "env", projectId: "app-project", title: "App" } },
+    };
+    const chatDraft = {
+      key: "chat-draft",
+      name: "Thread",
+      params: { draft: { environmentId: "env", projectId: "project", title: "Chat" } },
+    };
+    const isAppProject = (project: { projectId: string }) => project.projectId === "app-project";
+    const afterThread = workspaceSelectionsIn([home, thread], {}, undefined, isAppProject);
+    expect(workspaceSelectionsIn([home, appDraft], afterThread, undefined, isAppProject)).toBe(
+      afterThread,
+    );
+    expect(
+      workspaceSelectionsIn([home, appDraft], {}, undefined, isAppProject).threadsDraft,
+    ).toBeUndefined();
+    expect(
+      workspaceSelectionsIn([home, chatDraft, appDraft], {}, undefined, isAppProject).threadsDraft,
+    ).toEqual({ key: chatDraft.key, params: chatDraft.params });
+  });
+
   it("doesn't remember pages a Settings row doesn't open", () => {
     for (const name of ["SettingsEnvironmentNew", "SettingsProjectOverview", "SettingsAuth"]) {
       expect(workspaceSelectionsIn([home, settings, { key: name, name }], {}).settings).toBe(
@@ -110,6 +134,30 @@ describe("opening a workspace tab", () => {
     selections = workspaceSelectionsIn(away.routes, selections);
     const back = workspaceTabNavigationState(away, "threads", selections, columnsAvailable);
     expect(back.routes.at(-1)).toMatchObject({ key: "thread", params: thread.params });
+  });
+
+  it("reopens a draft the tab showed after its last chat, until another chat opens", () => {
+    const columns = { columns: true, check: available };
+    const draft = { key: "draft", name: "Thread", params: { draft: { requestId: "r" } } };
+    const withDraft = workspaceSelectionsIn(
+      [home, draft],
+      workspaceSelectionsIn([home, thread], {}),
+    );
+    const back = workspaceTabNavigationState(
+      { routes: [home, settings] },
+      "threads",
+      withDraft,
+      columns,
+    );
+    expect(back.routes.at(-1)).toEqual(draft);
+    const afterChat = workspaceSelectionsIn([home, thread], withDraft);
+    const again = workspaceTabNavigationState(
+      { routes: [home, settings] },
+      "threads",
+      afterChat,
+      columns,
+    );
+    expect(again.routes.at(-1)).toMatchObject({ key: "thread", params: thread.params });
   });
 
   it("falls back to the list for a chat that no longer exists, or an unknown Settings page", () => {

@@ -17,6 +17,7 @@ import {
   SegmentCollapsedSchema,
   segmentIdOfEnvironment,
   toggleSegmentCollapsed,
+  type OwnsEnvironment,
   type SegmentSagaNode,
   type SidebarListScope,
   type SidebarSegmentation,
@@ -57,6 +58,7 @@ type SidebarSegmentsInput<Node> = Omit<SidebarThreadListScope<Node>, "orderedThr
     readonly settledVisibleCount: number;
     readonly settledPageCount: number;
     readonly routeThreadKey: string | null;
+    readonly unloadedSettledCountOf?: ((ownsEnvironment: OwnsEnvironment) => number) | undefined;
   };
 
 type UseSidebarSegments = <Node extends SegmentSagaNode>(
@@ -97,6 +99,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     snoozedShelfExpanded,
     settledShelfExpanded,
     routeThreadKey,
+    unloadedSettledCountOf,
   } = input;
 
   const [shelves, setShelves] = useState(NO_SEGMENT_SHELVES);
@@ -177,6 +180,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
           shelves,
           isRouteThread: (thread) => threadKeyOf(thread) === routeThreadKey,
           statusOf,
+          unloadedSettledCountOf,
         });
   return {
     segments,

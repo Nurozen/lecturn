@@ -147,6 +147,40 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
+  it.effect.each([undefined, false, true])(
+    "selects native collaboration modes without prompt overrides with hasLecturnMcp=%s",
+    (hasLecturnMcp) =>
+      Effect.gen(function* () {
+        for (const interactionMode of ["plan", "default"] as const) {
+          for (const reasoningEffort of [undefined, "high"] as const) {
+            const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+              nativeThreadId: "native-mode-switch",
+              codexInput: [{ type: "text", text: "test" }],
+              runtimePolicy: { runtimeMode: "full-access", interactionMode, cwd: null },
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5.4",
+                ...(reasoningEffort === undefined
+                  ? {}
+                  : { options: [{ id: "reasoningEffort", value: reasoningEffort }] }),
+              },
+              ...(hasLecturnMcp === undefined ? {} : { hasLecturnMcp }),
+            });
+
+            assert.deepEqual(params.collaborationMode, {
+              mode: interactionMode,
+              settings: {
+                model: "gpt-5.4",
+                ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
+              },
+            });
+            assert.equal(params.effort, reasoningEffort);
+            assert.equal(params.additionalContext !== undefined, hasLecturnMcp === true);
+          }
+        }
+      }),
+  );
+
   it.effect("derives concrete Codex turn policies from every Lecturn runtime mode", () =>
     Effect.gen(function* () {
       const build = (
@@ -232,13 +266,41 @@ describe("CodexAdapterV2 runtime policy", () => {
           appInstructions: "Use rw_ tools for rocket edits.",
         });
       const section = "## Connected app instructions\n\nUse rw_ tools for rocket edits.";
-      const withMcp = (yield* build(true)).collaborationMode?.settings.developer_instructions;
-      assert.isTrue(withMcp?.endsWith(`\n\n${section}`));
-      assert.isTrue((withMcp?.length ?? 0) > section.length + 2);
-      assert.equal(
-        (yield* build(false)).collaborationMode?.settings.developer_instructions,
-        section,
-      );
+      const withMcp = yield* build(true);
+      assert.deepEqual(withMcp.additionalContext?.["lecturn_app_instructions_01"], {
+        kind: "application",
+        value: section,
+      });
+      assert.isDefined(withMcp.additionalContext?.["lecturn_runtime"]);
+      const withoutMcp = yield* build(false);
+      assert.deepEqual(withoutMcp.additionalContext, {
+        lecturn_app_instructions_01: { kind: "application", value: section },
+      });
+      // Codex keeps its own mode text, so app instructions never override it.
+      assert.isUndefined(withMcp.collaborationMode?.settings.developer_instructions);
+      assert.isUndefined(withoutMcp.collaborationMode?.settings.developer_instructions);
+    }),
+  );
+  it.effect("splits long connected app instructions under Codex's context cap", () =>
+    Effect.gen(function* () {
+      const instructions = "é".repeat(3_000);
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-thread-app",
+        codexInput: [{ type: "text", text: "Fly it.", text_elements: [] }],
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+        },
+        modelSelection: CODEX_TEST_MODEL_SELECTION,
+        appInstructions: instructions,
+      });
+      const values = Object.entries(params.additionalContext ?? {})
+        .filter(([key]) => key.startsWith("lecturn_app_instructions_"))
+        .map(([, entry]) => entry.value);
+      assert.equal(values.length, 2);
+      for (const value of values) assert.isAtMost(Buffer.byteLength(value, "utf8"), 4_000);
+      assert.equal(values.join(""), `## Connected app instructions\n\n${instructions}`);
     }),
   );
 });
@@ -919,6 +981,7 @@ function codexReplayPreamble(input: {
           approvalsReviewer: "user",
           sandboxPolicy: { type: "dangerFullAccess" },
           summary: "detailed",
+          collaborationMode: { mode: "default", settings: { model: "gpt-5.4" } },
         },
       },
     },
@@ -2047,6 +2110,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 model: "gpt-5.4",
                 ...turnPolicies[turnModes[index]!],
                 summary: "detailed",
+                collaborationMode: { mode: "default", settings: { model: "gpt-5.4" } },
               },
             },
           },

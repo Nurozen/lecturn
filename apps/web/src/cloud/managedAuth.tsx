@@ -88,12 +88,15 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     };
   }, [clerk, isLoaded, signedInSessionKey]);
 
+  // ClerkProvider owns the Clerk instance, so this binding lasts as long as the provider is mounted.
   useEffect(() => {
     bindAccountTokenClerk(clerk);
     bindActiveAccountClerk(clerk);
     return () => {
       bindAccountTokenClerk(null);
       bindActiveAccountClerk(null);
+      setManagedRelayPrimaryAccount(appAtomRegistry, null);
+      syncManagedRelaySessions(appAtomRegistry, []);
     };
   }, [clerk]);
 
@@ -236,13 +239,6 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     userId,
   ]);
 
-  useEffect(
-    () => () => {
-      setManagedRelayPrimaryAccount(appAtomRegistry, null);
-      syncManagedRelaySessions(appAtomRegistry, []);
-    },
-    [],
-  );
   useEffect(
     () =>
       appAtomRegistry.subscribe(knownAccountRemovalsAtom, () =>

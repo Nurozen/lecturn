@@ -188,7 +188,7 @@ export const layerSourceFromRegistry = Layer.effect(
               maxJobs: SQUIRE_CI_MAX_JOBS,
               maxLogBytes: SQUIRE_CI_MAX_LOG_BYTES,
             }).pipe(
-              Effect.map(Option.some),
+              Effect.asSome,
               Effect.mapError((cause) => new SquireCiReadError({ cause })),
             ),
         }),

@@ -11,7 +11,7 @@ import { Check, Copy } from "lucide";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
-import { BrowserChromeThemeSync, DocumentTitleSync } from "../components/RootDocumentSync";
+import { BrowserChromeThemeSync } from "../components/RootDocumentSync";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -125,7 +125,6 @@ function RootRouteView() {
   ) {
     return (
       <>
-        <DocumentTitleSync />
         <BrowserChromeThemeSync key={pathname} />
         <Outlet />
       </>
@@ -136,7 +135,6 @@ function RootRouteView() {
   if (hostedPromptLinkLanding !== null) {
     return (
       <>
-        <DocumentTitleSync />
         <BrowserChromeThemeSync key={pathname} />
         {hostedPromptLinkLanding}
       </>
@@ -150,7 +148,6 @@ function RootRouteView() {
   ) {
     return (
       <>
-        <DocumentTitleSync />
         <BrowserChromeThemeSync key={pathname} />
         <Outlet />
       </>

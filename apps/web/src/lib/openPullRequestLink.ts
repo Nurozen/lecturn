@@ -4,22 +4,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent } from "react";
 
 import {
-  changeRequestLinkHost,
-  findChangeRequestTarget,
+  resolveChangeRequestLinkTarget,
   resolvePullRequestPreviewTarget,
-  type ChangeRequestTarget,
 } from "@lecturn/client-runtime/change-request-links";
-import {
-  sourceControlClients,
-  type ChangeRequestLink,
-} from "@lecturn/client-runtime/source-control-clients";
 
 import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
-import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
-import { resolveProjectGitTargets } from "@lecturn/client-runtime/state/projectGit";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProjects, useProjects } from "../state/entities";
@@ -35,36 +27,6 @@ export function usePullRequestPreviewTarget(environmentId: EnvironmentId | null,
     pullRequestsEnabled: serverConfig?.environment.capabilities.pullRequests === true,
     url,
   });
-}
-
-export function findProjectOnChangeRequestHost(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): EnvironmentProject | undefined {
-  return findChangeRequestHostTarget(projects, link)?.project;
-}
-
-/** {@link findProjectOnChangeRequestHost}, with the repository and host the panel is handed. */
-function findChangeRequestHostTarget(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): ChangeRequestTarget<EnvironmentProject> | undefined {
-  const own = findChangeRequestTarget(projects, link);
-  if (own !== undefined) return own;
-  // Each host's definition decides whether a checkout lends its credentials host-wide; Azure's
-  // reads stay scoped to the checkout's organization and project.
-  const project = projects.find((candidate) =>
-    resolveProjectGitTargets({ project: candidate }).some((target) => {
-      const identity = target.repositoryIdentity;
-      return (
-        identity?.provider !== undefined &&
-        sourceControlClients.get(identity.provider).canReadChangeRequestOnHost(identity, link)
-      );
-    }),
-  );
-  return project === undefined
-    ? undefined
-    : { project, repository: link.repository, host: changeRequestLinkHost(link) };
 }
 
 function shouldOpenPullRequestExternally(
@@ -95,48 +57,27 @@ export function useOpenChangeRequestLink(
     // subscribing would hand every rendered link a new handler. Projects likewise, so a
     // link can resolve against a snapshot that arrived after this handler was built.
     const serverConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
-    const allProjects = readProjects();
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
-    const parsed = sourceControlClients.parseChangeRequestUrl(targetUrl)?.link;
-    if (parsed === undefined) return false;
-    const reads = (environmentId: string) =>
-      serverConfigs.get(environmentId as EnvironmentId)?.environment.capabilities.pullRequests ===
-      true;
-    // Matching remotes do not make project ids usable outside the panel thread's environment.
-    const projects = resolvedThreadRef
-      ? allProjects.filter((project) => project.environmentId === resolvedThreadRef.environmentId)
-      : targetEnvironmentId
-        ? allProjects.filter((project) => project.environmentId === targetEnvironmentId)
-        : allProjects
-            .filter((project) => reads(project.environmentId))
-            .toSorted(
-              (left, right) =>
-                Number(right.environmentId === primaryEnvironmentId) -
-                Number(left.environmentId === primaryEnvironmentId),
-            );
-    const target =
-      findChangeRequestTarget(projects, parsed) ??
-      (resolvedPanelRef
-        ? findChangeRequestHostTarget(
-            projects.filter(
-              (candidate) =>
-                serverConfigs.get(candidate.environmentId)?.environment.capabilities
-                  .threadPullRequests === true,
-            ),
-            parsed,
-          )
-        : undefined);
-    if (target === undefined || !reads(target.project.environmentId)) return false;
-    const { project, host } = target;
-    // A server that links pull requests to threads resolves the URL's own spelling; an older
-    // one asks its provider for the checkout's repository selector.
-    const repository =
-      serverConfigs.get(project.environmentId)?.environment.capabilities.threadPullRequests === true
-        ? parsed.repository
-        : target.repository;
+    const target = resolveChangeRequestLinkTarget({
+      url: targetUrl,
+      projects: readProjects(),
+      capabilities: (environmentId) => serverConfigs.get(environmentId)?.environment.capabilities,
+      environmentId: resolvedThreadRef?.environmentId ?? targetEnvironmentId,
+      primaryEnvironmentId,
+      lendHostProject: resolvedPanelRef !== undefined,
+    });
+    if (target === null) return false;
+    const { project, repository, number, host } = target;
     event.preventDefault();
     event.stopPropagation();
+    const pullRequestsSearch = {
+      repository,
+      number,
+      ...(host === undefined ? {} : { selectedHost: host }),
+      selectedProjectId: project.id,
+      selectedEnvironmentId: project.environmentId,
+    };
     if (resolvedPanelRef) {
       useRightPanelStore.getState().openPullRequest(resolvedPanelRef, {
         // The standalone PR panel has a synthetic ref; each tab keeps its real environment.
@@ -144,10 +85,10 @@ export function useOpenChangeRequestLink(
           ? {}
           : { environmentId: project.environmentId }),
         projectId: project.id,
+        ...(host === undefined ? {} : { host }),
         repository,
-        host,
         url: targetUrl,
-        number: parsed.number,
+        number,
       });
       if (!resolvedThreadRef) {
         void navigate({
@@ -156,11 +97,7 @@ export function useOpenChangeRequestLink(
             ...previous,
             involvement: previous.involvement ?? "all",
             state: previous.state ?? "all",
-            repository,
-            number: parsed.number,
-            selectedHost: host,
-            selectedProjectId: project.id,
-            selectedEnvironmentId: project.environmentId,
+            ...pullRequestsSearch,
           }),
           replace: true,
         });
@@ -169,15 +106,7 @@ export function useOpenChangeRequestLink(
     }
     void navigate({
       to: "/pull-requests",
-      search: {
-        involvement: "all",
-        state: "all",
-        repository,
-        number: parsed.number,
-        selectedHost: host,
-        selectedProjectId: project.id,
-        selectedEnvironmentId: project.environmentId,
-      },
+      search: { involvement: "all", state: "all", ...pullRequestsSearch },
     });
     return true;
   };

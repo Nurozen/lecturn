@@ -72,6 +72,103 @@ export function findProjectForChangeRequest<Project extends ChangeRequestProject
   return findChangeRequestTarget(projects, link)?.project;
 }
 
+/** Prefers the project checked out from the link's repository, else lends any project on its host. */
+export function findProjectOnChangeRequestHost<Project extends ChangeRequestProject>(
+  projects: ReadonlyArray<Project>,
+  link: ChangeRequestLink,
+): Project | undefined {
+  return findChangeRequestHostTarget(projects, link)?.project;
+}
+
+/** {@link findProjectOnChangeRequestHost}, with the repository and host the panel is handed. */
+function findChangeRequestHostTarget<Project extends ChangeRequestProject>(
+  projects: ReadonlyArray<Project>,
+  link: ChangeRequestLink,
+): ChangeRequestTarget<Project> | undefined {
+  const own = findChangeRequestTarget(projects, link);
+  if (own !== undefined) return own;
+  // Each host's definition decides whether a checkout lends its credentials host-wide; Azure's
+  // reads stay scoped to the checkout's organization and project.
+  const project = projects.find((candidate) =>
+    changeRequestProjectRepositories(candidate).some(
+      (identity) =>
+        identity?.provider !== undefined &&
+        sourceControlClients.get(identity.provider).canReadChangeRequestOnHost(identity, link),
+    ),
+  );
+  return project === undefined
+    ? undefined
+    : { project, repository: link.repository, host: changeRequestLinkHost(link) };
+}
+
+export interface ChangeRequestLinkCapabilities {
+  readonly pullRequests?: boolean | undefined;
+  readonly threadPullRequests?: boolean | undefined;
+}
+
+/**
+ * Where every client opens a change request link in the app, or null for the browser. A link
+ * opened into a pull request view may borrow any project on its host when the server reads
+ * change requests by host, so a mirror's or a sibling repository's link still opens in the app.
+ */
+export function resolveChangeRequestLinkTarget<Project extends ChangeRequestProject>({
+  url,
+  projects,
+  capabilities,
+  environmentId,
+  projectId,
+  primaryEnvironmentId,
+  lendHostProject,
+}: {
+  url: string;
+  projects: ReadonlyArray<Project>;
+  capabilities: (environmentId: EnvironmentId) => ChangeRequestLinkCapabilities | undefined;
+  /** The link's own environment; without one, any environment that reads change requests. */
+  environmentId?: EnvironmentId | undefined;
+  /** The project the link came from, tried first. */
+  projectId?: ProjectId | undefined;
+  primaryEnvironmentId?: EnvironmentId | null | undefined;
+  lendHostProject: boolean;
+}): {
+  readonly project: Project;
+  readonly repository: string;
+  readonly number: number;
+  readonly host?: string;
+} | null {
+  const link = sourceControlClients.parseChangeRequestUrl(url)?.link;
+  if (link === undefined) return null;
+  // Matching remotes do not make project ids usable outside the link's environment.
+  const candidates = (
+    environmentId === undefined
+      ? projects.filter((project) => capabilities(project.environmentId)?.pullRequests === true)
+      : projects.filter((project) => project.environmentId === environmentId)
+  ).sort(
+    (left, right) =>
+      Number(right.id === projectId) - Number(left.id === projectId) ||
+      Number(right.environmentId === primaryEnvironmentId) -
+        Number(left.environmentId === primaryEnvironmentId),
+  );
+  const target =
+    findChangeRequestTarget(candidates, link) ??
+    (lendHostProject
+      ? findChangeRequestHostTarget(
+          candidates.filter(
+            (candidate) => capabilities(candidate.environmentId)?.threadPullRequests === true,
+          ),
+          link,
+        )
+      : undefined);
+  if (target === undefined) return null;
+  const { project, host } = target;
+  const projectCapabilities = capabilities(project.environmentId);
+  if (projectCapabilities?.pullRequests !== true) return null;
+  // A server that links pull requests to threads resolves the URL's own spelling; an older
+  // one reads the matched checkout's repository selector, a Stave space's secondary one too.
+  const repository =
+    projectCapabilities.threadPullRequests === true ? link.repository : target.repository;
+  return { project, repository, number: link.number, host };
+}
+
 export function resolvePullRequestPreviewTarget({
   environmentId,
   projects,

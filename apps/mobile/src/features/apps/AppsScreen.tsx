@@ -1,9 +1,9 @@
 import { Platform, ScrollView, View, type ScrollViewProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ScrollViewMarker } from "react-native-screens";
 
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { cn } from "../../lib/cn";
+import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { useDebouncedValue } from "../../state/queries";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { AppsTree } from "./AppThreadsScreen";
@@ -11,7 +11,7 @@ import { AppsTree } from "./AppThreadsScreen";
 function AppsScrollView(props: ScrollViewProps) {
   const insets = useSafeAreaInsets();
   return (
-    <ScrollViewMarker style={{ flex: 1 }}>
+    <NativeScrollViewMarker style={{ flex: 1 }}>
       <ScrollView
         {...props}
         // Transparent so the backdrop drawn once behind the list shows through.
@@ -20,7 +20,7 @@ function AppsScrollView(props: ScrollViewProps) {
         contentInsetAdjustmentBehavior="never"
         contentOffset={props.contentOffset ?? { x: 0, y: -insets.top }}
       />
-    </ScrollViewMarker>
+    </NativeScrollViewMarker>
   );
 }
 

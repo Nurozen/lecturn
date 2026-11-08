@@ -322,8 +322,10 @@ export interface SidebarSegmentView<Thread, Node> extends SidebarListScope<Threa
   readonly collapsed: boolean;
   readonly attention: ThreadStatusPill | null;
   readonly hasRows: boolean;
-  /** Settled rows behind "Show more". */
+  /** Settled rows behind "Show more", older ones not read yet included. */
   readonly hiddenSettledCount: number;
+  /** Older settled threads the shell left out, read in pages as the shelf grows. */
+  readonly unloadedSettledCount: number;
   /** Configured page size, excluding any extra deep-linked current row. */
   readonly settledVisibleCount: number;
   /** Which drafts the segment's draft block keeps, inside `scopedProjectKeys`. */
@@ -418,6 +420,8 @@ export interface SidebarSegmentViewsInput<Thread, Node> extends Omit<
   readonly shelves: SegmentShelves;
   readonly isRouteThread: (thread: Thread) => boolean;
   readonly statusOf: (thread: Thread) => ThreadStatusPill | null;
+  /** Older settled threads not read yet in the environments a segment owns. */
+  readonly unloadedSettledCountOf?: ((ownsEnvironment: OwnsEnvironment) => number) | undefined;
 }
 
 /**
@@ -446,6 +450,8 @@ export function buildSidebarSegmentViews<
     const mine = (threads: ReadonlyArray<Thread>) => threads.filter((thread) => own.has(thread));
     const environmentIds = new Set(segment.projects.map((project) => project.environmentId));
     const shelf = input.shelves.get(segment.id) ?? {};
+    const ownsEnvironment = input.environmentFilters.get(segment.id) ?? OWNS_EVERY_ENVIRONMENT;
+    const unloadedSettledCount = input.unloadedSettledCountOf?.(ownsEnvironment) ?? 0;
     const workingShelfExpanded = shelf.workingExpanded ?? input.workingShelfExpanded ?? false;
     const snoozedShelfExpanded = shelf.snoozedExpanded ?? input.snoozedShelfExpanded;
     const settledShelfExpanded = shelf.settledExpanded ?? input.settledShelfExpanded;
@@ -485,7 +491,8 @@ export function buildSidebarSegmentViews<
         [...pinnedThreads, ...activeThreads, ...workingThreads].map(input.statusOf),
       ),
       hasRows: segment.threads.length > 0 || (input.nestSagaProjects && scopedSagaTree.length > 0),
-      hiddenSettledCount: settledPage.hiddenCount,
+      hiddenSettledCount: settledPage.hiddenCount + unloadedSettledCount,
+      unloadedSettledCount,
       settledVisibleCount: shelf.settledVisibleCount ?? input.settledVisibleCount,
       pinnedThreads,
       activeThreads,
@@ -507,7 +514,7 @@ export function buildSidebarSegmentViews<
       workingShelfExpanded,
       snoozedShelfExpanded,
       settledShelfExpanded,
-      ownsEnvironment: input.environmentFilters.get(segment.id) ?? OWNS_EVERY_ENVIRONMENT,
+      ownsEnvironment,
     };
   });
 }

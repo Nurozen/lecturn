@@ -18,7 +18,6 @@ import type {
   SquireRuleOffer,
   ThreadId,
 } from "@lecturn/contracts";
-import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -60,6 +59,7 @@ import {
   type SquireAnswer,
 } from "./squireQueue.logic";
 import { useSquireItemsAct, useSquireMarkOpened } from "./squireQueueState";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type SquireActedHandler = (
   row: SquireCardRow,
@@ -106,7 +106,7 @@ function SquireCardBody(props: {
   readonly now: number;
 }) {
   const { environmentId, card } = props;
-  const navigation = useNavigation();
+  const openThreadOverPage = useOpenThreadOverPage();
   const { canAct, run } = useSquireItemsAct(environmentId);
   const payload = card.payload instanceof UnknownUnionMember ? null : card.payload;
   const recommendation = payload === null ? null : squireCardRecommendation(payload);
@@ -143,7 +143,7 @@ function SquireCardBody(props: {
 
   const openThread = () => {
     if (threadId === null) return;
-    navigation.navigate("Thread", { environmentId, threadId });
+    openThreadOverPage({ environmentId, threadId });
   };
 
   const followUp = () => {
@@ -153,7 +153,7 @@ function SquireCardBody(props: {
       key,
       squireFollowUpDraft(payload.question, getComposerDraftSnapshot(key).text),
     );
-    navigation.navigate("Thread", { environmentId, threadId: payload.threadId });
+    openThreadOverPage({ environmentId, threadId: payload.threadId });
   };
 
   return (
@@ -347,7 +347,7 @@ function SquireOverlapThread(props: {
   readonly thread: OverlapPayload["threads"][number];
 }) {
   const { environmentId, thread } = props;
-  const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const shell = useQuietThreadShell(scopeThreadRef(environmentId, thread.threadId));
   const config = useEnvironmentServerConfig(environmentId);
   const instance = config?.providers.find(
@@ -367,7 +367,7 @@ function SquireOverlapThread(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Open ${line.label}`}
-      onPress={() => navigation.navigate("Thread", { environmentId, threadId: thread.threadId })}
+      onPress={() => openThread({ environmentId, threadId: thread.threadId })}
       className="gap-0.5 active:opacity-60"
     >
       <Text className="font-lecturn-medium text-sm text-primary-text" numberOfLines={1}>

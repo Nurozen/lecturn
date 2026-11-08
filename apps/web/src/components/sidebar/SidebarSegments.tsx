@@ -21,6 +21,7 @@ import {
   OWNS_EVERY_ENVIRONMENT,
   segmentLabelDomId,
   segmentListDomId,
+  type OwnsEnvironment,
 } from "./sidebarSegments.logic";
 import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { SidebarAccountBar } from "./SidebarAccountBar";
@@ -35,6 +36,10 @@ import type {
 export interface SidebarListBodyScope<Node>
   extends SidebarThreadListScope<Node>, SidebarShelfActions {
   readonly orderedPinnedThreads: ReadonlyArray<EnvironmentThreadShell>;
+  /** A segment's older settled threads not read yet; the one list counts them itself. */
+  readonly unloadedSettledCount?: number;
+  /** A segment's environments; the one list owns every environment. */
+  readonly ownsEnvironment?: OwnsEnvironment;
 }
 
 interface SidebarSegmentsProps<Node> {

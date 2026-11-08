@@ -8,11 +8,14 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { ConnectAccountMenu } from "./ConnectAccountMenu";
 import { useLecturnConnectAuthPrompt } from "./useLecturnConnectAuthPrompt";
 
-export function LecturnConnectSidebarSignIn() {
-  if (hasPhoneConnectAccount()) return <PhoneConnectSidebarEntry />;
+/** `labelClassName` lets the phone icon rail keep the label for screen readers only. */
+export function LecturnConnectSidebarSignIn({
+  labelClassName,
+}: { readonly labelClassName?: string } = {}) {
+  if (hasPhoneConnectAccount()) return <PhoneConnectSidebarEntry labelClassName={labelClassName} />;
   if (!hasCloudPublicConfig()) return null;
 
-  return <ConfiguredLecturnConnectSidebarSignIn />;
+  return <ConfiguredLecturnConnectSidebarSignIn labelClassName={labelClassName} />;
 }
 
 export function LecturnConnectSidebarAvatar() {
@@ -22,7 +25,11 @@ export function LecturnConnectSidebarAvatar() {
   return <ConnectAccountMenu />;
 }
 
-function ConfiguredLecturnConnectSidebarSignIn() {
+function ConfiguredLecturnConnectSidebarSignIn({
+  labelClassName,
+}: {
+  readonly labelClassName: string | undefined;
+}) {
   const { isLoaded, isSignedIn } = useAuth();
   const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
 
@@ -34,7 +41,7 @@ function ConfiguredLecturnConnectSidebarSignIn() {
         <SidebarMenuItem>
           <SidebarMenuButton onClick={openAuthPrompt}>
             <LogInIcon />
-            <span>Sign in to Lecturn Connect</span>
+            <span className={labelClassName}>Sign in to Lecturn Connect</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

@@ -145,6 +145,7 @@ describe("searchSettings", () => {
       "stave-status",
       "stave-binary-path",
       "stave-config-path",
+      "sidebar-project-icon-colors",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });

@@ -3,6 +3,7 @@ import {
   EnvironmentHttpApi,
   type OrchestrationProjectShell,
 } from "@lecturn/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -17,6 +18,7 @@ import {
   requireEnvironmentScope,
 } from "../auth/http.ts";
 import * as AppStreamFilter from "../apps/appStreamFilter.ts";
+import { parseAppSubject } from "../apps/subjects.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
@@ -35,7 +37,7 @@ import * as StaveProjectShellDecoration from "./fork/StaveProjectShellDecoration
 import {
   buildActiveShellSnapshot,
   loadShellSnapshotParts,
-  omitIdleSubagentShells,
+  shellSnapshotForSubscriber,
 } from "./ShellStream.ts";
 import { boundedSnapshotResponseFields } from "./ThreadStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
@@ -81,24 +83,27 @@ export const layer = HttpApiBuilder.group(
         ),
     );
 
-    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* (
-      omitIdleSubagents: boolean,
-    ) {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
-          sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
-          listProjects: projectStore.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
-      const projects = yield* decorateShells(yield* enrichProjectShells(base.projects));
-      return {
-        ...base,
-        threads: omitIdleSubagents ? omitIdleSubagentShells(base.threads) : base.threads,
-        projects,
-      };
-    });
+    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(
+      function* (options: {
+        readonly omitIdleSubagents: boolean;
+        readonly omitOlderSettled: boolean;
+      }) {
+        const base = buildActiveShellSnapshot(
+          yield* loadShellSnapshotParts({
+            sql,
+            readThreads: threadManagement.readShellSnapshot({ location: "active" }),
+            listProjects: projectStore.listShells(),
+            latestSequence: applicationEvents.latestApplicationSequence,
+          }),
+        );
+        const { snapshot } = shellSnapshotForSubscriber(base, {
+          ...options,
+          now: yield* DateTime.now,
+        });
+        const projects = yield* decorateShells(yield* enrichProjectShells(base.projects));
+        return { ...snapshot, projects };
+      },
+    );
 
     const loadThreadSnapshot = Effect.fn("http.orchestration.loadThreadSnapshot")(function* (
       threadId: Parameters<typeof threadManagement.getThreadSnapshot>[0],
@@ -166,7 +171,12 @@ export const layer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          return yield* loadShellSnapshot(args.query.omitIdleSubagents === "1").pipe(
+          return yield* loadShellSnapshot({
+            omitIdleSubagents: args.query.omitIdleSubagents === "1",
+            // Lecturn: app sessions cannot page older settled threads, so their shells stay whole.
+            omitOlderSettled:
+              args.query.omitOlderSettled === "1" && parseAppSubject(principal.subject) === null,
+          }).pipe(
             Effect.map(AppStreamFilter.filterShellSnapshotForSubject(principal.subject)),
             traceLocalHandlerWork,
             Effect.catch((cause) =>
@@ -237,6 +247,7 @@ export const layer = HttpApiBuilder.group(
               bounded,
               compactTurnItems: args.query.compactTurnItems === "1",
               dedupeBodies: args.query.dedupeBodies === "1",
+              compactIds: args.query.compactIds === "1",
             }),
           };
         }),
@@ -261,6 +272,9 @@ export const layer = HttpApiBuilder.group(
               args.query.view === "conversation",
             )
             .pipe(
+              Effect.map((page) =>
+                args.query.compactIds === "1" ? { ...page, idTable: true as const } : page,
+              ),
               traceLocalHandlerWork,
               Effect.catch(
                 Effect.fnUntraced(function* (cause) {

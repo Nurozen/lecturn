@@ -77,19 +77,31 @@ function samePullRequest(
 /**
  * The page each tab shows in a root route chain: the newest chat, the newest pull request, and
  * the Settings page directly above the Settings route. Returns `previous` when nothing changed.
- * A connected app's thread belongs to Apps, so it never becomes the remembered chat.
+ * A connected app's thread or draft belongs to Apps, so it never becomes the remembered chat.
  */
 export function workspaceSelectionsIn(
   routes: readonly RouteLike[],
   previous: WorkspaceSelections,
   isAppThread: (selection: Omit<ThreadSelection, "key">) => boolean = () => false,
+  isAppProject: (project: {
+    readonly environmentId: string;
+    readonly projectId: string;
+  }) => boolean = () => false,
 ): WorkspaceSelections {
   let next = previous;
   const thread = routes.findLast((route) => {
     if (route.name !== "Thread") return false;
     const environmentId = stringParam(route.params, "environmentId");
     const threadId = stringParam(route.params, "threadId");
-    return !(environmentId && threadId && isAppThread({ environmentId, threadId }));
+    if (environmentId && threadId) return !isAppThread({ environmentId, threadId });
+    const draft = (route.params as { readonly draft?: object } | undefined)?.draft;
+    const draftEnvironmentId = stringParam(draft, "environmentId");
+    const draftProjectId = stringParam(draft, "projectId");
+    return !(
+      draftEnvironmentId &&
+      draftProjectId &&
+      isAppProject({ environmentId: draftEnvironmentId, projectId: draftProjectId })
+    );
   });
   const environmentId = stringParam(thread?.params, "environmentId");
   const threadId = stringParam(thread?.params, "threadId");
@@ -98,9 +110,17 @@ export function workspaceSelectionsIn(
     threadId &&
     (next.threads?.environmentId !== environmentId ||
       next.threads.threadId !== threadId ||
-      next.threads.key !== thread?.key)
+      next.threads.key !== thread?.key ||
+      next.threadsDraft)
   ) {
-    next = { ...next, threads: { environmentId, threadId, key: thread?.key } };
+    const { threadsDraft: _, ...rest } = next;
+    next = { ...rest, threads: { environmentId, threadId, key: thread?.key } };
+  } else if (
+    thread?.key !== undefined &&
+    !threadId &&
+    (next.threadsDraft?.key !== thread.key || next.threadsDraft.params !== thread.params)
+  ) {
+    next = { ...next, threadsDraft: { key: thread.key, params: thread.params } };
   }
   const pullRequestRoute = routes.findLast((route) => route.name === "PullRequest");
   const pullRequest = pullRequestSelection(pullRequestRoute?.params);
@@ -143,6 +163,16 @@ function detailRoute(
   check: WorkspaceSelectionCheck,
 ): RouteLike | undefined {
   if (tab === "threads") {
+    const draft = selections.threadsDraft;
+    if (draft) {
+      return (
+        state.routes.find((route) => route.key === draft.key) ?? {
+          key: draft.key,
+          name: "Thread",
+          params: draft.params as object | undefined,
+        }
+      );
+    }
     const thread = selections.threads;
     if (!thread || !check.thread(thread)) return undefined;
     return (

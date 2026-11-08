@@ -1034,6 +1034,7 @@ function ThreadSettingsMainContent(props: {
   };
 
   return (
+    // oxlint-disable-next-line lecturn/require-registered-list-scroll -- Sheet content; sheets sit outside workspace columns and keep their own header handling.
     <AnimatedLegendList
       alwaysBounceVertical
       automaticallyAdjustsScrollIndicatorInsets

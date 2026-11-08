@@ -117,6 +117,20 @@ describe("workspace root navigation", () => {
     expect(workspaceTabsReducer(state, { type: "cancel" }).tabs.threads.scrollOffset).toBe(500);
   });
 
+  it("keeps the Settings search apart from the tab Settings opened over", () => {
+    let state = workspaceTabsReducer(initialWorkspaceTabsState(), {
+      type: "query",
+      query: "diff",
+      tab: "threads",
+    });
+    state = workspaceTabsReducer(state, { type: "search", tab: "settings" });
+    state = workspaceTabsReducer(state, { type: "query", query: "theme", tab: "settings" });
+    expect(state.tabs.settings).toMatchObject({ query: "theme", searchMode: "active" });
+    state = workspaceTabsReducer(state, { type: "cancel", tab: "settings" });
+    expect(state.tabs.settings).toMatchObject({ query: "", searchMode: "resting" });
+    expect(state.tabs.threads.query).toBe("diff");
+  });
+
   it("a late native blur cannot reopen a cancelled search", () => {
     let state = workspaceTabsReducer(initialWorkspaceTabsState(), { type: "search" });
     state = workspaceTabsReducer(state, { type: "cancel" });
@@ -156,7 +170,7 @@ describe("workspace root navigation", () => {
   it("orders the tabs Threads, Apps, Pulls and rejects the native compose key", () => {
     expect(WORKSPACE_TABS).toEqual(["threads", "apps", "pullRequests", "usage"]);
     expect(Object.keys(initialWorkspaceTabsState().tabs).sort()).toEqual(
-      [...WORKSPACE_TABS].sort(),
+      [...WORKSPACE_TABS, "settings"].sort(),
     );
     expect(WORKSPACE_TABS.every(isWorkspaceTab)).toBe(true);
     expect(isWorkspaceTab("compose")).toBe(false);

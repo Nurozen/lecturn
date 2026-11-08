@@ -1,5 +1,5 @@
 import type { NavigationState } from "@react-navigation/native";
-import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import * as Linking from "expo-linking";
 import { AppState, Dimensions, Platform } from "react-native";
 
@@ -47,12 +47,25 @@ function save() {
     .catch(() => undefined);
 }
 
+// Route keys only name routes of the session that wrote them; a saved one would make a tab rebuild
+// its page under a stale key, which UIKit animates as a pop and a push.
+function withoutRouteKeys(saved: WorkspaceSelections | undefined): WorkspaceSelections {
+  const omitKey = <Selection extends { readonly key?: string }>({ key: _, ...rest }: Selection) =>
+    rest;
+  const { threads, pullRequests, settingsKey: _, threadsDraft: _draft, ...rest } = saved ?? {};
+  return {
+    ...rest,
+    ...(threads ? { threads: omitKey(threads) } : {}),
+    ...(pullRequests ? { pullRequests: omitKey(pullRequests) } : {}),
+  };
+}
+
 /** Loads the saved selections once; pages visited before it resolves win over saved ones. */
 export function hydrateWorkspaceSelections() {
   if (!REMEMBERS) return Promise.resolve();
   hydration ??= loadPreferences()
     .then((preferences) => {
-      selections = { ...preferences.workspaceSelections, ...selections };
+      selections = { ...withoutRouteKeys(preferences.workspaceSelections), ...selections };
       saved = selections;
       AppState.addEventListener("change", (status) => {
         if (status !== "active") save();
@@ -66,13 +79,17 @@ export function currentWorkspaceSelections() {
   return selections;
 }
 
-/** The navigation container's `onStateChange`: remembers the page each tab is showing. */
+/**
+ * The navigation container's `onReady` and `onStateChange`: remembers the page each tab is
+ * showing. The initial state, such as a cold start's reopened chat, reaches only `onReady`.
+ */
 export function recordWorkspaceSelections(state: NavigationState | undefined) {
   if (!REMEMBERS || !state) return;
   selections = workspaceSelectionsIn(
     state.routes.slice(0, state.index + 1),
     selections,
     isAppThread,
+    isAppProject,
   );
 }
 
@@ -85,13 +102,18 @@ function isAppThread(selection: { readonly environmentId: string; readonly threa
     }),
   );
   if (thread === null) return false;
-  const project = appAtomRegistry.get(
+  return isAppProject(thread);
+}
+
+/** A connected app's workspace; a draft started from Apps lives there too. */
+function isAppProject(project: { readonly environmentId: string; readonly projectId: string }) {
+  const shell = appAtomRegistry.get(
     environmentProjects.projectAtom({
-      environmentId: thread.environmentId,
-      projectId: thread.projectId,
+      environmentId: project.environmentId as EnvironmentId,
+      projectId: project.projectId as ProjectId,
     }),
   );
-  return project?.appBinding !== undefined;
+  return shell?.appBinding !== undefined;
 }
 
 function environmentRemoved(environmentId: string) {

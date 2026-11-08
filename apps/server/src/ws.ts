@@ -92,6 +92,7 @@ import {
   type ServerConfig as ClientServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
+  type ServerProvider,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
@@ -141,11 +142,12 @@ import {
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
-  activeShellRowsForSubscriber,
+  loadOlderSettledThreadsPage,
   loadShellSnapshotParts,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
+  shellSnapshotForSubscriber,
   shellStreamItemsFromResumeSnapshot,
   shouldPublishShellApplicationEvent,
   skipUnchangedThreadShells,
@@ -530,6 +532,10 @@ export const withLateEditorConfig = <E, R>(
     ),
   );
 };
+
+function withoutWorkspaceSnapshots(providers: ReadonlyArray<ServerProvider>): ServerProvider[] {
+  return providers.map(({ workspaceSnapshots: _workspaceSnapshots, ...provider }) => provider);
+}
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
@@ -950,6 +956,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
     readonly acceptBoundedSnapshot?: boolean;
     readonly acceptCompactTurnItems?: boolean;
     readonly acceptDedupedBodies?: boolean;
+    readonly acceptCompactIds?: boolean;
   }) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const dedupeBodies = input.acceptDedupedBodies === true;
@@ -1053,6 +1060,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
             ...snapshot,
             compactTurnItems: input.acceptCompactTurnItems === true,
             dedupeBodies,
+            compactIds: input.acceptCompactIds === true,
           })
         : (() => {
             const projection = projectThreadProjectionForWire(snapshot.projection);
@@ -1150,6 +1158,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
     readonly omitIdleSubagents?: boolean;
+    readonly omitOlderSettled?: boolean;
   }) {
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1186,13 +1195,16 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
-      const rows = activeShellRowsForSubscriber(base.threads, input.omitIdleSubagents === true);
-      subagentThreadIds = rows.subagentThreadIds;
+      const forSubscriber = shellSnapshotForSubscriber(base, {
+        omitIdleSubagents: input.omitIdleSubagents === true,
+        omitOlderSettled: input.omitOlderSettled === true,
+        now: yield* DateTime.now,
+      });
+      subagentThreadIds = forSubscriber.subagentThreadIds;
       const enriched = yield* enrichProjectShells(base.projects);
       return {
         snapshot: {
-          ...base,
-          threads: rows.threads,
+          ...forSubscriber.snapshot,
           projects: enriched.projects,
         } as OrchestrationV2ShellSnapshot,
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
@@ -1437,7 +1449,9 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const recordClientCommandAnalytics = (command: OrchestrationV2Command) => {
     switch (command.type) {
       case "message.dispatch":
-        return analytics.record("client.turn.requested", originProps).pipe(Effect.ignore);
+        return analytics
+          .record("client.turn.requested", originProps)
+          .pipe(Effect.ignore, Effect.andThen(recordCommandFeatureUsage(command)));
       case "thread.fork":
         return analytics
           .record("client.thread.forked", {
@@ -1907,12 +1921,16 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
 
   const loadServerConfig = Effect.fn("ws.loadServerConfig")(function* (options: {
     readonly usageLimitsCommand: boolean;
+    readonly workspaceSnapshotsOnDemand: boolean;
   }) {
     const keybindingsConfig = yield* keybindings.loadConfigState;
     const currentProviders = yield* providerRegistry.getProviders;
-    const providers = options.usageLimitsCommand
+    const commandProviders = options.usageLimitsCommand
       ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
       : currentProviders;
+    const providers = options.workspaceSnapshotsOnDemand
+      ? withoutWorkspaceSnapshots(commandProviders)
+      : commandProviders;
     const settings = AppStreamFilter.filterServerSettingsForSubject(currentSession.subject)(
       ServerSettings.redactServerSettingsForClient(yield* serverSettings.getSettings),
     );
@@ -1977,8 +1995,11 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       },
       settings,
       shellResumeCompletionMarker: true,
-      // Lecturn: app and embed sessions cannot call getThreadFamily, so their shells stay whole.
-      ...(parseAppSubject(currentSession.subject) === null ? { shellThreadFamilies: true } : {}),
+      // Lecturn: app and embed sessions cannot call getThreadFamily or getOlderSettledThreads,
+      // so their shells stay whole.
+      ...(parseAppSubject(currentSession.subject) === null
+        ? { shellThreadFamilies: true, shellOlderSettled: true }
+        : {}),
       threadResumeCompletionMarker: true,
       threadSnapshotPagination: true,
       threadFind: true,
@@ -2047,7 +2068,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
 
   // Rows the shell can omit, read with the same snapshot sequence the shell uses.
   const readOmittableShellRows = Effect.fn("ws.orchestrationV2.readOmittableShellRows")(function* (
-    options: { readonly subagentFamilyOf: ThreadId } | { readonly worktreePath: string },
+    options: { readonly familyOf: ThreadId } | { readonly worktreePath: string },
     message: string,
   ) {
     const { threads, snapshotSequence } = yield* loadShellSnapshotParts({
@@ -2295,7 +2316,15 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         .searchThreadStream(input)
         .pipe(Stream.mapError((cause) => new OrchestrationV2SearchThreadError({ cause }))),
     [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input) =>
-      threadSearch.search(input).pipe(
+      ThreadSearch.searchThreadsWithOlderSettledRows({
+        request: input,
+        search: threadSearch.search,
+        searchOlderSettled: threadSearch.searchOlderSettled,
+        sql,
+        readThreads: (threadIds) =>
+          threadManagement.readShellSnapshot({ location: "active", threadIds }),
+        latestSequence: applicationEvents.latestApplicationSequence,
+      }).pipe(
         Effect.mapError(
           (cause) =>
             new OrchestrationSearchThreadsError({
@@ -2307,9 +2336,22 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>
       getOrchestrationV2ArchivedShellSnapshot,
     [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
-      readOmittableShellRows(
-        { subagentFamilyOf: input.threadId },
-        "Failed to load the thread family",
+      readOmittableShellRows({ familyOf: input.threadId }, "Failed to load the thread family"),
+    [ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads]: (input) =>
+      loadOlderSettledThreadsPage({
+        sql,
+        listThreads: threadManagement.listOlderSettledThreads(input),
+        readThreads: (threadIds) =>
+          threadManagement.readShellSnapshot({ location: "active", threadIds }),
+        latestSequence: applicationEvents.latestApplicationSequence,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationV2GetShellSnapshotError({
+              message: "Failed to load older settled threads",
+              cause,
+            }),
+        ),
       ),
     [ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds]: (input) =>
       readOmittableShellRows(
@@ -2449,9 +2491,14 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: (_input) =>
       Stream.unwrap(subscribeOrchestrationV2ArchivedShell()),
     [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
-      Stream.unwrap(subscribeOrchestrationV2Shell(input)).pipe(
-        AppStreamFilter.filterShellStream(currentSession),
-      ),
+      Stream.unwrap(
+        subscribeOrchestrationV2Shell(
+          // Lecturn: app sessions cannot page older settled threads, so their shells stay whole.
+          parseAppSubject(currentSession.subject) === null
+            ? input
+            : { ...input, omitOlderSettled: false },
+        ),
+      ).pipe(AppStreamFilter.filterShellStream(currentSession)),
     [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) =>
       Stream.unwrap(
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
@@ -2502,7 +2549,8 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
       ),
     [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
-    [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig({ usageLimitsCommand: false }),
+    [WS_METHODS.serverGetConfig]: (_input) =>
+      loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),
     [WS_METHODS.serverSearchAcpRegistry]: (input) =>
       acpRegistryCatalog
         .search(input)
@@ -2672,7 +2720,29 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
             providers = yield* providerRegistry.refreshInstance(instance.instanceId);
           }
         }
-        return { providers };
+        if (input.workspaceSnapshotsOnDemand !== true) return { providers };
+        const commandProviders =
+          input.usageLimitsCommand === true
+            ? withUsageLimitsCommands(providers, yield* usageLimitSources.current)
+            : providers;
+        const { instanceId, cwd } = input;
+        if (instanceId === undefined || cwd === undefined) {
+          return { providers: withoutWorkspaceSnapshots(commandProviders) };
+        }
+        return {
+          providers: commandProviders
+            .filter((provider) => provider.instanceId === instanceId)
+            .map((provider) => ({
+              ...provider,
+              // Callers read only the cwd snapshot; the config stream carries the rest.
+              models: [],
+              slashCommands: [],
+              skills: [],
+              workspaceSnapshots: (provider.workspaceSnapshots ?? []).filter(
+                (snapshot) => snapshot.cwd === cwd,
+              ),
+            })),
+        };
       }),
     [WS_METHODS.mcpAppsCallTool]: (input) => mcpAppRequests.callTool(input),
     [WS_METHODS.mcpAppsToolInfo]: (input) => mcpAppRequests.toolInfo(input),
@@ -3213,7 +3283,8 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.subscribeWorktreeSetup]: (input) => worktreeSetupTracker.stream(input.threadId),
     [WS_METHODS.worktreeSetupCancel]: (input) =>
       worktreeSetupTracker.cancel(input.threadId).pipe(Effect.map((cancelled) => ({ cancelled }))),
-    [WS_METHODS.vcsRefreshStatus]: (input) => vcsStatusBroadcaster.refreshStatus(input.cwd),
+    [WS_METHODS.vcsRefreshStatus]: (input) =>
+      vcsStatusBroadcaster.refreshStatus(input.cwd, { localOnly: input.localOnly ?? false }),
     [WS_METHODS.vcsPull]: (input) =>
       gitWorkflow.pullCurrentBranch(input.cwd).pipe(
         Effect.matchCauseEffect({
@@ -3397,12 +3468,16 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       Stream.unwrap(
         Effect.gen(function* () {
           const usageLimitsCommand = input.usageLimitsCommand === true;
+          const workspaceSnapshotsOnDemand = input.workspaceSnapshotsOnDemand === true;
           // Subscribed before the snapshot so no provider change falls between them.
           const providerChanges = yield* providerRegistry.subscribeChanges;
           // Buffer changes through discovery and the initial snapshot's RPC ACK wait.
           const keybindingsChanges = yield* keybindings.subscribeChanges;
           const settingsChanges = yield* serverSettings.subscribeChanges;
-          const config = yield* loadServerConfig({ usageLimitsCommand });
+          const config = yield* loadServerConfig({
+            usageLimitsCommand,
+            workspaceSnapshotsOnDemand,
+          });
           const keybindingsUpdates = keybindingsChanges.pipe(
             Stream.map((event) => ({
               version: 1 as const,
@@ -3421,8 +3496,15 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
             usageLimitSources.streamChanges.pipe(
               Stream.changesWith(usageLimitsCommand ? sameUsageLimitCommandCoverage : () => true),
             ),
-            (providers, sources) =>
-              usageLimitsCommand ? withUsageLimitsCommands(providers, sources) : providers,
+            (providers, sources) => {
+              const commandProviders = usageLimitsCommand
+                ? withUsageLimitsCommands(providers, sources)
+                : providers;
+              // Stripped before the de-dupe below, so snapshot-only changes send nothing.
+              return workspaceSnapshotsOnDemand
+                ? withoutWorkspaceSnapshots(commandProviders)
+                : commandProviders;
+            },
           ).pipe(
             // Both sides replay their current value, so the first pairing normally
             // repeats the snapshot the client already holds. Compare against that
@@ -3617,11 +3699,28 @@ const LECTURN_WS_METHODS = [
 type LecturnRpcTag = (typeof LECTURN_WS_METHODS)[number];
 type WsRpcTag = RpcGroup.Rpcs<typeof ServerWsRpcGroup>["_tag"];
 const lecturnRpcTags: ReadonlySet<string> = new Set(LECTURN_WS_METHODS);
-const WsCoreRpcGroup = ServerWsRpcGroup.omit(
+const forkGroupRpcTags = [
   ...Object.values(CONTEXTUAL_WS_METHODS),
   ...Object.values(APPS_WS_METHODS),
   ...SquireRpcs.map((rpc) => rpc._tag),
   ...LECTURN_WS_METHODS,
+] as const;
+const forkGroupRpcTagSet: ReadonlySet<string> = new Set(forkGroupRpcTags);
+// The remaining orchestration RPCs get their own group too; the core group alone outgrew the budget.
+type OrchestrationRpcTag = Extract<
+  Exclude<WsRpcTag, ContextualRpcTag | AppsRpcTag | SquireRpcTag | LecturnRpcTag>,
+  `orchestration.${string}`
+>;
+const isOrchestrationRpcTag = (tag: string): tag is OrchestrationRpcTag =>
+  tag.startsWith("orchestration.") && !forkGroupRpcTagSet.has(tag);
+const WsCoreRpcGroup = ServerWsRpcGroup.omit(
+  ...forkGroupRpcTags,
+  ...[...ServerWsRpcGroup.requests.keys()].filter(isOrchestrationRpcTag),
+);
+const WsOrchestrationRpcGroup = ServerWsRpcGroup.omit(
+  ...([...ServerWsRpcGroup.requests.keys()].filter((tag) => !isOrchestrationRpcTag(tag)) as Array<
+    Exclude<WsRpcTag, OrchestrationRpcTag>
+  >),
 );
 const WsContextualRpcGroup = RpcGroup.make(...ContextualRpcs);
 const WsAppsRpcGroup = RpcGroup.make(...AppsRpcs);
@@ -3635,6 +3734,7 @@ const WsLecturnRpcGroup = ServerWsRpcGroup.omit(
 /** The handler groups that together serve WsRpcGroup (exported for wiring tests). */
 export const WS_RPC_HANDLER_GROUPS = {
   core: WsCoreRpcGroup,
+  orchestration: WsOrchestrationRpcGroup,
   contextual: WsContextualRpcGroup,
   apps: WsAppsRpcGroup,
   squire: WsSquireRpcGroup,
@@ -3659,14 +3759,16 @@ export const layerWsRpc = (
       Effect.map((handlers) => {
         const coreHandlers: Omit<
           typeof handlers,
-          ContextualRpcTag | AppsRpcTag | SquireRpcTag | LecturnRpcTag
+          ContextualRpcTag | AppsRpcTag | SquireRpcTag | LecturnRpcTag | OrchestrationRpcTag
         > = handlers;
+        const orchestrationHandlers: Pick<typeof handlers, OrchestrationRpcTag> = handlers;
         const contextualHandlers: Pick<typeof handlers, ContextualRpcTag> = handlers;
         const appsHandlers: Pick<typeof handlers, AppsRpcTag> = handlers;
         const squireHandlers: Pick<typeof handlers, SquireRpcTag> = handlers;
         const lecturnHandlers: Pick<typeof handlers, LecturnRpcTag> = handlers;
         return Layer.mergeAll(
           WsCoreRpcGroup.toLayer(coreHandlers),
+          WsOrchestrationRpcGroup.toLayer(orchestrationHandlers),
           WsContextualRpcGroup.toLayer(contextualHandlers),
           WsAppsRpcGroup.toLayer(appsHandlers),
           WsSquireRpcGroup.toLayer(squireHandlers),

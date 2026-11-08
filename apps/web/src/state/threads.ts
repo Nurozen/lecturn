@@ -7,6 +7,7 @@ import {
   createEnvironmentThreadStateAtoms,
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
+  createOlderSettledThreadAtoms,
   createThreadEnvironmentAtoms,
   createThreadFamilyAtoms,
 } from "@lecturn/client-runtime/state/threads";
@@ -22,7 +23,14 @@ import { serverEnvironment } from "./server";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentShell } from "./shell";
 
-const threadFamilies = createThreadFamilyAtoms(connectionAtomRuntime, environmentShell.stateAtom);
+export const threadFamilies = createThreadFamilyAtoms(
+  connectionAtomRuntime,
+  environmentShell.stateAtom,
+);
+export const olderSettledThreads = createOlderSettledThreadAtoms(
+  connectionAtomRuntime,
+  environmentShell.stateAtom,
+);
 const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, threadFamilies.snapshotAtom);
 /** Sending a guest message starts a turn in the thread's own mode; dismissing starts nothing. */
 const sendGuestMessage = withAndroidAccessFor(

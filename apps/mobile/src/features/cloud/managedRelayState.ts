@@ -13,7 +13,7 @@ import {
 import type { EnvironmentId } from "@lecturn/contracts";
 import type { RelayClientEnvironmentRecord } from "@lecturn/contracts/relay";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 
 import * as Runtime from "../../lib/runtime";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -54,14 +54,6 @@ export function useManagedRelayEnvironments(selectedAccountId?: string) {
     : EMPTY_ENVIRONMENTS_ATOM;
   const result = useAtomValue(atom);
   const snapshot = readManagedRelaySnapshotState(result);
-  useEffect(() => {
-    if (snapshot.error) {
-      console.error("[lecturn-cloud] Relay environment listing failed", {
-        message: snapshot.error,
-        traceId: snapshot.errorTraceId,
-      });
-    }
-  }, [snapshot.error, snapshot.errorTraceId]);
   const refresh = useCallback(() => {
     if (accountId) {
       managedRelayQueryManager.refreshEnvironments(appAtomRegistry, accountId);

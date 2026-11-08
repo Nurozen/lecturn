@@ -53,7 +53,7 @@ const seedHistory = Effect.gen(function* () {
 const compactAndList = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
-  yield* maintenance.compactEventStore;
+  yield* maintenance.compactEventStore();
   const rows = yield* sql<{ readonly event_id: string }>`
     SELECT event_id FROM orchestration_events ORDER BY sequence ASC`;
   return rows.map((row) => row.event_id);

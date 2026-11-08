@@ -192,7 +192,7 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
         // An unusable lock directory must not block updates; fall back to the
         // in-process lock alone.
         const lock = yield* acquireFileLock(lockKey, restore).pipe(
-          Effect.map(Option.some),
+          Effect.asSome,
           Effect.catch((error) =>
             Effect.logWarning("Provider maintenance file lock unavailable", {
               lockKey,

@@ -148,6 +148,7 @@ vi.mock("../../state/projects", () => ({
   },
 }));
 vi.mock("../../state/vcs", () => ({ vcsEnvironment: { status: vi.fn() } }));
+vi.mock("../../state/olderSettledShelf", () => ({ useOlderSettledCount: () => 0 }));
 vi.mock("../../state/sourceControl", () => ({
   sourceControlEnvironment: {
     cancelProjectClone: { label: "clone.cancel" },

@@ -111,10 +111,17 @@ import {
 import { SquireHomeListRow, useSquireHomeItems } from "../squires/SquireHomeRows";
 import { SquireMotionClock } from "../squires/SquireIndicator";
 import { isHomeSquireItem } from "../squires/squireHomeItems.logic";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 
 type SidebarListItem = (
   | HomeHierarchyV2Item
-  | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number }
+  | {
+      readonly type: "v2-show-more";
+      readonly key: string;
+      readonly hiddenCount: number;
+      readonly state?: "loading" | "failed";
+    }
 ) & { readonly depth?: number };
 
 const SIDEBAR_STICKY_HEADER_HEIGHT = 114;
@@ -213,7 +220,10 @@ function ThreadNavigationSidebarPane(
   const pendingTasks = usePendingNewTasks();
   const activeNewTask = useActiveNewTask();
   const queuedThreadKeys = useQueuedThreadKeys();
-  const { confirmDeletePendingTask } = usePendingTaskListActions();
+  const selectDetail = useSelectWorkspaceDetail();
+  const { confirmDeletePendingTask } = usePendingTaskListActions((params) =>
+    selectDetail({ name: "Thread", params }),
+  );
   const environments = Object.values(savedConnectionsById)
     .map((connection) => ({
       environmentId: connection.environmentId,
@@ -237,11 +247,6 @@ function ThreadNavigationSidebarPane(
           )
         ? [options.selectedEnvironmentId]
         : [];
-  const threadSearch = useThreadSearch(searchEnvironmentIds, props.searchQuery);
-  // This map reaches LegendList's extraData, which re-renders every row whenever it changes
-  // identity; the hook keeps it stable.
-  const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
-  const matchedThreadKeys = new Set(threadSearchMatchByKey.keys());
   const projectScopeKey = options.selectedProjectKey;
   const resolvedProjectKey = resolveScratchProjectScopeKey(projectScopeKey, projects, {
     sidebarProjectGroupingMode: options.projectGroupingMode,
@@ -283,6 +288,17 @@ function ThreadNavigationSidebarPane(
   );
   const selectedProjectScope =
     projectScopes.find((scope) => scope.key === resolvedProjectKey) ?? null;
+  const threadSearch = useThreadSearch(
+    searchEnvironmentIds,
+    props.searchQuery,
+    selectedProjectScope === null
+      ? {}
+      : { projectIds: selectedProjectScope.projectRefs.map((ref) => ref.projectId) },
+  );
+  // This map reaches LegendList's extraData, which re-renders every row whenever it changes
+  // identity; the hook keeps it stable.
+  const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
+  const matchedThreadKeys = new Set(threadSearchMatchByKey.keys());
   const selectedProjectKey = selectedProjectScope?.key ?? null;
   const selectedProjectRefs =
     selectedProjectScope === null
@@ -431,6 +447,7 @@ function ThreadNavigationSidebarPane(
     layout: threadListV2Layout,
     items: threadListV2Items,
     contentOnlyThreadKeys,
+    olderSettledShelf,
   } = useThreadListV2({
     threads,
     allThreads: allThreadShells,
@@ -490,6 +507,11 @@ function ThreadNavigationSidebarPane(
         type: "v2-show-more",
         key: "v2-show-more",
         hiddenCount: threadListV2Layout.hiddenSettledCount,
+        ...(olderSettledShelf.loading
+          ? { state: "loading" as const }
+          : olderSettledShelf.failed
+            ? { state: "failed" as const }
+            : {}),
       });
     }
     return items;
@@ -681,7 +703,7 @@ function ThreadNavigationSidebarPane(
       return homeListItemsAreEqual(previous, item);
     }
     if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
-      return previous.hiddenCount === item.hiddenCount;
+      return previous.hiddenCount === item.hiddenCount && previous.state === item.state;
     }
     if (isHomeSquireItem(previous) && isHomeSquireItem(item)) {
       return homeListItemsAreEqual(previous, item);
@@ -870,7 +892,11 @@ function ThreadNavigationSidebarPane(
           <ThreadListV2ShowMoreRow
             pane={SIDEBAR_ROW_PANE}
             hiddenCount={item.hiddenCount}
-            onPress={showMoreSettled}
+            {...(item.state === undefined ? {} : { state: item.state })}
+            onPress={() => {
+              olderSettledShelf.retry();
+              showMoreSettled();
+            }}
           />
         );
       case "header":
@@ -992,6 +1018,7 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <AnimatedLegendList
+                renderScrollComponent={Platform.OS === "ios" ? NativeScrollView : undefined}
                 itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
                 viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}
                 data={listItems}
@@ -1088,6 +1115,7 @@ function ThreadNavigationSidebarPane(
         ) : (
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
+              {/* oxlint-disable-next-line lecturn/require-registered-list-scroll -- Only the non-native workspace layout (Android and the fallback) renders this sidebar, which has no native header to register with. */}
               <AnimatedLegendList
                 itemLayoutAnimation={HIERARCHY_LAYOUT_TRANSITION}
                 viewabilityConfig={THREAD_ACTIVITY_VIEWABILITY_CONFIG}

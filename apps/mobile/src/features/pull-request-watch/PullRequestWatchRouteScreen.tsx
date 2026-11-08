@@ -51,6 +51,7 @@ import { environmentSession } from "../../state/session";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 function Action(props: {
   readonly label: string;
@@ -207,6 +208,7 @@ function PullRequestWatchControls({
 }) {
   const { themeAppearance } = useAppearancePreferences();
   const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const focused = useIsFocused();
   const projects = useProjects();
   const config = useEnvironmentServerConfig(environmentId);
@@ -517,9 +519,7 @@ function PullRequestWatchControls({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Open managing thread: ${manager.title}`}
-                onPress={() =>
-                  navigation.navigate("Thread", { environmentId, threadId: manager.id })
-                }
+                onPress={() => openThread({ environmentId, threadId: manager.id })}
               >
                 <Text className="font-lecturn-medium text-foreground" numberOfLines={2}>
                   {manager.title}
@@ -736,12 +736,7 @@ function PullRequestWatchControls({
                 <Action
                   label="Open thread"
                   icon="text.bubble"
-                  onPress={() =>
-                    navigation.navigate("Thread", {
-                      environmentId,
-                      threadId: watch.managerThreadId!,
-                    })
-                  }
+                  onPress={() => openThread({ environmentId, threadId: watch.managerThreadId! })}
                 />
                 <Action
                   label="Unassign"

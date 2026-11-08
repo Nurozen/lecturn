@@ -42,6 +42,7 @@ import {
   squireScreenState,
   squireTeamFilterToggle,
 } from "./squireQueue.logic";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type SquireRouteParams = {
   environmentId: string;
@@ -170,7 +171,7 @@ function SquireHeader(props: {
 }) {
   const { environmentId, entry } = props;
   const { squire } = entry;
-  const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const indicator = useSquireIndicator(environmentId, entry);
   const portraitRef = useRef<ViewInstance>(null);
   const inView = useSquireInView(portraitRef, indicator.state === "working");
@@ -228,12 +229,7 @@ function SquireHeader(props: {
         {actions.chatThreadId === null ? null : (
           <RequestActionButton
             label="Chat"
-            onPress={() =>
-              navigation.navigate("Thread", {
-                environmentId,
-                threadId: actions.chatThreadId!,
-              })
-            }
+            onPress={() => openThread({ environmentId, threadId: actions.chatThreadId! })}
           />
         )}
         {canSetStatus && actions.setupPrompt === null ? (

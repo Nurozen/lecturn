@@ -47,6 +47,9 @@ vi.mock("react-native", () => ({
     return null;
   },
 }));
+vi.mock("../../native/NativeScrollViewMarker", async () => ({
+  NativeScrollView: (await import("react-native")).ScrollView,
+}));
 vi.mock("react-native-reanimated", () => {
   const transition = {
     delay: () => transition,

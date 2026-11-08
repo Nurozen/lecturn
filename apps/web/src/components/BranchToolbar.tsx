@@ -236,7 +236,7 @@ const RunContextSelector = memo(function RunContextSelector({
           className={
             isPanel
               ? THREAD_DETAILS_PANEL_ICON_CLASS
-              : cn("size-3 shrink-0", showEnvironmentIndicator && "mx-0!")
+              : cn("size-3 shrink-0", showEnvironmentIndicator ? "mx-0!" : "redesign:mx-0!")
           }
         />
       </TooltipTrigger>
@@ -249,29 +249,38 @@ const RunContextSelector = memo(function RunContextSelector({
       </TooltipPopup>
     </Tooltip>
   );
-  const icon = showEnvironmentIndicator ? (
+  const environmentIcon = (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+        {autoEnvironmentLabel ? (
+          <ScaleIcon
+            className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+            aria-hidden="true"
+          />
+        ) : (
+          <EnvironmentMachineIcon
+            kind={activeEnvironment?.machine ?? "server"}
+            // New design: wide machine glyphs need a little more box to match the square row icons.
+            className={
+              isPanel
+                ? cn(THREAD_DETAILS_PANEL_ICON_CLASS, "redesign:-mx-px redesign:size-4.5")
+                : "size-3 shrink-0 mx-0!"
+            }
+          />
+        )}
+      </TooltipTrigger>
+      <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+    </Tooltip>
+  );
+  const icon = !showEnvironmentIndicator ? (
+    workspaceIcon
+  ) : (
     // Button's SVG margins consume 4px of the gap; mx-0! restores the intended 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
-      <Tooltip>
-        <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-          {autoEnvironmentLabel ? (
-            <ScaleIcon
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-              aria-hidden="true"
-            />
-          ) : (
-            <EnvironmentMachineIcon
-              kind={activeEnvironment?.machine ?? "server"}
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-            />
-          )}
-        </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
-      </Tooltip>
-      {workspaceIcon}
+      {environmentIcon}
+      {/* The new design moves the panel's workspace icon after the label. */}
+      {isPanel ? <span className="contents redesign:hidden">{workspaceIcon}</span> : workspaceIcon}
     </span>
-  ) : (
-    workspaceIcon
   );
   const triggerContent = (
     <>
@@ -284,6 +293,10 @@ const RunContextSelector = memo(function RunContextSelector({
             : autoEnvironmentLabel) ??
           (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
       </ComposerContextLabel>
+      {/* New design: trailing in the panel, so every row label starts on the same edge. */}
+      {isPanel && showEnvironmentIndicator ? (
+        <span className="hidden redesign:contents">{workspaceIcon}</span>
+      ) : null}
     </>
   );
 
@@ -291,7 +304,7 @@ const RunContextSelector = memo(function RunContextSelector({
     return (
       <span
         className={cn(
-          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6",
+          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6 redesign:text-foreground/70 redesign:dark:text-muted-foreground",
           isPanel && "max-w-full",
           isPanel && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
         )}
@@ -325,7 +338,9 @@ const RunContextSelector = memo(function RunContextSelector({
         ].join(" ")}
       >
         {triggerContent}
-        {!isPanel ? <ChevronDownIcon className="size-3 shrink-0 opacity-50" /> : null}
+        {!isPanel ? (
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:mx-0! redesign:opacity-100" />
+        ) : null}
       </MenuTrigger>
       <MenuPopup
         align="start"
@@ -779,7 +794,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       ref={setStripElement}
       data-compact={labelsOverflow ? "" : undefined}
       className={cn(
-        "gap-1 text-xs font-normal text-muted-foreground/70",
+        "gap-1 text-xs font-normal text-muted-foreground/70 redesign:text-foreground/70 redesign:dark:text-muted-foreground",
         // Hide empty non-Git strips while retaining host width so controls can reappear as the chat grows.
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}

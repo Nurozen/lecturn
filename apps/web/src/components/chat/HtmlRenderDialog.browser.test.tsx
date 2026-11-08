@@ -10,13 +10,16 @@ import { act, render as renderUi } from "../../../test/render";
 import { HtmlRenderDialog } from "./HtmlRenderDialog";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 
-const { cachedUrl, refresh, showError, openLink, openChangeRequestLink } = vi.hoisted(() => ({
-  cachedUrl: { lifeMs: 60 * 60_000 },
-  refresh: vi.fn(),
-  showError: vi.fn(),
-  openLink: vi.fn(),
-  openChangeRequestLink: vi.fn(),
-}));
+const { cachedUrl, inlineUrl, refresh, showError, openLink, openChangeRequestLink } = vi.hoisted(
+  () => ({
+    cachedUrl: { lifeMs: 60 * 60_000 },
+    inlineUrl: vi.fn<(environmentId: unknown) => void>(),
+    refresh: vi.fn(),
+    showError: vi.fn(),
+    openLink: vi.fn(),
+    openChangeRequestLink: vi.fn(),
+  }),
+);
 vi.mock(import("~/browser/useOpenLink"), async (original) => ({
   ...(await original()),
   useOpenLink: () => openLink,
@@ -25,13 +28,21 @@ vi.mock(import("~/lib/openPullRequestLink"), async (original) => ({
   ...(await original()),
   useOpenChangeRequestLink: () => openChangeRequestLink,
 }));
+// The long-lived URL hook mints near-expiry URLs itself (longLivedAssetUrls.test.ts); here it
+// hands the frame a URL with `cachedUrl.lifeMs` left, as one that aged after loading would have.
+vi.mock(import("~/assets/longLivedAssetUrls"), async (original) => ({
+  ...(await original()),
+  useLongLivedAssetUrl: (environmentId) => {
+    inlineUrl(environmentId);
+    return {
+      _tag: "Success",
+      url: "https://environment.test/original.html",
+      expiresAt: Date.now() + cachedUrl.lifeMs,
+    };
+  },
+}));
 vi.mock(import("~/assets/assetUrls"), async (original) => ({
   ...(await original()),
-  useAssetUrlState: () => ({
-    _tag: "Success",
-    url: "https://environment.test/original.html",
-    expiresAt: Date.now() + cachedUrl.lifeMs,
-  }),
   useAssetUrlRefresh: () => refresh,
 }));
 vi.mock(import("../ui/toast"), async (original) => {
@@ -48,6 +59,7 @@ const onClose = vi.fn();
 
 function setup() {
   refresh.mockReset();
+  inlineUrl.mockReset();
   cachedUrl.lifeMs = 60 * 60_000;
   openLink.mockReset().mockResolvedValue(undefined);
   openChangeRequestLink.mockReset().mockReturnValue(false);
@@ -142,10 +154,12 @@ it("offers only full screen and opens with the inline URL while keeping the inli
 
 async function renderInlineNearExpiry() {
   cachedUrl.lifeMs = 60_000;
-  refresh.mockResolvedValueOnce("https://environment.test/inline.html");
   await using stack = new AsyncDisposableStack();
   stack.use(await renderInline());
-  expect(refresh).toHaveBeenCalledOnce();
+  // The frame adopts the first URL and stops asking, so later mints do not reload it.
+  expect(inlineUrl).toHaveBeenCalledWith(EnvironmentId.make("environment"));
+  expect(inlineUrl).toHaveBeenLastCalledWith(null);
+  expect(refresh).not.toHaveBeenCalled();
   return stack.move();
 }
 
@@ -154,7 +168,7 @@ it("opens full screen with a fresh URL when the inline one is near expiry", asyn
   await using _screen = await renderInlineNearExpiry();
   refresh.mockResolvedValue("https://environment.test/renewed.html");
   await click("Open full screen");
-  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(refresh).toHaveBeenCalledOnce();
   expect(document.querySelector('[role="dialog"] iframe')?.getAttribute("src")).toContain(
     "https://environment.test/renewed.html#",
   );

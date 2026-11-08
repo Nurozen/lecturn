@@ -68,7 +68,8 @@ describe("Lecturn orchestration provider instructions", () => {
     const first = lecturnAcpPromptWithInstructions({ prompt, state, squireInstructions });
     assert.include(first, squireInstructions.join("\n\n"));
     assert.notInclude(first, LECTURN_ORCHESTRATION_INSTRUCTIONS.trim());
-    assert.notInclude(first, "## Lecturn collaborative browser");
+    assert.notInclude(first, "## Lecturn browser");
+    assert.notInclude(first, "acp-mcp-call");
     assert.equal(
       lecturnAcpPromptWithInstructions({ prompt, state, previousState: state, squireInstructions }),
       prompt,

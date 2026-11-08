@@ -54,7 +54,6 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
-import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { ThreadSearchMatchExcerpt } from "../threads/thread-search-match";
 import {
@@ -68,6 +67,7 @@ import { threadJumpIndex } from "./threadKeyboardShortcuts";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 const PALETTE_COMMANDS: ReadonlyArray<HardwareKeyboardCommand> = [
   "commandPalette",
@@ -256,7 +256,7 @@ export function CommandPalette(props: {
   const navigation = useNavigation();
   const selectTab = useSelectWorkspaceTab();
   const { themeVariables } = useAppearancePreferences();
-  const { selectThread, selectThreadRoute } = useAdaptiveWorkspaceLayout();
+  const selectDetail = useSelectWorkspaceDetail();
   const runCommand = props.onCommand;
   const projects = useProjects();
   const threads = useVisibleThreadShells();
@@ -286,7 +286,21 @@ export function CommandPalette(props: {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  const search = useThreadSearch(searchEnvironmentIds, query.startsWith(">") ? "" : query);
+  // The palette matches environment names when there are several; older rows must match the same.
+  const environmentLabels =
+    environments.length > 1
+      ? Object.fromEntries(
+          searchEnvironmentIds.flatMap((environmentId) => {
+            const label = savedConnectionsById[environmentId]?.environmentLabel;
+            return label === undefined ? [] : [[environmentId, label]];
+          }),
+        )
+      : undefined;
+  const search = useThreadSearch(
+    searchEnvironmentIds,
+    query.startsWith(">") ? "" : query,
+    environmentLabels === undefined ? {} : { environmentLabels },
+  );
   const contentMatchByKey = useMemo(
     () =>
       new Map(
@@ -368,12 +382,15 @@ export function CommandPalette(props: {
         title: `New thread in ${activeProject.title}`,
         searchTerms: ["new task", "chat", "create"],
         run: () =>
-          selectThreadRoute({
-            draft: {
-              requestId: uuidv4(),
-              environmentId: activeProject.environmentId,
-              projectId: activeProject.id,
-              title: activeProject.title,
+          selectDetail({
+            name: "Thread",
+            params: {
+              draft: {
+                requestId: uuidv4(),
+                environmentId: activeProject.environmentId,
+                projectId: activeProject.id,
+                title: activeProject.title,
+              },
             },
           }),
       });
@@ -403,12 +420,15 @@ export function CommandPalette(props: {
       detail: `New thread · ${savedConnectionsById[project.environmentId]?.environmentLabel ?? project.environmentId}`,
       searchTerms: [project.workspaceRoot, "new thread", "project"],
       run: () =>
-        selectThreadRoute({
-          draft: {
-            requestId: uuidv4(),
-            environmentId: project.environmentId,
-            projectId: project.id,
-            title: project.title,
+        selectDetail({
+          name: "Thread",
+          params: {
+            draft: {
+              requestId: uuidv4(),
+              environmentId: project.environmentId,
+              projectId: project.id,
+              title: project.title,
+            },
           },
         }),
     }));
@@ -436,7 +456,11 @@ export function CommandPalette(props: {
           ...(thread.environmentId === activeThread?.environmentId && thread.id === activeThread.id
             ? { secondary: true }
             : {}),
-          run: () => selectThread(thread),
+          run: () =>
+            selectDetail({
+              name: "Thread",
+              params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+            }),
         };
       });
     const squireItems = squirePaletteItems(
@@ -460,8 +484,7 @@ export function CommandPalette(props: {
     projects,
     runCommand,
     savedConnectionsById,
-    selectThread,
-    selectThreadRoute,
+    selectDetail,
     squireStates,
     threads,
   ]);

@@ -2,11 +2,7 @@ import { contextualPreparationOutcome } from "@lecturn/client-runtime/state/cont
 import { deliveredGroups } from "./contextualDisclosure";
 import { ContextualHostSettings } from "./ContextualHostSettings";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  useNavigation,
-  type NavigationProp,
-  type StaticScreenProps,
-} from "@react-navigation/native";
+import type { StaticScreenProps } from "@react-navigation/native";
 import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
@@ -27,6 +23,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { randomHex } from "../../lib/uuid";
 import { ContextualButton as Button, ContextualThreadControl } from "./ContextualControls";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type ContextualRouteParams = {
   environmentId: string;
@@ -436,8 +433,7 @@ export function ContextualThreadPanel({
 }
 
 export function EvidenceCard({ evidence }: { evidence: ContextualEvidence }) {
-  const navigation =
-    useNavigation<NavigationProp<{ Thread: { environmentId: string; threadId: string } }>>();
+  const openThread = useOpenThreadOverPage();
   const locator = evidence.locator;
   return (
     <View className="gap-2 border-l-2 border-primary pl-3">
@@ -457,10 +453,7 @@ export function EvidenceCard({ evidence }: { evidence: ContextualEvidence }) {
         <Button
           label="Open source conversation"
           onPress={() =>
-            navigation.navigate("Thread", {
-              environmentId: locator.environmentId,
-              threadId: locator.threadId,
-            })
+            openThread({ environmentId: locator.environmentId, threadId: locator.threadId })
           }
         />
       ) : evidence.sourceUrl &&

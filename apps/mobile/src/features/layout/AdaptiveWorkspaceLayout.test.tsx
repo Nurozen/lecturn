@@ -7,7 +7,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import * as Layout from "../../lib/layout";
 import { loadCompiledMobileModule } from "../../lib/reactCompilerModule.test-support";
 import * as RootStackReset from "../../lib/root-stack-reset";
-import * as ThreadRouteState from "../threads/thread-route-state";
 import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 import * as DeferredNavigation from "./deferred-navigation";
@@ -27,9 +26,7 @@ const navigation = {
   getState: () => navigationState,
 };
 const workspaceTabNavigationState = vi.fn(() => ({ index: 0, routes: [{ name: "Home" }] }));
-let threadSelectionAction = "push";
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
-const selectWorkspace = vi.fn();
 const openThreadPullRequests = vi.fn();
 // Stable like the real hook's handler, so it never changes the sidebar's props identity.
 const openPendingTaskStub = vi.fn();
@@ -71,7 +68,6 @@ const stubModules: Record<string, unknown> = {
   "../../state/entities": { useProjects: () => noProjects },
   "../../state/threads": { environmentThreadShells: { navigationThreadShellsAtom: {} } },
   "../threads/new-task-project-selection": { newTaskDestination: () => ({ route: "Home" }) },
-  "../threads/thread-route-state": ThreadRouteState,
   "../workspace/WorkspaceTabsContext": { useWorkspaceTabs: () => null },
   "@lecturn/contracts": {
     EnvironmentId: { make: (value: string) => value },
@@ -88,16 +84,12 @@ const stubModules: Record<string, unknown> = {
     useNavigation: () => navigation,
     NavigationContext: React.createContext<unknown>(undefined),
     NavigationRouteContext: React.createContext<unknown>(undefined),
-    CommonActions: {
-      reset: (state: unknown) => ({ type: "RESET", state }),
-      setParams: (params: unknown) => ({ type: "SET_PARAMS", payload: { params } }),
-    },
-    StackActions: { replace: (name: string) => ({ type: "REPLACE", name }) },
   },
   "react-native": {
     Platform: { OS: "android", select: (options: { android?: unknown }) => options.android },
     useWindowDimensions: () => windowSize,
     View: Passthrough,
+    Keyboard: { dismiss: () => undefined },
   },
   "react-native-reanimated": {
     __esModule: true,
@@ -115,10 +107,6 @@ const stubModules: Record<string, unknown> = {
       return shared;
     },
     withTiming: (value: number) => value,
-  },
-  "../../lib/adaptive-navigation": {
-    resolveThreadSelectionNavigationAction: () => threadSelectionAction,
-    resolveThreadSelectionOverlayState: () => null,
   },
   "../../lib/scopedEntities": {
     scopedThreadKey: (environmentId: string, threadId: string) => `${environmentId}:${threadId}`,
@@ -138,9 +126,10 @@ const stubModules: Record<string, unknown> = {
     AndroidWorkspaceNavigation: () => null,
     ANDROID_WORKSPACE_RAIL_WIDTH: 72,
   },
-  "../workspace/useAndroidWorkspaceSelection": {
-    useAndroidWorkspaceSelection: () => selectWorkspace,
+  "../workspace/workspace-detail-selection": {
+    selectWorkspaceDetail: (detail: unknown) => ({ type: "SELECT_WORKSPACE_DETAIL", detail }),
   },
+  "../workspace/useSelectWorkspaceDetail": { startOpeningDetail: () => undefined },
   "../home/home-list-options": { HomeListOptionsProvider: Passthrough },
   "../home/usePendingTaskListActions": {
     usePendingTaskListActions: () => ({ openPendingTask: openPendingTaskStub }),
@@ -318,59 +307,6 @@ describe("adaptive workspace inspector registration", () => {
 
     await renderWorkspace(null);
     expect(shownInspector).toBeNull();
-  });
-});
-
-describe("adaptive workspace thread selection", () => {
-  afterEach(() => {
-    threadSelectionAction = "push";
-    navigationState = undefined;
-    navigation.dispatch.mockClear();
-  });
-
-  it("drops a linked route's account and app when another thread is selected in place", async () => {
-    // Android resets the workspace instead; the merge is on the iOS path.
-    const ios = loadCompiledMobileModule({
-      file: "src/features/layout/AdaptiveWorkspaceLayout.tsx",
-      modules: stubModules,
-      platform: "ios",
-    }).exports as unknown as typeof AdaptiveWorkspaceLayoutModule;
-    let selectThreadRoute: ReturnType<typeof ios.useAdaptiveWorkspaceLayout>["selectThreadRoute"];
-    function SelectionReader() {
-      ({ selectThreadRoute } = ios.useAdaptiveWorkspaceLayout());
-      return null;
-    }
-    await React.act(() =>
-      root.render(
-        <ios.AdaptiveWorkspaceLayout pathname="/" workspaceRouteKey="workspace-route">
-          <SelectionReader />
-        </ios.AdaptiveWorkspaceLayout>,
-      ),
-    );
-    threadSelectionAction = "set-params";
-    navigationState = {
-      routes: [
-        {
-          key: "workspace-route",
-          name: "Thread",
-          params: { accountId: "a", appId: "dev.example" },
-        },
-      ],
-    };
-
-    await React.act(async () => selectThreadRoute!({ environmentId: "e", threadId: "t" }));
-
-    const action = navigation.dispatch.mock.calls[0]![0];
-    expect(action).toMatchObject({ type: "SET_PARAMS", source: "workspace-route" });
-    // `setParams` merges, so the keys must be present with no value to overwrite the old ones.
-    expect(action.payload.params).toStrictEqual({
-      accountId: undefined,
-      appId: undefined,
-      prompt: undefined,
-      draft: undefined,
-      environmentId: "e",
-      threadId: "t",
-    });
   });
 });
 
