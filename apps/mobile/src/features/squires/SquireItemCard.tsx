@@ -18,9 +18,8 @@ import type {
   SquireRuleOffer,
   ThreadId,
 } from "@lecturn/contracts";
-import { StackActions, useNavigation } from "@react-navigation/native";
 import { useState } from "react";
-import { Platform, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -60,17 +59,7 @@ import {
   type SquireAnswer,
 } from "./squireQueue.logic";
 import { useSquireItemsAct, useSquireMarkOpened } from "./squireQueueState";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-
-// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
-function useOpenThreadOverPage() {
-  const navigation = useNavigation();
-  const selectDetail = useSelectWorkspaceDetail();
-  return (params: { readonly environmentId: string; readonly threadId: string }) => {
-    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
-    else navigation.dispatch(StackActions.push("Thread", params));
-  };
-}
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type SquireActedHandler = (
   row: SquireCardRow,

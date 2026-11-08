@@ -26,10 +26,13 @@ export function useOlderSettledShelf(input: {
   readonly expanded: boolean;
   /** Rows the shelf shows; pages are read until it lists that many. */
   readonly visibleCount: number;
+  /** Segment or nested project shelves page instead, so read pages stay mounted. */
+  readonly partShelves?: boolean;
 }) {
   const scopeKey = JSON.stringify(input.scopes);
   const [requested, setRequested] = useState({ scopeKey, pages: NO_PAGES });
-  const pages = requested.scopeKey === scopeKey && input.expanded ? requested.pages : NO_PAGES;
+  const keepPages = input.expanded || input.partShelves === true;
+  const pages = requested.scopeKey === scopeKey && keepPages ? requested.pages : NO_PAGES;
   const shelfScopes = input.scopes.map((scope) => ({
     scope,
     pages: pages.get(scope.environmentId) ?? 0,
@@ -67,6 +70,21 @@ export function useOlderSettledShelf(input: {
     /** Older settled threads in scope that are not local; add it to the local Settled rows. */
     unloadedCount: (threads: ReadonlyArray<EnvironmentThreadShell>) =>
       unloadedOlderSettledCount({ olderSettled: olderOf, scopes: input.scopes, threads }),
+    /** The same count for part of the scope: an account segment or a nested project's shelf. */
+    unloadedCountIn: (
+      scopes: ReadonlyArray<OlderSettledScope>,
+      threads: ReadonlyArray<EnvironmentThreadShell>,
+    ) => unloadedOlderSettledCount({ olderSettled: olderOf, scopes, threads }),
+    /** Whether a page read can still add rows to these scopes. */
+    canLoadIn: (scopes: ReadonlyArray<OlderSettledScope>) =>
+      scopes.some(({ environmentId }) => {
+        const environment = shelf.get(environmentId);
+        return (
+          environment?.older != null &&
+          environment.pages.frontier !== null &&
+          environment.pages.status !== "failed"
+        );
+      }),
     loading: loaded.some(({ scope }) => pagesOf(scope.environmentId)?.status === "pending"),
     failed: loaded.some(({ scope }) => pagesOf(scope.environmentId)?.status === "failed"),
     retry: () => {
@@ -77,16 +95,20 @@ export function useOlderSettledShelf(input: {
   };
 }
 
-/** Reads the next pages while the shelf lists fewer rows than it shows. */
+/**
+ * Reads the next pages while the shelf lists fewer rows than it shows, or while a segment or
+ * nested project shelf (`partShelfShort`) lists fewer than it shows and its scope can load more.
+ */
 export function useOlderSettledShelfGrowth(
   shelf: ReturnType<typeof useOlderSettledShelf>,
   listedSettledThreads: ReadonlyArray<EnvironmentThreadShell>,
+  partShelfShort = false,
 ) {
   const wanted = wantedOlderSettledPages({
     requested: shelf.pages,
     environments: shelf.environments,
     listedCount: listedSettledThreads.length,
-    visibleCount: shelf.visibleCount,
+    visibleCount: partShelfShort ? Number.POSITIVE_INFINITY : shelf.visibleCount,
   });
   const { grow, pages } = shelf;
   useEffect(() => {

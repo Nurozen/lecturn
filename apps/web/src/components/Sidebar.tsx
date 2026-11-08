@@ -6,7 +6,12 @@ import {
 } from "./sidebar/SidebarDragScope";
 import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import { StaveIcon } from "./StaveIcon";
-import { projectSettledPage } from "./sidebarSettledGroups";
+import {
+  partSettledShelfShort,
+  projectOlderSettledScopes,
+  projectSettledPage,
+  withUnloadedSettled,
+} from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
 import {
@@ -980,13 +985,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     Schema.Boolean,
   );
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
+  // Account segments and nested projects page their own shelves (see `partShelfShort`).
+  const partSettledShelves = sidebarSegmentation !== null || nestSagaProjects;
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
-    expanded: settledShelfExpanded,
+    expanded: settledShelfExpanded && !partSettledShelves,
     visibleCount: settledVisibleCount,
+    partShelves: partSettledShelves,
   });
   const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
-  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads);
+  const segmentOlderSettledScopes = (owns: (environmentId: EnvironmentId) => boolean) =>
+    olderSettledScopes([...serverConfigs.keys()].filter(owns), scopedProjectKeys);
   const settledCount = settledThreads.length + olderSettledShelf.unloadedCount(visibleThreads);
   const visibleSettledThreads = (() => {
     const visible = listedSettledThreads.slice(0, settledVisibleCount);
@@ -1088,6 +1097,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return entries;
   })();
   const nestedSettledThreads = [...settledByProject.values()].flatMap((page) => page.visible);
+  const olderSettledByProject = new Map(
+    scopedSagaTree
+      .flatMap((root) => [root, ...root.children])
+      .map((node) => {
+        const scopes = projectOlderSettledScopes(node.group.memberProjectRefs);
+        const unloaded = olderSettledShelf.unloadedCountIn(scopes, visibleThreads);
+        return [node.group.key, { unloaded, canLoad: olderSettledShelf.canLoadIn(scopes) }];
+      }),
+  );
   const sidebarSegments = useSidebarSegments({
     segmentation: sidebarSegmentation,
     projects,
@@ -1114,7 +1132,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleSettledShelf,
     showMoreSettled,
     routeThreadKey: routeRowThreadKey,
+    unloadedSettledCountOf: (owns) =>
+      olderSettledShelf.unloadedCountIn(segmentOlderSettledScopes(owns), visibleThreads),
   });
+  // A segment or nested project shelf that shows more rows than it lists reads older pages.
+  const partShelfShort = partSettledShelfShort(
+    nestSagaProjects
+      ? [...settledByProject].map(([key, page]) => ({
+          expanded: page.expanded,
+          listed: page.total,
+          limit: page.limit,
+          unloaded: olderSettledByProject.get(key)?.unloaded ?? 0,
+          canLoad: olderSettledByProject.get(key)?.canLoad ?? false,
+        }))
+      : (sidebarSegments.segments ?? []).map((segment) => ({
+          expanded: segment.settledShelfExpanded,
+          listed: segment.settledThreads.length,
+          limit: segment.settledVisibleCount,
+          unloaded: segment.unloadedSettledCount,
+          canLoad: olderSettledShelf.canLoadIn(segmentOlderSettledScopes(segment.ownsEnvironment)),
+        })),
+  );
+  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads, partShelfShort);
   const orderedThreads = (() => {
     if (sidebarSegments.segments !== null) {
       return flattenSegmentsForNavigation(sidebarSegments.segments);
@@ -3093,24 +3132,30 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onSettle={settleFromDrag}
                               >
                                 {({ pinned, active, working = [], snoozed, settled }) => {
+                                  const olderCount =
+                                    olderSettledByProject.get(node.group.key)?.unloaded ?? 0;
                                   if (
                                     !pinned.length &&
                                     !active.length &&
                                     !working.length &&
                                     !snoozed.length &&
-                                    !settled.length
+                                    !settled.length &&
+                                    olderCount === 0
                                   )
                                     return null;
-                                  const settledPage = projectSettledPage(
-                                    settled,
-                                    {
-                                      expanded: true,
-                                      limit:
-                                        projectSettledShelves[node.group.key]?.limit ??
-                                        SETTLED_TAIL_INITIAL_COUNT,
-                                    },
-                                    routeRowThreadKey,
-                                    SETTLED_TAIL_INITIAL_COUNT,
+                                  const settledPage = withUnloadedSettled(
+                                    projectSettledPage(
+                                      settled,
+                                      {
+                                        expanded: true,
+                                        limit:
+                                          projectSettledShelves[node.group.key]?.limit ??
+                                          SETTLED_TAIL_INITIAL_COUNT,
+                                      },
+                                      routeRowThreadKey,
+                                      SETTLED_TAIL_INITIAL_COUNT,
+                                    ),
+                                    olderCount,
                                   );
                                   return (
                                     <>
@@ -3519,7 +3564,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 <span className="text-xs font-medium text-muted-foreground/50">
                                   {settledShelfExpanded
                                     ? "Settled"
-                                    : `Settled (${"id" in segment ? settledThreads.length : settledCount})`}
+                                    : `Settled (${"id" in segment ? settledThreads.length + (segment.unloadedSettledCount ?? 0) : settledCount})`}
                                 </span>
                                 <span className="h-px flex-1 bg-sidebar-border/60" />
                                 <ChevronDownIcon

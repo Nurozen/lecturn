@@ -170,8 +170,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -1132,11 +1131,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --toolbar-control-foreground: var(--foreground);
   --toolbar-control-hover: var(--accent);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-zinc-900);
+  --foreground: var(--color-zinc-800);
   --card: var(--color-white);
-  --card-foreground: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-800);
   --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-900);
+  --popover-foreground: var(--color-zinc-800);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: var(--color-white);
   --secondary: var(--color-zinc-50);
@@ -1146,8 +1145,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --placeholder: var(--muted-foreground);
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
-  /* One step past the accent, so a user turn stands off the near-white canvas. */
-  --message-surface: color-mix(in srgb, var(--color-zinc-200) 55%, var(--color-zinc-100));
+  --message-surface: var(--accent);
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
@@ -1210,16 +1208,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: var(--color-neutral-400);
+    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
     --accent: --alpha(var(--color-white) / 4%);
     --accent-foreground: var(--color-neutral-100);
-    --message-surface: var(--accent);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
     --error-foreground: var(--color-red-400);
     --tool-error-icon: #fca5a5;
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: --alpha(var(--color-white) / 8%);
-    --input: --alpha(var(--color-white) / 11%);
+    --border: --alpha(var(--color-white) / 6%);
+    --input: --alpha(var(--color-white) / 8%);
     --info-foreground: var(--color-blue-400);
     --guest-foreground: var(--color-fuchsia-300);
     --success-foreground: var(--color-emerald-400);
@@ -1238,14 +1235,33 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   }
 }
 
+/* New design palette (Settings -> Beta). Same specificity as :root and placed
+   before the Lecturn palette, so that palette and user themes still win. */
+:root:where([data-redesign]) {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --foreground: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-900);
+  --popover-foreground: var(--color-zinc-900);
+  /* One step past the accent, so a user turn stands off the near-white canvas. */
+  --message-surface: color-mix(in srgb, var(--color-zinc-200) 55%, var(--color-zinc-100));
+
+  @variant dark {
+    --muted-foreground: var(--color-neutral-400);
+    --message-surface: var(--accent);
+    --border: --alpha(var(--color-white) / 8%);
+    --input: --alpha(var(--color-white) / 11%);
+  }
+}
+
 /* Keep both sidebar implementations (default and legacy) on the same quiet
    zinc hierarchy: zinc-50 navigation, zinc-25 hover, and white selected/raised
    surfaces. */
 [data-app-sidebar] {
   --background: var(--color-zinc-25);
-  --foreground: var(--color-zinc-900);
+  --foreground: var(--color-zinc-800);
   --card: var(--color-white);
-  --card-foreground: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-800);
   --accent: var(--color-zinc-100);
   --accent-foreground: var(--color-zinc-900);
   --muted: var(--color-zinc-50);
@@ -1253,7 +1269,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
-  --sidebar-foreground: var(--color-zinc-900);
+  --sidebar-foreground: var(--color-zinc-800);
   --sidebar-muted-foreground: var(--color-zinc-500);
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-25);
@@ -1283,6 +1299,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
     --sidebar-border: var(--border);
     --sidebar-stage-fade: var(--card);
   }
+}
+
+:where([data-redesign]) [data-app-sidebar] {
+  --foreground: var(--color-zinc-900);
+  --card-foreground: var(--color-zinc-900);
+  --sidebar-foreground: var(--color-zinc-900);
 }
 
 /* Lecturn: parchment and brass by day, midnight ink and amber by night.
@@ -1814,8 +1836,8 @@ body {
   }
 }
 
-/* New design geometry. Lecturn's default look keeps the values in :root and the
-   @theme blocks; data-redesign (Settings -> Beta) swaps in the quieter set. */
+/* New design geometry (Settings -> Beta). The defaults stay in :root, @theme and
+   the Lecturn palette; the redesign palette and font sit next to :root above. */
 html[data-redesign] {
   --radius: 0.5rem;
   --composer-elevation: 0 1px 2px rgb(0 0 0 / 5%);
@@ -2396,6 +2418,13 @@ code {
 :root {
   --diff-addition: var(--success);
   --diff-deletion: var(--destructive);
+  --diff-addition-foreground: light-dark(var(--color-emerald-600), var(--color-emerald-400));
+  --diff-deletion-foreground: light-dark(var(--color-red-600), var(--color-red-400));
+}
+
+/* New design: stronger diff text. Same specificity as :root, so the
+   data-diff-color-scheme overrides below still win. */
+:root:where([data-redesign]) {
   --diff-addition-foreground: light-dark(var(--color-emerald-700), var(--color-emerald-400));
   --diff-deletion-foreground: light-dark(var(--color-red-700), var(--color-red-400));
 }

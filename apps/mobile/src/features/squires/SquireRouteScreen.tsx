@@ -10,10 +10,9 @@ import {
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useLayoutEffect, useRef, useState } from "react";
 import {
-  Platform,
   Pressable,
   ScrollView,
   View,
@@ -43,17 +42,7 @@ import {
   squireScreenState,
   squireTeamFilterToggle,
 } from "./squireQueue.logic";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-
-// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
-function useOpenThreadOverPage() {
-  const navigation = useNavigation();
-  const selectDetail = useSelectWorkspaceDetail();
-  return (params: { readonly environmentId: string; readonly threadId: string }) => {
-    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
-    else navigation.dispatch(StackActions.push("Thread", params));
-  };
-}
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type SquireRouteParams = {
   environmentId: string;

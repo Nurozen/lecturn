@@ -236,6 +236,18 @@ describe("buildSidebarSegmentViews", () => {
     ]);
   });
 
+  it("counts older settled threads the shell left out in each segment's Show more", () => {
+    const result = views({
+      settledThreads: [thread("s-work-1", "relay-work"), thread("s-home-1", "relay-home")],
+      settledShelfExpanded: true,
+      settledVisibleCount: 1,
+      // Only the home account's environment has older threads not read yet.
+      unloadedSettledCountOf: (owns) => (owns("relay-home") ? 30 : 0),
+    });
+    expect(result.map((segment) => segment.unloadedSettledCount)).toEqual([0, 30]);
+    expect(result.map((segment) => segment.hiddenSettledCount)).toEqual([0, 30]);
+  });
+
   it("keeps the page limit independent of the extra deep-linked row across shelf toggles", () => {
     const settledThreads = [1, 2, 3, 4, 5].map((id) => thread(`work-${id}`, "relay-work"));
     const isRouteThread = (entry: TestThread) => entry.id === "work-5";

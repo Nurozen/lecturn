@@ -77,19 +77,31 @@ function samePullRequest(
 /**
  * The page each tab shows in a root route chain: the newest chat, the newest pull request, and
  * the Settings page directly above the Settings route. Returns `previous` when nothing changed.
- * A connected app's thread belongs to Apps, so it never becomes the remembered chat.
+ * A connected app's thread or draft belongs to Apps, so it never becomes the remembered chat.
  */
 export function workspaceSelectionsIn(
   routes: readonly RouteLike[],
   previous: WorkspaceSelections,
   isAppThread: (selection: Omit<ThreadSelection, "key">) => boolean = () => false,
+  isAppProject: (project: {
+    readonly environmentId: string;
+    readonly projectId: string;
+  }) => boolean = () => false,
 ): WorkspaceSelections {
   let next = previous;
   const thread = routes.findLast((route) => {
     if (route.name !== "Thread") return false;
     const environmentId = stringParam(route.params, "environmentId");
     const threadId = stringParam(route.params, "threadId");
-    return !(environmentId && threadId && isAppThread({ environmentId, threadId }));
+    if (environmentId && threadId) return !isAppThread({ environmentId, threadId });
+    const draft = (route.params as { readonly draft?: object } | undefined)?.draft;
+    const draftEnvironmentId = stringParam(draft, "environmentId");
+    const draftProjectId = stringParam(draft, "projectId");
+    return !(
+      draftEnvironmentId &&
+      draftProjectId &&
+      isAppProject({ environmentId: draftEnvironmentId, projectId: draftProjectId })
+    );
   });
   const environmentId = stringParam(thread?.params, "environmentId");
   const threadId = stringParam(thread?.params, "threadId");

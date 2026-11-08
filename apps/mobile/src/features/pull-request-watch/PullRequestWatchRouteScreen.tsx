@@ -23,12 +23,7 @@ import {
 } from "@lecturn/client-runtime/state/activityContext";
 import { useMobileSagaIndex } from "../../state/stave";
 import { isRepositoryWatchManagerEligible } from "@lecturn/client-runtime/state/repositoryScope";
-import {
-  StackActions,
-  useNavigation,
-  useIsFocused,
-  type StaticScreenProps,
-} from "@react-navigation/native";
+import { useNavigation, useIsFocused, type StaticScreenProps } from "@react-navigation/native";
 import {
   AuthOrchestrationOperateScope,
   CommandId,
@@ -39,7 +34,7 @@ import {
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { makeQueuedMessageMetadata } from "../../lib/commandMetadata";
 import { uuidv4 } from "../../lib/uuid";
@@ -56,17 +51,7 @@ import { environmentSession } from "../../state/session";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-
-// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
-function useOpenThreadOverPage() {
-  const navigation = useNavigation();
-  const selectDetail = useSelectWorkspaceDetail();
-  return (params: { readonly environmentId: string; readonly threadId: string }) => {
-    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
-    else navigation.dispatch(StackActions.push("Thread", params));
-  };
-}
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 function Action(props: {
   readonly label: string;

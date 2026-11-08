@@ -35,6 +35,8 @@ import type {
 export interface SidebarListBodyScope<Node>
   extends SidebarThreadListScope<Node>, SidebarShelfActions {
   readonly orderedPinnedThreads: ReadonlyArray<EnvironmentThreadShell>;
+  /** A segment's older settled threads not read yet; the one list counts them itself. */
+  readonly unloadedSettledCount?: number;
 }
 
 interface SidebarSegmentsProps<Node> {

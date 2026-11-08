@@ -2,7 +2,7 @@ import { contextualPreparationOutcome } from "@lecturn/client-runtime/state/cont
 import { deliveredGroups } from "./contextualDisclosure";
 import { ContextualHostSettings } from "./ContextualHostSettings";
 import { useAtomValue } from "@effect/atom-react";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import type { StaticScreenProps } from "@react-navigation/native";
 import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
@@ -14,7 +14,7 @@ import {
   type ContextualEvidence,
 } from "@lecturn/contracts";
 import { useState } from "react";
-import { Linking, Platform, ScrollView, View } from "react-native";
+import { Linking, ScrollView, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { contextualEnvironment as contextual } from "../../state/contextual";
 import { serverEnvironment } from "../../state/server";
@@ -23,17 +23,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { randomHex } from "../../lib/uuid";
 import { ContextualButton as Button, ContextualThreadControl } from "./ContextualControls";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-
-// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
-function useOpenThreadOverPage() {
-  const navigation = useNavigation();
-  const selectDetail = useSelectWorkspaceDetail();
-  return (params: { readonly environmentId: string; readonly threadId: string }) => {
-    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
-    else navigation.dispatch(StackActions.push("Thread", params));
-  };
-}
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export type ContextualRouteParams = {
   environmentId: string;

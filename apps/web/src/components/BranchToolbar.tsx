@@ -233,7 +233,11 @@ const RunContextSelector = memo(function RunContextSelector({
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         <WorkspaceIcon
-          className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+          className={
+            isPanel
+              ? THREAD_DETAILS_PANEL_ICON_CLASS
+              : cn("size-3 shrink-0", showEnvironmentIndicator ? "mx-0!" : "redesign:mx-0!")
+          }
         />
       </TooltipTrigger>
       <TooltipPopup>
@@ -256,10 +260,10 @@ const RunContextSelector = memo(function RunContextSelector({
         ) : (
           <EnvironmentMachineIcon
             kind={activeEnvironment?.machine ?? "server"}
-            // Wide machine glyphs need a little more box to match the square row icons.
+            // New design: wide machine glyphs need a little more box to match the square row icons.
             className={
               isPanel
-                ? cn(THREAD_DETAILS_PANEL_ICON_CLASS, "-mx-px size-4.5")
+                ? cn(THREAD_DETAILS_PANEL_ICON_CLASS, "redesign:-mx-px redesign:size-4.5")
                 : "size-3 shrink-0 mx-0!"
             }
           />
@@ -270,13 +274,12 @@ const RunContextSelector = memo(function RunContextSelector({
   );
   const icon = !showEnvironmentIndicator ? (
     workspaceIcon
-  ) : isPanel ? (
-    environmentIcon
   ) : (
     // Button's SVG margins consume 4px of the gap; mx-0! restores the intended 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
       {environmentIcon}
-      {workspaceIcon}
+      {/* The new design moves the panel's workspace icon after the label. */}
+      {isPanel ? <span className="contents redesign:hidden">{workspaceIcon}</span> : workspaceIcon}
     </span>
   );
   const triggerContent = (
@@ -290,8 +293,10 @@ const RunContextSelector = memo(function RunContextSelector({
             : autoEnvironmentLabel) ??
           (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
       </ComposerContextLabel>
-      {/* Trailing in the panel, so every row label starts on the same edge. */}
-      {isPanel && showEnvironmentIndicator ? workspaceIcon : null}
+      {/* New design: trailing in the panel, so every row label starts on the same edge. */}
+      {isPanel && showEnvironmentIndicator ? (
+        <span className="hidden redesign:contents">{workspaceIcon}</span>
+      ) : null}
     </>
   );
 

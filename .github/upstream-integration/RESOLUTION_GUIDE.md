@@ -1292,6 +1292,10 @@ from upstream's side.
   Upstream's unconditional visual tweaks go behind `redesign:` / `[data-redesign]` (old value
   first, new under the variant); SVGs with `stroke-width="2"` take the `lucide` class so the
   redesign stroke rule reaches them. Structural and copy changes are taken as upstream.
+  Palette and font changes count as visual tweaks: `:root`, `.dark`, `[data-app-sidebar]`,
+  diff colors and the sans stack keep the Lecturn values (no Inter by default), and the new
+  values sit in `:root:where([data-redesign])` blocks next to `:root`, so the Lecturn palette
+  and user themes still win.
 - **#24850 instructions.** Take upstream's short sections with Lecturn names; keep the
   `lecturn-thread://` link rule, Squire and connected-app overrides, and the ACP-only MCP
   fallback (skipped on Squire homes). Codex connected-app instructions travel as
@@ -1301,7 +1305,10 @@ from upstream's side.
   paths and the `pingdotgg` remote URL stay verbatim.
 - **Mobile navigation lint (#24710).** Fork pages use `useSelectWorkspaceDetail` for a page
   and a drill-in (Android selects, iOS `StackActions.push`) to open a thread over a fork page
-  (Squire, Decisions, Contextual, PR watch). Screen lists register through
+  (Squire, Decisions, Contextual, PR watch, one app's threads at `lecturn://apps/<appId>`)
+  through the shared `features/workspace/useOpenThreadOverPage`. The Apps tab list selects. An
+  app's thread or draft never becomes the Threads tab's remembered page
+  (`workspaceSelectionsIn` takes `isAppThread` and `isAppProject`). Screen lists register through
   `NativeScrollView`/`NativeScrollViewMarker`, never `react-native-screens` directly.
 - **Mobile Settings (#24644, #24766).** `SettingsList` sections may carry `render`; Connect
   accounts is the `accounts` slot above Connections; Settings pages keep
@@ -1313,11 +1320,17 @@ from upstream's side.
   stays fork (multi-account); `appInit` applies appearance and title (#25004). Fork Stave
   matching and host lending for PR links live in client-runtime
   `resolveChangeRequestLinkTarget` (#24738). The fork sidebar root list uses
-  `useOlderSettledShelf`.
+  `useOlderSettledShelf`. Account segments and nested saga projects page older settled threads
+  from their own shelves (`partShelves`, `partSettledShelfShort`), and their counts and
+  "Show more" include threads not read yet. Phone Settings keeps the Connect account menu and
+  sign-in in the icon rail footer: it is their only home, and `#connect-accounts` lands there.
 - **Server.** ws.ts has six handler groups (core, orchestration, contextual, apps, squire,
   lecturn); split by prefix if TS2589 returns. `shellOlderSettled` goes to non-app sessions
   only, and app/embed shells never take `omitOlderSettled`. PR linked-thread lookups leave out
-  Squire-marked threads. `compactEventStore` is a function (#20877).
+  Squire-marked threads. `compactEventStore` is a function (#20877). Compaction now drops
+  middle `turn-item.updated` events (oldest and newest per item stay), and `SquireCompactionFloor`
+  protects only `thread.pull-request-link-updated`: Squire classifiers must rely only on an
+  item's newest state, or extend the floor to `turn-item.updated` above the Squire cursor.
 - **Deps.** Vendored `apps/mobile/deps/*-t3.N*.tgz` the fork never modified (blob equals the
   merge base) take upstream's newer file with `package.json`, `allowBuilds` and the lock.
   `docs/operations/development.md` omits upstream's GitCafe mirror section;

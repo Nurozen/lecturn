@@ -51,6 +51,30 @@ describe("workspace tab selections", () => {
     expect(workspaceSelectionsIn([home, appThread], {}, isAppThread).threads).toBe(undefined);
   });
 
+  it("doesn't remember a draft started from Apps as the Threads draft", () => {
+    const appDraft = {
+      key: "app-draft",
+      name: "Thread",
+      params: { draft: { environmentId: "env", projectId: "app-project", title: "App" } },
+    };
+    const chatDraft = {
+      key: "chat-draft",
+      name: "Thread",
+      params: { draft: { environmentId: "env", projectId: "project", title: "Chat" } },
+    };
+    const isAppProject = (project: { projectId: string }) => project.projectId === "app-project";
+    const afterThread = workspaceSelectionsIn([home, thread], {}, undefined, isAppProject);
+    expect(workspaceSelectionsIn([home, appDraft], afterThread, undefined, isAppProject)).toBe(
+      afterThread,
+    );
+    expect(
+      workspaceSelectionsIn([home, appDraft], {}, undefined, isAppProject).threadsDraft,
+    ).toBeUndefined();
+    expect(
+      workspaceSelectionsIn([home, chatDraft, appDraft], {}, undefined, isAppProject).threadsDraft,
+    ).toEqual({ key: chatDraft.key, params: chatDraft.params });
+  });
+
   it("doesn't remember pages a Settings row doesn't open", () => {
     for (const name of ["SettingsEnvironmentNew", "SettingsProjectOverview", "SettingsAuth"]) {
       expect(workspaceSelectionsIn([home, settings, { key: name, name }], {}).settings).toBe(

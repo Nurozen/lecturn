@@ -387,9 +387,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           </div>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="max-md:hidden">
+      {/* Phones keep the Connect account menu in the icon rail: it is its only home. */}
+      <SidebarFooter>
         <Suspense fallback={null}>
-          <LecturnConnectSidebarSignIn />
+          <LecturnConnectSidebarSignIn
+            labelClassName={cn(!compactSearchOpen && "max-md:sr-only")}
+          />
         </Suspense>
         <Suspense fallback={null}>
           <LecturnConnectSidebarAvatar />

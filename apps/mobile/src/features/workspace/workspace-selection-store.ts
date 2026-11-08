@@ -1,5 +1,5 @@
 import type { NavigationState } from "@react-navigation/native";
-import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
+import type { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import * as Linking from "expo-linking";
 import { AppState, Dimensions, Platform } from "react-native";
 
@@ -89,6 +89,7 @@ export function recordWorkspaceSelections(state: NavigationState | undefined) {
     state.routes.slice(0, state.index + 1),
     selections,
     isAppThread,
+    isAppProject,
   );
 }
 
@@ -101,13 +102,18 @@ function isAppThread(selection: { readonly environmentId: string; readonly threa
     }),
   );
   if (thread === null) return false;
-  const project = appAtomRegistry.get(
+  return isAppProject(thread);
+}
+
+/** A connected app's workspace; a draft started from Apps lives there too. */
+function isAppProject(project: { readonly environmentId: string; readonly projectId: string }) {
+  const shell = appAtomRegistry.get(
     environmentProjects.projectAtom({
-      environmentId: thread.environmentId,
-      projectId: thread.projectId,
+      environmentId: project.environmentId as EnvironmentId,
+      projectId: project.projectId as ProjectId,
     }),
   );
-  return project?.appBinding !== undefined;
+  return shell?.appBinding !== undefined;
 }
 
 function environmentRemoved(environmentId: string) {

@@ -23,6 +23,7 @@ import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
 import { ThreadListGroupHeader } from "../threads/thread-list-items";
 import { ThreadListV2SettledShelfHeader } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 import { AppCardHeader } from "./AppCardHeader";
 import { AppDetailSheet } from "./AppDetailSheet";
@@ -105,11 +106,14 @@ export function AppsTree(props: {
   const { providersByEnvironmentId } = useAtomValue(threadListEnvironmentsAtom);
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const selectDetail = useSelectWorkspaceDetail();
+  const openThreadOverPage = useOpenThreadOverPage();
+  // The Apps tab selects like any list; one app's page is drilled into, so iOS pushes over it.
+  const openThread = (params: ReactNavigation.RootParamList["Thread"]) =>
+    props.appId === undefined
+      ? selectDetail({ name: "Thread", params })
+      : openThreadOverPage(params);
   const selectThread = (thread: { readonly environmentId: EnvironmentId; readonly id: string }) =>
-    selectDetail({
-      name: "Thread",
-      params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
-    });
+    openThread({ environmentId: String(thread.environmentId), threadId: String(thread.id) });
   const [detailAppId, setDetailAppId] = useState<AppId | null>(null);
   const detailCard = cards.find((card) => card.appId === detailAppId) ?? null;
 
@@ -135,14 +139,11 @@ export function AppsTree(props: {
     const project = appCardTargetWorkspace(card);
     if (project === null) return null;
     return () =>
-      selectDetail({
-        name: "Thread",
-        params: {
-          draft: {
-            environmentId: String(project.environmentId),
-            projectId: String(project.id),
-            title: project.title,
-          },
+      openThread({
+        draft: {
+          environmentId: String(project.environmentId),
+          projectId: String(project.id),
+          title: project.title,
         },
       });
   };

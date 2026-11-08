@@ -1,5 +1,4 @@
 import { threadDecisionEnvironment } from "../../state/thread-decisions";
-import { StackActions, useNavigation } from "@react-navigation/native";
 import {
   DecisionEvidenceId,
   type EnvironmentId,
@@ -8,24 +7,14 @@ import {
   type ProjectId,
 } from "@lecturn/contracts";
 import { useState } from "react";
-import { Platform, View } from "react-native";
+import { View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 import { contextualEnvironment as contextual } from "../../state/contextual";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { randomHex } from "../../lib/uuid";
 import { ContextualButton as Button } from "./ContextualControls";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-
-// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
-function useOpenThreadOverPage() {
-  const navigation = useNavigation();
-  const selectDetail = useSelectWorkspaceDetail();
-  return (params: { readonly environmentId: string; readonly threadId: string }) => {
-    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
-    else navigation.dispatch(StackActions.push("Thread", params));
-  };
-}
+import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
 
 export function DecisionGroupPanel({
   environmentId,
