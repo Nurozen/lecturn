@@ -36,6 +36,8 @@ const NOW = Date.parse("2026-01-04T00:00:00.000Z");
 const ENVIRONMENT = EnvironmentId.make("environment-visit-watermark");
 const threadA: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("a") };
 const threadB: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("b") };
+// Its own thread: visits are throttled per thread across tests in this file.
+const threadC: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("c") };
 
 function setShell(ref: ScopedThreadRef, updatedAt: string) {
   appAtomRegistry.set(shellAtom(shellKey(ref)), {
@@ -68,14 +70,14 @@ function windowFocus(focused: boolean) {
 it("waits for window focus before recording a visit", async () => {
   mocks.visitRun.mockReset();
   mocks.visitRun.mockResolvedValue(AsyncResult.success(undefined));
-  setShell(threadA, "2026-01-02T00:00:00.000Z");
+  setShell(threadC, "2026-01-02T00:00:00.000Z");
   using focus = windowFocus(false);
   using _timers = fakeTimers();
   vi.setSystemTime(NOW);
 
   await using screen = await render(
     <AppAtomRegistryProvider>
-      <ThreadVisitWatermark threadRef={threadA} />
+      <ThreadVisitWatermark threadRef={threadC} />
     </AppAtomRegistryProvider>,
   );
   expect(visitedThreadIds()).toEqual([]);
@@ -83,11 +85,11 @@ it("waits for window focus before recording a visit", async () => {
   focus.gain();
   await screen.rerender(
     <AppAtomRegistryProvider>
-      <ThreadVisitWatermark threadRef={threadA} />
+      <ThreadVisitWatermark threadRef={threadC} />
     </AppAtomRegistryProvider>,
   );
 
-  expect(visitedThreadIds()).toEqual(["a"]);
+  expect(visitedThreadIds()).toEqual(["c"]);
 });
 
 it("records the visit of the next thread at once after switching threads", async () => {
