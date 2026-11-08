@@ -1,5 +1,5 @@
 import {
-  isSquireStayQuietTool,
+  squireQuietRunIds,
   squireUpdateGroups,
   type SquireApprovalEntry,
   type SquireUpdateItemRole,
@@ -106,19 +106,26 @@ export function groupSquireUpdates<T extends ThreadFeedEntry>(
   return result;
 }
 
-/** Runs that called `squire_stay_quiet`, whose text never reaches the chat. */
-export function squireQuietRunIds(feed: ReadonlyArray<ThreadFeedEntry>): ReadonlySet<RunId> {
-  const quiet = new Set<RunId>();
-  for (const entry of feed) {
-    if (entry.type !== "activity-group" || entry.runId === null) continue;
-    for (const activity of entry.activities) {
-      const item = activity.projectedItem.item;
-      if (item.type === "dynamic_tool" && isSquireStayQuietTool(item.toolName)) {
-        quiet.add(entry.runId);
-      }
-    }
+type SquireQuietItem = ThreadFeedActivity | Extract<ThreadFeedEntry, { readonly type: "message" }>;
+
+function squireQuietSignal(item: SquireQuietItem) {
+  if ("message" in item) {
+    const { message } = item;
+    return message.role === "user" && (message.createdBy ?? "user") === "user"
+      ? { runId: message.runId, userMessage: true }
+      : null;
   }
-  return quiet;
+  const tool = item.projectedItem.item;
+  return tool.type === "dynamic_tool" ? { runId: item.runId, toolName: tool.toolName } : null;
+}
+
+/** Runs whose text never reaches the chat; the rule is shared with web. */
+export function squireChatQuietRunIds(feed: ReadonlyArray<ThreadFeedEntry>): ReadonlySet<RunId> {
+  const items = feed.flatMap((entry): ReadonlyArray<SquireQuietItem> => {
+    if (entry.type === "activity-group") return entry.activities;
+    return entry.type === "message" ? [entry] : [];
+  });
+  return squireQuietRunIds(items, squireQuietSignal);
 }
 
 function isQuietText(entry: ThreadFeedEntry, quietRunIds: ReadonlySet<RunId>): boolean {

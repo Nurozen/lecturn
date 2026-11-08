@@ -277,7 +277,7 @@ import {
   hideSquireQuietText,
   insertUnreadDivider,
   mergeSquireApprovals,
-  squireQuietRunIds,
+  squireChatQuietRunIds,
   threadUnreadAnchor,
 } from "./ThreadFeed.logic";
 import { SquireApprovalRow } from "../squires/SquireApprovalRow";
@@ -2929,7 +2929,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     reportHeaderMaterialVisibility(false);
   }, [feedThreadKey, reportHeaderMaterialVisibility]);
 
-  const quietRunIds = props.squireChatSquireId ? squireQuietRunIds(props.feed) : EMPTY_RUN_IDS;
+  const quietRunIds = props.squireChatSquireId ? squireChatQuietRunIds(props.feed) : EMPTY_RUN_IDS;
   const squireApprovals = useSquireChatApprovals(
     props.environmentId,
     props.squireChatSquireId ?? null,

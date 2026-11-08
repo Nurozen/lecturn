@@ -7,7 +7,7 @@ import {
   hideSquireQuietText,
   insertUnreadDivider,
   mergeSquireApprovals,
-  squireQuietRunIds,
+  squireChatQuietRunIds,
   threadUnreadAnchor,
 } from "./ThreadFeed.logic";
 
@@ -25,7 +25,7 @@ function activity(
     id,
     createdAt: "2026-11-05T00:00:00.000Z",
     runId: run(runId),
-    activities: [{ id, lifecycleStatus, workEntry, projectedItem: { item } }],
+    activities: [{ id, runId: run(runId), lifecycleStatus, workEntry, projectedItem: { item } }],
   } as unknown as ThreadFeedEntry;
 }
 
@@ -158,14 +158,36 @@ describe("runs that stayed quiet", () => {
       quietTool,
       message("hushed", "r1", "assistant"),
     ];
-    const quiet = squireQuietRunIds(feed);
+    const quiet = squireChatQuietRunIds(feed);
     expect([...quiet]).toEqual([run("r1")]);
     expect(ids(hideSquireQuietText(feed, quiet))).toEqual(["said", "quiet"]);
   });
 
+  it("does not silence a run that also raised something", () => {
+    const notify = activity("notify", "r1", {
+      type: "dynamic_tool",
+      status: "completed",
+      toolName: "mcp__lecturn__squire_notify",
+    });
+    const feed = [quietTool, notify, message("spoke", "r1", "assistant")];
+    expect(squireChatQuietRunIds(feed).size).toBe(0);
+  });
+
+  it("does not silence a run the user started, and never hides their message", () => {
+    const feed = [
+      message("ask", "r1", "user", "user"),
+      quietTool,
+      message("reply", "r1", "assistant"),
+    ];
+    const quiet = squireChatQuietRunIds(feed);
+    expect(quiet.size).toBe(0);
+    const forced = new Set([run("r1")]);
+    expect(ids(hideSquireQuietText(feed, forced))).toEqual(["ask", "quiet"]);
+  });
+
   it("returns the rows untouched when no run stayed quiet", () => {
     const feed = [message("said", "r0", "assistant")];
-    expect(hideSquireQuietText(feed, squireQuietRunIds(feed))).toBe(feed);
+    expect(hideSquireQuietText(feed, squireChatQuietRunIds(feed))).toBe(feed);
   });
 });
 
