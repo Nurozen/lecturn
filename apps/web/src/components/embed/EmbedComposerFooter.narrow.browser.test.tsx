@@ -9,6 +9,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
 } from "@lecturn/contracts";
+import type { EmbedHostContext } from "@lecturn/contracts/embedBridge";
 import { BrainIcon, LockOpenIcon, PaperclipIcon, SendIcon, SparklesIcon } from "lucide-react";
 import { createRef, useLayoutEffect, useState } from "react";
 import { describe, expect, it } from "vite-plus/test";
@@ -16,6 +17,7 @@ import { page } from "vite-plus/test/browser";
 import { act, render as renderUi, type Screen } from "../../../test/render";
 
 import { EmbedPresentationContext } from "../../embed/EmbedPresentationContext";
+import { installEmbedTheme } from "../../embed/embedTheme";
 import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
@@ -35,6 +37,8 @@ import { Select, SelectValue } from "../ui/select";
 import { AppRefChipStrip } from "./AppRefChipStrip";
 import { useAppRefChipStore } from "./appRefChipStore";
 import { EmbedComposerFooter } from "./EmbedComposerFooter";
+// The token file RocketWright sends: `--font-sans` names Inter, and the faces come with it.
+import rocketwrightTheme from "../../../../../examples/embed-host/src/rocketwright-theme.json?raw";
 
 const presentation = {
   projectRef: scopeProjectRef(EnvironmentId.make("env-1"), ProjectId.make("project-1")),
@@ -45,17 +49,44 @@ let container: HTMLDivElement;
 
 let testScreen: Screen;
 
+const rocketwright = JSON.parse(rocketwrightTheme) as {
+  variables: Record<string, string>;
+  fontsCss: string;
+};
+const hostContext = (styles?: EmbedHostContext["styles"]): EmbedHostContext => ({
+  theme: "dark",
+  displayMode: "inline",
+  locale: "en-US",
+  ...(styles ? { styles } : {}),
+});
+
+/**
+ * Themes the pane from RocketWright's host context, as the embed does. Its labels then measure
+ * in the host's Inter on every machine instead of the platform's system font, so whether a label
+ * fits at a given width does not depend on where the test runs.
+ */
 async function setup(): Promise<AsyncDisposable> {
-  document.documentElement.dataset.lecturnEmbed = "";
-  document.documentElement.classList.add("dark");
+  let send: (context: EmbedHostContext) => void = () => {};
+  const uninstall = installEmbedTheme({
+    hostContext: () =>
+      hostContext({ variables: rocketwright.variables, css: { fonts: rocketwright.fontsCss } }),
+    subscribeHostContext: (listener) => {
+      send = listener;
+      return () => {};
+    },
+  });
   container = document.createElement("div");
   document.body.append(container);
   testScreen = await renderUi(null, { container, router: false });
   return {
     async [Symbol.asyncDispose]() {
       await testScreen[Symbol.asyncDispose]();
+      // A context without styles drops the host's variables and font faces.
+      send(hostContext());
+      uninstall();
       delete document.documentElement.dataset.lecturnEmbed;
       document.documentElement.classList.remove("dark");
+      document.documentElement.style.removeProperty("color-scheme");
       useAppRefChipStore.getState().clear(TARGET);
     },
   };
@@ -243,10 +274,16 @@ async function renderAt(paneWidth: number, labels: Labels) {
   await act(async () => document.fonts.ready);
 }
 
-// Typical labels, and the longest RocketWright's pane showed: neither may wrap the footer
-// past two rows.
+// Typical labels, and the longest the pane can show (RocketWright's longest model and access,
+// Codex's longest effort): neither may wrap the footer past two rows. At 352 px each set is
+// ~16-20 px from the fit boundary, so the access outcome never hinges on sub-pixel glyph widths.
 const TYPICAL = { model: "Opus 5", shown: "Opus 5", effort: "High", access: "Supervised" };
-const LONGEST = { model: "GPT-6-Astra", shown: "6 Astra", effort: "Medium", access: "Full access" };
+const LONGEST = {
+  model: "GPT-6-Astra",
+  shown: "6 Astra",
+  effort: "Extra High",
+  access: "Full access",
+};
 
 const visibleText = (row: Element) =>
   Array.from(row.querySelectorAll<HTMLElement>("button")).map((button) =>
@@ -293,9 +330,8 @@ describe("EmbedComposerFooter in a narrow pane", () => {
     const [model, effort, access] = visibleText(controlsRow);
     expect(model).toBe(labels.shown);
     expect(effort).toBe(labels.effort);
-    // Access gives way to its icon first; with short model names every label fits at
-    // RocketWright's width.
-    expect(access).toBe(width === 352 ? labels.access : "");
+    // Access gives way to its icon first; typical labels all fit at RocketWright's width.
+    expect(access).toBe(width === 352 && labels === TYPICAL ? labels.access : "");
     expect(visibleText(contextualRow)).toEqual(["Contextual · Off"]);
   });
 
