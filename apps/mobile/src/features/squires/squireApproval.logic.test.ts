@@ -20,7 +20,7 @@ import {
   createSquireOpenedTracker,
   squireActOutcome,
   squireApprovalAnswer,
-  squireApprovalControls,
+  squireChatControls,
   squireHeaderActions,
   squireItemsActInput,
   squireQuestionMode,
@@ -367,55 +367,76 @@ describe("question recommendation", () => {
 
 const OFFER = { effect: "allow", capReached: false } as unknown as SquireRuleOffer;
 
-describe("squireApprovalControls", () => {
-  const base = {
-    phase: "open" as const,
-    expired: false,
-    canAct: true,
-    canSaveRule: true,
-    ruleSaved: false,
-  };
+describe("squireChatControls", () => {
+  const base = { payload: null, canAct: true, canSaveRule: true, ruleSaved: false };
   const card = (kind: SquireCardKind, extra: Partial<SquireCardRow> = {}) =>
     ({ id: "c", squireId: RELEASE, kind, ...extra }) as SquireCardRow;
+  const open = (row: SquireCardRow) =>
+    ({ row, createdAt: "", phase: "open", outcome: null, expired: false }) as const;
+  const closed = (row: SquireCardRow, expired: boolean) =>
+    ({ row, createdAt: "", phase: "closed", outcome: "Expired", expired }) as const;
 
   it("offers Always allow only where a rule can apply", () => {
-    expect(squireApprovalControls({ ...base, row: card("steer") })).toEqual({
+    expect(squireChatControls({ ...base, entry: open(card("steer")) })).toEqual({
       kind: "approve",
+      allowLabel: "Allow once",
       alwaysAllow: false,
     });
     expect(
-      squireApprovalControls({ ...base, row: card("steer", { allowRuleOffer: OFFER }) }),
-    ).toEqual({ kind: "approve", alwaysAllow: true });
+      squireChatControls({ ...base, entry: open(card("steer", { allowRuleOffer: OFFER })) }),
+    ).toMatchObject({ kind: "approve", alwaysAllow: true });
     expect(
-      squireApprovalControls({
+      squireChatControls({
         ...base,
-        row: card("proposal", { allowRuleOffer: { ...OFFER, capReached: true } }),
+        entry: open(card("proposal", { allowRuleOffer: { ...OFFER, capReached: true } })),
       }),
-    ).toEqual({ kind: "approve", alwaysAllow: false });
+    ).toMatchObject({ kind: "approve", alwaysAllow: false });
+    expect(
+      squireChatControls({
+        ...base,
+        canSaveRule: false,
+        entry: open(card("steer", { allowRuleOffer: OFFER })),
+      }),
+    ).toMatchObject({ kind: "approve", alwaysAllow: false });
+  });
+
+  it("names a proposal's accept as web does", () => {
+    const entry = open(card("proposal"));
+    const label = (type: string) =>
+      squireChatControls({ ...base, entry, payload: { type } as SquireKnownPayload });
+    expect(label("squire-proposal")).toMatchObject({ allowLabel: "Accept" });
+    expect(label("room-proposal")).toMatchObject({ allowLabel: "Open room" });
+    expect(label("thread-proposal")).toMatchObject({ allowLabel: "Allow once" });
   });
 
   it("keeps question answers, overlap Dismiss, and the inactivity check's Keep and Pause", () => {
-    expect(squireApprovalControls({ ...base, row: card("question") })).toEqual({ kind: "answer" });
-    expect(squireApprovalControls({ ...base, row: card("overlap") })).toEqual({ kind: "dismiss" });
+    expect(squireChatControls({ ...base, entry: open(card("question")) })).toEqual({
+      kind: "answer",
+    });
+    expect(squireChatControls({ ...base, entry: open(card("overlap")) })).toEqual({
+      kind: "dismiss",
+    });
     expect(
-      squireApprovalControls({ ...base, row: card("fyi", { fyiSource: "inactivity" }) }),
+      squireChatControls({ ...base, entry: open(card("fyi", { fyiSource: "inactivity" })) }),
     ).toEqual({ kind: "inactivity" });
-    expect(squireApprovalControls({ ...base, row: card("fyi") })).toEqual({ kind: "none" });
+    expect(squireChatControls({ ...base, entry: open(card("fyi")) })).toEqual({ kind: "none" });
   });
 
   it("offers the rule alone once expired, and nothing once it is saved", () => {
     const row = card("steer", { allowRuleOffer: OFFER });
-    const closed = { ...base, phase: "closed" as const, expired: true, row };
-    expect(squireApprovalControls(closed)).toEqual({ kind: "expired", allowNextTime: true });
-    expect(squireApprovalControls({ ...closed, ruleSaved: true })).toEqual({
+    expect(squireChatControls({ ...base, entry: closed(row, true) })).toEqual({
+      kind: "expired",
+      allowNextTime: true,
+    });
+    expect(squireChatControls({ ...base, ruleSaved: true, entry: closed(row, true) })).toEqual({
       kind: "expired",
       allowNextTime: false,
     });
-    expect(squireApprovalControls({ ...closed, expired: false })).toEqual({ kind: "none" });
+    expect(squireChatControls({ ...base, entry: closed(row, false) })).toEqual({ kind: "none" });
   });
 
   it("offers no controls to a viewer who cannot act", () => {
-    expect(squireApprovalControls({ ...base, canAct: false, row: card("steer") })).toEqual({
+    expect(squireChatControls({ ...base, canAct: false, entry: open(card("steer")) })).toEqual({
       kind: "none",
     });
   });

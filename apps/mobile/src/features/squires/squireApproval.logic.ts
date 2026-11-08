@@ -1,12 +1,11 @@
 import { seedUserInputDraftAnswers } from "@lecturn/client-runtime/state/thread-requests";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
 import {
-  squireAllowRuleInput,
+  squireApprovalControls,
   squireLeadShowsIntro,
   squireQuestionPanelQuestions,
   squireUndoOffer,
   type SquireApprovalEntry,
-  type SquireApprovalPhase,
   type SquireEnvironmentState,
   type SquireKnownPayload,
   type SquireSnapshotEntry,
@@ -146,8 +145,8 @@ export function squireCardRecommendation(
   }
 }
 
-export type SquireApprovalControls =
-  | { readonly kind: "approve"; readonly alwaysAllow: boolean }
+export type SquireChatControls =
+  | { readonly kind: "approve"; readonly allowLabel: string; readonly alwaysAllow: boolean }
   | { readonly kind: "answer" }
   | { readonly kind: "dismiss" }
   | { readonly kind: "inactivity" }
@@ -155,38 +154,38 @@ export type SquireApprovalControls =
   | { readonly kind: "none" };
 
 /**
- * What a chat row offers. An approval is Allow once, Deny, and Always allow where a rule can
- * apply; a question keeps its answer controls and an overlap its Dismiss. An expired approval
- * offers the rule alone. Everything closed offers nothing, since its outcome stays as its line.
+ * What a chat row offers this viewer: the shared controls, narrowed by what this session may do.
+ * A question keeps its answer controls and an overlap its Dismiss; an expired approval offers
+ * the rule alone. Everything closed offers nothing, since its outcome stays as its line.
  */
-export function squireApprovalControls(input: {
-  readonly row: Pick<SquireCardRow, "id" | "squireId" | "kind" | "fyiSource" | "allowRuleOffer">;
-  readonly phase: SquireApprovalPhase;
-  readonly expired: boolean;
+export function squireChatControls(input: {
+  readonly entry: SquireApprovalEntry<SquireCardRow>;
+  /** Null while the card loads; labels fall back. */
+  readonly payload: SquireKnownPayload | null;
   readonly canAct: boolean;
   readonly canSaveRule: boolean;
   /** "Saved to rules" already applies to this card this session. */
   readonly ruleSaved: boolean;
-}): SquireApprovalControls {
-  const { row } = input;
-  const ruleAvailable = input.canSaveRule && !input.ruleSaved && squireAllowRuleInput(row) !== null;
-  if (input.phase !== "open") {
-    return input.expired ? { kind: "expired", allowNextTime: ruleAvailable } : { kind: "none" };
+}): SquireChatControls {
+  const { entry } = input;
+  const shared = squireApprovalControls(entry, input.payload);
+  const canSave = input.canSaveRule && !input.ruleSaved;
+  if (entry.phase !== "open") {
+    return entry.expired
+      ? { kind: "expired", allowNextTime: canSave && shared.allowNextTime }
+      : { kind: "none" };
   }
   if (!input.canAct) return { kind: "none" };
-  switch (row.kind) {
-    case "steer":
-    case "proposal":
-      return { kind: "approve", alwaysAllow: ruleAvailable };
-    case "question":
-      return { kind: "answer" };
-    case "overlap":
-      return { kind: "dismiss" };
-    case "fyi":
-      return row.fyiSource === "inactivity" ? { kind: "inactivity" } : { kind: "none" };
-    default:
-      return { kind: "none" };
+  if (shared.inactivity) return { kind: "inactivity" };
+  if (shared.allow !== null) {
+    return {
+      kind: "approve",
+      allowLabel: shared.allow,
+      alwaysAllow: canSave && shared.alwaysAllow,
+    };
   }
+  if (entry.row.kind === "question") return { kind: "answer" };
+  return entry.row.kind === "overlap" ? { kind: "dismiss" } : { kind: "none" };
 }
 
 /**

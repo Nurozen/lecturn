@@ -18,13 +18,14 @@ function activity(
   runId: string,
   item: Record<string, unknown>,
   lifecycleStatus = "completed",
+  workEntry: Record<string, unknown> = {},
 ): ThreadFeedEntry {
   return {
     type: "activity-group",
     id,
     createdAt: "2026-11-05T00:00:00.000Z",
     runId: run(runId),
-    activities: [{ id, lifecycleStatus, projectedItem: { item } }],
+    activities: [{ id, lifecycleStatus, workEntry, projectedItem: { item } }],
   } as unknown as ThreadFeedEntry;
 }
 
@@ -110,6 +111,34 @@ describe("groupSquireUpdates", () => {
     expect(ids(groupSquireUpdates([...feed.slice(2, 4), question], null))).toEqual(["question"]);
   });
 
+  it("keeps a failed run's error and an answered question out of the span", () => {
+    const span = (row: ThreadFeedEntry) => [wake("wake-1", "r1", []), row];
+    const failure = { class: "provider" };
+    const failed = activity("failed", "r1", { type: "error", status: "failed", failure });
+    expect(ids(groupSquireUpdates(span(failed), null))).toEqual(["failed"]);
+    const answered = activity("answered", "r1", { type: "user_input_request" }, "completed", {
+      questionAnswer: { requestId: "request-1" },
+    });
+    expect(ids(groupSquireUpdates(span(answered), null))).toEqual(["answered"]);
+  });
+
+  it("folds a retrying error and a usage-limit warning, as web does", () => {
+    const span = (row: ThreadFeedEntry) => [wake("wake-1", "r1", []), row];
+    const retrying = activity("retrying", "r1", {
+      type: "error",
+      status: "running",
+      failure: { class: "provider" },
+      retry: { attempt: 1 },
+    });
+    expect(ids(groupSquireUpdates(span(retrying), null))).toEqual([]);
+    const limited = activity("limited", "r1", {
+      type: "error",
+      status: "failed",
+      failure: { class: "usage_limit" },
+    });
+    expect(ids(groupSquireUpdates(span(limited), null))).toEqual([]);
+  });
+
   it("returns the feed untouched when no wake is in it", () => {
     const plain = [message("ask", "r0", "user", "user"), message("reply", "r0", "assistant")];
     expect(groupSquireUpdates(plain, null)).toBe(plain);
@@ -149,8 +178,8 @@ function timed(entry: ThreadFeedEntry, seconds: number): ThreadFeedEntry {
     : { ...entry, createdAt };
 }
 
-function approval(id: string, seconds: number) {
-  return { row: { id }, createdAt: at(seconds) } as unknown as Parameters<
+function approval(id: string, seconds: number, phase = "closed") {
+  return { row: { id }, createdAt: at(seconds), phase } as unknown as Parameters<
     typeof mergeSquireApprovals
   >[1][number];
 }
@@ -189,7 +218,20 @@ describe("mergeSquireApprovals", () => {
     ]);
   });
 
-  it("holds an approval older than the loaded history until it loads", () => {
+  it("shows a row still waiting on the user even before its history loads", () => {
+    expect(ids(mergeSquireApprovals(rows, [approval("open", 5, "open")], true))).toEqual([
+      "squire-approval:open",
+      "a",
+      "b",
+    ]);
+    expect(ids(mergeSquireApprovals(rows, [approval("sending", 5, "sending")], true))).toEqual([
+      "squire-approval:sending",
+      "a",
+      "b",
+    ]);
+  });
+
+  it("holds a closed approval older than the loaded history until it loads", () => {
     expect(ids(mergeSquireApprovals(rows, [approval("old", 5)], true))).toEqual(["a", "b"]);
     expect(ids(mergeSquireApprovals(rows, [approval("old", 5)], false))).toEqual([
       "squire-approval:old",

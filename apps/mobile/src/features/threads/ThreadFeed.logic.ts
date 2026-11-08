@@ -11,8 +11,10 @@ import {
 } from "@lecturn/client-runtime/state/thread-visits";
 import type { RunId, SquireCardRow } from "@lecturn/contracts";
 
-import type { ThreadFeedEntry } from "../../lib/threadActivity";
+import type { ThreadFeedActivity, ThreadFeedEntry } from "../../lib/threadActivity";
 import type { SquireApprovalFeedEntry, ThreadFeedRow } from "./pending-thread-feed";
+
+type ThreadFeedActivityItem = ThreadFeedActivity["projectedItem"]["item"];
 
 const NO_EVENT_KINDS: ReadonlyArray<string> = [];
 
@@ -38,6 +40,12 @@ function rowRunId(entry: ThreadFeedEntry): RunId | null {
   }
 }
 
+/** A failure the user should see; a retrying error or a usage-limit warning is neither, as on web. */
+function isRuntimeError(item: ThreadFeedActivityItem): boolean {
+  if (item.type !== "error" || item.retry !== undefined) return false;
+  return item.failure.class !== "usage_limit" || item.status === "completed";
+}
+
 export function squireUpdateRole(
   entry: ThreadFeedEntry,
   activeRunId: RunId | null,
@@ -51,6 +59,8 @@ export function squireUpdateRole(
         const item = activity.projectedItem.item;
         return (
           isLiveSubagentTurnItem(item) ||
+          activity.workEntry.questionAnswer !== undefined ||
+          isRuntimeError(item) ||
           ((item.type === "approval_request" ||
             item.type === "user_input_request" ||
             item.type === "secret_request") &&
@@ -130,8 +140,9 @@ export function hideSquireQuietText<T extends ThreadFeedEntry>(
 
 /**
  * Places a Squire's approvals among the chat's rows by when they were raised. While earlier
- * history is unloaded, an approval older than the first row waits for it, so a row never sits
- * above messages that came before it. The working row stays last.
+ * history is unloaded, a closed row older than the first row waits for it, so it never sits
+ * above messages that came before it; one still waiting on the user shows regardless. The
+ * working row stays last.
  */
 export function mergeSquireApprovals(
   rows: ReadonlyArray<ThreadFeedRow>,
@@ -142,7 +153,7 @@ export function mergeSquireApprovals(
   const oldest = rows[0]?.createdAt ?? null;
   const shown =
     hasMoreHistory && oldest !== null
-      ? approvals.filter((approval) => approval.createdAt >= oldest)
+      ? approvals.filter((approval) => approval.phase !== "closed" || approval.createdAt >= oldest)
       : approvals;
   if (shown.length === 0) return rows;
   const result: ThreadFeedRow[] = [];

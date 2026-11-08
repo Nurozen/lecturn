@@ -39,13 +39,14 @@ import {
 } from "./SquireEvidence";
 import {
   SQUIRE_KIND_LABEL,
-  squireApprovalControls,
+  squireChatControls,
   squireCardRecommendation,
   squireFollowUpDraft,
   squireOffersFollowUp,
   squireQuestionMode,
   squireQuestionRepeatsTitle,
   type SquireAnswer,
+  type SquireChatControls,
 } from "./squireApproval.logic";
 import {
   squireSavedRuleCardsAtom,
@@ -72,7 +73,7 @@ export function SquireApprovalRow(props: {
   readonly entry: SquireApprovalEntry<SquireCardRow>;
 }) {
   const { environmentId, entry } = props;
-  const { row, phase, expired } = entry;
+  const { row, phase } = entry;
   // Seeing an open row is what opening a card used to be: it cancels the phone escalation.
   useSquireMarkOpened(environmentId, phase === "open" ? row.id : null, row.openedAt);
   const detail = useEnvironmentQuery(
@@ -99,10 +100,10 @@ export function SquireApprovalRow(props: {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const controls = squireApprovalControls({
-    row,
-    phase,
-    expired,
+  const payload = card === null || card.payload instanceof UnknownUnionMember ? null : card.payload;
+  const controls = squireChatControls({
+    entry,
+    payload,
     canAct,
     canSaveRule,
     ruleSaved: saved,
@@ -228,7 +229,7 @@ export function SquireApprovalRow(props: {
 }
 
 function SquireApprovalFooter(props: {
-  readonly controls: ReturnType<typeof squireApprovalControls>;
+  readonly controls: SquireChatControls;
   readonly outcome: string | null;
   /** The in-flight line; while set, the row offers nothing. */
   readonly pending: string | null;
@@ -251,7 +252,11 @@ function SquireApprovalFooter(props: {
       )}
       {offersButtons && controls.kind === "approve" ? (
         <View className="flex-row flex-wrap gap-2">
-          <RequestActionButton label="Allow once" disabled={busy} onPress={props.onAllowOnce} />
+          <RequestActionButton
+            label={controls.allowLabel}
+            disabled={busy}
+            onPress={props.onAllowOnce}
+          />
           {controls.alwaysAllow ? (
             <RequestActionButton
               label="Always allow"
