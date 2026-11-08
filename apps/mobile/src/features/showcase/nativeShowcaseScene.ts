@@ -51,6 +51,8 @@ const SHOWCASE_SCENES = [
   "draft-long",
   "settings-end",
   "settings-threads-end",
+  "settings-general",
+  "settings-labs",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 

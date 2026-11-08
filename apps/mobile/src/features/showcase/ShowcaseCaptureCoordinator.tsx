@@ -115,6 +115,8 @@ const stamp = "2026-01-15T12:00:00.000Z";
 const CAPTURE_FLOWS: Partial<Record<string, (c: CaptureFlowContext) => NavigationAction>> = {
   settings: settingsPage(),
   "settings-end": settingsPage(),
+  "settings-general": settingsPage("SettingsOrganization"),
+  "settings-labs": settingsPage("SettingsLabs"),
   "settings-search": settingsPage(),
   "settings-back": settingsPage("SettingsEnvironments"),
   "settings-select": settingsPage("SettingsEnvironments"),
