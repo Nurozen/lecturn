@@ -1129,6 +1129,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const nestedSettledThreads = [...settledByProject.values()].flatMap((page) => page.visible);
   const sidebarSegments = useSidebarSegments({
     segmentation: sidebarSegmentation,
+    projectScopeKey,
     projects,
     pinnedThreads,
     activeThreads,

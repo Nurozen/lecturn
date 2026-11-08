@@ -51,6 +51,8 @@ export interface SidebarSegmentsView<Node> {
 type SidebarSegmentsInput<Node> = Omit<SidebarThreadListScope<Node>, "orderedThreads"> &
   SidebarShelfActions & {
     readonly segmentation: SidebarSegmentation | null;
+    /** The chosen project scope, or null for all; `scopedProjectKeys` is rebuilt every render. */
+    readonly projectScopeKey: string | null;
     readonly projects: ReadonlyArray<{ readonly environmentId: string; readonly id: string }>;
     readonly nestedSettledThreads: ReadonlyArray<EnvironmentThreadShell>;
     readonly nestSagaProjects: boolean;
@@ -82,6 +84,7 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
     setCollapsedSegmentIds((collapsed) => toggleSegmentCollapsed(collapsed, segmentId));
   const {
     segmentation,
+    projectScopeKey,
     projects,
     pinnedThreads,
     activeThreads,
@@ -104,9 +107,9 @@ const useAccountSidebarSegments: UseSidebarSegments = <Node extends SegmentSagaN
 
   const [shelves, setShelves] = useState(NO_SEGMENT_SHELVES);
   // A project scope flip starts every segment's settled tail over, as it does the one list's.
-  const [lastScope, setLastScope] = useState(scopedProjectKeys);
-  if (lastScope !== scopedProjectKeys) {
-    setLastScope(scopedProjectKeys);
+  const [lastScopeKey, setLastScopeKey] = useState(projectScopeKey);
+  if (lastScopeKey !== projectScopeKey) {
+    setLastScopeKey(projectScopeKey);
     setShelves(resetSegmentSettledPages);
   }
   const shelfActionsOf = (segmentId: string): SidebarShelfActions => ({
