@@ -4,8 +4,9 @@ A Squire is an agent that keeps an eye on the threads you give it. When a watche
 turn, stops, waits on you, or its pull request changes, the Squire reads a short summary. It then
 stays quiet, asks you to decide something, or does what you allowed it to do. You can run several
 Squires, each with its own brief, scope, and permissions. They all report to one **Lead**, which
-keeps the combined queue, flags threads that touch the same files, sends a daily digest, and can
-route your requests to the right Squire.
+flags threads that touch the same files, sends a daily digest, and can route your requests to the
+right Squire. Each Squire and the Lead is a chat: what it has to say and what it needs from you
+appear in that conversation.
 
 ## Turn on Squires
 
@@ -43,14 +44,24 @@ A Squire can show a chart or table as a page in its thread. Its pages can't read
 machine or load anything from the network, and their links don't open, so ask the Squire to put a
 link in its reply instead.
 
-## Items
+## Approvals
 
-When a Squire needs you, it raises an item: a steer to send, a thread to create, a question a
-thread is waiting on, or, from the Lead, two threads changing the same files. Items show in the
-Squire's view, in the Lead's combined queue, in the desktop notch, and on mobile in the Squires
-section of the home list. Acting on an item anywhere resolves it everywhere. **Ask about this**
-answers a question from a temporary read-only copy of the thread, so it uses tokens only when you
-ask.
+When a Squire needs you, it asks in its chat, at the point in the conversation where it came up: a
+steer to send, a thread to create, a question a thread is waiting on, or, from the Lead, two threads
+changing the same files. The full text is right there. The sidebar shows when a Squire needs you,
+and a button at the top of the chat jumps to the oldest thing waiting. Approvals also show in the
+desktop notch and on mobile; acting on one anywhere resolves it everywhere.
+
+Choose **Allow once**, **Always allow**, or **Deny**. **Deny** also stops the Squire asking for the
+same thing again until you next write in its chat. Sending your own message closes any approvals
+still open in that chat, so you can just say what you want instead. A question stays open until
+it's answered.
+
+An approval for background work expires after 30 minutes. It stays in the chat marked **Expired**,
+so you can pick the conversation up later, and it can offer **Always allow next time**.
+
+Messages you haven't seen yet sit under a **New** line in any thread, placed where they begin when
+you open it.
 
 You can also give the Lead a task in its conversation. It forwards the task to the Squire watching
 that thread, proposes a new thread, or answers from what its Squires already know. Ask the Lead for
@@ -66,9 +77,10 @@ open, the held action shows under it; **Undo** turns the held action into a reco
 Only one Squire can steer a given thread on Auto. Budgets cap how much a Squire does in a day. Once
 a budget runs out, it goes back to recommending.
 
-After you accept a recommendation, in Lecturn or the notch, the Squire can offer **Always allow
-this**. That saves a rule that lets it act on its own next time, for that thread or its project.
-After you undo an action, it offers **Always ask first for this**. Rules are listed in the Squire's
+**Always allow** runs the action and saves a rule that lets the Squire do the same on its own next
+time, for that thread or its project. It's hidden where a rule can't apply, such as for voice notes
+and webhook runs. In the notch, accepting a recommendation can offer **Always allow this**. After
+you undo an action, the Squire offers **Always ask first for this**. Rules are listed in the Squire's
 settings with how often they matched, and you can remove them there. On mobile, they are at the
 bottom of the Squire's screen. A rule never widens what a
 Squire can see.
@@ -90,10 +102,10 @@ Phone alerts need [Lecturn Connect](./notifications-and-live-activities.md) with
 publishing on. Your phone is alerted when a Squire first needs a decision from you, not for every
 item. Later items arrive quietly until you have dealt with the open ones.
 
-If you are active at a desktop or web client, the alert waits. If you have not opened the item
-after 3 minutes, your phone is alerted anyway. To change that wait, go to **Settings → Squires →
+If you are active at a desktop or web client, the alert waits. If you have not seen the approval
+in its chat after 3 minutes, your phone is alerted anyway. To change that wait, go to **Settings → Squires →
 Phone alerts while I'm at my desktop**. To stop a Squire's alerts entirely, turn off **Notify me**
-in its settings. Its items still show in Lecturn.
+in its settings. Its approvals still show in Lecturn.
 
 ## Advanced: triggers and webhooks
 
