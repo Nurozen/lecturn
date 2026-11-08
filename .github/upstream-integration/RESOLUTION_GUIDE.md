@@ -1285,10 +1285,12 @@ from upstream's side.
   `*.pinglabs.workers.dev` to a Lecturn name; delete it again if upstream edits it.
 - **Mobile crash telemetry (#19093, lead decision D7).** The relay stack stays off until
   `MOBILE_TELEMETRY_ENABLED` (deploy-relay.yml, default `false`). Upstream's mobile datasets, ingest
-  token, dashboard, monitors, R2 bucket, upload token, rate limit and R2 binding are created only
-  through `whenMobileTelemetryEnabled` (`infra/relay/src/observability.ts`); off, the Worker serves
+  token, dashboard, monitors, R2 bucket and upload token are created only through
+  `whenMobileTelemetryEnabled` (`infra/relay/src/observability.ts`, `infra/relay/alchemy.run.ts`);
+  the rate limit and R2 read binding are created in `infra/relay/src/worker.ts` only when
+  `observability.mobileTelemetry` is defined. Off, the Worker serves
   `MobileTelemetry.layerApiDisabled` (404, body unread). Keep new upstream mobile telemetry
-  resources and bindings behind that gate; enabling is in `docs/operations/relay-observability.md`.
+  resources and bindings behind those gates; enabling is in `docs/operations/relay-observability.md`.
 - **Effect budget (#24964).** `scripts/effect-budget.json` holds each fork file at its effect
   count, keys repo-relative and sorted. When a file exceeds upstream's budget, check first
   whether the merge kept an effect upstream moved into a store (#24970-#25079); port the fork

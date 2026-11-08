@@ -261,8 +261,9 @@ Without it, uploads are skipped with a warning and stacks stay minified. Each in
 The relay side is off until the GitHub Actions variable `MOBILE_TELEMETRY_ENABLED` is `true`.
 Off, the deploy creates none of the above (mobile datasets, ingest token, dashboard and monitors,
 the R2 bucket, its upload token and the rate limit binding), and `/v1/mobile/observe` answers 404,
-which Observe treats as final: the app drops the batch without retrying or showing anything. To
-turn it on:
+which Observe treats as final: the app drops the batch without retrying or showing anything. The
+404 still gets the normal relay HTTP request span (its URL includes the project id; the body is not
+read). To turn it on:
 
 1. In the Cloudflare dashboard, confirm R2 is enabled on the account and the token behind the
    `CLOUDFLARE_API_TOKEN` secret has **Workers R2 Storage: Edit** and **Account API Tokens: Edit**.
