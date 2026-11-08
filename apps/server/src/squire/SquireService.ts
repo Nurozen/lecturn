@@ -105,11 +105,9 @@ const nextDefaultCompanion = (taken: ReadonlyArray<SquireCompanion>): SquireComp
 
 // The client draws the Lead's crest from its role, so the record only keeps gold.
 /**
- * The decision per driver. A driver is on only after its MCP
- * isolation and deny-runtime tests pass on start, resume, and fork and a live
- * smoke shows it; one that cannot drop its own tools stays off with a
- * reason the picker shows. Pi, Muse, and the ACP registry are never on. The
- * scripted driver exists only for tests.
+ * A driver is on only after its MCP isolation and deny-runtime tests pass on start, resume, and fork and a live smoke
+ * shows it; one that cannot drop its own tools stays off with a reason the picker shows. Pi, Muse, and the ACP
+ * registry are never on. The scripted driver exists only for tests.
  */
 const DRIVER_SUPPORT: Readonly<
   Record<string, { readonly squire: boolean; readonly probe: boolean; readonly reason?: string }>

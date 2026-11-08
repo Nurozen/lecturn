@@ -252,9 +252,7 @@ const buildExeCmd = Command.make(
         }),
       );
 
-      // The executable can only `import` built-ins. A file-backed import
-      // passes the bundler and `node dist/bin.mjs`, then throws inside the
-      // binary, so read the emitted module graph rather than trusting config.
+      // Executables reject non-builtin imports even when bundling succeeds; inspect the emitted graph.
       const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
       const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
       if (specifiers.length > 0) {

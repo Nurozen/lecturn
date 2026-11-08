@@ -25,10 +25,8 @@ import { inferProjectTitleFromPath } from "./projectPaths";
 import { newProjectId } from "./utils";
 
 /**
- * The tail every "add project" surface shares: reuse an existing project at
- * the path (open its latest thread, or start one), otherwise `project.create`
- * and start a thread in it. The command palette reaches it with a resolved
- * folder or clone destination; the Stave wizard reaches
+ * The tail every "add project" surface shares: reuse an existing project at the path,
+ * otherwise `project.create`, then open or start a thread. The Stave wizard enters at
  * `openExistingProjectAndThread` after the server created the project.
  */
 

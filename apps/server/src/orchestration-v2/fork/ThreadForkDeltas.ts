@@ -1,21 +1,8 @@
 /**
- * Lecturn deltas on upstream thread.fork (ThreadForkService):
- * - `sourceMessageId`: the user message the fork is cut at. The fork carries
- *   history through that message's run (inclusive) and records the anchor as
- *   `forkOrigin.messageId` (null for fork-at-end).
- * - `workspace: "new-worktree"` + `prepareWorktree`: the child works on a new
- *   branch in its own worktree instead of inheriting the parent's.
- * - Imported origin and the linked pull request ride on the spread of the
- *   source thread in ThreadForkService; a child on a new branch drops only the
- *   branch-derived pull request.
- * - Run-less history (a V1 migration transcript or an imported session) has
- *   no run to fork natively: the child gets a copy of that history up to the
- *   cut and its first turn receives it as portable context (see
- *   `planRunlessForkHistory`).
- * - First new turn of a child that still carries its default fork title
- *   generates a real title (see `shouldGenerateForkChildTitle`).
- * - `squireProbe` (server-only): the child is a Squire probe, marked and
- *   read-only (see `squireProbeFields`).
+ * Lecturn deltas on upstream thread.fork: `sourceMessageId` cuts through that message's run
+ * (`forkOrigin.messageId`); `"new-worktree"` gives the child its own branch and drops only the
+ * branch-derived pull request; run-less history is copied to the cut as portable context; a default
+ * fork title is regenerated on the first turn; `squireProbe` marks a read-only Squire probe.
  */
 import {
   MessageId,
@@ -94,12 +81,10 @@ const runlessForkId = (targetThreadId: ThreadId, sourceId: string) =>
   `fork:${targetThreadId}:${sourceId}`;
 
 /**
- * The child's copy of the source's run-less history. A cut at a user message
- * carries that message and everything up to the next user message (its
- * reply); without a cut the whole run-less history is carried. Copies get ids
- * derived from the child and source ids (a replayed plan is identical) and
- * keep their source timestamps, so imported history still reads as imported.
- * Returns `undefined` when there is nothing to carry or the cut is not found.
+ * The child's copy of the source's run-less history: through the cut user message and its reply, or
+ * all of it without a cut. Copy ids derive from child and source ids (a replayed plan is identical)
+ * and keep source timestamps, so imported history still reads as imported. `undefined` when there
+ * is nothing to carry or the cut is not found.
  */
 export function planRunlessForkHistory(input: {
   readonly targetThreadId: ThreadId;

@@ -1,12 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The tracer: the sidecar starts, the workspace is ensured, the embed is
- * mounted with RocketWright's theme under the host's own pane header, and
- * one scripted turn calls `ex_counter_increment` through Lecturn's app
- * toolkit. It asserts the header, the user's plain message, the app tool's
- * row with its success check and, under it, the card loaded and showing the
- * result, the counter server's call log and the `lecturn/context` meta
- * Lecturn sent with the call.
+ * The tracer: sidecar start, workspace ensure, embed mount with RocketWright's theme, then one
+ * scripted turn calling `ex_counter_increment` through Lecturn's app toolkit; asserts the header,
+ * message, tool row and loaded card, the counter call log and the `lecturn/context` meta.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFSP from "node:fs/promises";

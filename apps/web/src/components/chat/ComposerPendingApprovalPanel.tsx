@@ -112,15 +112,9 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
 });
 
 /**
- * The tool with the app's reason under it, as one item of the banner row
- * (`data-app-tool-approval`, ComposerBanner): the actions sit beside it while
- * the tool's whole name fits next to them, and otherwise wrap below the reason.
- * The reason is prose the app wrote for the user, not a command, so it reads as
- * text and wraps to a second line before truncating. It takes no width of its
- * own, so a long one never pushes the actions down. The embed keeps
- * the actions on the title's row, so there the reason takes a line of its own
- * under both (embedComposer.css) and the title truncates only once the compact
- * actions leave it no room.
+ * Actions sit beside the tool while its whole name fits, else wrap below the reason. The
+ * reason is app-written prose: it wraps before truncating and takes no width, so it never
+ * pushes the actions down. The embed keeps actions on the title row (embedComposer.css).
  */
 function ConnectedAppToolApproval({
   approval,

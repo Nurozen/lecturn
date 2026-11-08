@@ -51,11 +51,8 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 };
 
 /**
- * Resolve Electron's userData profile. An explicit Lecturn home isolates the
- * profile under `<stateDir>/electron` and wins over the shared default and
- * legacy profiles, which are never inspected in that case. Clerk calls this
- * before Electron is ready with the synchronous pre-ready FileSystem, and the
- * app identity calls it again after, so both must resolve the same profile.
+ * An explicit Lecturn home isolates the profile under `<stateDir>/electron`, skipping shared and
+ * legacy profiles. Clerk resolves it before Electron is ready and the app identity after; both must match.
  */
 export const resolveUserDataPath = Effect.fn("desktop.appIdentity.resolveUserDataPath")(function* (
   environment: Parameters<typeof DesktopUserData.resolveUserDataPath>[0] & {
@@ -77,7 +74,7 @@ export const resolveUserDataPath = Effect.fn("desktop.appIdentity.resolveUserDat
   return userDataPathOverride;
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
   const electronApp = yield* ElectronApp.ElectronApp;
@@ -130,10 +127,8 @@ export const make = Effect.gen(function* () {
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
-    // Electron removes spaces from this name to build the native User-Agent
-    // product token, but leaves parentheses intact. Keep the runtime name valid
-    // without rewriting preview sessions (which breaks Turnstile, #7110). The
-    // stable (Alpha) build keeps the bare product name.
+    // Electron strips spaces but keeps parentheses in its User-Agent token, breaking Turnstile in preview sessions.
+    // The stable (Alpha) build keeps the bare product name.
     yield* electronApp.setName(
       environment.branding.stageLabel === "Alpha"
         ? environment.branding.baseName
@@ -149,9 +144,7 @@ export const make = Effect.gen(function* () {
       yield* electronApp.setAppUserModelId(environment.appUserModelId);
     }
 
-    // Unpackaged runs only. A packaged bundle already carries its icon in
-    // Info.plist, so setting the dock tile again changes nothing except to
-    // overwrite a custom icon the user attached to the app themselves.
+    // Packaged bundles carry their icon in Info.plist; setting it again overwrites the user's custom icon.
     if (environment.platform === "darwin" && !environment.isPackaged) {
       const iconPaths = yield* assets.iconPaths;
       yield* Option.match(iconPaths.png, {

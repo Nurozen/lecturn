@@ -1,13 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - The threshold summary goes to the repo-root artifacts folder.
 /**
- * The live bar: the gold scenarios on a real Claude or Codex
- * Squire, through the same `/mcp` stack as the scripted bar. Spends provider tokens,
- * so it runs only with SQUIRE_BAR_PROVIDER=claudeAgent|codex.
- * SQUIRE_BAR_RUNS (default 3) runs per scenario, SQUIRE_BAR_SCENARIOS a
- * comma list of id prefixes (e.g. 01,02,03), SQUIRE_BAR_MODEL the model.
- * Each run gets a fresh Lecturn home and a fresh temp provider home. A miss
- * against gold is recorded in the run file and the summary, not failed here:
- * the thresholds are judged across runs.
+ * The live bar on a real Claude or Codex Squire. Spends provider tokens, so it runs only with
+ * SQUIRE_BAR_PROVIDER=claudeAgent|codex (also SQUIRE_BAR_RUNS, SQUIRE_BAR_SCENARIOS, SQUIRE_BAR_MODEL).
+ * A miss against gold is recorded, not failed here: the thresholds are judged across runs.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

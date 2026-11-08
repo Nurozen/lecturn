@@ -1,15 +1,7 @@
 /**
- * The Lead's overlap risk items: deterministic server logic run
- * when a summary is stored and when a thread's PR, settle, archive, delete,
- * or branch state changes. Two tracked threads, tracked by any Squires
- * (including the same one), overlap when their open change sets share a
- * (repository identity, repo-relative path). Items are raised under the
- * Lead's name and never wake it.
- *
- * Owner: `owner_squire_id` is the owning Squire of the thread the
- * recommendation lands first; every thread's own Squire is in the payload
- * (`threads[].squireId`), which is where the intersection is taken per thread.
- *
+ * Two tracked threads (any Squires, including the same one) overlap when their open change sets share a
+ * (repository identity, repo-relative path). Items are raised under the Lead's name and never wake it; each thread's
+ * own Squire is in `threads[].squireId`, where the intersection is taken per thread.
  * @module squire/SquireOverlap
  */
 import {

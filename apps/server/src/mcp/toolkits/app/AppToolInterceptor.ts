@@ -198,11 +198,10 @@ const answerAppCall = Effect.fn("AppToolInterceptor.answerAppCall")(
 );
 
 /**
- * The shared `/mcp` server has one flat tool registry, so per-thread app tools
- * cannot be registered on it. Instead the transport answers first, which keeps
- * its session and protocol checks, and this rewrites the answer for app-thread
- * credentials: app tools join `tools/list`, and a `tools/call` the transport
- * did not recognize goes to the app. Built-in tools win every name clash.
+ * The shared `/mcp` server has one flat tool registry, so per-thread app tools cannot be registered
+ * on it. The transport answers first (keeping its session and protocol checks); for app-thread
+ * credentials this then adds app tools to `tools/list` and sends unrecognized `tools/call`s to the
+ * app. Built-in tools win every name clash.
  */
 export const make = Effect.gen(function* () {
   const tools = yield* AppToolSource;

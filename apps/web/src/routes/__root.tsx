@@ -132,8 +132,7 @@ function RootRouteView() {
     );
   }
 
-  // Ahead of first-run onboarding, which would otherwise send a new visitor to the welcome
-  // wizard and lose the link.
+  // Handle links before onboarding redirects lose them.
   if (hostedPromptLinkLanding !== null) {
     return (
       <>
@@ -245,9 +244,7 @@ function errorDetails(error: unknown): string {
 
 const MAX_ERROR_CAUSE_DEPTH = 5;
 
-/**
- * Takes the pathname only so tokens in the query never land on the clipboard.
- */
+// Use only pathname to keep query tokens off the clipboard.
 function errorReport(error: unknown, pathname: string): string {
   const lines = [
     `${APP_DISPLAY_NAME} ${APP_VERSION}`,

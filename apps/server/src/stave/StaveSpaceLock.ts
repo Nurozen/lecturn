@@ -15,12 +15,9 @@ export class StaveSpaceLock extends Context.Service<
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
     /**
-     * Shared: admission that only has to exclude Stave operations, so any
-     * number run together. Waits up to `wait` (unbounded when omitted;
-     * `Duration.zero` never queues) and returns `None` when that runs out.
-     * Reentrant while a shared hold the fiber inherited is live, so a nested
-     * admission runs at once instead of queueing behind a writer that is
-     * waiting for this very holder.
+     * Shared: only excludes Stave operations. Waits up to `wait` (unbounded when omitted;
+     * `Duration.zero` never queues), then returns `None`. Reentrant while an inherited shared hold
+     * is live, so a nested admission never queues behind a writer waiting for this very holder.
      */
     readonly withSharedSpaceLock: <A, E, R>(
       root: string,
@@ -28,11 +25,9 @@ export class StaveSpaceLock extends Context.Service<
       wait?: Duration.Input,
     ) => Effect.Effect<Option.Option<A>, E, R>;
     /**
-     * Fence project root changes against registered ancestor operations.
-     * Exclusive: a project create or move changes which project owns a tree,
-     * so it must exclude in-flight thread admissions that resolved the old
-     * owner as well as Stave operations. It never waits, because it runs
-     * under the project command lock.
+     * Exclusive: a project create or move changes which project owns a tree, so it must exclude
+     * in-flight thread admissions that resolved the old owner as well as Stave operations. Never
+     * waits, because it runs under the project command lock.
      */
     readonly tryWithWorkspaceLocks: <A, E, R>(
       roots: ReadonlyArray<string>,
@@ -63,12 +58,9 @@ interface Waiter {
 }
 
 /**
- * Read/write lock with FIFO hand-off: a reader queues whenever anyone is
- * already queued, so once a writer waits, later readers line up behind it and
- * a stream of turn starts cannot starve a Stave operation. Effect's Semaphore
- * cannot express this with "readers take one permit, writers take all": it
- * serves any request that fits, so a later one-permit request overtakes a
- * waiting all-permit one.
+ * FIFO hand-off: a reader queues whenever anyone is queued, so turn starts cannot starve a waiting
+ * Stave operation. Effect's Semaphore serves any request that fits, so a later one-permit reader
+ * would overtake a waiting all-permit writer.
  */
 class SpaceRwLock {
   private readers = 0;

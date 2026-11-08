@@ -1,15 +1,7 @@
 /**
- * Held executions and accepts under the durable action protocol. Every execution runs under the budget owner's lock, then
- * the target's, reconciles every unfinished execution for both by receipt
- * before it is admitted, and holds the policy lock from re-validation through
- * finalize, so a pause, untrack, permission or rule change either commits
- * before re-validation (which then refuses) or waits until the dispatch has
- * committed. A dispatch error never decides the outcome: the receipt does.
- *
- * Held actions run as the granting user outside the MCP mode guard:
- * nothing raises the target's modes, and the steer is attributed to the
- * Squire (`createdBy: "agent"` plus `senderThreadId`).
- *
+ * Each execution takes the budget owner's lock then the target's, reconciles unfinished executions by receipt, and
+ * holds the policy lock from re-validation through finalize. The receipt, never a dispatch error, decides the outcome.
+ * Held actions run as the granting user outside the MCP mode guard; the steer is attributed to the Squire.
  * @module squire/SquireActions
  */
 import {

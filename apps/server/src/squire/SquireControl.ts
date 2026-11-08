@@ -1,16 +1,7 @@
 /**
- * Lead control: pause, resume, rescope, forward, and merge under the
- * Manage Squires class. At Recommend each becomes a proposal item; at
- * Auto a hold that `SquireActions` executes after the undo window, except
- * a rescope that widens scope, which is always a proposal. Every action logs
- * the state it replaced, so `revert` can restore it from the setup sheet.
- *
- * An execution commits its mutation with its `action.executed` row (unique on
- * the execution key) in one transaction, so reconciling it is reading that
- * row. It runs under the policy lock, which `SquireService` mutations also
- * take and which is not reentrant, so the mutations here write the store
- * directly instead of calling them.
- *
+ * A rescope that widens scope is always a proposal, even at Auto; each action logs the state it replaced for `revert`.
+ * An execution commits its mutation with its `action.executed` row in one transaction. The policy lock is not
+ * reentrant and `SquireService` mutations take it, so mutations here write the store directly.
  * @module squire/SquireControl
  */
 import {

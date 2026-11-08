@@ -53,13 +53,10 @@ const appendTools =
   };
 
 /**
- * Squire role tools exist only for a home thread's credential, and only while
- * the switch builds `SquireTools`; without it this passes everything through
- * and the gate lists nothing. `tools/list` gains the role's tools after the
- * transport answers. A role tool call is answered here: the shared registry
- * has no such tool, and the result must come back at once (Cursor's 60 s MCP
- * timeout), so it never reaches the transport. `SquireMcpGate` runs first,
- * so a call it refuses never gets here.
+ * Squire role tools exist only for a home thread's credential and only while the switch builds
+ * `SquireTools`; otherwise this passes everything through. A role tool call is answered here, never
+ * reaching the transport: the shared registry has no such tool and Cursor's 60 s MCP timeout needs
+ * the result at once. `SquireMcpGate` runs first, so a refused call never gets here.
  */
 export const make = Effect.gen(function* () {
   const service = yield* Effect.serviceOption(SquireTools.SquireTools);

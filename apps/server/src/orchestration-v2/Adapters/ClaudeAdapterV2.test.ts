@@ -1646,7 +1646,6 @@ describe("ClaudeAdapterV2 resumeThread", () => {
         });
         const projectDir = path.join(configDir, "projects", "-workspace");
         yield* fileSystem.makeDirectory(projectDir, { recursive: true });
-        // What a CLI stopped before it saved the first prompt leaves behind.
         yield* fileSystem.writeFileString(
           path.join(projectDir, "native-thread-empty.jsonl"),
           [
@@ -2348,7 +2347,6 @@ function makeFakeClaudeCli(answerSetServers = true) {
     });
     return child;
   };
-  // The SDK closes the CLI by ending its stdin.
   const closed = () => stdins.length > 0 && stdins.every((stdin) => stdin.writableEnded);
   return { spawn, spawns, controlRequests, closed };
 }
@@ -2666,7 +2664,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   });
   const STALE_TASK_NOTIFICATION_RESULT_TEXT =
     "Stale task-notification origin text that must not appear.";
-  // Shape seen live after interrupt recovery: zero turns, no terminal_reason.
   const staleTaskNotificationResult = makeResultFrame({
     uuid: "00000000-0000-4000-8000-000000000106",
     result: STALE_TASK_NOTIFICATION_RESULT_TEXT,
@@ -4456,7 +4453,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       if (terminal.status !== "failed") return;
       assert.include(terminal.failure.message, "run `claude auth login`");
       assert.include(terminal.failure.message, configDir);
-      // The message quotes its paths, which escapes Windows separators.
       assert.include(terminal.failure.message, JSON.stringify(cwd));
       assert.notInclude(terminal.failure.message, "repeated API errors");
     }).pipe(
@@ -4516,7 +4512,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     }
     return event.providerTurn;
   };
-  // Rollback closes the live query and waits for its message stream to end.
   const makeRollbackHarness = makeWakeHarnessWithOptions({
     close: (sdkMessages) => Queue.shutdown(sdkMessages),
   });
@@ -4676,7 +4671,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
   it.effect("never records a subagent uuid for a turn with no main-thread assistant message", () =>
     Effect.gen(function* () {
-      // The continuation turn reopens the query, and rollback shut the first queue down.
       const harness = yield* makeWakeHarnessWithOptions({
         close: (sdkMessages) => Queue.shutdown(sdkMessages),
         freshQueueOnReopen: true,
@@ -4753,7 +4747,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ]);
       const next = yield* Queue.take(harness.terminalReceipts);
       assert.equal(next.status, "completed");
-      // The reopened query must resume from the whole transcript, not pin a subagent uuid.
       assert.isUndefined(harness.getOpenedOptions()?.resumeSessionAt);
     }).pipe(
       Effect.provide(
@@ -4808,11 +4801,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           attachments: [],
         }),
       );
-      // Claude reports a compaction's outcome on a status frame. A /compact
-      // then ends with a success result naming the command and no terminal
-      // reason, even when the compaction failed (#19327). The automatic case
-      // omits the terminal reason too, so only the missing command keeps it
-      // completed.
+      // Failed /compact reports success without a terminal reason; status frames carry outcomes, including automatic compaction.
       const result = makeResultFrame({
         uuid: "00000000-0000-4000-8000-000000000613",
         result: compact ? "" : "Done.",
@@ -5270,7 +5259,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           usage: { ...zeroUsage, input_tokens: 37_939, output_tokens: 184 },
         }),
         usageSnapshotFrame("msg_first", "00000000-0000-4000-8000-000000000671", zeroUsage),
-        // The next request starts at zero again and its delta reports only output.
         usageStreamFrame({
           type: "message_start",
           message: { id: "msg_second", usage: zeroUsage },
@@ -5321,13 +5309,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           message: { id: "msg_native", usage: startUsage },
         }),
         usageSnapshotFrame("msg_native", "00000000-0000-4000-8000-000000000680", startUsage),
-        // Output-only deltas keep the input and cache counts from message_start.
         usageStreamFrame({
           type: "message_delta",
           delta: { stop_reason: null, stop_sequence: null },
           usage: { input_tokens: null, output_tokens: 20 },
         }),
-        // A delta that restates input (server tools) replaces it, explicit zeros included.
         usageStreamFrame({
           type: "message_delta",
           delta: { stop_reason: "end_turn", stop_sequence: null },
@@ -5346,7 +5332,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           uuid: "00000000-0000-4000-8000-000000000682",
           session_id: WAKE_NATIVE_SESSION,
         }),
-        // Usage for the message before the boundary no longer describes the context.
         usageSnapshotFrame("msg_native", "00000000-0000-4000-8000-000000000684", startUsage),
         usageStreamFrame({
           type: "message_delta",
@@ -6843,8 +6828,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
-  // Frames follow #19832: a full context window ends the turn with
-  // blocking_limit while the plan's rate-limit window is still allowed.
+  // Context exhaustion reports blocking_limit even when the rate-limit window is allowed.
   it.effect.each([
     {
       windowStatus: "allowed",
@@ -6957,7 +6941,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             WAKE_TASK_ID,
           );
 
-          // A subagent's own background shell keeps the subagent waiting on it.
           yield* Queue.offer(
             harness.sdkMessages,
             claudeSdkFrame({
@@ -7507,8 +7490,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           });
           const nativeIds = ["native-thread-roster-a", "native-thread-roster-b"] as const;
           let allocateIndex = 0;
-          // Real two-process model: each openQuery owns its own message queue.
-          // A shared queue would mask sibling process death on replacement.
+          // A shared queue would hide sibling process death on replacement.
           const processQueues: Array<{
             readonly nativeThreadId: string;
             readonly queue: Queue.Queue<SDKMessage>;
@@ -8244,8 +8226,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   it.effect("fails a prompt Claude completes without starting a turn for it", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        // Claude answers a prompt whose uuid its transcript already holds with
-        // a lone completed lifecycle frame and never runs a turn for it.
+        // Claude answers previously recorded prompt uuids with only a completed lifecycle frame.
         const harness = yield* makeWakeHarness;
         const now = yield* DateTime.now;
         yield* harness.runtime.startTurn(
@@ -8669,9 +8650,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         yield* harness.until(() => harness.offeredMessages.length === 1);
 
-        // Live interleaving seen after interrupt recovery: a stale stopped
-        // task_notification and its task-notification-origin result arrive
-        // before the real root assistant stream.
+        // After interrupt recovery, stale task notifications and their results can precede the root stream.
         yield* Queue.offer(
           harness.sdkMessages,
           claudeSdkFrame({
@@ -10101,8 +10080,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }),
         );
         const frames = [
-          // The SDK can forward child frames before the task_started that
-          // registers their subagent.
+          // Child frames can precede the task_started that registers their subagent.
           ...makeSubagentAssistantFrames({
             parentToolUseId: TOOL_USE_ID,
             uuid: "00000000-0000-4000-8000-000000000321",
@@ -10501,8 +10479,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const now = yield* DateTime.now;
           const toolUseId = "toolu-subagent-model";
           const parentModel = "claude-opus-4-6";
-          // Claude stamps its own error frames, such as a usage-limit notice, as
-          // "<synthetic>"; that is not the model the subagent runs on.
+          // Claude stamps its error frames as "<synthetic>", regardless of the subagent model.
           const observedModel =
             source === "synthetic-after" ? "<synthetic>" : "claude-haiku-4-5-20251001";
           yield* harness.runtime.startTurn(
@@ -11155,9 +11132,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }),
         );
         yield* Queue.offer(harness.sdkMessages, resumeTaskStarted);
-        // Shaped like the recorded SendMessage ACK in
-        // claude_background_subagent_lifecycle: the text block is the JSON of
-        // tool_use_result, and "message" names the agent's short id.
         const resumeAck = {
           success: true,
           message: `Resuming agent ${SUBAGENT_TASK_ID.slice(0, 7)}`,
@@ -12396,7 +12370,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           messageMark: true,
           itemMark: true,
         });
-        // A brief is marked as not a script, so its text is never read as one.
         assert.deepEqual(subagentPrompt("task-plain-auditor"), {
           text: "Audit the last five commits.",
           messageMark: false,
@@ -13537,7 +13510,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  // Line shapes copied from a Claude CLI 2.1.301 workflow member transcript.
   const transcriptLine = (entry: Record<string, unknown>) =>
     `${JSON.stringify({ isSidechain: true, agentId: "a1", timestamp: "2026-10-17T05:08:07.524Z", ...entry })}\n`;
   const memberAssistantLine = (
@@ -13791,8 +13763,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const harness = yield* makeWorkflowHarness;
-        // About 1.3 MB of early replies: more than the launch frame's read
-        // and the settled frame's read together, at 512 KB each.
+        // Exceeds the launch and settle reads combined, at 512 KB each.
         const filler = "x".repeat(16 * 1024);
         NodeFS.writeFileSync(
           NodePath.join(harness.transcriptDir, "agent-a1.jsonl"),
@@ -14154,8 +14125,7 @@ describe("ClaudeAdapterV2 query message stream", () => {
       let closed = false;
       let releaseRead = () => {};
       const readStarted = Promise.withResolvers<void>();
-      // Never yields a message — the read stays pending until close() flips
-      // `closed` and releases the in-flight await.
+      // Keep the read pending until close() releases it.
       // oxlint-disable-next-line require-yield
       async function* sdkMessages(): AsyncGenerator<SDKMessage, void> {
         for (;;) {
@@ -14192,9 +14162,7 @@ describe("ClaudeAdapterV2 query message stream", () => {
       );
       yield* Effect.promise(() => readStarted.promise);
 
-      // Iterating query[Symbol.asyncIterator]() directly deadlocks here:
-      // the raw generator's return() queues behind the in-flight read and
-      // scope close never completes.
+      // The raw async generator's return() queues behind its pending read and deadlocks scope close.
       yield* Scope.close(scope, Exit.void);
       assert.isTrue(closed);
     }),

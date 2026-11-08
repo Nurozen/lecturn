@@ -1,9 +1,7 @@
 /**
- * The per-socket RPC middleware. Scopes say what kind of call a session may
- * make; for `app:` and `embed:` sessions `AppAuthorization` then decides which
- * projects it may touch. Every other session gets the plain scope layer, so
- * ordinary clients pay nothing per call. `onAuthorized` is passed through to
- * the scope layer for both kinds of session.
+ * Per-socket RPC middleware: for `app:` and `embed:` sessions `AppAuthorization` decides which
+ * projects a call may touch after the scope check. Every other session gets the plain scope layer,
+ * so ordinary clients pay nothing per call. `onAuthorized` passes through for both.
  */
 import { RpcScopeAuthorization } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";

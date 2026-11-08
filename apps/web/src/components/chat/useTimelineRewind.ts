@@ -161,11 +161,9 @@ export function useTimelineRewind(input: TimelineRewindInput) {
         removedPaths: [],
         removedTruncated: false,
       });
-      // Reverting files runs `git clean`, which deletes untracked files the
-      // target checkpoint cannot restore. Those have no git object behind
-      // them, so the loss is permanent and has to be named before the user
-      // picks "Revert files too". The preview targets the same checkpoint the
-      // rollback restores (turn count 0 is the pre-run baseline).
+      // Reverting files runs `git clean`, permanently deleting untracked files the checkpoint
+      // cannot restore, so they must be named before "Revert files too". The preview targets
+      // the checkpoint the rollback restores (turn count 0 is the pre-run baseline).
       const targetCheckpoint =
         serverProjection === null
           ? undefined

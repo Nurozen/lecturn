@@ -1,15 +1,7 @@
 /**
- * Durable per-thread admission ledger for Contextual turns on the V2 orchestrator.
- *
- * V1 admitted a turn inside the projection transaction of its
- * `thread.turn-start-requested` event and drove its own FIFO worker. On V2 the
- * orchestrator already serializes runs per thread, so a row is admitted by the
- * runtime-only `beforeTurnStart` hook for one run (keyed by run id) and is
- * finished by the run's terminal notice. Projection rebuilds never call either
- * hook, so historical user turns can never be readmitted.
- *
- * `contextual_turn_queue.sequence` is a local monotonic admission counter; the
- * per-thread watermark keeps rejecting anything at or below a finished row.
+ * A row is admitted by the runtime-only `beforeTurnStart` hook for one run and finished by its
+ * terminal notice; projection rebuilds never call either, so historical turns are never readmitted.
+ * The per-thread watermark keeps rejecting anything at or below a finished row.
  */
 import { ContextualError, MessageId, RunId, type ThreadId } from "@lecturn/contracts";
 import { Context, Effect, Layer, Schema } from "effect";

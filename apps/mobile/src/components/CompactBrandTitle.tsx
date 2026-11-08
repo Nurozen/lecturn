@@ -18,11 +18,7 @@ export function CompactBrandTitle(
   props: {
     readonly allowFontScaling?: boolean;
     readonly accessibilityLabel?: string;
-    /**
-     * Fills the parent row and drops the stage badge when the full title does not fit.
-     * Narrow Android sidebar headers otherwise draw their actions over the badge. The
-     * wordmark itself stays on one line and ellipsizes if even it does not fit.
-     */
+    /** Fills the row and hides the stage badge when the full title does not fit; the wordmark then ellipsizes. */
     readonly fit?: boolean;
   } = {},
 ) {

@@ -35,10 +35,7 @@ function ClerkVersionCheck() {
   return null;
 }
 
-/**
- * Browser half of the managed-auth boundary, loaded lazily from the entry so
- * cloudless local mode never downloads a Clerk runtime.
- */
+/** Lazy-load Clerk so cloudless local mode never downloads it. */
 export default function BrowserManagedAuthShell({
   publishableKey,
   children,

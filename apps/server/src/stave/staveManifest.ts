@@ -1,13 +1,7 @@
 /**
- * On-disk shape of a Stave space manifest (`<space root>/.stave.yaml`).
- *
- * Decoding is deliberately permissive so every space Stave itself can load
- * lights up here too: `version` 0/absent through the current ceiling, unknown
- * keys (present and future) ignored, and scalar fields tolerated when YAML
- * hands them back as numbers or dates. Source of truth:
- * references/stave/internal/space/manifest.go.
- *
- * @module staveManifest
+ * Deliberately permissive so every space Stave itself can load works here: `version` 0/absent
+ * through the current ceiling, unknown keys ignored, and scalars tolerated when YAML hands them
+ * back as numbers or dates. Source of truth: references/stave/internal/space/manifest.go.
  */
 import * as Schema from "effect/Schema";
 

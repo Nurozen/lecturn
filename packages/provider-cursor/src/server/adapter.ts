@@ -305,11 +305,7 @@ function nativeThreadId(providerThread: OrchestrationV2ProviderThread): string {
   return id;
 }
 
-/**
- * Every Cursor settings layer the Cursor CLI loads: project and user rules,
- * skills, hooks, and MCP servers, team and MDM admin policy, and account
- * plugins. The SDK loads none of them when `settingSources` is omitted.
- */
+/** The SDK loads no CLI settings unless `settingSources` is supplied. */
 const CURSOR_AGENT_SETTING_SOURCES = [
   "project",
   "user",
@@ -319,16 +315,10 @@ const CURSOR_AGENT_SETTING_SOURCES = [
 ] as const satisfies ReadonlyArray<SettingSource>;
 
 /**
- * Lecturn: a Squire home or probe. `tools` limits the model to MCP
- * (home) or nothing (probe), and without `settingSources` the SDK loads no
- * project or user MCP server, rule, skill, hook, or AGENTS.md. Cursor's
- * servers enforce `tools`; the local shell, read, and write executors stay
- * wired, a known gap in the read restriction.
- *
- * The home runs unsandboxed with autoReview off because both put the SDK in
- * allowlist mode, where every MCP call needs an approval its headless
- * decider always refuses. The probe keeps the sandbox on: it has no tools, so
- * that refusal is the auto-decline.
+ * Lecturn Squire home (MCP only) or probe (no tools); no `settingSources`, so no project or user
+ * config loads. Cursor's servers enforce `tools`, but local shell/read/write executors stay wired (known gap).
+ * The home runs unsandboxed with autoReview off: either puts the SDK in allowlist mode, where the headless
+ * decider refuses every MCP call. The probe keeps the sandbox: with no tools, that refusal is the auto-decline.
  */
 function cursorSquireAgentOptions(input: {
   readonly squireIsolation: "home" | "probe";
@@ -393,10 +383,6 @@ export function makeCursorAgentOptions(input: {
   };
 }
 
-/**
- * Raised when Cursor rejects the selected model, usually a custom model outside
- * the account catalog. `makeProviderFailure` shows its message to the user.
- */
 class CursorModelUnavailableError extends Schema.TaggedError<CursorModelUnavailableError>()(
   "CursorModelUnavailableError",
   {
@@ -409,15 +395,9 @@ class CursorModelUnavailableError extends Schema.TaggedError<CursorModelUnavaila
   }
 }
 
-/**
- * Maps runner failures from opening or sending to an agent to the error a user
- * reads. Turn start records the message of the error the adapter wraps, so a
- * missing SDK is unwrapped rather than left behind the runner's generic one.
- * The SDK checks the model against the account catalog before opening or
- * sending and rejects it with an uncoded ConfigurationError listing every
- * account model, so its message prefix is the only signal. The SDK loads
- * lazily, so that error is matched by the name the SDK gives it, not by class.
- */
+// Unwrap a missing SDK so turn start records it, not the runner's generic error.
+// Uncoded SDK model rejections are identifiable only by message prefix; the lazily
+// loaded SDK's ConfigurationError is matched by name, not class.
 const classifyCursorRunnerFailure =
   (modelSelection: ModelSelection) => (error: CursorAgentSdk.CursorAgentSdkRunnerError) => {
     if (isCursorSdkNotInstalledError(error.cause)) return error.cause;
@@ -887,8 +867,7 @@ interface CursorProjectionTarget {
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"] | null;
 }
 
-// Fallback final output when Cursor's result carries none. The persisted row only
-// ever shows a bounded tail, so keep a little more than that.
+// Cursor results can omit output; retain more streamed fallback than the persisted tail.
 const MAX_CURSOR_STREAMED_OUTPUT_CHARS = 256 * 1024;
 // After a turn ends, a retryable stream error can make Cursor's SDK resume from
 // an older checkpoint inside the same run. When those resumes save nothing, it
@@ -2080,9 +2059,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               }
               const chunk = shellOutputText(update.event);
               if (chunk.length === 0) return;
-              // The completed call persists the final output once. Re-emitting the
-              // whole accumulated output on every delta grew the event store
-              // quadratically; live output goes to the command output hub instead.
+              // Persist output once; live hub deltas avoid quadratic event-store growth.
               shell.streamedOutput = (shell.streamedOutput + chunk).slice(
                 -MAX_CURSOR_STREAMED_OUTPUT_CHARS,
               );

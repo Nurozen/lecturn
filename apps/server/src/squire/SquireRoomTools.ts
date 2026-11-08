@@ -1,13 +1,7 @@
 /**
- * Room tools: `squire_propose_room` (Squires),
- * `squire_open_room` and `squire_close_room` (the Lead, Manage Squires), and
- * `squire_read_room` (members; the Lead any room). Proposals are
- * `room-proposed` event rows on the Lead, keyed by proposal id, and expire
- * after 24 h.
- *
- * A Lead open is a Lead control action: at Recommend a proposal card, at
- * Auto a hold `SquireActions` runs through `SquireRooms.applyOpen` after the
- * undo window.
+ * Open and close are the Lead's (Manage Squires); read is members' (the Lead any room). Proposals are `room-proposed`
+ * rows on the Lead, keyed by proposal id, expiring after 24 h. A Lead open is a Lead control action: a proposal card
+ * at Recommend, a hold run through `SquireRooms.applyOpen` after the undo window at Auto.
  */
 import {
   SquireCardId,

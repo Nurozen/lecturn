@@ -3,12 +3,8 @@ import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 /**
- * The card row's first line: the title (nested rows) or project name, the
- * markers, and the status slot whose hover actions cross-fade with the status.
- *
- * At rest only what is visible takes width, so the title keeps its room. The
- * hover actions (discard draft, Snooze, Settle) never move a visible marker:
- * on a row with a pin or a Woke label they open left of the markers and the
+ * At rest only what is visible takes width, so the title keeps its room. Hover actions never
+ * move a visible marker: with a pin or Woke label they open left of the markers and the
  * status stays; otherwise they take the status's place at the end of the line.
  */
 export function SidebarRowStatusLine(props: {
@@ -35,11 +31,9 @@ export function SidebarRowStatusLine(props: {
     <span
       data-testid="sidebar-row-actions"
       className={cn(
-        // Out of flow until revealed, so the hidden actions take no width at rest.
-        // focus-visible, not focus-within: a mouse click leaves the Settle
-        // button focused, and a plain focus-within would keep the controls
-        // pinned over the status label once the pointer moves away (e.g. after
-        // a failed settle) instead of cross-fading back.
+        // Out of flow until revealed, so hidden actions take no width at rest. focus-visible, not
+        // focus-within: a clicked Settle button stays focused, and focus-within would keep the
+        // controls pinned over the status after the pointer leaves.
         "pointer-events-none absolute flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
         leadingActions
           ? cn("shrink-0", props.slotHidden && "hidden")

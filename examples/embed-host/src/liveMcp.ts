@@ -1,12 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- A plain Electron host, the shape app developers copy; it runs no Effect runtime.
 /**
- * The host's live tools: a loopback Streamable-HTTP MCP endpoint that exists
- * only while the window is open. `connection.setLiveTools({ url, bearer })`
- * leases it to Lecturn; when the host quits, Lecturn answers `window_flash`
- * with "Embed Host is closed" without calling here.
- *
- * Each flash is appended to a JSON file so tests can see what reached the host
- * and with which Lecturn `_meta`.
+ * Loopback Streamable-HTTP MCP endpoint that exists only while the window is open, leased via
+ * `connection.setLiveTools({ url, bearer })`; once the host quits, Lecturn answers `window_flash`
+ * with "Embed Host is closed". Each flash and its Lecturn `_meta` is appended to a JSON file for tests.
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";

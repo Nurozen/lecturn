@@ -1,14 +1,8 @@
 /**
- * Archived Stave spaces, shared by web and mobile.
- *
- * An archived space keeps its Lecturn project (rooted at the `.archive/`
- * entry) with every thread, but the project is hidden from project lists: it
- * is reached again through New project → Stave → Existing space, which lists
- * the environment's spaces that are not visible projects (active spaces never
- * added, and archives). Restoring reuses the hidden project when one survives;
- * the server creates one otherwise. The runners here sequence the Stave
- * operations (restore, a saga's members, delete) over an injected client so
- * each surface binds them to its own operation manager.
+ * Archived Stave spaces keep their Lecturn project (rooted at the `.archive/` entry) and threads,
+ * hidden from project lists and reached again through New project → Stave → Existing space.
+ * Restoring reuses the hidden project when one survives, else the server creates one. Runners take
+ * an injected client so each surface binds them to its own operation manager.
  */
 
 import type {
@@ -410,11 +404,9 @@ export function undoStaveArchive(
 }
 
 /**
- * Permanently deletes an archive. Stave only destroys live spaces, so the
- * entry is restored first and then destroyed through the ordinary destroy
- * operation (owned memory kept, never forced); its project and threads go
- * with it. A saga's archived members stay archived; a saga that still has
- * live members is refused after the restore, before anything is destroyed.
+ * Permanently deletes an archive. Stave only destroys live spaces, so the entry is restored first
+ * and then destroyed normally (owned memory kept, never forced), taking its project and threads. A
+ * saga's archived members stay archived; a saga with live members is refused before any destroy.
  */
 export function deleteStaveArchive(
   client: StaveArchiveClient,

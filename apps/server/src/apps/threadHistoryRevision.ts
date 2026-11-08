@@ -3,11 +3,9 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 /**
- * Each thread's `historyRevision`: the sequence of its last
- * message, turn item or terminal provider turn. A turn can end without a new
- * item, so terminal provider turns count; metadata events (app data, title,
- * pin) never do, which is what keeps them from causing a re-copy. A thread with
- * no such event has revision 0.
+ * Each thread's `historyRevision`: the sequence of its last message, turn item or terminal provider
+ * turn (a turn can end without an item). Metadata events (app data, title, pin) never count, so
+ * they never cause a re-copy. A thread with no such event has revision 0.
  */
 export const readHistoryRevisions = Effect.fn("readHistoryRevisions")(function* (
   threadIds: ReadonlyArray<ThreadId>,

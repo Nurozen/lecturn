@@ -1,25 +1,8 @@
 /**
- * Contextual on the V2 orchestrator: a Lecturn orchestration-hook contribution.
- *
- * - beforeTurnStart (runtime only, once per start attempt): admit the run,
- *   prepare or resume its cited-context packet, defer the start while a
- *   conflict awaits review (no effect slot is held; re-attempted on the next
- *   Contextual change or a short poll), bind the packet to the dispatch and
- *   return it as provider-only context placed before the user text. Every V2
- *   adapter receives it in the turn input, so no adapter-level dispatch hook
- *   is needed. A canceled turn settles the run as cancelled, not failed.
- * - onRunTerminal: record the delivery receipt from the orchestrator's own
- *   provider-turn record (accepted / rejected / unknown) and finish the run's
- *   admission row; a run interrupted before dispatch cancels its preparation;
- *   a rollback invalidates preparations of removed messages.
- * - onThreadLifecycle: initialize thread settings, inherit fork/import
- *   origin, and clean up on delete.
- * - aroundCommand: apply thread.create's `contextual` option after commit and
- *   clean up project deletions.
- * - a live application-event tail (from boot, never a replay) records native
- *   compaction as a new context epoch.
- *
- * None of these fire on a projection rebuild (the V1 runtime-only rule).
+ * The cited-context packet is returned from beforeTurnStart as provider-only context before the
+ * user text, so every V2 adapter gets it in the turn input with no adapter dispatch hook. A
+ * canceled turn settles the run as cancelled, not failed. None of these hooks fire on a projection
+ * rebuild, and the compaction tail starts live from boot, never as a replay.
  */
 import {
   type MessageId,
@@ -57,11 +40,9 @@ import { ContextualTurnCoordinator } from "./ContextualTurnCoordinator.ts";
 import { ContextualTurnQueue, type ContextualQueuedTurn } from "./ContextualTurnQueue.ts";
 
 /**
- * A held turn (conflict awaiting review) defers its start: the run stays
- * "starting" and holds no orchestrator effect slot. The start is re-attempted
- * on any Contextual change (resolution publishes) or after this interval.
- * There is no hold limit: like V1, the turn waits until the user reviews,
- * cancels the turn, or stops the run.
+ * A turn held for conflict review stays "starting" without an effect slot and is re-attempted on
+ * any Contextual change or after this interval. There is no hold limit: the turn waits until the
+ * user reviews, cancels the turn, or stops the run.
  */
 const HOLD_RETRY_MS = 5_000;
 const RECENT_CONTEXT_MESSAGES = 12;

@@ -89,13 +89,10 @@ export type ImportTarget<TProject extends ImportTargetProject> =
   | { readonly kind: "blocked"; readonly reason: string };
 
 /**
- * Resolves where a session lands, by its cwd. A cwd that is a project root
- * imports there; a cwd that is a known thread worktree imports into that
- * thread's project, on the worktree. Any other cwd blocks the import with
- * `unmatchedReason`: a thread never runs in a folder other than the session's,
- * nor in one Lecturn does not already manage. `projects` and `threads` must
- * belong to the environment the sessions were listed from. Paths are indexed
- * once so resolving a long list stays linear.
+ * A cwd that is a project root or a known thread worktree imports there; any other cwd
+ * blocks with `unmatchedReason`, since a thread never runs outside the session's folder or
+ * in one Lecturn does not manage. `projects` and `threads` must belong to the environment
+ * the sessions were listed from.
  */
 export function createImportTargetResolver<TProject extends ImportTargetProject>(input: {
   readonly projects: ReadonlyArray<TProject>;

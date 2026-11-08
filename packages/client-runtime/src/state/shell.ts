@@ -618,11 +618,9 @@ export function createEnvironmentShellAtoms<R, E>(
 }
 
 /**
- * The project as the shell holds it once the store has applied `sequence`.
- * A project the server created on the client's behalf (a Stave space,
- * deviation 26) is only safe to open after the shell caught up to the
- * sequence its `project.create` produced; before that the row is either
- * absent or from an older snapshot.
+ * The project as the shell holds it once the store has applied `sequence`. A project the server
+ * created for the client (a Stave space, deviation 26) is safe to open only after the shell caught
+ * up to its `project.create` sequence; before that the row is absent or from an older snapshot.
  */
 export function findProjectVisibleAtSequence(
   state: EnvironmentShellState,

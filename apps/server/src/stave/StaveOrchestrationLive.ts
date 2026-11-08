@@ -1,14 +1,7 @@
 /**
- * StaveOrchestrationLive - `StaveOrchestration` on the V2 orchestrator.
- *
- * Project commands go through `ProjectService` (which runs in the calling
- * fiber, so `StaveReconciliation` reaches commit admission), run interrupts
- * through `OrchestratorV2`, reads through `StaveProjectShells` and the V2
- * projection tables, tails through the application event log, and runtime
- * quiescence closes live `ProviderSessionManagerV2` sessions found in the
- * provider-session projection.
- *
- * @module StaveOrchestrationLive
+ * Project commands go through `ProjectService`, which runs in the calling fiber so
+ * `StaveReconciliation` reaches commit admission. Runtime quiescence closes live
+ * `ProviderSessionManagerV2` sessions found in the provider-session projection.
  */
 import {
   type CommandId,

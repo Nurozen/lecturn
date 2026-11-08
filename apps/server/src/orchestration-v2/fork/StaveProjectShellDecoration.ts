@@ -1,13 +1,7 @@
 /**
- * Lecturn Stave adapters for the V2 project read/delete paths.
- *
- * V1 attached Stave `stave` / `notice` fields to project shells in
- * ProjectionSnapshotQuery and bound the space identity of a project deletion
- * in the Normalizer. On V2 both are optional services resolved once at
- * construction: without Stave wired (focused upstream tests) shells pass
- * through unchanged and deletions bind nothing beyond what the caller sent.
- *
- * @module StaveProjectShellDecoration
+ * Lecturn Stave adapters for the V2 project read/delete paths: `stave`/`notice` project shell
+ * fields and a project deletion's space identity. Both are optional services resolved once at
+ * construction; without Stave wired (focused upstream tests) shells and deletions pass through.
  */
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";

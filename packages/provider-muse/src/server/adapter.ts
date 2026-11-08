@@ -233,11 +233,7 @@ interface PendingRequest {
   shown: boolean;
 }
 
-/**
- * Muse 1.4.4 cannot address an inline child session (`session/read` and
- * `view/subscribe` answer sessionNotFound), so the thread carries the prompt,
- * live status (on its root node) and result.
- */
+// Muse 1.4.4 cannot read/subscribe to inline child sessions; retain prompt, root status, and result here.
 interface ChildContext {
   readonly childSessionId: string;
   readonly childThreadId: ThreadId;
@@ -304,8 +300,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       if (input.runtimePolicy.interactionMode === "plan")
         return yield* protocolError("Muse Code does not support dedicated Plan mode");
       const scope = yield* Effect.scope;
-      // Muse rejects non-canonical workspace roots (for example macOS /tmp) and
-      // reports canonical paths in approvals, so resolve symlinks once here.
+      // Muse requires canonical workspace roots and approval paths; resolve symlinks once.
       const requestedCwd = input.runtimePolicy.cwd ?? providerHost.paths.cwd;
       const cwd = yield* fileSystem
         .realPath(requestedCwd)
@@ -345,7 +340,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       let thread: OrchestrationV2ProviderThread | undefined;
       let active: ActiveTurn | undefined;
       let lastProviderTurn: OrchestrationV2ProviderTurn | undefined;
-      // Meta's newest subscription windows, for when a turn stopped at a usage limit can resume.
       let latestSubscriptionUsage: MuseSubscriptionUsage | undefined;
       const agentEndedAt = new Map<string, DateTime.Utc>();
       const resolveModel = Effect.fnUntraced(function* (selection: ModelSelection) {
@@ -1309,7 +1303,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       });
       const handleNotification = Effect.fnUntraced(function* (method: string, data: unknown) {
         const params = yield* decode(recordSchema, data);
-        // Account-wide, so it names no session: Meta's subscription windows after a response.
+        // usage/changed is account-wide and carries no session ID.
         if (method === "usage/changed") {
           latestSubscriptionUsage = yield* decode(MuseSubscriptionUsage, params);
           return;
@@ -1354,8 +1348,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             return;
           }
         }
-        // A workflow child's approval comes under the child's own run id, during a turn
-        // or after it, so it skips turn routing.
+        // Child approvals use their own run IDs and can outlive turns; bypass turn routing.
         if (params.subagentOrigin !== undefined && method.startsWith("approval/"))
           return yield* handleRequestEvent(method, params, undefined);
         if (
@@ -1841,8 +1834,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           const config = mcpSession
             ? {
                 mcpServers: {
-                  // Muse defaults to "required", which fails the whole run when Lecturn's
-                  // tools cannot be reached. The agent should still work without them.
+                  // Muse's required default fails runs if Lecturn tools are unreachable; make them optional.
                   lecturn: {
                     transport: "streamableHttp",
                     mode: "optional",
@@ -2088,8 +2080,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                   ...parts,
                 ],
                 displayText: turnInput.message.text || "Image attachment",
-                // A resumed session keeps the root it was created with; pin it to
-                // this thread's current checkout so edits land where Lecturn tracks them.
+                // Resumed sessions retain old roots; pin edits to the current checkout.
                 workspaceRoots: [workspaceRoot],
                 ifBusy: "queue",
                 ...(effort ? { reasoningEffort: effort } : {}),
@@ -2380,8 +2371,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 }),
             ),
           ),
-        // Muse rejects forks at completed-turn boundaries (InvalidCut), so Lecturn uses
-        // portable context handoff for forks and does not rewind Muse conversations.
+        // Muse rejects completed-turn forks with InvalidCut; use portable handoff without rewinding.
         rollbackThread: (args) =>
           Effect.fail(
             new ProviderAdapter.ProviderAdapterRollbackThreadError({

@@ -31,11 +31,9 @@ import type { SourceControlDefinition } from "../sourceControlClients.ts";
 export type AddProjectRemoteSource = SourceControlProviderKind | "url";
 
 /**
- * Sources that create the project through a Stave operation rather than a
- * folder or a clone. Kept apart from `AddProjectRemoteSource` because the
- * remote sources are switched on exhaustively (labels, hints, readiness)
- * and none of that applies here: the wizard owns the whole flow and the
- * server creates the project itself (deviation 26).
+ * Sources that create the project through a Stave operation. Kept apart from
+ * `AddProjectRemoteSource`, whose exhaustive switches (labels, hints, readiness) don't apply: the
+ * wizard owns the whole flow and the server creates the project itself (deviation 26).
  */
 export type AddProjectStaveSource = "stave-space" | "stave-saga";
 export type AddProjectSource = AddProjectRemoteSource | AddProjectStaveSource;

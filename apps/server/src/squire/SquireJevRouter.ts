@@ -1,15 +1,7 @@
 /**
- * Jev room routing. A rule (e) post on the funded tier
- * commits with routing `pending` and the Lead's `message` row `deferred`
- * (`defer_reason` routing, `not_before` +5 s); `SquireJevRouting.begin` then
- * asks the relay. A valid answer before the deadline retargets in one
- * transaction, compare-and-set on `pending`; at the deadline the clock
- * releases the Lead row and records fallback `timeout`; errors and unfunded
- * states fall back at once; a late answer is logged and ignored.
- *
- * `SquireJevRelay` is the seam to `ExtensionsCloudClient.route`; without
- * the cloud client the live layer reports `unfunded`, so every post routes by
- * rules at once.
+ * A funded rule (e) post commits with routing `pending` and the Lead's row deferred +5 s. A valid answer before the
+ * deadline retargets (compare-and-set on `pending`); at the deadline the clock releases the Lead row; errors and
+ * unfunded states fall back at once; a late answer is ignored. Without the cloud client every post routes by rules.
  */
 import {
   type ExtensionFundingStatusResult,

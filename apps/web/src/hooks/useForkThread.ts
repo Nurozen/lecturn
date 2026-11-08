@@ -26,13 +26,9 @@ import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 
 /**
- * Fork availability for shell-only surfaces (header menu, sidebar rows,
- * command palette, keybinding, /fork). Snapshot read, not a subscription:
- * these surfaces evaluate at open/dispatch time, like the action menu does.
- *
- * `point` is the whole-thread cut a shell exposes: the latest completed run,
- * or all run-less history (V1 migration, import) of a thread that never ran;
- * `blockReason` explains an unavailable action (or null).
+ * Snapshot read, not a subscription: shell-only surfaces evaluate at open/dispatch time.
+ * `point` is the latest completed run, or all run-less history (V1 migration, import) of a
+ * never-run thread; `blockReason` explains an unavailable action.
  */
 export function readForkAtLatestTurn(threadRef: ScopedThreadRef): {
   point: ThreadForkPoint | null;

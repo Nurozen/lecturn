@@ -1,7 +1,4 @@
-/**
- * Do not import lecturn modules from the string body. The Pi process resolves
- * `@earendil-works/pi-coding-agent` and `typebox` from the user's pi install.
- */
+// No Lecturn imports inside the string; resolve Pi and typebox from the user's Pi install.
 import { LECTURN_ORCHESTRATION_INSTRUCTIONS } from "@lecturn/provider-core/server/orchestrationInstructions";
 
 export const PI_LECTURN_MCP_EXTENSION_FILENAME = "pi-lecturn-mcp-extension.ts";
@@ -11,10 +8,7 @@ export const LECTURN_MCP_BEARER_ENV = "LECTURN_MCP_BEARER_TOKEN";
 export const LECTURN_PI_RUNTIME_MODE_ENV = "LECTURN_PI_RUNTIME_MODE";
 export const LECTURN_PI_MCP_EXTENSION_PATH_ENV = "LECTURN_PI_MCP_EXTENSION_PATH";
 
-/**
- * Pi tools whose confirmations the bridge raises as file-change approvals.
- * Auto-accept edits skips them; the adapter keys the approval kind off them.
- */
+// These tools trigger file-change approvals, bypassed by Auto-accept edits.
 export const PI_FILE_CHANGE_TOOLS = ["edit", "write"] as const;
 
 export const PI_LECTURN_MCP_EXTENSION_SOURCE = `\

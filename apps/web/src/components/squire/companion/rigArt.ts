@@ -1,17 +1,7 @@
-/* Parts are cropped to their alpha bounding box (2 px pad) to cut decoded memory; x/y/w/h place
-   each crop in stage units exactly where the full-stage source art sat.
-   One fixed shoulder/upper arm; interchangeable forearms meet at the elbow.
-   rock: the head rotates about the nape (chin down) or throat (chin up) and the raised hood about
-   its back or front base, so painted cut edges slide behind the collar instead of out of it.
-   limits: measured seam limits per bone relative to its parent (degrees / stage units); the
-   runtime soft-limits every channel to them. grips[*].armMotion optionally scales forearm motion.
-   limits.heads[appearance] / limits.heads['appearance-hood'] / limits.grips[equipment] override.
-   napeFill[appearance]: region where a static copy of the head (hood down) backs the moving
-   head, so the hair/cloak slit at the nape never opens wider when the chin drops (female only;
-   on the male head it would double the neck outline). hoodFaceClip sits ~2u under the trim.
-   heads[*].feather: [y0,y1] band where the head image fades out (male image ends at y~502).
-   napeFill rect fades in over `feather` units on its left and top edges. hoodLining: dark hood
-   interior drawn behind the head with the hood transform, under the brim/hair junction. */
+/* Parts are cropped to their alpha bounding box; x/y/w/h place each crop in stage units.
+   rock: head/hood pivots that keep painted cut edges behind the collar. limits: measured seam
+   limits per bone (degrees / stage units), soft-limited at runtime. napeFill (female only):
+   static head copy behind the nape slit. heads[*].feather: [y0,y1] band where the head fades. */
 import armillaryUrl from "~/assets/squire/companion/armillary.webp";
 import astrolabeUrl from "~/assets/squire/companion/astrolabe.webp";
 import femaleHeadUrl from "~/assets/squire/companion/female-head.webp";

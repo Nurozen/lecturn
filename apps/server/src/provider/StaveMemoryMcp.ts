@@ -1,14 +1,6 @@
 /**
- * Codex-specific Stave memory MCP wiring for orchestration-v2 adapters.
- *
- * A live Stave space whose manifest enables Marmot memory carries a generated
- * `context-marmot` entry in its root `.mcp.json`. `StaveMemoryWiring` reads and
- * validates that entry. Provider-neutral helpers (resolver, ACP, Cursor and
- * OpenCode shapes) live in `@lecturn/provider-core/server/staveMemory`; this
- * module only adds the Codex overrides, which need the server's process runner
- * and Codex MCP inventory.
- *
- * @module provider/StaveMemoryMcp
+ * Codex-only Stave memory overrides; they need the server's process runner and Codex MCP
+ * inventory. Provider-neutral helpers live in `@lecturn/provider-core/server/staveMemory`.
  */
 import type { CodexSettings } from "@lecturn/contracts";
 import {
@@ -25,15 +17,10 @@ import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import { type CodexMcpInventoryError, hasCanonicalMarmotServer } from "./codexMcpInventory.ts";
 
 /**
- * Codex `thread/start|resume|fork` config overrides for Stave memory.
- *
- * Codex recursively merges MCP tables across config layers, so the memory
- * server runs under a session-local name (`sm_<id>`) where stale env or
- * transport fields from a user's `context-marmot` entry cannot survive, and
- * the canonical `context-marmot` entry is disabled. A disabled entry still
- * needs a valid transport, so the command is only set when the user's own
- * config has no canonical entry; a conflicting entry then fails validation
- * instead of running.
+ * Codex merges MCP tables across config layers, so memory runs as session-local `sm_<id>`, where a
+ * user's stale `context-marmot` fields cannot survive, and the canonical entry is disabled. A
+ * disabled entry still needs a transport: the command is set only when the user has no canonical
+ * entry, so a conflicting one fails validation instead of running.
  */
 export function codexStaveMemoryMcpServers(input: {
   readonly config: StaveMemoryConfig;

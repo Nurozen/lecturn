@@ -14,11 +14,9 @@ import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popove
 import { QRCodeSvg } from "./ui/qr-code";
 import { toastManager } from "./ui/toast";
 
-// A Nightly server can need a mobile build that the public channel does not
-// carry yet. Lecturn ships a single TestFlight app on the same orchestrator as
-// its servers, so there is no separate beta app to point Nightly users to and
-// the notice and row stay off. Turn this on, with the beta link, once a
-// distinct mobile beta channel exists.
+// Lecturn ships a single TestFlight app on the servers' orchestrator, so there is no separate
+// beta app for Nightly users and the notice stays off. Turn this on, with the beta link,
+// once a distinct mobile beta channel exists.
 export const NIGHTLY_MOBILE_BETA_AVAILABLE = false;
 
 /** True on Nightly desktop, `npx lecturn@nightly`, and the hosted Nightly app. */

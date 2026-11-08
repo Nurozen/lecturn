@@ -50,8 +50,7 @@ import { getThreadListV2OrderedSection } from "../threads/threadListV2";
 import { threadCanArchive } from "./threadArchive";
 import { resolveThreadTitleRename } from "../threads/thread-title-rename";
 
-/** Version skew: never send settle/unsettle to a server that predates them
-    (capability defaults false on decode for older servers). */
+/** Older servers default the settlement capability to false; never send them settle/unsettle. */
 function environmentSupportsSettlement(environmentId: EnvironmentThreadShell["environmentId"]) {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
@@ -228,8 +227,7 @@ function useThreadActionExecutor(
   return executeAction;
 }
 
-// A plain function, not a hook: a `use*` function that calls no hooks is skipped by
-// the compiler, so the delete handler it returned was a new closure every render.
+// Hookless use* functions skip compilation, leaving their returned handlers unstable.
 function confirmThreadDeletion(
   executeAction: (action: ThreadListAction, thread: EnvironmentThreadShell) => Promise<boolean>,
   thread: EnvironmentThreadShell,
@@ -257,13 +255,9 @@ const FORK_UNAVAILABLE_MESSAGES: Record<ThreadForkUnavailableReason, string> = {
 };
 
 /**
- * Dispatches the Lecturn fork of `sourceThreadId` at `point` (a run, or
- * run-less V1-migrated/imported history) and resolves
- * to the new child thread's ref (null when the fork failed, after alerting).
- * The child gets Lecturn's "<parent> (fork)" title, which the first-turn
- * title seed relies on. Every mobile fork surface goes through here: the
- * thread list rows, the thread screen's header action, and the per-response
- * fork button.
+ * Every mobile fork surface goes through here; null when the fork failed, after alerting.
+ * `point` is a run or run-less V1-migrated/imported history. The child gets Lecturn's
+ * "<parent> (fork)" title, which the first-turn title seed relies on.
  */
 export function useForkThreadAt(): (input: {
   readonly environmentId: EnvironmentThreadShell["environmentId"];
@@ -319,11 +313,9 @@ export function useForkThreadAt(): (input: {
 }
 
 /**
- * Forks a thread through its latest completed run (or, for a never-run thread
- * with run-less history, all of that history) and resolves to the new child
- * thread's ref (null when the fork was refused or failed, after alerting).
- * Shared by the thread list rows and the thread screen's header action so
- * every surface applies the same availability gates.
+ * Forks through the latest completed run (or all run-less history of a never-run thread);
+ * null when refused or failed, after alerting. Shared by list rows and the thread header
+ * so every surface applies the same availability gates.
  */
 export function useForkThread(): (
   thread: EnvironmentThreadShell,
@@ -579,8 +571,6 @@ export function useThreadListActions(): {
       return false;
     }
     selectionHaptic();
-    // Same placement as web: a fresh pin takes the top of the arranged
-    // run. Servers that predate reordering get the bare pin (keyless).
     let orderKey: string | undefined;
     if (environmentSupportsPinReorder(thread.environmentId)) {
       const shells = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);

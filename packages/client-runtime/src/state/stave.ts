@@ -1,12 +1,8 @@
 /**
- * Stave visibility gates shared by web and mobile.
- *
- * Three facts decide what a client may show: the server build ships the
- * integration (`capabilities.stave`, a static descriptor fact), the user
- * turned it on (`settings.stave.enabled`, pushed live), and a binary is
- * runnable (`stave.getStatus`, a live probe). Configuration rows render on
- * the first fact alone so a user can recover from "no binary"; feature UI
- * (wizard, space actions, badges) needs all three.
+ * Stave visibility gates shared by web and mobile, from three facts: the build ships it
+ * (`capabilities.stave`), the user turned it on (`settings.stave.enabled`), and a binary runs
+ * (`stave.getStatus`). Configuration rows need only the first so a user can recover from "no
+ * binary"; feature UI (wizard, space actions, badges) needs all three.
  */
 
 // Structural shapes so callers can pass a full `ServerConfig`/`ServerSettings`/

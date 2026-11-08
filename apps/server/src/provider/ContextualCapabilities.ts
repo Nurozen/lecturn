@@ -135,10 +135,9 @@ export function providerContextIdForSession(driver: string, resumeCursor: unknow
   return null;
 }
 /** Host persists this key atomically with advancing its logical context epoch.
- * Unknown native identity returns null: never infer compaction from token count,
- * reconnect, local event UUID, command completion, or a session-only event.
- * Codex aliases collapse per native turn; multiple compactions in one turn are
- * conservatively treated as one boundary to avoid duplicate evidence re-supply.
+ * Unknown native identity returns null: never infer compaction from token count, reconnect, local
+ * event UUID, command completion, or a session-only event. Codex aliases collapse per native turn,
+ * so multiple compactions in one turn count as one boundary (no duplicate evidence re-supply).
  */
 export function contextualCompactionBoundaryKey(
   event: import("@lecturn/contracts").ProviderRuntimeEvent,

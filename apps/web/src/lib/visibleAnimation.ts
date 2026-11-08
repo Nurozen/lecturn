@@ -59,7 +59,6 @@ function stopFocusTracking() {
   blurRecheck = null;
 }
 
-/** Attach to a stable animation container. */
 export function observeVisibleAnimation(
   element: HTMLElement | SVGElement | null,
   options?: VisibleAnimationOptions,

@@ -1,9 +1,8 @@
 /**
- * HTTP default deny for `app:` and `embed:` sessions. `EnvironmentAuth`
- * refuses every path that is not classified here before any handler runs;
- * the authenticated-route middleware then asks `AppAuthorization` whether a
- * thread route's thread belongs to the subject's project. List routes (shell,
- * projects) are filtered by their handlers instead.
+ * HTTP default deny for `app:` and `embed:` sessions: `EnvironmentAuth` refuses every path not
+ * classified here before any handler runs, then the authenticated-route middleware asks
+ * `AppAuthorization` whether a thread route's thread belongs to the subject's project. List routes
+ * (shell, projects) are filtered by their handlers.
  */
 import {
   AuthOrchestrationReadScope,

@@ -385,10 +385,7 @@ export const layer = Api.make(
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
-    // Named prepared statements collide behind Hyperdrive's transaction-mode
-    // pool: sql-pg < 4.0.0-rc.117 names them `effect1..N` per connection, and
-    // inside a transaction a Bind can reach another request's statement
-    // (#14070, Effect-TS/effect#8320). Unnamed statements cannot collide.
+    // Named statements collide behind Hyperdrive transaction pooling (Effect-TS/effect#8320); use unnamed statements.
     const db = yield* Drizzle.Postgres(hyperdrive.connectionString, undefined, {
       prepare: false,
     });
@@ -405,8 +402,7 @@ export const layer = Api.make(
     const legacyTunnelGraceMinutes = Option.getOrUndefined(
       yield* RelayConfiguration.legacyTunnelGraceMinutesConfig,
     );
-    // Keys are endpoint keys or hashes over them, which already differ per
-    // stage, so stages sharing an account cannot collide in these namespaces.
+    // Endpoint keys and their hashes differ by stage, including in shared accounts.
     const hookRateLimit = yield* Cloudflare.RateLimit("HOOK_RATE_LIMIT", {
       namespaceId: 1001,
       simple: {

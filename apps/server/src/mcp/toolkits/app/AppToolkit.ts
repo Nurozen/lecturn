@@ -1,18 +1,8 @@
 /**
- * A connected app's tools on Lecturn's `/mcp`, for threads in that app's
- * projects. The interceptor (AppToolInterceptor.ts) reaches this through
- * `AppToolSource`.
- *
- * `call` runs in a fixed order, and each later step's policy lives in its own
- * file so its owner never edits this one:
- *   1. resolve the app and the tool's tier;
- *   2. live tools: check the lease;
- *   3. AppToolGate.decide;
- *   4. ask for approval if the gate says so (appToolApproval.ts);
- *   5. forward with Lecturn's `_meta`;
- *   6. if the app answers `lecturn/approval-required`, gate and ask again, then
- *      re-send with `{ approved: true, requestId }`;
- *   7. wrap the result for cards (AppCardEnvelope.ts).
+ * A connected app's tools on Lecturn's `/mcp`, for threads in that app's projects. `call` order,
+ * each policy in its own file: resolve app and tier; check a live tool's lease; AppToolGate.decide;
+ * ask approval if needed; forward with Lecturn's `_meta`; on `lecturn/approval-required` gate, ask
+ * and re-send `{ approved: true, requestId }`; wrap for cards (AppCardEnvelope.ts).
  */
 import {
   APP_TOOL_APPROVAL_META_KEY,
@@ -115,11 +105,9 @@ const omit = <T extends Readonly<Record<string, unknown>>>(
 ) => Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 
 /**
- * Adapters store a result's `lecturn/*` keys with the tool item, so an app
- * could otherwise forge Lecturn's approval or context there; the row summary
- * is the only one kept, as one short line of plain text. A card reference is
- * Lecturn's to attach: an app-supplied one would point a card at any
- * attachment.
+ * Adapters store a result's `lecturn/*` keys with the tool item, so an app could forge Lecturn's
+ * approval or context there; only the row summary is kept, as one short plain-text line. A card
+ * reference is Lecturn's to attach: an app-supplied one could point a card at any attachment.
  */
 const sanitizeResult = (result: McpSchema.CallToolResult): McpSchema.CallToolResult => {
   const structured = result.structuredContent;

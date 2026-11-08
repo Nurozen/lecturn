@@ -1,14 +1,7 @@
 /**
- * Pure rules behind the mobile "Import session" picker: which provider
- * instances can offer sessions, how their lists merge, where a session's cwd
- * lands, how a row reads, and how a refused import reads.
- *
- * Ported from the web palette (`apps/web/src/components/ImportSessionPalette.logic.ts`);
- * the feed-side twins live in `../../lib/threadActivity` (`importSourceLabel`,
- * `resolveImportDivider`, `shouldShowImportTruncatedNote`), ported from
- * `apps/web/src/components/ChatView.logic.ts`. Each pair is a deliberate
- * duplicate until one of them needs to change again, at which point the shared
- * half belongs in `@lecturn/client-runtime`.
+ * Deliberate duplicate of `apps/web/src/components/ImportSessionPalette.logic.ts` (feed-side
+ * twins in `../../lib/threadActivity` mirror `ChatView.logic.ts`). When either side needs to
+ * change again, move the shared half into `@lecturn/client-runtime`.
  */
 import type {
   ExternalSessionImportFailure,
@@ -125,13 +118,10 @@ export type ImportTarget<TProject extends ImportTargetProject> =
   | { readonly kind: "blocked"; readonly reason: string };
 
 /**
- * Resolves where a session lands, by its cwd. A cwd that is a project root
- * imports there; a cwd that is a known thread worktree imports into that
- * thread's project, on the worktree. Any other cwd blocks the import with
- * `unmatchedReason`: a thread never runs in a folder other than the session's,
- * nor in one Lecturn does not already manage. `projects` and `threads` must
- * belong to the environment the sessions were listed from. Paths are indexed
- * once so resolving a long list stays linear.
+ * A cwd that is a project root or a known thread worktree imports there; any other cwd
+ * blocks with `unmatchedReason`, since a thread never runs outside the session's folder or
+ * in one Lecturn does not manage. `projects` and `threads` must belong to the environment
+ * the sessions were listed from.
  */
 export function createImportTargetResolver<TProject extends ImportTargetProject>(input: {
   readonly projects: ReadonlyArray<TProject>;
@@ -296,11 +286,9 @@ export function threadImportFailureMessage(reason: ExternalSessionImportFailure)
 }
 
 /**
- * The model an imported thread starts on. The session fixes the instance, so
- * the usual new-thread sources (see `resolveNewTaskModelSelection`) apply only
- * when they already target it; otherwise the instance's own default model
- * wins. Null means the instance offers nothing startable and the import must
- * not dispatch.
+ * The session fixes the instance, so the usual new-thread sources apply only when they
+ * already target it; otherwise the instance's default model wins. Null means the instance
+ * offers nothing startable and the import must not dispatch.
  */
 export function resolveImportModelSelection(input: {
   readonly instanceId: ProviderInstanceId;
@@ -323,11 +311,8 @@ export function resolveImportModelSelection(input: {
 }
 
 /**
- * The permission and interaction modes an imported thread starts on. The
- * import shares the new task's toolbar, so it resolves them the way that
- * screen's send path does: the draft's own choice first, the flow's current
- * selection behind it, and Plan only while the flow offers the toggle. The
- * contract defaults are the last resort, not the starting point.
+ * Resolves like the new task's send path: the draft's choice, then the flow's current
+ * selection, Plan only while the flow offers the toggle, contract defaults last.
  */
 export function resolveImportThreadModes(input: {
   readonly draftRuntimeMode: RuntimeMode | null | undefined;

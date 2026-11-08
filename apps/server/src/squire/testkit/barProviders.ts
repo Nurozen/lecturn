@@ -1,18 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Temp provider homes are built with the providers' own CLIs, synchronously, before any layer runs.
 /**
- * Live providers for the live bar and MCP isolation tests: a real Claude or Codex
- * adapter for the Squire's home thread, run from a temp provider home this
- * module builds, and a recorder of what the provider was started with and
- * what it listed. Fixture worker threads stay on the scripted instance and
- * their summaries on the stub.
- *
- * The temp home is a leak detector: it carries a user-level MCP
- * server and a plugin (with its own MCP server and a skill) that the user's
- * real home does not, and the copied login leaves claude.ai connectors on, as
- * a user's would be. Each sentinel server appends to `sentinel.log` when it
- * starts and when it is listed, so a provider that loads one shows it even if
- * it never reports the tools. Credentials are copied, never linked, and the
- * user's real `~/.claude`, `~/.codex`, and keychain are only read.
+ * The temp provider home is a leak detector: its sentinel MCP servers and plugin append to `sentinel.log` when
+ * started or listed, so a provider that loads one shows it even if it never reports the tools.
+ * Credentials are copied, never linked; the user's real `~/.claude`, `~/.codex`, and keychain are only read.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

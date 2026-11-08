@@ -1,9 +1,6 @@
 /**
- * Turns a Squire's `pending` event rows into turns on its home thread. One
- * batch at a time per Squire: its rows are marked `batched`
- * before the dispatch and stay so until the run that consumed them ends, so
- * a restart re-dispatches the same command id and receipt replay keeps the
- * home thread at one message.
+ * One batch at a time per Squire: rows are marked `batched` before dispatch and stay so until the consuming run ends,
+ * so a restart re-dispatches the same command id and receipt replay keeps the home thread at one message.
  */
 import {
   CommandId,
@@ -233,11 +230,9 @@ export function batchSpeakerVerified(rows: ReadonlyArray<SquireEventRow>): boole
 const ACTING_ORIGINS: ReadonlySet<SquireTurnOrigin> = new Set(["event", "room", "lead"]);
 
 /**
- * Text a Squire wrote never drives Auto or a rule, directly or through the
- * Lead. A Lead message keeps `lead` only when its key is in
- * `userStartedLeadKeys` (a user started the Lead turn that sent it);
- * otherwise it counts as a Squire's. Room context reaches the model as input
- * too, so a Squire-written post in it makes the batch `message`.
+ * Text a Squire wrote never drives Auto or a rule, directly or through the Lead. A Lead message keeps `lead` only
+ * when its key is in `userStartedLeadKeys`; otherwise it counts as a Squire's. A Squire-written post in room context
+ * makes the batch `message`.
  */
 export function batchOrigin(
   rows: ReadonlyArray<SquireEventRow>,

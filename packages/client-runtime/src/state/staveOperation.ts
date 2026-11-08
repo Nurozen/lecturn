@@ -1,14 +1,8 @@
 /**
- * Client side of a streamed Stave operation (`stave.runOperation` /
- * `stave.observeOperation`).
- *
- * Events are keyed on the client-supplied `operationId` and numbered by a
- * per-operation `sequence`, so the consumer is a pure reducer over
- * `StaveProgressEvent`s that keeps every phase's output for the progress view,
- * plus a runner that knows when the stream ended without a terminal event and
- * can reattach from the last sequence it saw (deviation 26). The reducer is
- * the reconnect boundary: a `reset` drops what the client holds and accepts
- * the server's replay from `earliestSequence`.
+ * Client side of a streamed Stave operation (`stave.runOperation` / `stave.observeOperation`).
+ * Events are keyed on the client's `operationId` and numbered by `sequence`; the runner reattaches
+ * from the last sequence it saw when a stream ends without a terminal event (deviation 26). A
+ * `reset` drops what the client holds and accepts the server's replay from `earliestSequence`.
  */
 
 import {

@@ -297,8 +297,7 @@ function HomeTopContentSpacer() {
 function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
   if (Platform.OS !== "ios") return <ScrollView {...props} />;
 
-  // v5 needs the actual content scroll view registered with its screen controller.
-  // The layout observer and header siblings prevent UIKit from finding it implicitly.
+  // Register the scroll view explicitly; layout and header siblings hide it from UIKit.
   return (
     <ScrollViewMarker
       style={{ flex: 1 }}
@@ -318,8 +317,7 @@ function HomeScrollView(props: ComponentProps<typeof ScrollView>) {
 }
 
 function renderHomeScrollView(props: ScrollViewProps) {
-  // FlatList clones this element with its cells and ref. Keep the marker inside
-  // the component so those cells remain children of the actual ScrollView.
+  // FlatList clones this with cells and ref; keep the marker inside their actual ScrollView.
   return <HomeScrollView {...props} />;
 }
 
@@ -352,8 +350,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const contentSideInsets = usesNativeWorkspaceColumns
     ? (columnMetrics ?? screenMetrics)?.safeArea
     : undefined;
-  // Android lists that span a wide window (foldables in portrait) keep the
-  // reading width, so rows stay clear of the edges and the camera cutout.
+  // Wide Android lists need reading-width gutters to clear edges and camera cutouts.
   const { width: windowWidth } = useWindowDimensions();
   const androidListGutter =
     Platform.OS === "android"
@@ -460,8 +457,7 @@ export function HomeScreen(props: HomeScreenProps) {
       rows.slice(Math.max(0, state.start - 2), state.end + 3).map((row) => row.key),
     );
   };
-  // Status-bar, accessibility and programmatic scrolls never arm the scroll
-  // gate, so every scroll also activates the visible rows once it settles.
+  // Status-bar, accessibility and programmatic scrolls bypass the gate; activate visible rows after settling.
   const activationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(activationTimerRef.current), []);
   const handleListScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -595,9 +591,7 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  // The list's clock is state: the compiler caches anything computed from it on
-  // its other inputs, so a render-time `new Date()` would stop moving. The minute
-  // interval and the snooze-wake timer below both advance it.
+  // Keep time in state; the compiler would cache a render-time new Date().
   const [now, setNow] = useState(() => new Date().toISOString());
   const nowMinute = now.slice(0, 16);
   // Capture the wake timestamp so section membership and move planning
@@ -685,9 +679,7 @@ export function HomeScreen(props: HomeScreenProps) {
       bumpSnoozeWakeTick(Date.now());
     }, delayMs);
     return () => clearTimeout(id);
-    // snoozeWakeTick must re-arm the timer even when nextSnoozeWakeAt is
-    // unchanged: after a clamped fire (wake beyond the 32-bit setTimeout
-    // range) the boundary string is identical and the chain would die.
+    // snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
   }, [nextSnoozeWakeAt, snoozeWakeTick]);
   // Lecturn: the Squires section above the project tree.
   const squireItems = useSquireHomeItems({
@@ -922,10 +914,7 @@ export function HomeScreen(props: HomeScreenProps) {
   );
   const v2KeyExtractor = (item: HomeHierarchyV2Item) => item.key;
 
-  // FlatList/LegendList treat a changed extraData identity as "re-render every
-  // visible row", so an inline object literal would invalidate all rows on
-  // every HomeScreen render — and the minute clock must stay out of it for
-  // the same reason: the clock text is precomputed per item instead.
+  // extraData changes invalidate every visible row; put the minute clock on items to limit updates.
   const v2ExtraData = {
     queuedThreadKeys,
     activeNewTask,

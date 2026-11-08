@@ -4,25 +4,9 @@ import * as Ref from "effect/Ref";
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 import { missingStaveFeatures, supportsStaveVerb, type StaveFeatureVerb } from "./staveFeatures.ts";
 /**
- * StaveCli - the ONLY place Lecturn spawns `stave`.
- *
- * Every verb is a typed method (no argv passthrough): inputs are validated
- * with Stave's own name rule before they reach argv, `--json` is always
- * requested, and the exit status decides how stdout is read — a success
- * payload (exit 0) or the `{"error": {...}}` envelope (exit 1). Prose from a
- * legacy binary or a read verb's service error (which bypasses the envelope)
- * degrades to `non_json_output` with the stderr tail, never to a parse crash.
- *
- * Spawn discipline (deviation 7): the binary comes from `StaveBinary.resolve`,
- * stdin is `""` (closed immediately, so a prompt can never hang), `STAVE_CD_FD`
- * is unset so Stave never treats the server as its shell wrapper, `MARMOT_HOME`
- * is forwarded when the host has one, reads time out after 60s and mutations
- * after 15 minutes, and output is truncated rather than failed.
- *
- * URLs read back from JSON (Stave redacts secret-looking values) are never
- * turned into argv again; callers pass the original inputs.
- *
- * @module StaveCli
+ * The ONLY place Lecturn spawns `stave`; typed verbs, no argv passthrough. Stdin is closed so a
+ * prompt never hangs, and `STAVE_CD_FD` is unset so Stave never treats the server as its shell
+ * wrapper. URLs read back from JSON are redacted by Stave, so they never become argv again.
  */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { isValidStaveSpaceId, type StaveVersionInfo } from "@lecturn/shared/stave";
@@ -849,7 +833,7 @@ const isNotFoundCause = (cause: unknown): boolean => {
   return Predicate.hasProperty(cause, "code") && cause.code === "ENOENT";
 };
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("StaveCli.make")(function* () {
   const staveBinary = yield* StaveBinary;
   const processRunner = yield* ProcessRunner;

@@ -372,7 +372,7 @@ describe("waiting-on-user (P3.1, D1)", () => {
 
 describe("background work (A9)", () => {
   it("a completed run with completion-holding work defers on background", () => {
-    // Commands and monitors hold completion only when the agent awaits them (#24610).
+    // Commands and monitors hold completion only when the agent awaits them.
     for (const task of [
       { kind: "subagent" },
       { kind: "background_task" },

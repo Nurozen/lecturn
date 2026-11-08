@@ -209,9 +209,7 @@ export function CloudEnvironmentConnectRows({
     return false;
   };
 
-  // During onboarding selection a machine saved over another route already
-  // has its own row elsewhere, and selecting it must not add a Lecturn Connect
-  // route as a side effect, so it is left out here.
+  // Omit machines saved over other routes; onboarding selection must not add a Lecturn Connect route.
   const isVisibleEnvironment = (environmentId: EnvironmentId) =>
     environmentId !== primaryEnvironmentId &&
     (showSavedEnvironments || !savedById.has(environmentId)) &&

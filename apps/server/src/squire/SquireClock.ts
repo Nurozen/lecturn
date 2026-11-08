@@ -1,9 +1,6 @@
 /**
- * Squire timers. One fiber sleeps until the earliest moment a row,
- * trigger, or hold comes due (a deferred row's `not_before`, a schedule slot,
- * a held action's `executes_at`, a held-back intent's `escalate_at`) and
- * re-arms on every repository change, so nothing polls. The 5 s scheduler
- * source is the backstop for a missed wake, and also runs the daily prunes.
+ * One fiber sleeps until the earliest row, trigger, or hold comes due and re-arms on every repository change,
+ * so nothing polls. The 5 s scheduler source is the backstop for a missed wake and runs the daily prunes.
  */
 import type { SquireError, SquireId } from "@lecturn/contracts";
 import * as Context from "effect/Context";

@@ -1,13 +1,8 @@
 /**
- * Lecturn: the CODEX_HOME a Squire home or probe runs in.
- *
- * Codex always loads `CODEX_HOME/AGENTS.md` into a thread's prompt, and no
- * thread config suppresses it, so a marked thread runs in its own
- * home, one per provider instance under Lecturn's state directory. That home
- * holds only what a thread needs from the instance's home, linked from an
- * allowlist: the login and the thread store. The user's AGENTS.md, skills,
- * memories, plugins, rules, hooks, and config.toml stay behind, and so does
- * any entry a later Codex adds until it is listed here.
+ * Codex always loads `CODEX_HOME/AGENTS.md` and no thread config suppresses it, so a Squire runs in
+ * its own home per provider instance, linking only an allowlist (login, thread store). The user's
+ * AGENTS.md, skills, memories, plugins, rules, hooks and config.toml stay behind, as does any entry
+ * a later Codex adds until it is listed here.
  */
 import type { CodexSettings, ProviderInstanceId } from "@lecturn/contracts";
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
@@ -50,26 +45,18 @@ const LINKED_FILE =
   /^(?:auth\.json|session_index\.jsonl|(?:state|thread_history)_\d+\.sqlite|\.sqlite-maintenance\.lock|\.app-server-state-reconciled[\w.-]*)$/u;
 
 /**
- * Why auth.json is a link to the source home's file, not a copy: ChatGPT
- * refresh tokens rotate on use. A copy that refreshed would leave the source
- * holding a spent refresh token and log the user's own Codex out; a copy that
- * did not would go stale once the source refreshed, and writing it back could
- * overwrite a newer token. Codex rewrites auth.json in place (open and
- * truncate, which follows the link; checked on 0.165.0 with `codex login`), so
- * the user's CLI, Lecturn's ordinary threads, and the Squire read and refresh
- * one file, as they did when the Squire ran in the source home. The file store
- * is pinned because a keyring entry is keyed by the CODEX_HOME path: a keyring
- * write here would split the login in two.
+ * auth.json is a link, not a copy: ChatGPT refresh tokens rotate on use, so a copy would log the
+ * user's Codex out or go stale. Codex rewrites it in place (truncate follows the link; checked on
+ * 0.165.0), so everyone shares one file. The file store is pinned because keyring entries are
+ * keyed by CODEX_HOME path: a keyring write here would split the login in two.
  */
 export const CODEX_SQUIRE_HOME_LAUNCH_ARGS = `-c 'cli_auth_credentials_store="file"'`;
 
 const LAUNCH_ARGS_ENV = "LECTURN_CODEX_LAUNCH_ARGS";
 
 /**
- * The `-c` keys a Squire keeps from the instance's launch args: which model
- * provider to reach and how to sign in to it, as managed Codex sets them. A
- * CLI override could turn a native tool, an MCP server, or a feature back on,
- * point Codex at a skills snapshot or code-mode host, or move its transport,
+ * The `-c` keys a Squire keeps from the instance's launch args: model provider and sign-in only.
+ * Any other override could re-enable a native tool, MCP server or feature, or move its transport,
  * so every other flag stays behind, including any a later Codex adds.
  */
 const SQUIRE_CONFIG_KEY =

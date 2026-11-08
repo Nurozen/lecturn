@@ -1,16 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the invocation key is a durable deterministic hash
 /**
- * Every Squire role tool as one service method. Scope,
- * permission, rules, and budgets are enforced here, never by the prompt:
- * a refusal is an `isError` result with its reason, a downgrade is a
- * success that names the card it made. The `tool.called` row, unique on
- * the invocation key, commits with the tool's card and log rows, so a
- * retried call returns the stored result.
- *
- * A decision of Auto commits a hold: a `held` card with its immutable
- * execution intent and `executes_at`, which `SquireActions` runs after the
- * undo window.
- *
+ * Scope, permission, rules, and budgets are enforced here, never by the prompt. The `tool.called` row, unique on the
+ * invocation key, commits with the tool's card and log rows, so a retried call returns the stored result.
+ * Auto commits a `held` card with its immutable execution intent, which `SquireActions` runs after the undo window.
  * @module squire/SquireTools
  */
 import * as NodeCrypto from "node:crypto";
@@ -696,10 +688,8 @@ const make = Effect.gen(function* () {
   // ── Run and origin ──
 
   /**
-   * The call's run, read once when it arrives: the turn in flight, else the
-   * last one (a call that outlived its turn). Only a run the user's own
-   * message started is `user`; no run, or one that cannot be read, is
-   * `unknown`, which only recommends. A run that read another Squire's room
+   * Read once on arrival: the turn in flight, else the last one. Only a run the user's own message started is
+   * `user`; an unreadable or missing run is `unknown`, which only recommends. A run that read another Squire's room
    * posts acts as `message` from then on.
    */
   const callRun = Effect.fn("SquireTools.callRun")(function* (

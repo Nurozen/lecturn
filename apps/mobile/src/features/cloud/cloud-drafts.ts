@@ -43,8 +43,7 @@ export const removeCloudEnvironments = createRuntimeCommand(connectionAtomRuntim
         )
         .map((entry) => entry.target.environmentId),
     );
-    // Credentials are already revoked. A failed backup must leave the local
-    // owners intact so a later sign-in can retry without losing their files.
+    // Backup failure must retain local file owners so a later sign-in can retry.
     yield* Effect.tryPromise({
       try: () => archiveCloudComposerDrafts(accountId, environmentIds),
       catch: (cause) =>

@@ -193,11 +193,10 @@ function pullRequestLines(pr: PullRequest, failingJobs: number): Array<string> {
 }
 
 /**
- * The one rendering of a turn summary, used for the event message and for
- * the cap. Length is the UTF-16 `.length` of the whole text, header included.
- * Over the cap it trims model text first, then elides trailing files,
- * commands, and failing jobs as "+N more". A shown path or command is
- * never edited; the stored summary is never changed.
+ * The one rendering of a turn summary, for the event message and the cap. Length is the UTF-16
+ * `.length` of the whole text, header included. Over the cap it trims model text first, then
+ * elides trailing files, commands, and failing jobs as "+N more". A shown path or command is never
+ * edited; the stored summary is never changed.
  */
 export function renderSquireTurnSummary(
   input: SquireTurnSummary,

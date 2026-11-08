@@ -44,8 +44,7 @@ export function toSafeThreadAttachmentSegment(threadId: string): string | null {
 
 export function attachmentFileExtension(fileName: string): string {
   const extension = NodePath.extname(fileName).toLowerCase();
-  // ".part" is reserved for in-flight uploads; a stored "archive.part" would
-  // look stale to sweepStalePendingAttachments and get deleted.
+  // .part is reserved for pending uploads; the stale-upload sweep would delete stored files.
   if (extension === ".part" || !/^\.[a-z0-9]{1,10}$/.test(extension)) {
     return ".bin";
   }
@@ -104,12 +103,7 @@ export function createDeterministicAttachmentId(
   return `${threadSegment}-${uuid}`;
 }
 
-/**
- * A retry resends the same bytes and keeps its id. Editing a queued message
- * reuses the message id, so the bytes also stop a new image from taking an
- * earlier image's id and file. Clients cache attachment images by id, which
- * relies on ids never changing bytes.
- */
+/** Retries keep ids; changed bytes must get new ids because clients cache images by id. */
 export function chatAttachmentStableKey(
   messageId: string,
   index: number,
@@ -131,10 +125,7 @@ export function parseThreadSegmentFromAttachmentId(attachmentId: string): string
   return match[1]?.toLowerCase() ?? null;
 }
 
-/**
- * Only ids minted for this thread count, so deleting a fork never removes its
- * source's pages.
- */
+/** Only this thread's ids qualify, preserving source pages when deleting a fork. */
 export function threadHtmlRenderAttachmentIds(
   threadId: string,
   items: Iterable<{ readonly toolName: string | null | undefined; readonly output?: unknown }>,
@@ -265,11 +256,8 @@ export function planAttachmentClaim(input: {
 }
 
 /**
- * Child-namespaced id for an attachment copied into another thread: the
- * destination thread's segment, the caller-supplied deterministic uuid and
- * the source id's extension suffix. Pure — the fork assembler derives the
- * copied message rows' ids with it, and copyClaimedAttachment reuses it so
- * the file copy lands at the same id.
+ * Pure: the fork assembler derives copied message rows' ids with it, and copyClaimedAttachment
+ * reuses it so the file copy lands at the same id.
  */
 function deriveCopiedAttachmentId(input: {
   readonly sourceAttachmentId: string;
@@ -288,12 +276,9 @@ function deriveCopiedAttachmentId(input: {
 }
 
 /**
- * Plan copying a thread-owned attachment into another thread's namespace.
- *
- * The caller supplies the uuid (derived deterministically from the source and
- * destination) so retries produce the same final id. Resolution goes through
- * the full attachment rather than an id-only lookup because legacy attachment
- * ids may lack an embedded extension. The caller performs the file copy.
+ * The caller supplies a deterministic uuid so retries produce the same id, and performs the file
+ * copy. Resolves the full attachment, not an id-only lookup, because legacy ids may lack an
+ * embedded extension.
  */
 export function copyClaimedAttachment(input: {
   readonly attachmentsDir: string;

@@ -1,11 +1,7 @@
 /**
- * ProviderWorkAdmission on the V2 orchestrator. V1 claimed foreground inside
- * ProviderService.sendTurn and released it on turn.completed/aborted runtime
- * events. On V2 a run's provider turn starts after the `beforeTurnStart` hook
- * and ends with the run's terminal notice, so foreground is claimed there
- * (interrupting a background decision writer on the same provider instance)
- * and released at terminal. Background work therefore never starves a
- * foreground turn, and a foreground turn never overlaps a running helper.
+ * Foreground is claimed after `beforeTurnStart` (interrupting a background decision writer on the
+ * same provider instance) and released at the run's terminal notice, so background work never
+ * starves a foreground turn and a foreground turn never overlaps a running helper.
  */
 import type { RunId, ThreadId } from "@lecturn/contracts";
 import { Effect } from "effect";

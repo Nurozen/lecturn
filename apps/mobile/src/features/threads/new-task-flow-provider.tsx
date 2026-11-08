@@ -143,10 +143,7 @@ function pendingTaskDraftKey(messageId: string): string {
   return `pending-task:${messageId}`;
 }
 
-// The message id owned by the currently active editing session, tracked
-// across provider instances. An in-flight flush from a dismissed session
-// consults it so it never drops the draft or releases the drain lock out from
-// under a newer session editing the same task.
+// Track ownership across providers so old unmount flushes cannot drop newer drafts or drain locks.
 let activeEditingMessageId: string | null = null;
 
 function findQueuedPendingTask(messageId: string): QueuedThreadMessage | null {
@@ -225,11 +222,7 @@ type NewTaskFlowContextValue = {
   readonly filteredBranches: ReadonlyArray<VcsRef>;
   readonly reset: () => void;
   readonly setProject: (project: EnvironmentProject) => void;
-  /**
-   * Binds the composer to an existing new-task draft (a row in the thread
-   * list). Returns false when the draft is gone, so the caller can fall back
-   * to a fresh one.
-   */
+  /** Returns false if the existing draft is gone, allowing fallback to a fresh draft. */
   readonly openDraft: (draftKey: string) => boolean;
   readonly selectEnvironment: (environmentId: EnvironmentId) => void;
   readonly switchEnvironment: (environmentId: EnvironmentId) => Promise<boolean>;
@@ -316,8 +309,7 @@ export function NewTaskFlowProvider(
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [editingPendingTask, setEditingPendingTask] = useState<QueuedThreadMessage | null>(null);
   const pendingLocalBranchSyncDraftKeysRef = useRef(new Set<string>());
-  // Mirrors `editingPendingTask` synchronously so the unmount flush cannot act
-  // on a task whose editing session already ended this render.
+  // Mirror edit state synchronously so unmount flush cannot save a session ended this render.
   const editingPendingTaskRef = useRef<QueuedThreadMessage | null>(null);
   const editingRevisionRef = useRef(Promise.resolve(0));
 
@@ -405,8 +397,7 @@ export function NewTaskFlowProvider(
   const selectedRepositoryKey = selectedProject?.repositoryIdentity
     ? repositoryGroupingKeyOf(selectedProject.repositoryIdentity)
     : null;
-  // `|| null` (not `??`): a pending-task placeholder project can have an empty
-  // workspaceRoot, and an "" basename would reject every real host below.
+  // Use || null: placeholder workspaceRoot can be empty, and an empty basename rejects real hosts.
   const selectedWorkspaceBasename = selectedProject?.workspaceRoot.split("/").at(-1) || null;
   const selectedProjectTitle = selectedProject?.title ?? null;
   const environments = (() => {
@@ -560,10 +551,8 @@ export function NewTaskFlowProvider(
           projectHasThreads: selectedProjectHasThreads,
         })
       : "local");
-  // While the file read is pending and nothing above it decided, the
-  // resolved default is provisional. Nothing may write it into the draft
-  // during that window (the auto-branch effect does), or the frozen interim
-  // value beats the lecturn.json default once it loads.
+  // Do not persist the provisional workspace default while lecturn.json is loading; it would override
+  // the file's eventual default.
   const defaultWorkspaceModeSettled =
     selectedProjectDraft.workspaceSelection?.mode !== undefined ||
     forcedWorkspaceMode !== undefined ||
@@ -951,15 +940,12 @@ export function NewTaskFlowProvider(
     ) {
       return;
     }
-    // The draft screen writes a thread's branch and worktree into the draft in
-    // the same commit this effect runs, so the rendered selection above can be
-    // stale. Re-read the draft before replacing it.
+    // Re-read before replacing: the draft screen can update workspace selection in this same commit.
     const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
     if (live && (live.mode !== "worktree" || live.branch !== null)) {
       return;
     }
-    // The default may only exist as origin/<default> (isRemote), which
-    // availableBranches filters out — search the unfiltered refs for it.
+    // Search unfiltered refs: the default may exist only as origin/<default>, excluded by availableBranches.
     const preferredBranch =
       allBranchRefs.find((branch) => branch.isDefault) ??
       availableBranches.find((branch) => branch.current) ??
@@ -1097,10 +1083,7 @@ export function NewTaskFlowProvider(
         ...(mode === "worktree" && workspaceSelection?.pullRequestReference
           ? { pullRequestReference: workspaceSelection.pullRequestReference }
           : {}),
-        // An explicit picker choice wins. Otherwise only a task sending now
-        // records the current checkout: a queued local task drains days
-        // later against whatever is checked out then, so a queue-time
-        // guess would pin a stale label to a thread that ran somewhere else.
+        // Queued local tasks use drain-time checkout; snapshot branches only for immediate sends or explicit choices.
         branch: resolveProjectThreadCreationBranch({
           workspaceMode: mode,
           selectedBranch: workspaceSelection?.branch ?? null,
@@ -1132,10 +1115,7 @@ export function NewTaskFlowProvider(
     setEditingPendingTask(null);
   };
 
-  // If the queued task disappears mid-edit (deleted from the list, or
-  // delivered), end the editing session immediately without saving — a later
-  // flush must not resurrect it, and the composer should fall back to the
-  // regular per-project draft.
+  // End editing without saving if the queued task disappears; a later flush must not resurrect it.
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   useEffect(() => {
     const editing = editingPendingTaskRef.current;
@@ -1171,16 +1151,11 @@ export function NewTaskFlowProvider(
       });
 
       if (!message) {
-        // The edits are currently unsendable (e.g. the prompt was cleared).
-        // Keep both the draft and the drain lock: the stale queued payload
-        // must not auto-send content the user just removed, and reopening the
-        // task resumes from the saved draft.
+        // Keep unsendable edits and the drain lock so removed content cannot auto-send from a stale payload.
         return;
       }
 
-      // The write handoff lets a reopened editor follow this editor's pending
-      // save. Its CAS still rejects unrelated queue edits, deletes, and
-      // deliveries, so the flush cannot resurrect or overwrite them.
+      // Hand off pending saves to reopened editors; CAS still rejects unrelated edits, deletes and deliveries.
       void flushPendingTaskEditorWrite({
         message,
         baseline: editingRevisionRef.current,
@@ -1198,8 +1173,7 @@ export function NewTaskFlowProvider(
           scheduleUnusedComposerAttachmentCleanup(editing.attachments);
         })
         .catch((error) => {
-          // Keep the drain lock and the draft: delivering the stale payload
-          // would silently drop the newer edits. Reopening the task retries.
+          // Keep the draft and drain lock on failure so stale payloads cannot discard edits; reopening retries.
           console.warn("[new-task] failed to save edited pending task", error);
         });
     };

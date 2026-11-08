@@ -1,13 +1,8 @@
 /**
- * Bridge between an app host (iframe parent or Electron preload) and Lecturn's
- * embed view. The roles are reversed from MCP Apps: Lecturn's web UI is the
- * guest and the app is the host. Methods MCP Apps already names keep its names
- * so the framing helpers stay shared; Lecturn additions use the `lecturn/`
- * prefix and are advertised under `experimental.lecturn`, because MCP Apps
- * sanctions no vendor namespace.
- *
- * This module imports only `effect/Schema` so `@lecturn/embed/browser` can use
- * it through the `./embedBridge` subpath without the contracts barrel.
+ * Bridge between an app host (iframe parent or Electron preload) and Lecturn's embed view, with
+ * MCP Apps' roles reversed. Methods MCP Apps names keep its names; Lecturn additions use the
+ * `lecturn/` prefix under `experimental.lecturn`, since MCP Apps sanctions no vendor namespace.
+ * Imports only `effect/Schema` so `@lecturn/embed/browser` can use it without the contracts barrel.
  */
 import * as Schema from "effect/Schema";
 

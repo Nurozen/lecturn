@@ -1,21 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - The sentinel home, a stand-in Lecturn MCP server, and evidence files are plain Node fixtures built before any layer runs.
 /**
- * S0a2 for Cursor: a Squire home and probe on the real Cursor SDK see
- * only Lecturn's server (home) or nothing (probe). Spends Cursor tokens, so
- * it runs only with SQUIRE_S0A2_PROVIDER=cursor and a Cursor key: either
- * CURSOR_API_KEY or SQUIRE_S0A2_CURSOR_CREDENTIAL, the path of a copy of
- * Lecturn's stored Cursor sign-in. SQUIRE_BAR_MODEL picks the model.
- *
- * The SDK runs in this process and finds the user's Cursor settings through
- * HOME, so HOME points at a temp home carrying a user MCP server, a user
- * skill, and a user rule; the scratch cwd carries a project MCP server, a
- * project rule, AGENTS.md, and CLAUDE.md. Each sentinel server logs when it
- * starts or is listed, and each instruction file asks for a sentinel word.
- * A stand-in for Lecturn's MCP server lists one Squire tool, as the Squire
- * credential's gate would. Phases: home start, home resume (a new session),
- * probe, and a control thread with the normal settings layers, which must
- * show the sentinels so the detector is known to work.
- * Evidence goes to artifacts/squire-bar/s0a2/cursor/.
+ * S0a2 for Cursor: a Squire home and probe on the real Cursor SDK see only Lecturn's server (home)
+ * or nothing (probe). Spends tokens: needs SQUIRE_S0A2_PROVIDER=cursor and CURSOR_API_KEY or
+ * SQUIRE_S0A2_CURSOR_CREDENTIAL. The SDK reads HOME, so a temp home plants sentinels, which a
+ * control thread must show. Evidence goes to artifacts/squire-bar/s0a2/cursor/.
  */
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";

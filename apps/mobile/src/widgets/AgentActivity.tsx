@@ -61,9 +61,7 @@ export interface AgentActivityProps {
   readonly activities: ReadonlyArray<AgentActivityRowProps>;
 }
 
-// This function is serialized into the widget extension's JS bundle, so it
-// must stay self-contained: no references to module-scope helpers, only the
-// imported view/modifier factories.
+// Widget serialization excludes module helpers; use only imported view/modifier factories.
 export function AgentActivity(
   props: AgentActivityProps,
   environment: LiveActivityEnvironment,
@@ -135,9 +133,7 @@ export function AgentActivity(
     if (phase === "running" || phase === "starting") return 2;
     return 3;
   };
-  // Past the stale date the system stops vouching for the content, so every
-  // in-flight row degrades to "stale" rather than claiming an agent is still
-  // working.
+  // Mark in-flight rows stale after expiry so they cannot claim agents still work.
   const activities: ReadonlyArray<AgentActivityRowProps> = environment.isStale
     ? props.activities.map((row) =>
         row.phase === "completed" || row.phase === "failed"
@@ -196,8 +192,7 @@ export function AgentActivity(
   const showCompactGlyph = !attentionRow && !failedRow && !allDone && !environment.isStale;
   const summary = attentionSuffix || activeLabel;
 
-  // Any registered scheme variant routes back to this app; taps are delivered
-  // to the widget's containing app, so the prod scheme is safe for all builds.
+  // Widget taps target the containing app, so its production scheme is safe in every build.
   const deepLinkRow = attentionRow ?? row0;
   const deepLink =
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
@@ -269,10 +264,7 @@ export function AgentActivity(
       >
         {row.threadTitle}
       </Text>
-      {/* No layoutPriority and no frame on the project: two bare texts take
-          their ideal width when it fits and shrink proportionally only when it
-          doesn't — so short rows never truncate, and long title + long project
-          truncate together. */}
+      {/* Bare texts share shrinkage proportionally; project frames or layoutPriority would prevent balanced truncation. */}
       {row.projectTitle !== row.threadTitle ? (
         <Text modifiers={[font({ size: 11 }), foregroundStyle(secondaryForeground), lineLimit(1)]}>
           {row.projectTitle}

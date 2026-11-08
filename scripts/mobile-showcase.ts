@@ -71,8 +71,7 @@ const MOBILE_BUILD_ENV = {
   // the native project overruns the dev launcher's 10s manifest timeout on a
   // loaded CI host, which leaves the app on the launcher's home screen.
   MOBILE_VERSION_POLICY: "appVersion",
-  // Lets the capture build require full screen on iPad so the app can rotate
-  // itself to landscape (see app.config.ts).
+  // iPad self-rotation needs the capture build's fullscreen mode (app.config.ts).
   LECTURN_SHOWCASE_CAPTURE_BUILD: "1",
   JAVA_HOME:
     NodeProcess.env.JAVA_HOME ??
@@ -344,8 +343,7 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
       } else if (SHOWCASE_THEMES.some((theme) => theme === value)) {
         themes.add(value as ShowcaseTheme);
       } else {
-        // The app silently falls back to its default palette for an unknown id,
-        // so reject it here rather than shipping a mislabeled screenshot.
+        // Unknown themes silently use the default palette; reject mislabeled captures.
         throw new Error(`Unsupported theme '${value}'. Use ${SHOWCASE_THEMES.join(", ")}, or all.`);
       }
       index += 1;
@@ -881,11 +879,7 @@ async function iosSimulatorDataPath(udid: string): Promise<string> {
   return dataPath;
 }
 
-// generativeexperiencesd posts a "Ready for Apple Intelligence" follow-up
-// banner on an eligible device's first boot, and CoreFollowUp re-surfaces it on
-// every boot until the user dismisses it. Stamping the readiness marker before
-// boot makes the daemon skip the post, and dropping the CoreFollowUp store
-// clears a banner that a previous boot already queued.
+// Apple Intelligence posts persistent first-boot banners; mark readiness and clear queued CoreFollowUp notices.
 async function suppressIosSystemFollowUps(udid: string): Promise<void> {
   const dataPath = await iosSimulatorDataPath(udid);
   const preferences = NodePath.join(dataPath, "Library/Preferences");
@@ -910,9 +904,7 @@ async function suppressIosSystemFollowUps(udid: string): Promise<void> {
 
 async function normalizeIosSimulator(appearance: ShowcaseAppearance, udid: string): Promise<void> {
   await runCommand("xcrun", ["simctl", "ui", udid, "appearance", appearance]);
-  // Always-on displays (Pro Max) dim a locked screen instead of turning it
-  // off, which the lock-screen wake cannot tell from a lit one. Without it the
-  // locked display goes dark and the wake lights it fully.
+  // Disable always-on dimming so lock-screen wake can distinguish off from fully lit.
   await runCommand("xcrun", [
     "simctl",
     "spawn",
@@ -942,9 +934,7 @@ async function normalizeIosSimulator(appearance: ShowcaseAppearance, udid: strin
   ]);
 }
 
-// iPadOS 26 windowing ("Chamois") runs UIRequiresFullScreen apps in a fixed
-// portrait compatibility window, which defeats the in-app landscape rotation
-// the capture build relies on.
+// iPadOS 26 windowing forces fullscreen apps into portrait, defeating capture-build rotation.
 async function ensureIosFullScreenAppsMode(udid: string): Promise<void> {
   const current = await commandOutput("xcrun", [
     "simctl",
@@ -956,8 +946,7 @@ async function ensureIosFullScreenAppsMode(udid: string): Promise<void> {
     "SBChamoisWindowingEnabled",
   ]).catch(() => "");
   if (current.trim() === "0") return;
-  // The Settings toggle writes all three keys; SBChamoisWindowingEnabled
-  // alone is not honored on a freshly created device.
+  // Fresh devices honor the Settings toggle only when all three keys are written.
   for (const key of [
     "SBChamoisWindowingEnabled",
     "SBMedusaMultitaskingEnabled",
@@ -975,9 +964,7 @@ async function ensureIosFullScreenAppsMode(udid: string): Promise<void> {
       "false",
     ]);
   }
-  // A SpringBoard restart is not enough on a freshly created simulator (the
-  // first CI run captured with windowing still active), so reboot the device
-  // and verify the mode actually stuck.
+  // New simulators require a reboot, not just SpringBoard restart, before windowing settings take effect.
   await runCommand("xcrun", ["simctl", "shutdown", udid]);
   await runCommand("xcrun", ["simctl", "boot", udid]);
   await runCommand("xcrun", ["simctl", "bootstatus", udid, "-b"]);
@@ -1116,10 +1103,7 @@ async function iosSimulatorLocked(udid: string): Promise<boolean> {
   return state.trim().endsWith(" 1");
 }
 
-/**
- * The staging app asks for notification permission; simctl has no privacy
- * service for it, so answer the prompt until the scene reports ready.
- */
+// simctl has no notification privacy service; answer the staging app's prompt until ready.
 async function allowIosNotificationsUntilReady(udid: string, ready: Promise<void>): Promise<void> {
   const state = { settled: false };
   const tapping = (async () => {
@@ -1163,11 +1147,7 @@ async function presentIosLockScreen(udid: string): Promise<void> {
   await runAxe(udid, ["tap", "--label", "Allow"]).catch(() => undefined);
 }
 
-/**
- * The alert usually wakes the display, but not always. A home press on a dark
- * display only wakes it, so press only after a screenshot proves it is dark;
- * pressing on a lit lock screen would unlock the device instead.
- */
+/** Press home only if a screenshot proves the lock screen is dark; a lit display would unlock instead. */
 async function wakeIosLockScreen(udid: string): Promise<void> {
   const probe = NodePath.join(NodeOS.tmpdir(), `lecturn-showcase-wake-${udid}.png`);
   try {
@@ -1280,8 +1260,7 @@ async function captureIos(
       firstScene,
       "--showcaseTheme",
       capture.theme,
-      // The app rotates itself; Simulator menu UI scripting needs macOS
-      // Accessibility permission that CI runners do not grant to osascript.
+      // Simulator rotation UI scripting needs Accessibility permission unavailable on CI.
       "--showcaseOrientation",
       capture.device.orientation ?? "portrait",
     ]);
@@ -1299,11 +1278,10 @@ async function captureIos(
         : ready;
     };
     if (sceneIndex === 0) {
-      // A first launch can strand itself: the dev launcher gives up on a slow
-      // manifest, or a slow server spends the one-time pairing credential after
-      // the app's 10s timeout and the app retries a 401 forever. Only a relaunch
-      // with fresh credentials recovers. Killing a launch that is still loading
-      // sends it back to the launcher, so relaunch only once it has given up.
+      // A first launch can strand itself (the dev launcher gives up on a slow manifest, or a slow
+      // server spends the one-time pairing credential after the app's 10s timeout), and only a
+      // relaunch with fresh credentials recovers. Killing a still-loading launch sends it back to
+      // the launcher, so relaunch only once it has given up.
       const deadline = Date.now() + 900_000;
       let launchedAt = Date.now();
       let relaunches = 0;
@@ -1391,11 +1369,7 @@ async function runAdb(serial: string, args: ReadonlyArray<string>): Promise<void
   await runCommand(androidSdkTool("platform-tools/adb"), ["-s", serial, ...args]);
 }
 
-/**
- * Emulator images post their own ongoing notices (keyboard configured, serial
- * console enabled) that would share the shade with the app's. Snoozing hides
- * them for the capture; they come back on their own an hour later.
- */
+/** Snooze emulator system notices for an hour so only app notifications appear in captures. */
 async function snoozeAndroidSystemNotifications(serial: string): Promise<void> {
   const keys = (await adbOutput(serial, ["shell", "cmd", "notification", "list"]))
     .split("\n")
@@ -1529,9 +1503,7 @@ async function writeAndroidShowcaseScene(serial: string, scene: ShowcaseScene): 
   ]);
 }
 
-// Gesture and key-command toggles have no launch-URL flag, so they still go
-// through the preferences file; onboarding, auto-launch and the floating button
-// come from DEV_CLIENT_LAUNCH_FLAGS on the launch URL.
+// Gesture/key-command toggles have no URL flags; set preferences separately from DEV_CLIENT_LAUNCH_FLAGS.
 async function prepareAndroidShowcaseApp(serial: string): Promise<void> {
   const preferences = `<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <map>

@@ -1,12 +1,7 @@
 /**
- * Room rows: `squire_room`, `squire_room_member`, and the room
- * log `squire_room_post`. Kept apart from `SquireRepository` so the room
- * builders never edit that shared file; it shares the same `SqlClient`, so
- * its statements join an enclosing `repository.transaction`.
- *
- * Writes publish no change of their own: callers run them inside
- * `SquireRepository.transaction`, which publishes once after the commit, so
- * the snapshot stream and the clock see every room write.
+ * Shares `SquireRepository`'s `SqlClient`, so its statements join an enclosing `repository.transaction`.
+ * Writes publish no change of their own: callers run them inside `SquireRepository.transaction`, which publishes
+ * once after the commit, so the snapshot stream and the clock see every room write.
  */
 import { SquireId, SquireRoomId, SquireRoomPostId } from "@lecturn/contracts";
 import * as Context from "effect/Context";

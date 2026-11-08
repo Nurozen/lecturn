@@ -341,11 +341,9 @@ export class SquireRepository extends Context.Service<
       readonly to: string;
     }) => Result<boolean>;
     /**
-     * Deletes the Squire and its rows in every Squire table, in one
-     * transaction, and closes open rooms it leaves with fewer than 2 Squire
-     * members. Summaries are shared, so they stay with their payer cleared;
-     * room posts are the room's log, so they stay too. The caller deletes the
-     * returned secrets from the secret store. Idempotent.
+     * Also closes open rooms left with fewer than 2 Squire members. Summaries are shared, so they stay with their
+     * payer cleared; room posts are the room's log, so they stay too. The caller deletes the returned secrets from
+     * the secret store. Idempotent.
      */
     readonly deleteSquireRows: (
       id: SquireId,
@@ -400,11 +398,8 @@ export class SquireRepository extends Context.Service<
       readonly updatedAt: string;
     }) => Result<ReadonlyArray<SquireCardId>>;
     /**
-     * Pause: holds the Squire raised or owns become open recommendations
-     * without a timer. A hold whose open slot (one per Squire, thread, and
-     * kind) is already taken becomes
-     * `outdated` with resolution `superseded` instead, newest hold first, so
-     * the newest wins. Returns the opened ids.
+     * Pause: the Squire's holds become open recommendations without a timer. A hold whose open slot (one per Squire,
+     * thread, and kind) is taken becomes `outdated`/`superseded` instead, newest first, so the newest wins.
      */
     readonly openHeldCards: (input: {
       readonly squireId: SquireId;

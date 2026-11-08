@@ -91,10 +91,8 @@ export const make = Effect.gen(function* () {
             const updatedAt = DateTime.formatIso(yield* DateTime.now);
             const registration = input.registration;
 
-            // The drizzle handle is alchemy's lazy proxy chain: it only becomes a
-            // real Effect when consumed via `yield*`. Handing it to Effect.all sends
-            // the raw Proxy into the fiber runtime, which spins the isolate at 100%
-            // CPU (registrations then hang until the client aborts) — keep every db
+            // The drizzle handle is alchemy's lazy proxy chain: handing it to Effect.all sends the
+            // raw Proxy into the fiber runtime, which spins the isolate at 100% CPU. Keep every db
             // chain directly yielded.
             if (registration.pushToken) {
               yield* claimPushToken(db, {

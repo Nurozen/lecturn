@@ -1,37 +1,8 @@
 /*
- * <squire-rig>: layered cutout character runtime, ported from the v5 baseline
- * (artifacts/squire-concepts/v5/src/squire-rig.js). Motion constants, poses, springs, beats,
- * gesture curves, limits, transitions, and paint order are v5's; the port changes art loading
- * (imported URLs, lazy per part), cloth tinting (pre-tinted textures, no per-frame filter), and
- * scheduling (injectable clock, 30 fps gate, focus, single-rig lease, 20 s settle).
- *
- * RIG. Coordinates are RIG_ART.stage units. Bones: body (pivot 550,1300) parents head
- * (joint 560,440) and forearm (public name `arm`, the elbow at 400,990). Grip art holds forearm,
- * hands and item; the torso owns shoulder and upper arm. Paint order:
- *   aura FX | body[ nape-fill, head[ head-alt, head, hood-wrap[hood], head FX ], torso-wrap[
- *   torso, torso FX ], arm[ grip-out-wrap, grip-wrap[ grip, item FX ] ] ] | front FX
- * Head/hood render behind the torso so the collar covers the neck join. The head rocks about
- * RIG_ART.rock.nape (chin down) or .throat (chin up) so its painted cut always slides behind
- * the collar; a static head copy masked to RIG_ART.napeFill backs the nape. The raised hood
- * lives in the head bone for paint order but carries its own matrix: it follows part of the
- * head turn about its own base, and the face clip rides with it. The forearm inherits the
- * torso's exact breath matrix (elbow and any baked patch stay registered).
- *
- * MOTION. Ambient channels are pure functions of rig time t; springs smooth state weights
- * (slightly underdamped, with anticipation), gaze, eyes, motion level and the hood trail.
- *   Breath     asymmetric (inhale 40%, exhale 50%, hold 10%), seeded per-cycle period +-12%
- *              and depth 0.8-1.15, a sigh every ~25-40 s (depth 1.8, head drops).
- *   Weight     body rotation from three incommensurate sines (7.3 s, 3.1 s, 13.7 s).
- *   Head       lagged follow-through, partial counter-rotation, slow drift, pitch. Horizontal
- *              gaze is mostly eyes (frame.eye, leading the head ~80 ms).
- *   Hood       follows 45% of the head turn through a spring (trails); clip rides along.
- *   Beats      deterministic idle variations (60 s windows), muted around gestures and state
- *              changes.
- *   Levels     subtle; lively (authored gesture curves, sway x1.5, beats x2); still (held
- *              state pose; switching to still blends to rest over 0.55 s first).
- * Gesture/beat deltas only use the headroom left before a limit; every bone channel is then
- * soft-limited to the measured seam limits and passed through a final critically damped
- * filter in live mode.
+ * <squire-rig>: layered cutout runtime ported from v5 (artifacts/squire-concepts/v5/src/squire-rig.js);
+ * motion constants, poses, beats, limits and paint order are v5's. Coordinates are RIG_ART.stage
+ * units. Head/hood paint behind the torso so the collar covers the neck join, and every bone
+ * channel is soft-limited to the measured seam limits.
  */
 import { acquireCompanionLease, type CompanionLease } from "./companionLease";
 import { companionClock, onCompanionFocusChange } from "./companionClock";
@@ -145,13 +116,9 @@ type PoseDef = {
 };
 type PoseKey = keyof PoseDef;
 
-// Held pose per state (read from a single still at panel size): idle rests with eyes lowered
-// toward the item; attentive straightens and rises, lifts the chin and turns head and eyes
-// back toward the viewer (negative gaze), wide-eyed, presenting the item; thinking settles
-// down, bows toward the item and draws it up and in. `lid` is extra upper-lid lowering for
-// FX. Attentive's turn holds (autoGaze 0) so the settled frame keeps it. Thinking is deeper
-// than v5 (bow 4.4 -> 5, sink 9 -> 11, half-lid 0.35 -> 0.55). Blended by spring weights
-// (which may overshoot slightly).
+// Held pose per state, blended by spring weights (may overshoot slightly). `lid` is extra
+// upper-lid lowering for FX. Attentive's turn holds (autoGaze 0) so the settled frame keeps
+// it. Thinking is deeper than v5 (bow 4.4 -> 5, sink 9 -> 11, half-lid 0.35 -> 0.55).
 const POSES: Readonly<Record<CompanionState, PoseDef>> = {
   idle: {
     body: 0,
@@ -355,17 +322,10 @@ type GestureSource = {
   readonly lively: GestureLevel;
 };
 
-// Gesture tracks: [seconds, value] keys, Hermite-interpolated with flat extremes. Each level
-// is authored inside the seam limits (blended by the lively spring, never scaled up and
-// clamped). Holds keep 0.2-0.3 deg of drift so they stay alive.
-// Raised past v5 so each reads at the 340 px panel, where a degree of head turn is under 2 px,
-// and each peak is its own still: nod sinks and bows with the chin tucked (the head drops
-// ~8 px) then rebounds chin-up; greet draws up, turns head and eyes to the viewer and waves the
-// raised item; listen leans in with the chin up and the head drawn back toward the sound
-// behind the ear; ponder sits back with the item drawn up and in, head tilting (its warm
-// rising thought, not the pose, sets it apart from thinking);
-// glance leans in and lifts the item as head and eyes snap down to it and back, eyes leading
-// (gaze peaks ahead of the head). Soft limits keep every channel inside the seams.
+// Gesture tracks: [seconds, value] keys, Hermite-interpolated with flat extremes, each level
+// authored inside the seam limits (blended, never scaled up and clamped). Raised past v5 so
+// each reads at the 340 px panel, where a degree of head turn is under 2 px. Holds keep
+// 0.2-0.3 deg of drift so they stay alive.
 const GESTURE_SOURCE: Readonly<Record<CompanionGesture, GestureSource>> = {
   nod: {
     duration: 1.05,
@@ -1397,12 +1357,9 @@ function preload(href: string) {
 }
 
 /**
- * v5's cloth filter, per pixel, in sRGB (color-interpolation-filters="sRGB"):
- *   navy      = feColorMatrix alpha 8 (B - R), clamped (non-premultiplied input)
- *   navyMask  = navy in SourceAlpha
- *   clothTint = flood(rgb, strength) in navyMask
- *   result    = screen(SourceGraphic, clothTint), premultiplied: c = cs + cb - cs cb
- * Only cool (B > R) pixels enter the mask, so skin and metal are untouched.
+ * v5's cloth filter per pixel in sRGB: mask = clamp(8 (B - R)) x alpha x strength, then
+ * screen(SourceGraphic, tint in mask), premultiplied: c = cs + cb - cs cb. Only cool
+ * (B > R) pixels enter the mask, so skin and metal are untouched.
  */
 export function applyClothTint(pixels: Uint8ClampedArray, tint: ClothTint) {
   const [r, g, b, strength] = tint;
@@ -1908,11 +1865,9 @@ export class SquireRigElement extends HTMLElement {
     };
   }
 
-  // Per-instance seed: the `seed` attribute (integer). Without one, a stable per-instance
-  // counter is reflected into the attribute on connect (so copies of a rig share its seed).
-  // The clock starts at origin = 40 * hash(seed) s, so rigs on one page never move in
-  // lockstep. setPose time is absolute and holds use the same seed and origin as live
-  // motion: setPose({ time: debugState.time }) reproduces the live frame.
+  // The `seed` attribute, else a stable per-instance counter reflected on connect (so copies
+  // share it). The clock starts at 40 * hash(seed) s so rigs never move in lockstep;
+  // setPose({ time: debugState.time }) reproduces the live frame.
   private _seed() {
     const v = Number.parseInt(this.getAttribute("seed") ?? "", 10);
     return Number.isFinite(v) ? v : this._id;
@@ -2462,12 +2417,10 @@ export class SquireRigElement extends HTMLElement {
     return easeIn((tau + 0.01) / (EQUIP.swapAt + EQUIP.fade / 2));
   }
 
-  // Appearance: the head dips, the incoming head wipes in under a feathered gradient mask
-  // (face first, then back toward the nape) over the outgoing one, then the head rises.
-  // No visible <image> ever changes href (that can blank a frame while it re-decodes): the
-  // new face loads into whichever head image is hidden, the two trade roles on a mid-wipe
-  // flip, and a finished swap hands back to the main head image once it has loaded.
-  // A hood transition can keep moving the hood while this owns the head images.
+  // No visible <image> ever changes href (that can blank a frame while it re-decodes): the new
+  // face loads into the hidden head image, the two trade roles on a mid-wipe flip, and a
+  // finished swap hands back to the main head image once loaded. A hood transition may still
+  // move the hood meanwhile.
   private _swapAppearance(prev: Shown, c: RigConfiguration, animate: boolean) {
     const running = this._transitions.get("appearance");
     const hood = this._transitions.get("hood");

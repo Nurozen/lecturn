@@ -5,11 +5,9 @@ import { Atom } from "effect/reactivity";
 export type ThreadForkSupport = ReadonlySet<EnvironmentId>;
 
 /**
- * Thread-list fork gate: the server advertises `threadForking`. The provider
- * does not gate: V2 forks natively when it can and otherwise carries the
- * transcript as portable context (presentation `conversationFork` only
- * describes the native path). The value keeps its identity while the gate is
- * unchanged, so provider freshness updates do not re-render list rows.
+ * Gates on the server's `threadForking` only; V2 carries the transcript as portable context
+ * when it cannot fork natively. The value keeps its identity while the gate is unchanged,
+ * so provider freshness updates do not re-render list rows.
  */
 export function createThreadForkSupportAtom(
   configsAtom: Atom.Atom<ReadonlyMap<EnvironmentId, ServerConfig>>,

@@ -1,13 +1,6 @@
 /**
- * Lists and imports provider sessions created outside Lecturn for one
- * provider instance.
- *
- * The per-provider work lives on `ProviderInstance.listExternalSessions` and
- * `ProviderInstance.importExternalSession`; this module resolves the instance,
- * hands the lister every provider-native session id Lecturn owns so it can
- * hide them, and shapes the result for the wire.
- *
- * @module provider/externalSessions
+ * The per-provider work lives on `ProviderInstance`; this module hands the lister every
+ * provider-native session id Lecturn owns so it can hide them.
  */
 import {
   ExternalSessionImportError,
@@ -131,13 +124,9 @@ export const listExternalSessions = Effect.fn("listExternalSessions")(function* 
 });
 
 /**
- * Forks one external session natively and reads its history. The caller owns
- * every validation that must precede the fork: a session forked here stays on
- * disk even if the import is later rejected.
- *
- * Titles are capped here, once, like listed ones: `title` is the session's own
- * and `threadTitle` the imported thread's (the caller's choice when given).
- * Both ride on every thread shell.
+ * The caller owns every validation that must precede the fork: a session forked here stays on disk
+ * even if the import is later rejected. Titles are capped here, once: `title` is the session's own,
+ * `threadTitle` the imported thread's.
  */
 export const importExternalSession = Effect.fn("importExternalSession")(function* (input: {
   readonly providerInstanceId: ProviderInstanceId;

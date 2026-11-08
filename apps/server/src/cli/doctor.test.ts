@@ -25,8 +25,6 @@ it.effect(
                   ),
               }),
               Layer.succeed(DatabaseMaintenance, {
-                // An unconverted database: reclaiming space is recommended.
-                // A V1 database sits beside it; --fix must keep it.
                 inspect: () =>
                   Effect.succeed({
                     databaseBytes: 2000,

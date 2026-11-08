@@ -262,9 +262,7 @@ function sameSidebarProviderEntries(
   return true;
 }
 
-// Threads on non-primary environments (Lecturn Connect, hosted) resolve their
-// provider entry from their own environment's config: default instance ids
-// are driver slugs, so a flat map would collide across environments.
+// Resolve providers per environment because default instance ids collide across environments.
 const sidebarProviderEntriesAtom = Atom.make((get) => {
   const providersByEnvironment = get(environmentPresentations.providersByEnvironmentAtom);
   const derived = deriveProviderEntriesByEnvironment(
@@ -292,8 +290,6 @@ const sidebarProviderEntriesAtom = Atom.make((get) => {
 
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
 
-// Collapsed shelves share one empty list so a route change alone does not
-// give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
@@ -400,9 +396,7 @@ function partitionForkSidebarThreads(input: {
           : inbox(thread)
     ).push(thread);
   }
-  // Server capability only gates DRAGGING — it must not influence the
-  // sort, or mixed-version fleets would render different pinned orders on
-  // web and mobile from the same data.
+  // Capability gates dragging only; mixed server versions must preserve the same pinned order across clients.
   return {
     pinnedThreads: sortPinnedThreadsForSidebar(pinned),
     activeThreads: workingShelfEnabled
@@ -1096,9 +1090,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         [scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), thread] as const,
     ),
   );
-  // Handlers read these through refs: depending on per-update Map/Set
-  // identities would give every row a fresh callback prop on each shell
-  // event and defeat row memoization during streaming.
+  // Read changing maps/sets through refs so streamed events preserve row callbacks.
   const threadByKeyRef = useRef(threadByKey);
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
   const settledThreadKeys = new Set(
@@ -1273,8 +1265,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
 
   const settlingThreadKeysRef = useRef(new Set<string>());
-  // Callers snapshot the plan BEFORE the command mutates the partition;
-  // background parks never navigate (null plan).
+  // Snapshot navigation before partition mutation; background parks use a null plan.
   const planForwardNavigation = (
     threadKey: string,
     coParkingKeys?: ReadonlySet<string>,
@@ -1503,10 +1494,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const attemptPin = (threadRef: ScopedThreadRef) => {
     void (async () => {
-      // Fresh pins take the top of the arranged run: pinThread computes a
-      // key before the smallest key across ALL pinned shells — including
-      // snoozed pins hidden from this list, whose keys are still part of
-      // the run — so the new pin can't land beneath a hidden head.
       const result = await pinThread(threadRef);
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
@@ -1892,8 +1879,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             if (session.branch) copyBranchToClipboard(session.branch, { branch: session.branch });
             return;
           case "discard": {
-            // The menu can stay open while the draft sends; discarding a
-            // promoting draft would strand the send.
+            // The menu may outlive draft promotion; discarding then would strand the send.
             const current = useComposerDraftStore.getState().getDraftSession(draftId);
             if (current && !current.promotedTo) discardComposerDraft(draftId);
             return;
@@ -2695,12 +2681,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       >
                         {(sortable, dropVerb, dragOverPinned) => (
                           <SidebarThreadRow
-                            // Keyed per variant on purpose: when a thread settles,
-                            // the card fades out in place and the slim row fades
-                            // in at its settled position instead of one element
-                            // FLIP-sliding through every row in between (rows here
-                            // are translucent, so a crossing row reads as text
-                            // painted over text).
+                            // Keyed per variant so a settling thread cross-fades in
+                            // place instead of FLIP-sliding through translucent rows,
+                            // where a crossing row reads as text painted over text.
                             key={`${threadKey}:${rowVariant}`}
                             thread={thread}
                             variant={rowVariant}
@@ -3428,11 +3411,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             ...renderShelfRows(workingThreads, "working", workingShelfExpanded),
                           );
                         }
-                        // Snoozed shelf: between the inbox and Settled — out of the
-                        // way, never gone. The header always renders while anything
-                        // is snoozed (the count is the whole footprint when
-                        // collapsed); rows only when expanded. Vanishes entirely at
-                        // count 0.
+                        // Snoozed shelf: out of the way, never gone. The header (with
+                        // its count) renders while anything is snoozed; rows only when
+                        // expanded.
                         if (snoozedThreads.length > 0) {
                           items.push(
                             <SidebarDragBoundary

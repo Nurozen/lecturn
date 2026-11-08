@@ -630,8 +630,28 @@ from upstream's side.
   ends at the last full sentence (`oxlint-plugin-lecturn/test/utils.ts`,
   `infra/relay/src/environments/ManagedEndpointReaper.ts`) or finishes the sentence from
   its pre-prune text (`apps/server/src/cloud/ManagedEndpointRuntime.ts`: "...says nothing
-  about the tunnel."; `packages/provider-opencode/src/server/v2/adapter.ts` keeps its
-  whole session-fork sentence).
+  about the tunnel."). The `packages/provider-opencode/src/server/v2/adapter.ts`
+  session-fork comment the fork once finished was deleted whole when upstream dropped it
+  in #21514.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 68d5b7ac, comment halving #21514/#24675).**
+
+- **Four-line cap.** `lecturn/no-low-value-comments` now also fails comment blocks over four
+  lines (license headers exempt), bare `#123` issue/PR refs (`owner/repo#123` and URLs are
+  fine) and `@public` boilerplate. Fork comments follow it: keep the constraint (security
+  gates, Squire/Stave/Decision Ingestion/Lecturn Apps ownership, wire-compat notes), drop the
+  background. Do not split a block to dodge the cap.
+- Fork `@module X` tags and "Name - ..." header lines were dropped where a module header had
+  to fit the cap; upstream carries almost none. Long fork design-spec headers (Squire
+  companion rig/emblem/fx, embed-host e2e scenario steps) were compressed to four lines; if
+  that spec text is wanted, it belongs in `docs/dev/`, not code.
+- `apps/server/src/stave/StaveError.ts`: the host error-code table comment is gone; the
+  codes live in `STAVE_HOST_ERROR_CODES` in contracts.
+- Mechanical resolution: translate base and theirs T3->Lecturn before diff3 so fork-renamed
+  comment lines match upstream deletions, then prove JS/TS files comment-only with a
+  code-token compare (parse diagnostics catch a stray ` * ...` line left outside a comment).
+  A fork-deleted file (DU) may have been deleted in an earlier sync merge: check
+  `git cat-file -e HEAD:<path>` rather than `git log --diff-filter=D`.
 
 **Upstream changes taken in a Lecturn shape (sync to upstream 16918b57).**
 

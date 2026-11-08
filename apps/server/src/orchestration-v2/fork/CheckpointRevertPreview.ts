@@ -1,11 +1,8 @@
 /**
- * Lecturn: what a checkpoint rollback with file restore would delete for good.
- *
- * `git clean` during restore removes untracked, non-ignored files that have
- * no object in the repository, so the revert dialog lists them first. The
- * preview is advisory: when the scope, the checkpoint or its ref cannot be
- * resolved the rollback itself fails with a precise reason, so the preview
- * reports nothing at risk instead of a second, less useful error.
+ * Lecturn: what a checkpoint rollback with file restore would delete for good: the untracked,
+ * non-ignored files with no repository object that `git clean` removes. Advisory: when the scope,
+ * checkpoint or ref cannot be resolved the rollback itself fails precisely, so this reports
+ * nothing.
  */
 import {
   ORCHESTRATION_REVERT_PREVIEW_MAX_PATHS,

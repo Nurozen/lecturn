@@ -1,10 +1,7 @@
 /**
- * Service tags for connected apps. Each service has its own layer file and
- * `AppsLayer.ts` composes them; the tags live together so a service's
- * consumers never import another service's layer file.
- *
- * Operations fail with `AppsError`, the wire error, whose `code` already names
- * the categories every transport shows.
+ * Service tags for connected apps, kept together so a service's consumers never import another
+ * service's layer file. Operations fail with `AppsError`, the wire error, whose `code` already
+ * names the categories every transport shows.
  */
 import type {
   AppBinding,

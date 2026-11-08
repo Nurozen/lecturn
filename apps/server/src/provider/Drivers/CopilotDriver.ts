@@ -63,11 +63,9 @@ const COPILOT_PACKAGE_MAINTENANCE = {
 };
 
 /**
- * npm, bun, pnpm, and Vite+ installs update through their package manager, and
- * only once that manager is proven to own the executable. Every other install
- * (Homebrew cask, WinGet, the install script) updates itself with
- * `copilot update`. The npm package name stays set either way so the registry
- * version check still works.
+ * npm, bun, pnpm and Vite+ installs update through their package manager, only once it is proven
+ * to own the executable; every other install runs `copilot update`. The npm package name stays set
+ * either way so the registry version check still works.
  */
 export const COPILOT_UPDATE_RESOLVER: ProviderMaintenanceCapabilitiesResolver = {
   resolve: (context) => {

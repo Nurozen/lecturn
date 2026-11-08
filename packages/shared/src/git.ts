@@ -10,11 +10,9 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 
 export const WORKTREE_BRANCH_PREFIX = "lecturn";
-// Canonical form is `lecturn/<8 hex>`. Older mobile builds generated `lecturn/<uuid>`
-// via Crypto.randomUUID() (always RFC 4122 v4), so the matcher also accepts exactly
-// that shape — version nibble `4`, variant nibble `[89ab]` — to keep those threads
-// eligible for branch regeneration without loosening beyond what was ever generated.
-// `lecturn-<8 hex>` is the fallback when a plain `lecturn` branch blocks the namespace.
+// Canonical form is `lecturn/<8 hex>`. Older mobile builds generated `lecturn/<uuid>` (RFC 4122
+// v4), so the matcher accepts exactly that shape too, keeping those threads eligible for branch
+// regeneration. `lecturn-<8 hex>` is the fallback when a plain `lecturn` branch blocks it.
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(
   `^${WORKTREE_BRANCH_PREFIX}(?:-[0-9a-f]{8}$|\\/(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$)`,
 );
@@ -110,10 +108,7 @@ export function buildTemporaryWorktreeBranchName(
   return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
 
-/**
- * Git stores refs as paths, so a plain `lecturn` branch makes every `lecturn/<hex>`
- * ref impossible. This moves a temporary name to the flat `lecturn-<hex>` sibling.
- */
+/** Flatten temporary lecturn/<hex> refs because an existing lecturn branch blocks nested refs. */
 export function flattenTemporaryWorktreeBranchName(refName: string): string {
   // Keep only the canonical 8-hex token so legacy UUID names stay recognizable.
   const token = refName
@@ -251,9 +246,7 @@ export function parseOriginUrlFromGitConfig(configText: string): string | null {
   for (const rawLine of joined.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) continue;
-    // Both `[remote "origin"]` and the legacy `[remote.origin]` form, with an
-    // optional trailing comment. Git keeps quoted subsections case-sensitive
-    // but folds the dotted form to lowercase.
+    // Git preserves case in quoted remote subsections but lowercases legacy dotted ones.
     const header = /^\[\s*remote(?:\s+"([^"]+)"|\.([^\]\s]+))\s*\](?:\s*[#;].*)?$/i.exec(line);
     if (header) {
       section = header[1] ?? header[2]?.toLowerCase() ?? null;
@@ -297,9 +290,7 @@ function deriveLocalBranchNameCandidatesFromRemoteRef(
   return [...candidates];
 }
 
-// Only the whitespace git actually rejects is replaced — git accepts U+00A0 and
-// friends, and rewriting those would silently create a ref the user never asked
-// for.
+// Replace only Git-rejected whitespace; nonbreaking spaces are valid ref characters.
 export function sanitizeNewRefName(rawName: string): string {
   return rawName.trim().replace(/[ \t\n\r\f\v]+/g, "-");
 }

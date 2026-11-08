@@ -1,12 +1,7 @@
 /**
- * The Squire event reactor. A durable cursor over committed application
- * events: each event is classified from its own stored payload
- * (`squireEvents.ts`), and every interested Squire gets an `INSERT OR IGNORE`
- * row, so the dedupe key makes ingestion idempotent across lag and restarts.
- * It also owns deferral promotion (summary, threshold, background), question
- * cards, card outdating, deletion cascades, and the auto-decline on Squire
- * threads. Summary generation and re-homing are forked so a slow model call
- * never holds the cursor; `drainThrough` waits for both.
+ * A durable cursor over committed events: each is classified from its own stored payload and every interested Squire
+ * gets an `INSERT OR IGNORE` row, so ingestion is idempotent across lag and restarts. Summary generation and
+ * re-homing are forked so a slow model call never holds the cursor; `drainThrough` waits for both.
  */
 import {
   type ApplicationStoredEvent,

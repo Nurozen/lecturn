@@ -1,57 +1,8 @@
 /*
- * <squire-emblem>: the Threadkeeper logo as an animated companion, ported from the v5
- * concept (squire-emblem.js). A drop-in swap for <squire-rig>: same attribute vocabulary,
- * methods, debugState and events. Standalone: no dependency on the rig, its art or FX.
- *
- * ATTRIBUTES (invalid values fall back to the first listed)
- *   palette brass|moonstone|sage|rose|gold  state idle|attentive|thinking  motion subtle|lively|still
- *   gaze auto|left|center|right|pointer  transitions on|off  debug false|true  label <text>
- *   seed <integer> (optional; default per instance, reflected) - clock starts at 40*hash(seed) s
- *   frame bare|orbit|seal  weight regular|fine|bold (1.5 / 2.1 / 2.9 at 128)  glow soft|bright|none
- *   surface auto|dark|light (ink for the page behind; auto reads the nearest opaque ancestor
- *   background, so the bare/orbit logo stays legible on cream; the seal is always navy)
- *   placement panel|overlay (which companion holds the single live lease; overlays outrank)
- *
- * API (same semantics as <squire-rig>)
- *   configuration / getConfiguration()  normalized attributes (+ seed).
- *   setPose({ time, gaze, state })      deterministic hold: springs settle, gestures cancel,
- *                                       transitions finish; equal inputs give equal frames.
- *   resume()                            leave the hold. Changing `motion` also leaves it.
- *   play(name)                          nod | greet | flourish | glance | listen | ponder. Promise
- *                                       { name, played, interrupted }; resolves at once (played
- *                                       false) when not animating. Unknown names reject. Wakes a
- *                                       settled emblem first.
- *   debugState                          CompanionDebugStateBase + small, surface, frame, weight,
- *                                       glow, pose { hub, star, gain, ... }.
- *   Events: squire-gesture-end {name, interrupted}, squire-transition-end {kind, completed},
- *   kind palette|frame|weight|glow|entrance (animated transitions only).
- *
- * DRAWING. The 128-unit logo: three cubic threads that meet at the star (82,22) and the lower
- * knot (49,106), a start knot (25,62) and a four-point star. Threads live once in <defs>
- * (pathLength 100) and are drawn by <use> layers: blurred glow, engraved shadow, ghost, body,
- * and light (comet) dashes. Only the three `d` strings and a handful of attributes change per
- * frame; values are cached so unchanged attributes are never rewritten. Below 40 CSS px the
- * element swaps to the 24 px drawing (two threads) and a reduced set: glow breathing and star
- * twinkle (state cues hold still; no floating, waves or comets).
- *
- * MOTION. Threads are deformed by moving bezier control points only. The knots are fixed and
- * static; the star end of the two star threads rides the star hub (at most ~5 units) so the
- * drawing never comes apart. Interior junctions move together with both of their handles
- * (tangent continuity is kept). Channels are pure functions of time t plus springs (state
- * weights, lively, ambient, gaze), as in the rig.
- *   Idle      seeded 3-sine noise per node (2 units subtle, x1.6 lively; star threads share a
- *             correlated component so they never cross), stroke breathing +-4%, glow breath
- *             ~4.4 s, star twinkle and slow rotation. Beats 6-11 s apart: an outward ripple
- *             with a shimmer along one thread, or a star glint.
- *   Attentive star lifts and brightens, threads gather toward the spine, steady warm halo.
- *   Thinking  comet light along each thread in turn, a slow travelling wave, satellites orbit
- *             (frame orbit), motes drift round the star, slower deeper glow.
- *   Still     state pose at rest (halo, lifted star, a held glint for thinking).
- *
- * SCHEDULING (port). Frames come from companionClock() and render at most
- * COMPANION_MAX_FPS. Only the lease holder animates (others are `yielded` and keep their last
- * frame). After COMPANION_SETTLE_MS without a state change, gesture, transition or pointer
- * interaction the emblem blends to rest and stops (`settled`) until woken.
+ * <squire-emblem>: the Threadkeeper logo as a drop-in for <squire-rig> (same attributes,
+ * methods, debugState and events), ported from v5 squire-emblem.js. Threads deform by bezier
+ * control points only, knots fixed and star ends riding the hub, so the drawing never comes
+ * apart. Only the lease holder animates; it settles to rest after COMPANION_SETTLE_MS.
  */
 import { observeResize } from "~/lib/observeResize";
 
@@ -674,12 +625,10 @@ type GestureDef = {
   spine: Curve | null;
 };
 
-// Gesture channels: hx, hy (star hub, units), along (toward the lower knot), rot (deg),
-// scale, gain (star), fan (threads open; negative gather), lean (upper threads + star,
-// x3.2 units), warm (halo), undraw (flourish rewind 0..1), spine/spineA (ponder light),
-// knot (end-knot flare), glint (star flare), streak (glance trail), rays (greet), and the
-// figure's motifs: arcs (listen), chevrons (nod), orb (ponder). Motion channels scale 1.3x
-// when lively.
+// Gesture channels: hx/hy star hub (units), along (toward the lower knot), rot (deg), fan
+// (negative gathers), lean (x3.2 units), undraw (flourish rewind 0..1), plus flare/light/motif
+// channels (gain, warm, spine, knot, glint, streak, rays, arcs, chevrons, orb). Motion
+// channels scale 1.3x when lively.
 const RAW_GESTURES: Record<CompanionGesture, RawGesture> = {
   nod: {
     duration: 0.9,

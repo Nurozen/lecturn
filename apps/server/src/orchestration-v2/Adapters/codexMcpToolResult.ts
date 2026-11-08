@@ -55,11 +55,10 @@ function takeLastMember(
 }
 
 /**
- * What follows the marker is a contiguous end of the serialized result, so its
- * last members are whole when they are small: the row summary in `_meta` and a
- * card's envelope in `structuredContent`. Nothing before it is trusted, since
- * a cut through one string can still parse with the marker inside it. The cut
- * content (an image's bytes) cannot be restored, so the marker stands for it.
+ * What follows the marker is a contiguous end of the serialized result, so its small last members
+ * (the `_meta` row summary, a card's `structuredContent` envelope) are whole. Nothing before it is
+ * trusted: a cut through a string can still parse with the marker inside. The cut content (an
+ * image's bytes) cannot be restored, so the marker stands for it.
  */
 function truncatedResult(
   text: string,
@@ -93,14 +92,10 @@ function isLecturnAppResult(result: Record<string, unknown>): boolean {
 }
 
 /**
- * Codex replaces an MCP result whose JSON passes its event limit (1 MiB, which
- * an app tool's image reaches) with one text block holding the head and tail
- * of that JSON around a `…N chars truncated…` marker, and drops its
- * `structuredContent` and `_meta`. Every reader of tool output expects the MCP
- * shape: the row's `lecturn/summary`, the card envelope, image serving and the
- * stored-image strip. Behind that string they find nothing, and the string is
- * too large to store or to parse on the wire, so an app tool's result is
- * restored here.
+ * Codex replaces an MCP result whose JSON passes its 1 MiB event limit (an app tool's image) with
+ * one text block of head and tail around a `…N chars truncated…` marker, dropping
+ * `structuredContent` and `_meta`. Every tool-output reader expects the MCP shape and that string
+ * is too large to store or parse, so an app tool's result is restored here.
  */
 export function codexMcpToolResult(call: {
   readonly server: string;

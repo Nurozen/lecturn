@@ -167,11 +167,7 @@ export function AddProjectShell(props: {
   const insets = useSafeAreaInsets();
 
   return (
-    // collapsable={false} is load-bearing: if this wrapper is flattened, the
-    // ScrollView lands directly under RNSSafeAreaView and RNS's formSheet
-    // scroll-view frame correction mistakes this full-height wrapper for a
-    // "header" sibling, coercing the ScrollView to zero height (blank sheet
-    // as soon as the sheet re-lays-out, e.g. when the keyboard opens).
+    // A collapsible wrapper lets formSheet resizing mistake the full-height view for a header and collapse the ScrollView.
     <SettingsScreen title={props.title ?? "Add project"}>
       <ScrollView
         keyboardShouldPersistTaps="handled"
@@ -1407,9 +1403,7 @@ export function AddProjectDestinationScreen(props: {
       if (AsyncResult.isFailure(startResult)) {
         setError(errorMessage(Cause.squash(startResult.cause)));
       } else {
-        // The draft screen resolves its project from the client store, so it
-        // must not open before the create event has arrived (it would fall back
-        // to the project picker and lose the clone controls).
+        // Wait for the create event; the client store otherwise falls back to the project picker and loses clone controls.
         const project = await waitForProject(
           { environmentId: environment.environmentId, projectId },
           15_000,

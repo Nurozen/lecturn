@@ -1,15 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off -- Test runner for real Electron runs; it runs no Effect runtime.
 /**
- * Electron end-to-end scenarios. They need a display and a built example, so
- * this is the `e2e` script, never `test` (CI's Test job has no display).
- *
- *   vp run --filter embed-host build
- *   vp run --filter embed-host e2e -- [scenario...]     # e.g. tracer; all by default
- *   vp run --filter embed-host e2e -- --steps 1,2       # steps of the full scenario (scenario.ts)
- *   vp run --filter embed-host e2e -- --steps 3,4,5,ledger   # the attach flow and its copy ledger
- *
- * EMBED_HOST_E2E_ARTIFACTS=<dir> writes `<scenario>-e2e.log` and captures
- * there; EMBED_HOST_E2E_KEEP=1 keeps each run's temp directory.
+ * Electron e2e scenarios need a display and a built example, so this is `e2e`, never `test`:
+ *   vp run --filter embed-host build && vp run --filter embed-host e2e -- [scenario...] [--steps 1,2]
+ * EMBED_HOST_E2E_ARTIFACTS=<dir> writes `<scenario>-e2e.log` and captures there;
+ * EMBED_HOST_E2E_KEEP=1 keeps each run's temp directory.
  */
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";

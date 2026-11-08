@@ -1,16 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- A plain stdio MCP server, the shape app developers copy; it runs no Effect runtime.
 /**
- * The host's headless tools: a stdio MCP server Lecturn starts per workspace
- * while the host app may be closed. `counter_increment` keeps a counter under
- * `--root` and renders as the `ui://ex/counter-card` MCP Apps card;
- * `counter_read` reads it and has no card, so its tool row stands alone.
- *
- * Every increment's `_meta` is appended to `<root>/.embed-host/counter-calls.json`
- * so tests can check the context Lecturn sent with it, and every served process
- * appends its pid to `counter-processes.json` so they can tell when it stops.
- *
- * `--list-tools` prints the `tools/list` result and exits. It takes no state,
- * so Lecturn can refresh definitions while another process owns the root.
+ * Headless stdio MCP server Lecturn starts per workspace while the host may be closed; tests read
+ * each increment's `_meta` from `<root>/.embed-host/counter-calls.json` and served pids from
+ * `counter-processes.json`. `--list-tools` prints `tools/list` without touching state, so Lecturn
+ * can refresh definitions while another process owns the root.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";

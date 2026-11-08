@@ -1,13 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - runs as plain JS inside an installed tarball tree, where Effect is not resolvable.
 /**
- * In-process probes for scripts/smoke-pack-install.ts. The smoke script strips the types and
- * writes this file next to the installed lecturn/dist/bin.mjs, so every `require` here resolves
- * exactly as the bundled server's own createRequire(import.meta.url) calls do.
- *
- * Usage (internal): <runtime> <lecturn>/dist/smoke-pack-probe.mjs <serverEntry> [<realServerEntry>]
- * The real entry differs from the first only in an isolated install, where node_modules/lecturn
- * is a symlink and a host that resolves the entry through Node gets the .pnpm path.
- * Prints one JSON line: { runtime, checks: { [name]: { ok, detail } } }.
+ * In-process probes for scripts/smoke-pack-install.ts, written next to the installed
+ * lecturn/dist/bin.mjs so every `require` resolves as the bundled server's own calls do. Usage:
+ * <runtime> <lecturn>/dist/smoke-pack-probe.mjs <serverEntry> [<realServerEntry>] (the real entry
+ * differs only in an isolated install). Prints one JSON line: { runtime, checks }.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

@@ -1,22 +1,8 @@
 /**
- * The counter tool's MCP Apps card, `ui://ex/counter-card`. The counter tool
- * server answers `resources/read` for it with `counterCardResource()`, and
- * Lecturn captures it into the thread when `counter_increment` runs.
- *
- * It has the structure of a real app's result card (content is
- * illustrative): a title row with an icon, a saved state, three stats and a
- * line chart of the counter's history. At 560 px or wider it takes the desktop
- * form ("Saved result" under the title, three boxed tiles); narrower, the embed
- * form (a "Saved" chip, one label/value row per stat). Both forms draw the
- * chart with axes, tick labels and a light grid, and no filled area; a single
- * call is a dot mid-plot. Every color comes from the host's
- * MCP Apps variables, and the curve from `--color-ring-primary`, which Lecturn
- * sets to the thread gold and an embedding host to its own accent.
- *
- * counterCard.test.ts reads the `data-card-*` attributes; keep them when
- * restyling.
- *
- * Expected tool result: `structuredContent: { count, by?, history? }`.
+ * MCP Apps card `ui://ex/counter-card` (from `counterCardResource()`), captured into the thread
+ * when `counter_increment` runs; expects `structuredContent: { count, by?, history? }`. Desktop
+ * form at >= 560 px, embed form below; colors come only from the host's MCP Apps variables
+ * (curve: `--color-ring-primary`). counterCard.test.ts reads the `data-card-*` attributes.
  */
 export const COUNTER_CARD_URI = "ui://ex/counter-card";
 export const COUNTER_CARD_MIME_TYPE = "text/html;profile=mcp-app";

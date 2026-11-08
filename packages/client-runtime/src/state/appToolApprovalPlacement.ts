@@ -1,13 +1,8 @@
 /**
- * Pairs each connected-app tool approval with the row of the call it holds.
- *
- * The server orders turn items by when they first commit. The gate raises an
- * approval from inside the app tool's MCP call, which reaches the server apart
- * from the provider's own event stream, so the approval often commits before
- * the call's row and sorts above the call it is holding. The server cannot
- * place it: the MCP request carries no provider call id, and the call's row may
- * not exist yet when the gate raises the approval. The request names only the
- * tool, so each approval claims a call of that tool in its own run here.
+ * Pairs each connected-app tool approval with the row of the call it holds. The gate raises it
+ * inside the app tool's MCP call, apart from the provider's event stream, so it often sorts above
+ * the call. The server can't place it (no provider call id, and the row may not exist yet); the
+ * request names only the tool, so each approval claims a call of that tool in its own run here.
  */
 import type {
   OrchestrationV2ThreadProjection,
@@ -126,11 +121,10 @@ export interface CardApproval {
 }
 
 /**
- * The rows beside the composer's approval card. A waiting app approval's own row repeats the card
- * word for word, and the call it holds is not running but waiting on the card, so both stay out
- * until it is answered; then the call comes back with its approval below it. A provider's own
- * waiting approval row stays unless `hideProviderApprovals`, since its card shows the command under
- * a generic title.
+ * The rows beside the composer's approval card. A waiting app approval's row repeats the card and
+ * its held call waits on the card, so both stay out until answered; then the call returns with
+ * its approval below it. A provider's waiting approval row stays unless `hideProviderApprovals`,
+ * since its card shows the command under a generic title.
  */
 export function withoutApprovalCardRows<Row>(
   rows: ReadonlyArray<Row>,
