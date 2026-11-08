@@ -69,6 +69,7 @@ import { terminalDebugLog } from "./terminalDebugLog";
 import {
   getTerminalBufferReplayKey,
   getTerminalSurfaceReplayBuffer,
+  hasTerminalReplayContent,
   TERMINAL_BUFFER_REPLAY_STABILITY_DELAY_MS,
 } from "./terminalBufferReplay";
 import {
@@ -490,7 +491,12 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   useShowcaseSceneRendered(
     "terminal",
     themeId,
-    readyBufferReplayKey === bufferReplayKey && terminalSurfaceBuffer.length > 0,
+    hasTerminalReplayContent({
+      buffer: terminal.buffer,
+      output: terminal.output,
+      replayKey: bufferReplayKey,
+      readyReplayKey: readyBufferReplayKey,
+    }),
   );
 
   const pendingExitNavigationRef = useRef<string | null>(null);
