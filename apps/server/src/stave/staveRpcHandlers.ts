@@ -457,13 +457,14 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
   });
 
   return StaveRpcRuntime.of({
-    sagaStatus: (sagaRoot) =>
-      inExecution(
+    sagaStatus: Effect.fn("StaveRpcRuntime.sagaStatus")(function (sagaRoot) {
+      return inExecution(
         refreshGeneration.pipe(
           Effect.andThen(cacheKey(sagaRoot)),
           Effect.flatMap((key) => Cache.get(sagaCache, key)),
         ),
-      ),
+      );
+    }),
     lastFailure: Effect.gen(function* () {
       const local = yield* Ref.get(lastFailureRef);
       const invocation =
@@ -474,8 +475,8 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
         : local;
     }),
     recordFailure,
-    spaceStatus: (workspaceRoot) =>
-      inExecution(
+    spaceStatus: Effect.fn("StaveRpcRuntime.spaceStatus")(function (workspaceRoot) {
+      return inExecution(
         Effect.gen(function* () {
           yield* refreshGeneration;
           const status = yield* Cache.get(cache, yield* cacheKey(workspaceRoot));
@@ -486,7 +487,8 @@ export const makeRuntime = Effect.fn("StaveRpcRuntime.make")(function* (
             )),
           };
         }),
-      ),
+      );
+    }),
   });
 });
 

@@ -11,7 +11,8 @@ import { environmentAtomList, environmentIdsKey } from "./environmentAtomList";
 import { useEnvironmentIdentities } from "./environments";
 import { environmentProjects } from "./projects";
 import { serverEnvironment } from "./server";
-import { useEnvironmentsWithScope } from "./session";
+import { environmentSummaries } from "./presentation";
+import { environmentSession, sessionHasScope, useEnvironmentsWithScope } from "./session";
 
 const hasProjectAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make(
@@ -71,6 +72,24 @@ function useReadableSquireEnvironmentsKey(): string {
       .filter((environmentId) => readable.has(environmentId)),
   );
 }
+
+/** `useSquireEnvironments` for services that run outside React, such as Squire alerts. */
+export const readableSquireEnvironmentsAtom = Atom.make((get) =>
+  get(
+    mergedStatesAtom(
+      environmentIdsKey(
+        get(environmentSummaries.identitiesAtom)
+          .map((environment) => environment.environmentId)
+          .filter((environmentId) =>
+            sessionHasScope(
+              get(environmentSession.sessionStateAtom(environmentId)),
+              AuthOrchestrationReadScope,
+            ),
+          ),
+      ),
+    ),
+  ),
+).pipe(Atom.withLabel("web-squire-states-readable"));
 
 /**
  * Every environment's Squires, merged for the sidebar group, notch, and palette. Reading it

@@ -89,6 +89,7 @@ function useRecentThreadShortcutSync(state: NavigationState): void {
 
   useEffect(() => {
     if (!catalog.isReady) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- The environment catalog is an external store; removed environments leave the saved launcher recents.
     setRecents((current) =>
       current === null
         ? null

@@ -46,5 +46,5 @@ export const layerNoop: Layer.Layer<StaveRootsProvider> = Layer.succeed(
 export const layerFixed = (agentWorkDir: string): Layer.Layer<StaveRootsProvider> =>
   Layer.succeed(
     StaveRootsProvider,
-    StaveRootsProvider.of({ agentWorkDir: Effect.succeed(Option.some(agentWorkDir)) }),
+    StaveRootsProvider.of({ agentWorkDir: Effect.succeedSome(agentWorkDir) }),
   );

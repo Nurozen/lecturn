@@ -304,9 +304,6 @@ describe("runProcess", () => {
       expect(yield* Deferred.isDone(ended)).toBe(false);
     }),
   );
-
-  for (const {} of ["timeout", "success"] as const) {
-  }
 });
 
 describe("runProcess line callbacks", () => {

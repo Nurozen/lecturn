@@ -335,6 +335,7 @@ const probeClaudeCapabilities = Effect.fn("ClaudeProvider.probeClaudeCapabilitie
     cwd?: string,
     includeUsage = true,
   ) {
+    // @effect-diagnostics-next-line abortControllerInEffect:off - The Claude SDK takes the controller itself as its `abortController` option.
     const abort = new AbortController();
     return yield* Effect.gen(function* () {
       const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);

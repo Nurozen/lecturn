@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { KeyboardController } from "react-native-keyboard-controller";
 
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
@@ -18,42 +18,31 @@ const NATIVE_DISMISSAL_ECHO_WINDOW_MS = 150;
 /** Blur/focus costs two keyboard animations; inputView overrides also replay show when removed. */
 export function useThreadSettingsSheetPresentation(input: {
   readonly editorRef: RefObject<ComposerEditorHandle | null>;
-  readonly isEditorFocused: boolean;
+  /** Runs on the frame the sheet becomes visible, after the keyboard started leaving. */
+  readonly onPresent: () => void;
 }) {
+  // Destructured so the compiler keys memoized handlers on the stable editor ref, not on
+  // the fresh input object: the finishTransitioning listener re-subscribes on every change.
+  const { editorRef, onPresent } = input;
   const [phase, setPhase] = useState<PresentationPhase>("closed");
   const [keepsComposerExpanded, setKeepsComposerExpanded] = useState(false);
   const isActiveRef = useRef(false);
-  const isMountedRef = useRef(true);
-  const isEditorFocusedRef = useRef(input.isEditorFocused);
+  // Written by the editor's focus handlers; read when restoring focus after dismissal.
+  const isEditorFocusedRef = useRef(false);
   const openingIdRef = useRef(0);
   const focusRestoreIdRef = useRef(0);
   const restoreFocusAfterDismissRef = useRef(false);
   const restorePendingRef = useRef(false);
   const lastStackTransitionFinishedAtRef = useRef(0);
   const dismissRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearDismissRestoreTimer = useCallback(() => {
+  const clearDismissRestoreTimer = () => {
     if (dismissRestoreTimerRef.current !== null) {
       clearTimeout(dismissRestoreTimerRef.current);
       dismissRestoreTimerRef.current = null;
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    isEditorFocusedRef.current = input.isEditorFocused;
-  }, [input.isEditorFocused]);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      isActiveRef.current = false;
-      openingIdRef.current += 1;
-      focusRestoreIdRef.current += 1;
-      clearDismissRestoreTimer();
-    };
-  }, [clearDismissRestoreTimer]);
-
-  const open = useCallback(() => {
+  const open = () => {
     if (isActiveRef.current) {
       return;
     }
@@ -65,7 +54,7 @@ export function useThreadSettingsSheetPresentation(input: {
     // The compact metadata strip can open settings without owning the
     // keyboard. Preserve that layout and never steal focus on dismissal. A
     // reopen during the post-dismissal "restoring" handoff keeps the restore.
-    const restoresEditorFocus = phase === "restoring" || input.isEditorFocused;
+    const restoresEditorFocus = phase === "restoring" || isEditorFocusedRef.current;
     restoreFocusAfterDismissRef.current = restoresEditorFocus;
     setKeepsComposerExpanded(restoresEditorFocus);
     setPhase("opening");
@@ -75,24 +64,30 @@ export function useThreadSettingsSheetPresentation(input: {
 
     // Dismiss the keyboard before blur, then present next frame so native transitions overlap.
     void KeyboardController.dismiss({ animated: true });
-    input.editorRef.current?.blur();
+    editorRef.current?.blur();
 
     requestAnimationFrame(() => {
-      if (!isMountedRef.current || !isActiveRef.current || openingIdRef.current !== openingId) {
+      // A composer unmounted during the frame takes its editor with it; present nothing.
+      if (
+        !isActiveRef.current ||
+        openingIdRef.current !== openingId ||
+        editorRef.current === null
+      ) {
         return;
       }
       setPhase("visible");
+      onPresent();
     });
-  }, [clearDismissRestoreTimer, input.editorRef, input.isEditorFocused, phase]);
+  };
 
-  const restoreEditorFocus = useCallback(() => {
+  const restoreEditorFocus = () => {
     const focusRestoreId = focusRestoreIdRef.current + 1;
     focusRestoreIdRef.current = focusRestoreId;
     let attemptsRemaining = 20;
 
     // Retry focus restoration if UIKit briefly refuses first responder at the dismissal boundary.
     const restoreFocus = () => {
-      if (!isMountedRef.current || focusRestoreIdRef.current !== focusRestoreId) {
+      if (focusRestoreIdRef.current !== focusRestoreId) {
         return;
       }
       if (isEditorFocusedRef.current || attemptsRemaining <= 0) {
@@ -101,25 +96,25 @@ export function useThreadSettingsSheetPresentation(input: {
       }
 
       attemptsRemaining -= 1;
-      input.editorRef.current?.focus();
+      editorRef.current?.focus();
       setTimeout(restoreFocus, 50);
     };
     requestAnimationFrame(restoreFocus);
-  }, [input.editorRef]);
+  };
 
-  const runPendingDismissalRestore = useCallback(() => {
+  const runPendingDismissalRestore = () => {
     if (!restorePendingRef.current) {
       return;
     }
     restorePendingRef.current = false;
     clearDismissRestoreTimer();
-    if (!isMountedRef.current || isActiveRef.current) {
+    if (isActiveRef.current) {
       return;
     }
     restoreEditorFocus();
-  }, [clearDismissRestoreTimer, restoreEditorFocus]);
+  };
 
-  const onDismissed = useCallback(() => {
+  const onDismissed = () => {
     isActiveRef.current = false;
 
     if (!restoreFocusAfterDismissRef.current) {
@@ -139,19 +134,35 @@ export function useThreadSettingsSheetPresentation(input: {
       dismissRestoreTimerRef.current = null;
       runPendingDismissalRestore();
     }, SHEET_DISMISSAL_KEYBOARD_OVERLAP_MS);
-  }, [clearDismissRestoreTimer, runPendingDismissalRestore]);
+  };
 
-  const onStackTransitionsFinished = useCallback(() => {
+  const onStackTransitionsFinished = () => {
     lastStackTransitionFinishedAtRef.current = Date.now();
     runPendingDismissalRestore();
-  }, [runPendingDismissalRestore]);
+  };
+
+  const onEditorFocusChange = (focused: boolean) => {
+    isEditorFocusedRef.current = focused;
+  };
+
+  // Called when the composer unmounts: cancels a queued presentation frame, the
+  // dismissal restore timer, and any focus-restore retries still in flight.
+  const dispose = () => {
+    isActiveRef.current = false;
+    openingIdRef.current += 1;
+    focusRestoreIdRef.current += 1;
+    restorePendingRef.current = false;
+    clearDismissRestoreTimer();
+  };
 
   return {
     isActive: phase === "opening" || phase === "visible",
     isVisible: phase === "visible",
     keepsComposerExpanded: phase !== "closed" && keepsComposerExpanded,
     open,
+    onEditorFocusChange,
     onDismissed,
     onStackTransitionsFinished,
+    dispose,
   } as const;
 }

@@ -6,7 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { resolveAttachmentPathById } from "../attachmentStore.ts";
+import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
+import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -53,52 +54,71 @@ export const layer = Layer.effect(
       Effect.forEach(
         attachmentIds,
         (attachmentId) => {
-          const path = resolveAttachmentPathById({
-            attachmentsDir: config.attachmentsDir,
-            attachmentId,
-          });
+          const extension = parseAttachmentFileExtension(attachmentId);
+          const path =
+            resolveAttachmentPathById({
+              attachmentsDir: config.attachmentsDir,
+              attachmentId,
+            }) ??
+            (extension
+              ? resolveAttachmentRelativePath({
+                  attachmentsDir: config.attachmentsDir,
+                  relativePath: `${attachmentId}.${extension}`,
+                })
+              : null);
           return path === null
             ? Effect.void
-            : fileSystem
-                .remove(path, { force: true })
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
-                  ),
-                );
+            : fileSystem.remove(path, { force: true }).pipe(
+                Effect.andThen(fileSystem.remove(`${path}.txt`, { force: true })),
+                Effect.mapError(
+                  (cause) =>
+                    new ResourceCleanupError({ operation: "attachment", attachmentId, cause }),
+                ),
+              );
         },
         { discard: true, concurrency: 4 },
       );
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
     return {
-      cleanupScheduledTasks: (threadId: ThreadId) =>
-        scheduledTasks
+      cleanupScheduledTasks: Effect.fn("ResourceCleanupService.cleanupScheduledTasks")(function (
+        threadId: ThreadId,
+      ) {
+        return scheduledTasks
           .deleteForThread(threadId)
           .pipe(
             Effect.mapError(
               (cause) =>
                 new ResourceCleanupError({ operation: "scheduled-tasks", threadId, cause }),
             ),
-          ),
-      cleanupTerminals: (threadId: string) =>
-        terminals
+          );
+      }),
+      cleanupTerminals: Effect.fn("ResourceCleanupService.cleanupTerminals")(function (
+        threadId: string,
+      ) {
+        return terminals
           .close({ threadId, deleteHistory: true })
           .pipe(
             Effect.mapError(
               (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
             ),
-          ),
-      cleanupPreviews: (threadId: string) =>
-        previews
+          );
+      }),
+      cleanupPreviews: Effect.fn("ResourceCleanupService.cleanupPreviews")(function (
+        threadId: string,
+      ) {
+        return previews
           .close({ threadId: ThreadId.make(threadId) })
           .pipe(
             Effect.mapError(
               (cause) => new ResourceCleanupError({ operation: "preview", threadId, cause }),
             ),
-          ),
-      cleanupAttachments: (attachmentIds: ReadonlyArray<string>, threadId: string) =>
-        listAttachmentIdsReferencedElsewhere({ threadId, attachmentIds }).pipe(
+          );
+      }),
+      cleanupAttachments: Effect.fn("ResourceCleanupService.cleanupAttachments")(function (
+        attachmentIds: ReadonlyArray<string>,
+        threadId: string,
+      ) {
+        return listAttachmentIdsReferencedElsewhere({ threadId, attachmentIds }).pipe(
           Effect.provideService(SqlClient.SqlClient, sql),
           Effect.mapError(
             (cause) => new ResourceCleanupError({ operation: "attachment", threadId, cause }),
@@ -106,7 +126,8 @@ export const layer = Layer.effect(
           Effect.flatMap((shared) =>
             removeAttachments(attachmentIds.filter((attachmentId) => !shared.has(attachmentId))),
           ),
-        ),
+        );
+      }),
     };
   }),
 );

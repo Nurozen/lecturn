@@ -3,7 +3,6 @@ import type { ModelCapabilities } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { createModelCapabilities } from "@lecturn/shared/model";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";

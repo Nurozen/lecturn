@@ -1,4 +1,5 @@
 import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
+import { queuedRunEditBlockedReason } from "@lecturn/client-runtime/queued-run-edit";
 import {
   forkableRunIdsByUserMessage,
   hasRunlessForkHistory,
@@ -35,7 +36,8 @@ import { type TerminalLaunchContext, useChatTerminalActions } from "./chat/useCh
 import { useComposerSend } from "./chat/useComposerSend";
 import { useComposerResume } from "./chat/useComposerResume";
 import { useImplementPlanInNewThread } from "./chat/useProposedPlanSend";
-import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
+import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
+import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { resolveDraftHeroState } from "./ChatView.logic";
@@ -284,6 +286,7 @@ import {
   PullRequestThreadDialogHost,
 } from "./chat/ChatOverlayHosts";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
+import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
@@ -636,6 +639,7 @@ export default function ChatView(props: ChatViewProps) {
       ? { citation, key: citationLocation.key ?? citationLocation.href }
       : null;
   })() as AssistantCitationRequest | null;
+  const citationHistory = useCitedHistory(citationRequest);
   const { resolvedTheme } = useTheme();
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
@@ -1004,7 +1008,6 @@ export default function ChatView(props: ChatViewProps) {
   );
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
-  const previewSessionsReady = !activeEnvironmentServerBrowser || activePreviewState.listLoaded;
   const resolvePreviewRuntimeTabId = activeThreadRef
     ? (tabId: string) => previewRuntimeTabId(activeThreadRef, activePreviewServerEpoch, tabId)
     : undefined;
@@ -1059,34 +1062,6 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
-
-  useEffect(() => {
-    if (!activeThreadRef || !previewSessionsReady) return;
-    const hiddenTabIds = new Set(
-      Object.values(activePreviewState.sessions)
-        .filter((session) => session.runtime === "server" && session.reveal === false)
-        .map((session) => session.tabId),
-    );
-    useRightPanelStore
-      .getState()
-      .reconcileBrowserSurfaces(
-        activeThreadRef,
-        Object.keys(activePreviewState.sessions),
-        hiddenTabIds,
-      );
-  }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
-
-  useEffect(() => {
-    const source = activePreviewMiniPlayer?.source;
-    if (
-      activeThreadRef &&
-      previewSessionsReady &&
-      source?.kind === "browser" &&
-      !activePreviewState.sessions[source.tabId]
-    ) {
-      usePreviewMiniPlayerStore.getState().close(activeThreadRef);
-    }
-  }, [activePreviewMiniPlayer, activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
   const activePlan = deriveActivePlanState(serverProjection, activeActivityRun?.runId);
@@ -1416,7 +1391,6 @@ export default function ChatView(props: ChatViewProps) {
   } = usePendingThreadRequests({
     environmentId,
     activeThreadId,
-    activeThread,
     serverProjection,
     supportsQuestionAttachments,
     composerDraftTarget,
@@ -2147,9 +2121,6 @@ export default function ChatView(props: ChatViewProps) {
     threadRef: activeThreadRef,
     deviceState,
     deviceStateLoaded,
-    previewState: activePreviewState,
-    serverBrowserAvailable: activeEnvironmentServerBrowser,
-    panelSurfaces: rightPanelState.surfaces,
     miniPlayerSource: activePreviewMiniPlayer?.source ?? null,
     sheetLayout: shouldUsePlanSidebarSheet,
   });
@@ -2313,9 +2284,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     showScrollToBottom,
     timelineLiveFollowEnabled,
-    cancelPositionRestoreRef,
     isTimelineAtLogicalEndStable,
-    cancelTimelineLiveFollowForUserNavigationStable,
     onComposerPageScrollKeyDownStable,
     onComposerPageScrollKeyUpStable,
     onComposerPageScrollReleaseStable,
@@ -2325,14 +2294,14 @@ export default function ChatView(props: ChatViewProps) {
     onToolOutputCollapsedAtEndStable,
     onIsAtEndChangeStable,
     anchorNewTurn,
+    attachTimelineViewport,
+    attachComposerOverlay: attachFollowComposerOverlay,
   } = useTimelineFollow({
     legendListRef,
     composerRef,
-    composerOverlayElement,
     composerTimelineInset,
     routeThreadKey,
     activeThreadKey,
-    activeThreadId: activeThread?.id,
     isServerThread,
     serverProjection,
     threadStatus,
@@ -2957,10 +2926,9 @@ export default function ChatView(props: ChatViewProps) {
   const timelineSkills = activeProviderStatus
     ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
     : EMPTY_PROVIDER_SKILLS;
-  const threadFindControlsRef = useRef<ThreadFindControls | null>(null);
-  const [isThreadFindActive, setIsThreadFindActive] = useState(false);
-  const openThreadFind = () => threadFindControlsRef.current?.open();
-  const closeThreadFind = () => threadFindControlsRef.current?.close();
+  const threadFindEnabled =
+    isServerThread && serverConfig?.threadFind === true && !paintOnlyDisplayedTimeline;
+  const isThreadFindActive = useThreadFindOpen(activeThreadRef, threadFindEnabled);
 
   useChatViewShortcuts(controls, {
     enabled: activeThreadId !== null && !backgroundThread,
@@ -2982,8 +2950,9 @@ export default function ChatView(props: ChatViewProps) {
         if (!event.repeat) copyActiveThreadReference();
       },
       "chat.find": () => {
-        if (!isServerThread || serverConfig?.threadFind !== true) return false;
-        openThreadFind();
+        if (!isServerThread || serverConfig?.threadFind !== true || activeThreadKey === null)
+          return false;
+        openThreadFind(activeThreadKey);
       },
       "composer.cycleHost": ({ event }) => {
         if (!canChangeEnvironment) return false;
@@ -3271,6 +3240,9 @@ export default function ChatView(props: ChatViewProps) {
         threadId={activeThread.id}
         optimisticMessages={optimisticUserMessages}
         editingRunId={queuedRunEdit.editingRunId}
+        editBlockedReason={queuedRunEditBlockedReason({
+          openQuestionCount: pendingUserInputs.length,
+        })}
         onEditQueuedRun={queuedRunEdit.beginEdit}
         onCancelEdit={queuedRunEdit.cancelEdit}
       />
@@ -3621,13 +3593,8 @@ export default function ChatView(props: ChatViewProps) {
                 skills: timelineSkills,
                 progressive: serverConfig?.threadFindProgressive === true,
                 thread: activeThreadRef,
-                enabled:
-                  isServerThread &&
-                  serverConfig?.threadFind === true &&
-                  !paintOnlyDisplayedTimeline,
+                enabled: threadFindEnabled,
               }}
-              controlsRef={threadFindControlsRef}
-              onOpenChange={setIsThreadFindActive}
               detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
               composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
               data-chat-workspace-drop-target="true"
@@ -3671,7 +3638,7 @@ export default function ChatView(props: ChatViewProps) {
                   androidChatScope={routeThreadKey}
                   androidChatThread={androidChatThread}
                   citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
-                  citationHistoryLoading={threadDetailLoading}
+                  citationHistory={citationHistory}
                   {...(!paintOnlyDisplayedTimeline
                     ? {
                         ...(allows("cite") ? { onCiteAssistantText: citeAssistantTextStable } : {}),
@@ -3850,8 +3817,7 @@ export default function ChatView(props: ChatViewProps) {
                   onIsAtEndChange={onIsAtEndChangeStable}
                   onContentOverflowChange={setTimelineOverflows}
                   onToolOutputCollapsedAtEnd={onToolOutputCollapsedAtEndStable}
-                  onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
-                  cancelPositionRestoreRef={cancelPositionRestoreRef}
+                  onViewportAttach={attachTimelineViewport}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                   emptyPlaceholderInset={composerReservedHeight}
                   topFadeEnabled={!hasTimelineTopBanner}
@@ -3878,7 +3844,10 @@ export default function ChatView(props: ChatViewProps) {
               </div>
 
               <div
-                ref={setComposerOverlayElement}
+                ref={(overlay: HTMLDivElement | null) => {
+                  setComposerOverlayElement(overlay);
+                  attachFollowComposerOverlay(overlay);
+                }}
                 inert={isRevertingCheckpoint}
                 data-chat-composer-overlay="true"
                 className={

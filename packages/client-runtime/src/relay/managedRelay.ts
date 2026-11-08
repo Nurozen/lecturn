@@ -440,8 +440,9 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
     unregisterDevice: unavailable("clientRuntime.managedRelay.unregisterDevice"),
     registerLiveActivity: unavailable("clientRuntime.managedRelay.registerLiveActivity"),
     getAgentActivitySnapshot: unavailable("clientRuntime.managedRelay.getAgentActivitySnapshot"),
-    resetTokenCache: () =>
-      Effect.void.pipe(Effect.withSpan("clientRuntime.managedRelay.resetTokenCache")),
+    resetTokenCache: Effect.fn("clientRuntime.managedRelay.resetTokenCache")(function () {
+      return Effect.void;
+    }),
   });
 }
 
@@ -953,23 +954,28 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       Effect.withSpan("clientRuntime.managedRelay.registerLiveActivity"),
       withRelayClientTracing,
     ),
-    resetTokenCache: (accountId) =>
-      (accountId === undefined
-        ? SynchronizedRef.set(cachedTokens, []).pipe(
-            Effect.andThen(options.accessTokenStore ? options.accessTokenStore.clear : Effect.void),
-          )
-        : // Write the other accounts' tokens back: `clear` would sign them out of the relay too.
-          SynchronizedRef.updateEffect(cachedTokens, (tokens) => {
-            const nextTokens = tokens.filter((token) => token.accountId !== accountId);
-            if (nextTokens.length === tokens.length) {
-              return Effect.succeed(tokens);
-            }
-            const store = options.accessTokenStore;
-            return (
-              store ? (nextTokens.length === 0 ? store.clear : store.save(nextTokens)) : Effect.void
-            ).pipe(Effect.as(nextTokens));
-          })
-      ).pipe(Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"), withRelayClientTracing),
+    resetTokenCache: Effect.fnUntraced(
+      function* (accountId) {
+        if (accountId === undefined) {
+          yield* SynchronizedRef.set(cachedTokens, []);
+          if (options.accessTokenStore) yield* options.accessTokenStore.clear;
+          return;
+        }
+        // Write the other accounts' tokens back: `clear` would sign them out of the relay too.
+        yield* SynchronizedRef.updateEffect(cachedTokens, (tokens) => {
+          const nextTokens = tokens.filter((token) => token.accountId !== accountId);
+          if (nextTokens.length === tokens.length) {
+            return Effect.succeed(tokens);
+          }
+          const store = options.accessTokenStore;
+          return (
+            store ? (nextTokens.length === 0 ? store.clear : store.save(nextTokens)) : Effect.void
+          ).pipe(Effect.as(nextTokens));
+        });
+      },
+      Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"),
+      withRelayClientTracing,
+    ),
   });
 });
 

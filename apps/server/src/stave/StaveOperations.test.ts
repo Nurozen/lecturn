@@ -353,7 +353,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
             }),
           options.configReaderLayer ?? configReader,
           Layer.mock(StaveLifecycleRepository)({
-            getByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getByWorkspaceRoot: () => Effect.succeedNone,
             ...options.lifecycle,
           }),
           Layer.mock(TerminalManager)({
@@ -364,7 +364,7 @@ const makeHarness = (roots: Roots, options: HarnessOptions) =>
           }),
           StaveSpaceLock.layer,
           Layer.mock(StaveWorkspaceReader)({
-            load: options.readerLoad ?? (() => Effect.succeed(Option.none())),
+            load: options.readerLoad ?? (() => Effect.succeedNone),
             invalidate: (workspaceRoot) =>
               Ref.update(invalidated, (roots) => [...roots, workspaceRoot]),
           }),
@@ -1537,8 +1537,7 @@ it.effect("terminal recovery refuses a recreated incarnation at the same project
           fixture,
           activeProject: project("p", root),
           lifecycle: fixture.service,
-          readerLoad: () =>
-            Effect.succeed(Option.some({ ...infoFor(), createdAt: "2026-09-02T00:00:00Z" })),
+          readerLoad: () => Effect.succeedSome({ ...infoFor(), createdAt: "2026-09-02T00:00:00Z" }),
         };
       }).pipe(Effect.orDie),
     (harness, options) =>
@@ -1572,7 +1571,7 @@ describe("StaveOperations lifecycle and edits", () => {
             root,
             seen,
             activeProject: project("p", root),
-            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            readerLoad: () => Effect.succeedSome(infoFor()),
             cliExtra: {
               spaceAdd: () =>
                 Effect.sync(() => {
@@ -1651,7 +1650,7 @@ describe("StaveOperations lifecycle and edits", () => {
         Effect.gen(function* () {
           const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
           yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
-          return { root, readerLoad: () => Effect.succeed(Option.some(infoFor())) };
+          return { root, readerLoad: () => Effect.succeedSome(infoFor()) };
         }),
       (harness, options) =>
         Effect.gen(function* () {
@@ -1789,7 +1788,7 @@ describe("StaveOperations lifecycle and edits", () => {
               executionLayer,
               lifecycle: fixture.service,
               activeProject: project("p", root),
-              readerLoad: () => Effect.succeed(Option.some(infoFor())),
+              readerLoad: () => Effect.succeedSome(infoFor()),
               onQuiesce: settings
                 .updateSettings({ stave: { configPath: configB, binaryPath: "/binary-b" } })
                 .pipe(
@@ -1842,7 +1841,7 @@ describe("StaveOperations lifecycle and edits", () => {
             quiesced,
             lifecycle: fixture.service,
             activeProject: project("p", root),
-            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            readerLoad: () => Effect.succeedSome(infoFor()),
             cliExtra: {
               sagaList: Effect.succeed([]),
               spaceDestroy: () =>
@@ -1937,7 +1936,7 @@ describe("StaveOperations lifecycle and edits", () => {
             inventoryCalls,
             lifecycle: fixture.service,
             activeProject: project("p", root),
-            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            readerLoad: () => Effect.succeedSome(infoFor()),
             cliExtra: {
               spaceList: () =>
                 Effect.sync(() => {
@@ -2061,7 +2060,7 @@ it.effect("renews the lifecycle lease while Stave is running", () =>
           finish,
           renewed,
           activeProject: project("p", root),
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           lifecycle: {
             ...fixture.service,
             renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(true)),
@@ -2106,7 +2105,7 @@ it.effect("fails closed when a saga roster is unreadable", () =>
           root,
           fixture,
           activeProject: project("p", root),
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           lifecycle: fixture.service,
           cliExtra: {
             sagaList: Effect.succeed([
@@ -2160,7 +2159,7 @@ it.effect(
             fixture,
             activeProject: project("p", root),
             readerLoad: (candidate: string) =>
-              Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+              Effect.succeedSome(infoFor(candidate === archived ? "archived" : "live")),
             lifecycle: fixture.service,
             cliExtra: {
               spaceArchive: () =>
@@ -2233,7 +2232,7 @@ it.effect(
             attempts,
             lifecycle: fixture.service,
             activeProject: project("p", root),
-            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            readerLoad: () => Effect.succeedSome(infoFor()),
             cliExtra: {
               sagaList: Ref.get(enrolled).pipe(
                 Effect.map((member) =>
@@ -2339,7 +2338,7 @@ it.effect("previews confirmed saga removal and guarded destroy without mutating 
         return {
           root,
           previewed,
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           cliExtra: {
             sagaList: Effect.succeed([
               {
@@ -2419,7 +2418,7 @@ const archivedMemberScenario = (roots: Roots) =>
       activeProject: project("p", root),
       lifecycle: fixture.service,
       readerLoad: (candidate: string) =>
-        Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+        Effect.succeedSome(infoFor(candidate === archived ? "archived" : "live")),
       cliExtra: {
         sagaList: Effect.sync(() => [
           {
@@ -2570,7 +2569,7 @@ it.effect("uses durable lifecycle cleanup when a partial already has a project",
           root,
           fixture,
           activeProject: project("p", root),
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           lifecycle: fixture.service,
         };
       }),
@@ -2669,7 +2668,7 @@ it.effect("reconciles a restore that renamed the archive before failing", () =>
           fixture,
           activeProject: project("p", archived),
           readerLoad: (candidate: string) =>
-            Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+            Effect.succeedSome(infoFor(candidate === archived ? "archived" : "live")),
           lifecycle: fixture.service,
           cliExtra: {
             spaceRestore: (input: { from?: string | undefined }) =>
@@ -2731,7 +2730,7 @@ const restoreScenario = (adopt: boolean) =>
           ensured,
           shellProjects: adopt ? [projectShell("owner", gone)] : [],
           readerLoad: (candidate: string) =>
-            Effect.succeed(Option.some(infoFor(candidate === archived ? "archived" : "live"))),
+            Effect.succeedSome(infoFor(candidate === archived ? "archived" : "live")),
           lifecycle: {
             ...fixture.service,
             listActiveBySpaceId: () =>
@@ -2824,7 +2823,7 @@ it.effect.each([
           finish,
           renewed,
           activeProject: project("p", root),
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           lifecycle: {
             ...fixture.service,
             renewLease: () => Deferred.succeed(renewed, undefined).pipe(Effect.as(retained)),
@@ -3831,7 +3830,7 @@ it.effect(
             root,
             fixture,
             lifecycle: fixture.service,
-            readerLoad: () => Effect.succeed(Option.some(infoFor())),
+            readerLoad: () => Effect.succeedSome(infoFor()),
           };
         }),
       (harness, options) =>
@@ -3880,7 +3879,7 @@ it.effect("revalidates automatic eligibility after quiescence and prevents the d
           archiveCalls,
           fixture,
           lifecycle: fixture.service,
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           onQuiesce: Effect.sync(() => {
             eligible = false;
           }),
@@ -3941,7 +3940,7 @@ it.effect("requires an explicit reviewed cleanup verb and the recorded incarnati
           root,
           fixture,
           lifecycle: fixture.service,
-          readerLoad: () => Effect.succeed(Option.some({ ...infoFor(), spaceId: "replacement" })),
+          readerLoad: () => Effect.succeedSome({ ...infoFor(), spaceId: "replacement" }),
         };
       }),
     (harness, options) =>
@@ -4161,7 +4160,7 @@ it.effect("refuses archive of an archived incarnation before preview or mutation
       Effect.gen(function* () {
         const root = roots.path.join(roots.agentWorkDir, ".archive", SPACE_ID);
         yield* roots.fs.makeDirectory(root, { recursive: true }).pipe(Effect.orDie);
-        return { root, readerLoad: () => Effect.succeed(Option.some(infoFor("archived"))) };
+        return { root, readerLoad: () => Effect.succeedSome(infoFor("archived")) };
       }),
     (harness, options) =>
       Effect.gen(function* () {
@@ -4193,7 +4192,7 @@ it.effect("quiesces providers and terminals before detaching memory", () =>
           root,
           quiesced,
           activeProject: project("p", root),
-          readerLoad: () => Effect.succeed(Option.some(infoFor())),
+          readerLoad: () => Effect.succeedSome(infoFor()),
           cliExtra: {
             memoryDetach: () =>
               Effect.sync(() => {
@@ -4506,7 +4505,7 @@ it.effect.each(["settings", "server"] as const)(
   (disabled) =>
     scenario(
       (roots) =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
           const recoveryReads: string[] = [];
           const fixture = lifecycleFixture(root, "archiving");

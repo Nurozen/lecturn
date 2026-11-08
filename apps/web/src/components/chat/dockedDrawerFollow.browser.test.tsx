@@ -28,7 +28,7 @@ function Harness(props: {
   scrollToEnd: () => void;
 }) {
   useFollowEndWhenDrawerDocks({
-    overlay: props.overlay,
+    readOverlay: () => props.overlay,
     inset: props.inset,
     isFollowingEnd: () => props.following,
     scrollToEnd: props.scrollToEnd,

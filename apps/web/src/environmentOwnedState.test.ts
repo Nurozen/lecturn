@@ -2,7 +2,10 @@ import { scopedThreadKey } from "@lecturn/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("~/state/session", () => ({ readPreparedConnection: () => null }));
+vi.mock("~/state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/state/session")>()),
+  readPreparedConnection: () => null,
+}));
 
 import { useBrowserHistoryStore } from "./browserHistoryStore";
 import { useDiffPanelStore } from "./diffPanelStore";
@@ -44,7 +47,6 @@ function seed() {
     byProjectKey: {},
     projectKeyByThreadKey: {},
     pendingVisitsByThreadKey: {},
-    pendingTitlesByThreadKey: {},
   });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
   useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });

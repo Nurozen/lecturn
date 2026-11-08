@@ -5,6 +5,8 @@ import {
   buildReviewParsedDiff,
   buildReviewSectionItems,
   getDefaultReviewSectionId,
+  resolveReviewSelectedSectionId,
+  type ReviewSectionItem,
 } from "./reviewModel";
 
 describe("buildReviewSectionItems", () => {
@@ -12,7 +14,7 @@ describe("buildReviewSectionItems", () => {
     // Stave reviews carry no checkpoints; git section ids are scoped by gitCwd.
     const gitCwd = "/spaces/test/nested/api";
     const changesId = `git:${JSON.stringify([gitCwd, "branch-range"])}`;
-    const base = { checkpoints: [], turnDiffById: {}, loadingTurnIds: {}, gitCwd };
+    const base = { checkpoints: [], turnDiffById: {}, gitCwd };
     const loaded = buildReviewSectionItems({
       ...base,
       gitSections: [
@@ -47,6 +49,31 @@ describe("buildReviewSectionItems", () => {
 
     expect(getDefaultReviewSectionId(loaded)).toBe(changesId);
     expect(getDefaultReviewSectionId(loading)).toBe(changesId);
+  });
+});
+
+function makeSection(id: string): ReviewSectionItem {
+  return {
+    id,
+    kind: id.startsWith("turn:") ? "turn" : "branch-range",
+    title: id,
+    subtitle: null,
+    diff: null,
+    isLoading: false,
+  };
+}
+
+describe("resolveReviewSelectedSectionId", () => {
+  const turn = makeSection("turn:2");
+  const changes = makeSection("git:branch-range");
+
+  it("shows Changes before anything is picked, not the first section", () => {
+    expect(resolveReviewSelectedSectionId([turn, changes], null)).toBe("git:branch-range");
+  });
+
+  it("shows the default while the picked section loads and returns to the pick once it does", () => {
+    expect(resolveReviewSelectedSectionId([changes], "turn:2")).toBe("git:branch-range");
+    expect(resolveReviewSelectedSectionId([turn, changes], "turn:2")).toBe("turn:2");
   });
 });
 

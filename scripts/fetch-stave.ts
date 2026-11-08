@@ -181,18 +181,20 @@ export const staveExecutableName = (platformKey: StavePlatformKey) =>
  * Accepts `latest`, a `vX.Y.Z[-pre]` tag, or a bare `X.Y.Z[-pre]` version
  * (normalised to the tag form Stave publishes).
  */
-export const parseStaveTagInput = (input: string) => {
+export const parseStaveTagInput = Effect.fn("parseStaveTagInput")(function* (
+  input: string,
+): Effect.fn.Return<StaveTagInput, StaveTagInputError> {
   const trimmed = input.trim();
   if (trimmed === "latest") {
-    return Effect.succeed<StaveTagInput>({ kind: "latest" });
+    return { kind: "latest" };
   }
   const match = STAVE_TAG_PATTERN.exec(trimmed);
   const version = match?.[1];
   if (version === undefined) {
-    return Effect.fail(new StaveTagInputError({ input }));
+    return yield* new StaveTagInputError({ input });
   }
-  return Effect.succeed<StaveTagInput>({ kind: "tag", tag: `v${version}` });
-};
+  return { kind: "tag", tag: `v${version}` };
+});
 
 const LatestReleaseSchema = Schema.Struct({
   tag_name: Schema.NonEmptyString,
@@ -610,32 +612,30 @@ export interface FetchStaveModeFlags {
 }
 
 /** Exactly one of `--platform-key`, `--all` and `--resolve-only`; `--out` is required for the fetching modes. */
-export const resolveFetchStaveMode = (flags: FetchStaveModeFlags) => {
+export const resolveFetchStaveMode = Effect.fn("resolveFetchStaveMode")(function* (
+  flags: FetchStaveModeFlags,
+): Effect.fn.Return<FetchStaveMode, StaveCliUsageError> {
   const selected = [Option.isSome(flags.platformKey), flags.all, flags.resolveOnly].filter(
     Boolean,
   ).length;
   if (selected !== 1) {
-    return Effect.fail(
-      new StaveCliUsageError({
-        reason: "specify exactly one of --platform-key <key>, --all or --resolve-only.",
-      }),
-    );
+    return yield* new StaveCliUsageError({
+      reason: "specify exactly one of --platform-key <key>, --all or --resolve-only.",
+    });
   }
   if (flags.resolveOnly) {
-    return Effect.succeed<FetchStaveMode>({ kind: "resolve-only" });
+    return { kind: "resolve-only" };
   }
   if (Option.isNone(flags.out)) {
-    return Effect.fail(
-      new StaveCliUsageError({ reason: "--out <dir> is required unless --resolve-only is set." }),
-    );
+    return yield* new StaveCliUsageError({
+      reason: "--out <dir> is required unless --resolve-only is set.",
+    });
   }
   const outDir = flags.out.value;
-  return Effect.succeed<FetchStaveMode>(
-    Option.isSome(flags.platformKey)
-      ? { kind: "single", platformKey: flags.platformKey.value, outDir }
-      : { kind: "all", outDir },
-  );
-};
+  return Option.isSome(flags.platformKey)
+    ? { kind: "single", platformKey: flags.platformKey.value, outDir }
+    : { kind: "all", outDir };
+});
 
 export const writeStaveTagOutput = Effect.fn("writeStaveTagOutput")(function* (
   tag: string,

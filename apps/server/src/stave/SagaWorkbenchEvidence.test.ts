@@ -22,7 +22,7 @@ import {
 } from "@lecturn/source-control-core/server/PullRequestProvider";
 import * as Evidence from "./SagaWorkbenchEvidence.ts";
 
-const projectId = Schema.decodeUnknownSync(ProjectId)("p1");
+const projectId = Schema.decodeSync(ProjectId)("p1");
 const createdAt = "2026-09-10T00:00:00.000Z";
 const github = SourceControlProviderKind.make("github");
 const failure = new PullRequestProviderError({

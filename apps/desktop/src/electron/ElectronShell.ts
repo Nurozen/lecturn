@@ -65,8 +65,8 @@ export class ElectronShell extends Context.Service<
 
 /** @public */
 export const make = ElectronShell.of({
-  openExternal: (rawUrl) =>
-    Option.match(parseSafeExternalUrl(rawUrl), {
+  openExternal: Effect.fn("ElectronShell.openExternal")(function (rawUrl) {
+    return Option.match(parseSafeExternalUrl(rawUrl), {
       onNone: () => Effect.succeed(false),
       onSome: (externalUrl) =>
         Effect.promise(() =>
@@ -75,23 +75,27 @@ export const make = ElectronShell.of({
             () => false,
           ),
         ),
-    }),
-  openAppUrl: (url) =>
-    Effect.promise(() =>
+    });
+  }),
+  openAppUrl: Effect.fn("ElectronShell.openAppUrl")(function (url) {
+    return Effect.promise(() =>
       Electron.shell.openExternal(url).then(
         () => true,
         () => false,
       ),
-    ),
-  openSystemSettings: (pane) =>
-    Effect.promise(() =>
+    );
+  }),
+  openSystemSettings: Effect.fn("ElectronShell.openSystemSettings")(function (pane) {
+    return Effect.promise(() =>
       Electron.shell.openExternal(MAC_PERMISSION_SETTINGS_URLS[pane]).then(
         () => true,
         () => false,
       ),
-    ),
-  copyText: (text) =>
-    Effect.promise(() => Electron.clipboard.writeText(text).catch(() => undefined)),
+    );
+  }),
+  copyText: Effect.fn("ElectronShell.copyText")(function (text) {
+    return Effect.promise(() => Electron.clipboard.writeText(text).catch(() => undefined));
+  }),
 });
 
 export const layer = Layer.succeed(ElectronShell, make);

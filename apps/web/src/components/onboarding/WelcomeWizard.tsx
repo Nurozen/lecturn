@@ -1257,8 +1257,6 @@ function AgentInstallTerminal({
               onSessionExited={phoneLocalAuth ? () => setSessionEnded(true) : onClose}
               autoFocus={!phoneLocalAuth}
               visible={visible}
-              resizeEpoch={0}
-              drawerHeight={256}
               keybindings={keybindings}
             />
           ) : null

@@ -102,8 +102,8 @@ beforeAll(() => {
         },
       },
     }),
-    expose: ["ThreadDetailScreenContent"],
-  }).exports.ThreadDetailScreenContent as never;
+    expose: ["ThreadDetailBody"],
+  }).exports.ThreadDetailBody as never;
   FeedView = loadCompiledMobileModule({
     file: "src/features/threads/ThreadFeed.tsx",
     modules: modulesWith({

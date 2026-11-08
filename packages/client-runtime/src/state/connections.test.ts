@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
@@ -52,14 +51,14 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
             }),
         }),
         Layer.succeed(Persistence.EnvironmentCacheStore, {
-          loadShell: () => Effect.succeed(Option.none()),
+          loadShell: () => Effect.succeedNone,
           saveShell: () => Effect.void,
-          loadThread: () => Effect.succeed(Option.none()),
+          loadThread: () => Effect.succeedNone,
           saveThread: () => Effect.void,
           removeThread: () => Effect.void,
-          loadServerConfig: () => Effect.succeed(Option.none()),
+          loadServerConfig: () => Effect.succeedNone,
           saveServerConfig: () => Effect.void,
-          loadVcsRefs: () => Effect.succeed(Option.none()),
+          loadVcsRefs: () => Effect.succeedNone,
           saveVcsRefs: () => Effect.void,
           removeVcsRefs: () => Effect.void,
           clearVcsRefs: () => Effect.void,
@@ -72,12 +71,12 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
             }),
         }),
         Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, {
-          get: () => Effect.succeed(Option.none()),
+          get: () => Effect.succeedNone,
           put: () => Effect.void,
           remove: () => Effect.void,
         }),
         Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, {
-          get: () => Effect.succeed(Option.none()),
+          get: () => Effect.succeedNone,
           put: () => Effect.void,
           remove: () => Effect.void,
         }),
@@ -88,7 +87,7 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
         }),
         Layer.succeed(ClientCapabilities.CloudSession, {
           accountIds: Effect.succeed(["account-a", "account-b"]),
-          identity: (accountId) => Effect.succeed(Option.some({ accountId })),
+          identity: (accountId) => Effect.succeedSome({ accountId }),
           clerkToken: () => Effect.die(new Error("Clerk tokens are not used.")),
         }),
         Layer.succeed(Connectivity.Connectivity, {

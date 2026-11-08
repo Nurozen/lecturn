@@ -1148,49 +1148,68 @@ export const make = Effect.gen(function* () {
   return DecisionJobRepository.of({
     cursor: cursor.pipe(Effect.mapError(boundary)),
     nextLeaseDelay: nextLeaseDelay.pipe(Effect.mapError(boundary)),
-    processEvent: (event) =>
-      processEvent(event).pipe(
+    processEvent: Effect.fn("DecisionJobRepository.processEvent")(function (event) {
+      return processEvent(event).pipe(
         sql.withTransaction,
         Effect.tap(() => notify),
         Effect.mapError(boundary),
-      ),
-    get: (id) => get(id).pipe(Effect.mapError(boundary)),
-    claim: (input) => claim(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    checkpoint: (input) => checkpoint(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    finish: (input) =>
-      finish(input).pipe(
+      );
+    }),
+    get: Effect.fn("DecisionJobRepository.get")(function (id) {
+      return get(id).pipe(Effect.mapError(boundary));
+    }),
+    claim: Effect.fn("DecisionJobRepository.claim")(function (input) {
+      return claim(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    checkpoint: Effect.fn("DecisionJobRepository.checkpoint")(function (input) {
+      return checkpoint(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    finish: Effect.fn("DecisionJobRepository.finish")(function (input) {
+      return finish(input).pipe(
         sql.withTransaction,
         Effect.tap(() => notify),
         Effect.mapError(boundary),
-      ),
-    retry: (input) =>
-      retry(input).pipe(
+      );
+    }),
+    retry: Effect.fn("DecisionJobRepository.retry")(function (input) {
+      return retry(input).pipe(
         sql.withTransaction,
         Effect.tap(() => notify),
         Effect.mapError(boundary),
-      ),
-    scan: (input) =>
-      scan(input).pipe(
+      );
+    }),
+    scan: Effect.fn("DecisionJobRepository.scan")(function (input) {
+      return scan(input).pipe(
         input.operation === "retry" || input.operation === "cancel"
           ? sql.withTransaction
           : (effect) => effect,
         Effect.tap(() => notify),
         Effect.mapError(boundary),
-      ),
-    wakeWaiting: (reason) =>
-      wakeWaiting(reason).pipe(
+      );
+    }),
+    wakeWaiting: Effect.fn("DecisionJobRepository.wakeWaiting")(function (reason) {
+      return wakeWaiting(reason).pipe(
         sql.withTransaction,
         Effect.tap(() => notify),
         Effect.mapError(boundary),
-      ),
-    listSources: (input) => listSources(input).pipe(Effect.mapError(boundary)),
-    getEvaluation: (projectId, fingerprint) =>
-      getEvaluation(projectId, fingerprint).pipe(Effect.mapError(boundary)),
-    putEvaluation: (projectId, fingerprint, result) =>
-      putEvaluation(projectId, fingerprint, result).pipe(
-        sql.withTransaction,
-        Effect.mapError(boundary),
-      ),
+      );
+    }),
+    listSources: Effect.fn("DecisionJobRepository.listSources")(function (input) {
+      return listSources(input).pipe(Effect.mapError(boundary));
+    }),
+    getEvaluation: Effect.fn("DecisionJobRepository.getEvaluation")(
+      function (projectId, fingerprint) {
+        return getEvaluation(projectId, fingerprint).pipe(Effect.mapError(boundary));
+      },
+    ),
+    putEvaluation: Effect.fn("DecisionJobRepository.putEvaluation")(
+      function (projectId, fingerprint, result) {
+        return putEvaluation(projectId, fingerprint, result).pipe(
+          sql.withTransaction,
+          Effect.mapError(boundary),
+        );
+      },
+    ),
     notify,
     subscribeWake: PubSub.subscribe(wakes).pipe(Effect.map(Stream.fromSubscription)),
   });

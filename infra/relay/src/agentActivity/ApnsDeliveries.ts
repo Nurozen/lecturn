@@ -1948,14 +1948,18 @@ export const make = Effect.gen(function* () {
     sendLiveActivity,
     sendPushNotification,
     processSignedJob,
-    sendPushNotificationForTarget: (input) =>
-      liveActivities.withPushNotificationLock(input.target, (target) =>
+    sendPushNotificationForTarget: Effect.fn(
+      "relay.apns_deliveries.send_push_notification_for_target",
+    )(function (input) {
+      return liveActivities.withPushNotificationLock(input.target, (target) =>
         sendPushNotificationForTarget({ ...input, target }),
-      ),
-    sendForTarget: (input) =>
-      liveActivities.withPushNotificationLock(input.target, (target) =>
+      );
+    }),
+    sendForTarget: Effect.fn("relay.apns_deliveries.send_for_target")(function (input) {
+      return liveActivities.withPushNotificationLock(input.target, (target) =>
         sendForTarget({ ...input, target }),
-      ),
+      );
+    }),
   });
 });
 

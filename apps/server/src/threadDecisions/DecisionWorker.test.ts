@@ -218,10 +218,8 @@ const fixture = (options: Options = {}) =>
             replayed: false,
           };
         }).pipe(
-          Effect.flatMap((result) =>
-            options.evaluate
-              ? options.evaluate(input, requests.length, sql).pipe(Effect.as(result))
-              : Effect.succeed(result),
+          Effect.tap(() =>
+            options.evaluate ? options.evaluate(input, requests.length, sql) : Effect.void,
           ),
         ),
     });

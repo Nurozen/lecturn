@@ -1,3 +1,4 @@
+import * as DocumentText from "../../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -20,7 +21,6 @@ import {
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -271,7 +271,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
         Layer.provide(
           ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-mcp-html-render-" }),
         ),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(
           Layer.mock(ThreadManagement.ThreadManagementService)({
@@ -606,7 +606,7 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -663,7 +663,7 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
         ),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -751,7 +751,7 @@ it.effect.each(["lecturn_thread_interrupt", "lecturn_workflow_stop"])(
           Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
-              getShell: () => Effect.succeed(Option.none()),
+              getShell: () => Effect.succeedNone,
             }),
           ),
           Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -847,7 +847,7 @@ it.effect("discovers workflow stop targets and requires orchestration capability
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -905,7 +905,7 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
         Layer.provide(ServerSecretStore.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-mcp-attachment-" })),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       ),
     ),
   ),

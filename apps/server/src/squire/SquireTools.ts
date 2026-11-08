@@ -1832,7 +1832,7 @@ const make = Effect.gen(function* () {
     schema: S,
     args: unknown,
   ) =>
-    Schema.decodeUnknownEffect(schema)(withoutNulls(args) ?? {}).pipe(
+    Schema.decodeEffect(schema)(withoutNulls(args) ?? {}).pipe(
       Effect.map((value) => ({ ok: true as const, value })),
       Effect.catch((error) => Effect.succeed({ ok: false as const, message: error.message })),
     );

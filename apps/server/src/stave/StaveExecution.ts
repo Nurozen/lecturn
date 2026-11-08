@@ -102,5 +102,11 @@ export const layer = Layer.effect(
 /** For operation tests whose CLI and configuration are fixed fakes. */
 export const layerNoop = Layer.succeed(
   StaveExecution,
-  StaveExecution.of({ withExecution: (effect) => effect }),
+  StaveExecution.of({
+    withExecution: Effect.fn("StaveExecution.withExecution")(function <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) {
+      return effect;
+    }),
+  }),
 );

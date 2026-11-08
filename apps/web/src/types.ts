@@ -19,7 +19,6 @@ import type {
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-  ThreadRunSummary,
   ThreadRuntimeSummary,
 } from "@lecturn/client-runtime/state/shell";
 import type { ThreadCheckpointSummary } from "@lecturn/client-runtime/state/thread-checkpoints";

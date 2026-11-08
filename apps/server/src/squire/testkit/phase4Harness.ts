@@ -137,37 +137,36 @@ const layerStaveSpaceAdmission = (options: NonNullable<Phase4Options["staveSpace
                 Effect.map((shell) => shell?.projectId),
                 Effect.orDie,
               )
-            : Effect.succeed(undefined);
+            : Effect.undefined;
       yield* hooks.register({
         name: "stave",
-        aroundThreadLock: (command, dispatch) =>
-          Effect.gen(function* () {
-            const projectId = yield* projectOf(command);
-            if (projectId === undefined) return yield* dispatch;
-            const project = yield* projects.get(projectId).pipe(Effect.orDie);
-            if (Option.isNone(project)) return yield* dispatch;
-            const root = project.value.workspaceRoot;
-            const now = yield* locks.withSharedSpaceLock(root, dispatch, Duration.zero);
-            if (Option.isSome(now)) return now.value;
-            // Timed here rather than by the lock, which resolves the root with
-            // real I/O before its timer starts: this timer exists once
-            // `onWaiting` runs, so a test's TestClock adjustment never races it.
-            const granted = yield* Deferred.make<void>();
-            const admitted = yield* locks
-              .withSharedSpaceLock(
-                root,
-                Deferred.succeed(granted, undefined).pipe(Effect.andThen(dispatch)),
-              )
-              .pipe(Effect.map(Option.getOrThrow), Effect.forkChild);
-            yield* options.onWaiting ?? Effect.void;
-            const inTime = yield* Deferred.await(granted).pipe(
-              Effect.timeoutOption(STAVE_ADMISSION_WAIT),
-            );
-            if (Option.isSome(inTime)) return yield* Fiber.join(admitted);
-            yield* Fiber.interrupt(admitted);
-            yield* options.onRefused ?? Effect.void;
-            return yield* staveSpaceBusyRejection();
-          }),
+        aroundThreadLock: Effect.fn("aroundThreadLock")(function* (command, dispatch) {
+          const projectId = yield* projectOf(command);
+          if (projectId === undefined) return yield* dispatch;
+          const project = yield* projects.get(projectId).pipe(Effect.orDie);
+          if (Option.isNone(project)) return yield* dispatch;
+          const root = project.value.workspaceRoot;
+          const now = yield* locks.withSharedSpaceLock(root, dispatch, Duration.zero);
+          if (Option.isSome(now)) return now.value;
+          // Timed here rather than by the lock, which resolves the root with
+          // real I/O before its timer starts: this timer exists once
+          // `onWaiting` runs, so a test's TestClock adjustment never races it.
+          const granted = yield* Deferred.make<void>();
+          const admitted = yield* locks
+            .withSharedSpaceLock(
+              root,
+              Deferred.succeed(granted, undefined).pipe(Effect.andThen(dispatch)),
+            )
+            .pipe(Effect.map(Option.getOrThrow), Effect.forkChild);
+          yield* options.onWaiting ?? Effect.void;
+          const inTime = yield* Deferred.await(granted).pipe(
+            Effect.timeoutOption(STAVE_ADMISSION_WAIT),
+          );
+          if (Option.isSome(inTime)) return yield* Fiber.join(admitted);
+          yield* Fiber.interrupt(admitted);
+          yield* options.onRefused ?? Effect.void;
+          return yield* staveSpaceBusyRejection();
+        }),
       });
     }),
   );
@@ -183,11 +182,13 @@ const scriptedRegistry = (
     Effect.gen(function* () {
       const fakes = yield* SquireFakeScripts.SquireFakeScripts;
       const source = ScriptedScriptSource.of({
-        scriptFor: (input) =>
-          (deliveryGate !== undefined && input.message.notification?.source?.kind === "squire"
-            ? deliveryGate
-            : Effect.void
-          ).pipe(Effect.andThen(fakes.scriptFor(input.threadId, input.message))),
+        scriptFor: Effect.fn("ScriptedScriptSource.scriptFor")(function (input) {
+          return (
+            deliveryGate !== undefined && input.message.notification?.source?.kind === "squire"
+              ? deliveryGate
+              : Effect.void
+          ).pipe(Effect.andThen(fakes.scriptFor(input.threadId, input.message)));
+        }),
       });
       return ProviderAdapterRegistry.layerFromAdapters([
         yield* makeScriptedAdapterV2({ instanceId: scripted, environment: {} }).pipe(
@@ -221,7 +222,9 @@ const instancesLayer = (models: Readonly<Record<string, string>>) => {
     };
   }) as unknown as ReadonlyArray<ProviderInstance>;
   return Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-    getInstance: (id) => Effect.succeed(summarizing.find((entry) => entry.instanceId === id)),
+    getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (id) {
+      return Effect.succeed(summarizing.find((entry) => entry.instanceId === id));
+    }),
     listInstances: Effect.succeed(summarizing),
     listUnavailable: Effect.succeed([]),
     streamChanges: Stream.empty,
@@ -258,40 +261,39 @@ const projectService = Layer.unwrap(
             })),
           ),
         ),
-      create: (input) =>
-        Effect.gen(function* () {
-          const now = yield* DateTime.now;
-          const planned = planProjectCommand({
-            command: {
-              type: "project.create",
-              commandId: input.commandId,
-              projectId: input.projectId,
-              title: input.title,
-              workspaceRoot: input.workspaceRoot,
-            },
-            state: { project: undefined, workspaceOwner: undefined, appWorkspaceOwner: undefined },
-            eventId: EventId.make(`event:${input.commandId}`),
-            now,
-          });
-          yield* eventSink.commitProjectCommand({
+      create: Effect.fn("create")(function* (input) {
+        const now = yield* DateTime.now;
+        const planned = planProjectCommand({
+          command: {
+            type: "project.create",
             commandId: input.commandId,
             projectId: input.projectId,
-            commandType: "project.create",
-            acceptedAt: now,
-            event: Result.getOrThrow(planned),
-          });
-          const row = Option.getOrThrow(yield* projects.get(input.projectId));
-          return {
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            defaultModelSelection: row.defaultModelSelection,
-            scripts: row.scripts,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-          };
-        }).pipe(Effect.orDie),
+            title: input.title,
+            workspaceRoot: input.workspaceRoot,
+          },
+          state: { project: undefined, workspaceOwner: undefined, appWorkspaceOwner: undefined },
+          eventId: EventId.make(`event:${input.commandId}`),
+          now,
+        });
+        yield* eventSink.commitProjectCommand({
+          commandId: input.commandId,
+          projectId: input.projectId,
+          commandType: "project.create",
+          acceptedAt: now,
+          event: Result.getOrThrow(planned),
+        });
+        const row = Option.getOrThrow(yield* projects.get(input.projectId));
+        return {
+          id: row.projectId,
+          title: row.title,
+          workspaceRoot: row.workspaceRoot,
+          defaultModelSelection: row.defaultModelSelection,
+          scripts: row.scripts,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          deletedAt: row.deletedAt,
+        };
+      }, Effect.orDie),
     });
   }),
 );
@@ -313,7 +315,9 @@ const hostPowerUnknown = Layer.effect(
         stale: true,
         updatedAt,
       }),
-      report: () => Effect.void,
+      report: Effect.fn("HostPowerMonitor.report")(function () {
+        return Effect.void;
+      }),
       streamChanges: Stream.never,
     }),
   ),
@@ -416,12 +420,14 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
         Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
         Layer.succeed(ProjectSetupScriptRunner.ProjectSetupScriptRunner, {
-          runForThread: () => Effect.succeed({ status: "no-script" as const }),
+          runForThread: Effect.fn("ProjectSetupScriptRunner.runForThread")(function () {
+            return Effect.succeed({ status: "no-script" as const });
+          }),
         }),
         ProviderRegistryMock.layer(),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           namedProjectsRoot: "/projects",
-          folderForThread: () => Effect.succeed(Option.none()),
+          folderForThread: () => Effect.succeedNone,
         }),
         receipts,
         IdAllocator.layer,

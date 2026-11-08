@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { EnvironmentAuthInvalidError } from "@lecturn/contracts";
@@ -332,12 +331,12 @@ describe("remote environment authorization", () => {
             ClientCapabilities.CloudSession,
             ClientCapabilities.CloudSession.of({
               accountIds: Effect.succeed(["user_connect", "user_second"]),
-              identity: (accountId) => Effect.succeed(Option.some({ accountId })),
+              identity: (accountId) => Effect.succeedSome({ accountId }),
               clerkToken: () => Effect.succeed("clerk-token"),
             }),
           ),
           Effect.provideService(ClientCapabilities.AnalyticsDevice, {
-            id: Effect.succeed(Option.some("device-1")),
+            id: Effect.succeedSome("device-1"),
           }),
         ),
       );

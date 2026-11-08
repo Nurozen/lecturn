@@ -327,27 +327,23 @@ const makeTestRelay = Effect.fnUntraced(function* (
       getShell: unused,
       listShells: unused,
       getById: () =>
-        Effect.succeed(
-          Option.some({
-            id: PROJECT_ID,
-            title: options.app?.projectTitle ?? "Project",
-            workspaceRoot: "/workspace",
-            defaultModelSelection: null,
-            scripts: [],
-            createdAt: NOW,
-            updatedAt: NOW,
-            deletedAt: null,
-          }),
-        ),
+        Effect.succeedSome({
+          id: PROJECT_ID,
+          title: options.app?.projectTitle ?? "Project",
+          workspaceRoot: "/workspace",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: NOW,
+          updatedAt: NOW,
+          deletedAt: null,
+        }),
     }),
     Effect.provideService(ProjectStore.ProjectStoreV2, {
       get: () =>
-        Effect.succeed(
-          Option.some(
-            options.app === undefined
-              ? {}
-              : { appBinding: { appId: RELAY_APP_ID, workspaceRoot: "/workspace" } },
-          ),
+        Effect.succeedSome(
+          options.app === undefined
+            ? {}
+            : { appBinding: { appId: RELAY_APP_ID, workspaceRoot: "/workspace" } },
         ),
     } as unknown as ProjectStore.ProjectStoreV2["Service"]),
     Effect.provideService(AppRegistrationRepository, {

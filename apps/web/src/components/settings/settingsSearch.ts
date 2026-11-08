@@ -9,6 +9,9 @@ import {
   type SourceControlDefinition,
 } from "@lecturn/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@lecturn/shared/keybindings";
+import * as Schema from "effect/Schema";
+import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
+import { writeLocalStorageValue } from "../../hooks/useLocalStorage";
 import { commandLabel } from "./KeybindingsSettings.logic";
 import {
   validateSettingsScopeSearch,
@@ -65,7 +68,6 @@ export interface SettingsSearchItem {
   readonly localEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
   readonly managedTunnelOnly?: boolean;
-  readonly redesignOnly?: boolean;
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
   // Its row only renders when the server build advertises `capabilities.stave`.
@@ -92,7 +94,6 @@ export interface SettingsSearchAvailability {
   readonly managedTunnelActive?: boolean;
   /** A connected environment runs Squires (`capabilities.squire`). */
   readonly hasSquires?: boolean;
-  readonly redesignEnabled?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -104,9 +105,9 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
-  "/settings/scheduled-tasks": "Scheduled Tasks",
+  "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/squires": "Squires",
-  "/settings/source-control": "Source Control",
+  "/settings/source-control": "Source control",
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
   "/settings/apps": "Connected apps",
@@ -295,13 +296,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
-    id: "sidebar-project-icon-colors",
-    title: "Colored project icons",
-    to: "/settings/appearance",
-    searchTerms: ["sidebar favicon logo grayscale gray color"],
-    redesignOnly: true,
-  },
-  {
     id: "math-rendering",
     title: "Render math",
     to: "/settings/appearance",
@@ -389,7 +383,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "new-design",
     title: "New design",
     to: "/settings/beta",
-    searchTerms: ["beta redesign look style sidebar composer gray quieter classic"],
+    searchTerms: ["beta redesign look style sidebar composer black quieter classic"],
   },
   {
     id: "working-shelf",
@@ -1362,7 +1356,6 @@ export function filterAvailableSettingsSearchItems(
       (!item.requiresStaveGrace || availability.hasStaveGrace === true) &&
       (!item.requiresStaveDestroy || availability.hasStaveDestroy === true) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
-      (!item.redesignOnly || availability.redesignEnabled === true) &&
       // The switch that turns Squires on is reachable before any environment runs them.
       (item.to !== "/settings/squires" ||
         item.id === "squires-enabled" ||
@@ -1424,4 +1417,29 @@ export function searchSettings(
         left.index - right.index,
     )
     .map(({ item }) => item);
+}
+
+// Font smoothing only renders on macOS, so a search jump to it elsewhere
+// must not flip the section - the target would never mount to be scrolled to.
+const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
+  "prompt-font",
+  "terminal-font",
+  ...(typeof navigator !== "undefined" && isMacPlatform(navigator.platform)
+    ? ["font-smoothing"]
+    : []),
+]);
+
+export function isAdvancedTypographyTarget(targetId: string): boolean {
+  return ADVANCED_TYPOGRAPHY_TARGET_IDS.has(targetId);
+}
+
+/**
+ * Opens the persisted section a search result lives in before jumping to it, so
+ * its row is mounted to scroll to. The terminal reads the same flag, so it must
+ * stay on after the jump.
+ */
+export function revealSettingsSearchTarget(targetId: string): void {
+  if (isAdvancedTypographyTarget(targetId)) {
+    writeLocalStorageValue(TYPOGRAPHY_ADVANCED_STORAGE_KEY, true, false, Schema.Boolean);
+  }
 }

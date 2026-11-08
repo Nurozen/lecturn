@@ -7,14 +7,15 @@ import {
   isListedThread,
   pendingSubagentRequestsByThread,
 } from "@lecturn/client-runtime/state/threads";
-import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import type { AnyRouter } from "@tanstack/react-router";
 import type {
+  AppBinding,
   EnvironmentId,
   OrchestrationV2ThreadShell,
   SquireId,
   ThreadId,
 } from "@lecturn/contracts";
+import type { ClientSettings } from "@lecturn/contracts/settings";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AtomRegistry } from "effect/reactivity";
@@ -25,22 +26,21 @@ import {
   MessageCircleQuestionIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import { useContext, useEffect, useEffectEvent, useRef } from "react";
 
-import { getClientSettings, useClientSettings } from "../hooks/useSettings";
-import { useAppStatuses } from "../state/apps";
-import { useEnvironmentIds } from "../state/environments";
+import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
+import { isWindowsPlatform, randomUUID } from "../lib/utils";
+import { readableAppStatusesAtom } from "../state/apps";
+import { environmentSummaries } from "../state/presentation";
 import { environmentShell } from "../state/shell";
-import { randomUUID } from "../lib/utils";
-import { squireEnvironment, useSquireEnvironments } from "../state/squires";
+import { readableSquireEnvironmentsAtom, squireEnvironment } from "../state/squires";
 import { environmentThreadShells } from "../state/threads";
 import {
   hasDesktopNotifications,
   hasNotificationSound,
   playNotificationSound,
+  reportSquireAlert,
   revealNotifiedAppThread,
   setNotificationBadge,
-  reportSquireAlert,
   squireNotificationIntents,
   type SquireNotificationIntent,
   squireNotificationTag,
@@ -57,220 +57,6 @@ import {
 } from "./ThreadNotificationCoordinator.logic";
 import { toastManager } from "./ui/toast";
 
-export function ThreadNotificationCoordinator() {
-  const environmentIds = useEnvironmentIds();
-  const mode = useClientSettings((settings) => settings.notificationMode);
-  const inAppNotificationsEnabled = useClientSettings(
-    (settings) => settings.inAppNotificationsEnabled,
-  );
-  const pending = useRef(
-    new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
-  );
-  const onNotification = (environmentId: EnvironmentId, notification: Notification) => {
-    pending.current.get(notification.tag)?.notification.close();
-    pending.current.set(notification.tag, { environmentId, notification });
-    setNotificationBadge(pending.current.size);
-  };
-  // The badge counts threads waiting on the user, so Squire alerts close with the thread ones but
-  // stay out of that count.
-  const squirePending = useRef(
-    new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
-  );
-  const onSquireNotification = (environmentId: EnvironmentId, notification: Notification) => {
-    squirePending.current.get(notification.tag)?.notification.close();
-    squirePending.current.set(notification.tag, { environmentId, notification });
-  };
-
-  useEffect(() => {
-    const activeIds = new Set(environmentIds);
-    const count = pending.current.size;
-    for (const notifications of [pending.current, squirePending.current]) {
-      for (const [tag, entry] of notifications) {
-        if (activeIds.has(entry.environmentId)) continue;
-        entry.notification.close();
-        notifications.delete(tag);
-      }
-    }
-    if (count !== pending.current.size) setNotificationBadge(pending.current.size);
-  }, [environmentIds]);
-
-  useEffect(() => {
-    const clear = () => {
-      for (const { notification } of pending.current.values()) notification.close();
-      for (const { notification } of squirePending.current.values()) notification.close();
-      pending.current.clear();
-      squirePending.current.clear();
-      setNotificationBadge(0);
-    };
-    clear();
-    if (!hasDesktopNotifications(mode)) return;
-    const unsubscribe = window.desktopBridge?.onNotificationBadgeClear?.(clear);
-    window.addEventListener("focus", clear);
-    return () => {
-      unsubscribe?.();
-      window.removeEventListener("focus", clear);
-      clear();
-    };
-  }, [mode]);
-
-  useEffect(() => {
-    if (!hasNotificationSound(mode)) return;
-    document.addEventListener("pointerdown", unlockNotificationAudio);
-    document.addEventListener("keydown", unlockNotificationAudio);
-    return () => {
-      document.removeEventListener("pointerdown", unlockNotificationAudio);
-      document.removeEventListener("keydown", unlockNotificationAudio);
-    };
-  }, [mode]);
-
-  if (mode === "off" && !inAppNotificationsEnabled) return null;
-
-  return (
-    <>
-      {environmentIds.map((environmentId) => (
-        <EnvironmentNotifications
-          key={environmentId}
-          environmentId={environmentId}
-          onNotification={onNotification}
-        />
-      ))}
-      <SquireNotifications onNotification={onSquireNotification} />
-    </>
-  );
-}
-
-/** One alert per `notification.pushed` intent; a question card writes none. */
-function SquireNotifications({
-  onNotification,
-}: {
-  onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
-}) {
-  const environments = useSquireEnvironments();
-  const mode = useClientSettings((settings) => settings.notificationMode);
-  const inAppNotificationsEnabled = useClientSettings(
-    (settings) => settings.inAppNotificationsEnabled,
-  );
-  const navigate = useNavigate();
-  const { environmentId: activeEnvironmentId, squireId: activeSquireId } = useParams({
-    strict: false,
-  });
-  const seenByEnvironment = useRef(new Map<EnvironmentId, ReadonlyMap<SquireId, number>>());
-  const registry = useContext(RegistryContext);
-
-  useEffect(() => {
-    // Each shown alert is recorded once; the server ignores a repeat for the same card.
-    const alerted = (environmentId: EnvironmentId, intent: SquireNotificationIntent) => {
-      if (!registry.get(squireEnvironment.notificationAlerted.permissionAtom(environmentId)))
-        return;
-      const pushedLog = squireEnvironment.actionLog({
-        environmentId,
-        input: { squireId: intent.squireId, kinds: ["notification.pushed"], limit: 20 },
-      });
-      void reportSquireAlert(intent, {
-        readLog: () =>
-          Effect.runPromise(
-            AtomRegistry.getResult(registry, pushedLog, { suspendOnWaiting: true }).pipe(
-              Effect.map((result) => result.entries),
-              Effect.timeout("10 seconds"),
-              Effect.orElseSucceed(() => null),
-            ),
-          ),
-        report: (cardId) =>
-          squireEnvironment.notificationAlerted.run(registry, {
-            environmentId,
-            input: {
-              requestId: randomUUID(),
-              squireId: intent.squireId,
-              cardId,
-              surface: "desktop",
-            },
-          }),
-      });
-    };
-    const nextSeen = new Map<EnvironmentId, ReadonlyMap<SquireId, number>>();
-    for (const { environmentId, state } of environments) {
-      const { seen, intents } = squireNotificationIntents(
-        seenByEnvironment.current.get(environmentId) ?? null,
-        state,
-      );
-      nextSeen.set(environmentId, seen);
-      for (const intent of intents) {
-        const open = () => {
-          void navigate({
-            to: "/squires/$environmentId/$squireId",
-            params: { environmentId, squireId: intent.squireId },
-          });
-        };
-        if (hasNotificationSound(mode)) {
-          void playNotificationSound("input", () =>
-            hasNotificationSound(getClientSettings().notificationMode),
-          );
-        }
-        if (
-          inAppNotificationsEnabled &&
-          document.visibilityState === "visible" &&
-          document.hasFocus() &&
-          (activeEnvironmentId !== environmentId || activeSquireId !== intent.squireId)
-        ) {
-          const toastId = toastManager.add({
-            type: "info",
-            title: intent.title,
-            description: intent.body,
-            data: {
-              hideCopyButton: true,
-              leadingIcon: <BellIcon aria-hidden className="size-4 text-info-foreground" />,
-            },
-            actionProps: {
-              children: "Open Squire",
-              onClick: () => {
-                toastManager.close(toastId);
-                open();
-              },
-            },
-          });
-          alerted(environmentId, intent);
-          continue;
-        }
-        if (
-          !hasDesktopNotifications(mode) ||
-          (document.visibilityState === "visible" && document.hasFocus()) ||
-          typeof Notification === "undefined" ||
-          Notification.permission !== "granted"
-        )
-          continue;
-        try {
-          const notification = new Notification(intent.title, {
-            body: intent.body,
-            tag: squireNotificationTag(environmentId, intent.squireId),
-            silent: true,
-          });
-          onNotification(environmentId, notification);
-          alerted(environmentId, intent);
-          notification.addEventListener("click", () => {
-            notification.close();
-            window.focus();
-            open();
-          });
-        } catch {
-          // Some browsers expose Notification but reject desktop presentation.
-        }
-      }
-    }
-    seenByEnvironment.current = nextSeen;
-  }, [
-    activeEnvironmentId,
-    activeSquireId,
-    environments,
-    inAppNotificationsEnabled,
-    mode,
-    navigate,
-    onNotification,
-    registry,
-  ]);
-
-  return null;
-}
-
 interface NotificationState extends ThreadNotificationObservation {
   readonly raw: OrchestrationV2ThreadShell;
   readonly subagentRequest: PendingSubagentRequest | null;
@@ -278,48 +64,81 @@ interface NotificationState extends ThreadNotificationObservation {
   readonly status: SidebarThreadStatus;
 }
 
-function EnvironmentNotifications({
-  environmentId,
-  onNotification,
-}: {
-  environmentId: EnvironmentId;
-  onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
-}) {
-  const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
-  const snapshot =
-    shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value : null;
-  const threads = snapshot?.threads ?? null;
-  const projects = snapshot?.projects ?? null;
-  const listingCapabilities = useAtomValue(
-    environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
-  );
-  const appStatuses = useAppStatuses();
-  const mode = useClientSettings((settings) => settings.notificationMode);
-  const inAppNotificationsEnabled = useClientSettings(
-    (settings) => settings.inAppNotificationsEnabled,
-  );
-  const navigate = useNavigate();
-  const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
-    strict: false,
-  });
-  const previous = useRef(new Map<ThreadId, NotificationState>());
+interface NotificationProject {
+  readonly id: string;
+  readonly appBinding?: AppBinding | undefined;
+}
+
+interface WatchedEnvironment {
+  unsubscribe: () => void;
+  previous: Map<ThreadId, NotificationState>;
+  // The live snapshot's threads and projects: app threads alert under their app's name.
+  threads: ReadonlyArray<OrchestrationV2ThreadShell> | null;
+  projects: ReadonlyArray<NotificationProject> | null;
+  readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
+}
+
+/**
+ * Turns thread status transitions in every connected environment into sounds, in-app toasts,
+ * and desktop notifications, and keeps the dock badge in step with the unread ones.
+ */
+export function startThreadNotifications(
+  registry: AtomRegistry.AtomRegistry,
+  router: AnyRouter,
+): () => void {
+  const pending = new Map<string, { environmentId: EnvironmentId; notification: Notification }>();
+  const watched = new Map<EnvironmentId, WatchedEnvironment>();
+
+  // The badge counts threads waiting on the user, so Squire alerts close with the thread ones but
+  // stay out of that count.
+  const squirePending = new Map<
+    string,
+    { environmentId: EnvironmentId; notification: Notification }
+  >();
+
+  const trackNotification = (environmentId: EnvironmentId, notification: Notification) => {
+    pending.get(notification.tag)?.notification.close();
+    pending.set(notification.tag, { environmentId, notification });
+    setNotificationBadge(pending.size);
+  };
+  const trackSquireNotification = (environmentId: EnvironmentId, notification: Notification) => {
+    squirePending.get(notification.tag)?.notification.close();
+    squirePending.set(notification.tag, { environmentId, notification });
+  };
+  const clearPending = () => {
+    for (const { notification } of pending.values()) notification.close();
+    for (const { notification } of squirePending.values()) notification.close();
+    pending.clear();
+    squirePending.clear();
+    setNotificationBadge(0);
+  };
 
   // Completions fire from a timer, so read settings, focus and route when presenting.
-  const present = useEffectEvent((threadId: ThreadId, kind: ThreadNotificationKind) => {
-    const entry = previous.current.get(threadId);
-    if (!entry) return;
-    const { thread, status } = entry;
+  const present = (
+    environmentId: EnvironmentId,
+    state: NotificationState,
+    kind: ThreadNotificationKind,
+    projects: ReadonlyArray<NotificationProject> | null,
+  ) => {
+    const { thread, status } = state;
     // App threads alert like any other, even while Projects mode hides their project.
     const app = threadNotificationApp(
       projects?.find((project) => project.id === thread.projectId),
-      appStatuses.flatMap((entry) => (entry.environmentId === environmentId ? [entry.app] : [])),
+      registry
+        .get(readableAppStatusesAtom)
+        .flatMap((entry) => (entry.environmentId === environmentId ? [entry.app] : [])),
     );
     const open = () => {
       revealNotifiedAppThread(app);
-      void navigate({
+      void router.navigate({
         to: "/$environmentId/$threadId",
         params: { environmentId, threadId: thread.id },
       });
+    };
+    const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
+    const active = (router.state.matches.at(-1)?.params ?? {}) as {
+      environmentId?: string;
+      threadId?: string;
     };
     const title = threadNotificationTitle(
       kind === "completion"
@@ -344,7 +163,7 @@ function EnvironmentNotifications({
       inAppNotificationsEnabled &&
       document.visibilityState === "visible" &&
       document.hasFocus() &&
-      (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
+      (active.environmentId !== environmentId || active.threadId !== thread.id)
     ) {
       const toastId = toastManager.add({
         type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
@@ -385,8 +204,10 @@ function EnvironmentNotifications({
         body: thread.title,
         tag: threadNotificationTag(environmentId, thread.id),
         silent: true,
+        // Windows drops clicks after a toast moves into Notification Center.
+        requireInteraction: kind === "completion" && isWindowsPlatform(navigator.platform),
       });
-      onNotification(environmentId, notification);
+      trackNotification(environmentId, notification);
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
@@ -396,35 +217,23 @@ function EnvironmentNotifications({
     } catch {
       // Some browsers expose Notification but reject desktop presentation.
     }
-  });
-  const gate = useRef<ReturnType<typeof createThreadNotificationGate<ThreadId>>>(null);
-  useEffect(() => {
-    const created = createThreadNotificationGate<ThreadId>((threadId, kind) =>
-      present(threadId, kind),
-    );
-    gate.current = created;
-    return () => {
-      created.clear();
-      gate.current = null;
-      // A new gate has no pending completions, so forget the states they compared against.
-      previous.current.clear();
-    };
-  }, []);
+  };
 
-  useEffect(() => {
-    const pendingCompletions = gate.current;
-    if (!pendingCompletions) return;
-    if (threads === null) {
-      pendingCompletions.clear();
-      previous.current.clear();
-      return;
-    }
+  const observeThreads = (
+    environmentId: EnvironmentId,
+    entry: WatchedEnvironment,
+    threads: ReadonlyArray<OrchestrationV2ThreadShell>,
+  ) => {
+    const previous = entry.previous;
     const next = new Map<ThreadId, NotificationState>();
     const subagentRequests = pendingSubagentRequestsByThread(threads);
+    const listingCapabilities = registry.get(
+      environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
+    );
     const changed: Array<[NotificationState | undefined, NotificationState]> = [];
     for (const rawThread of threads) {
       if (!isListedThread(rawThread, listingCapabilities)) continue;
-      const prior = previous.current.get(rawThread.id);
+      const prior = previous.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
       if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
         next.set(rawThread.id, prior);
@@ -455,15 +264,273 @@ function EnvironmentNotifications({
       next.set(thread.id, state);
       changed.push([prior, state]);
     }
-    previous.current = next;
-    pendingCompletions.retain(new Set(next.keys()));
+    entry.previous = next;
+    entry.gate.retain(new Set(next.keys()));
     for (const [prior, state] of changed) {
-      pendingCompletions.observe(state.thread.id, prior, state, {
+      entry.gate.observe(state.thread.id, prior, state, {
         archived: state.thread.archivedAt !== null,
         quiet: state.raw.latestRunStopRequested === true,
       });
     }
-  }, [environmentId, listingCapabilities, threads]);
+  };
 
-  return null;
+  const watchEnvironment = (environmentId: EnvironmentId): WatchedEnvironment => {
+    const entry: WatchedEnvironment = {
+      previous: new Map(),
+      threads: null,
+      projects: null,
+      unsubscribe: () => {},
+      gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
+        const state = entry.previous.get(threadId);
+        if (state) present(environmentId, state, kind, entry.projects);
+      }),
+    };
+    const unsubscribeShell = registry.subscribe(
+      environmentShell.stateValueAtom(environmentId),
+      (shell) => {
+        const snapshot =
+          shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value : null;
+        entry.threads = snapshot?.threads ?? null;
+        entry.projects = snapshot?.projects ?? null;
+        if (entry.threads !== null) {
+          observeThreads(environmentId, entry, entry.threads);
+          return;
+        }
+        entry.gate.clear();
+        entry.previous = new Map();
+      },
+      { immediate: true },
+    );
+    // Which threads alert depends on the server's listing capabilities.
+    const unsubscribeListing = registry.subscribe(
+      environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
+      () => {
+        if (entry.threads !== null) observeThreads(environmentId, entry, entry.threads);
+      },
+    );
+    entry.unsubscribe = () => {
+      unsubscribeShell();
+      unsubscribeListing();
+      entry.gate.clear();
+    };
+    return entry;
+  };
+
+  let stopSquireAlerts: (() => void) | null = null;
+  let stopAppStatuses: (() => void) | null = null;
+  const syncEnvironments = () => {
+    const { notificationMode, inAppNotificationsEnabled } = getClientSettings();
+    const enabled = notificationMode !== "off" || inAppNotificationsEnabled;
+    if (enabled) {
+      stopSquireAlerts ??= startSquireAlerts(registry, router, trackSquireNotification);
+      // Keeps app names loaded for the alert titles.
+      stopAppStatuses ??= registry.subscribe(readableAppStatusesAtom, () => {});
+    } else {
+      stopSquireAlerts?.();
+      stopAppStatuses?.();
+      stopSquireAlerts = null;
+      stopAppStatuses = null;
+    }
+    const environmentIds = enabled ? registry.get(environmentSummaries.environmentIdsAtom) : [];
+    const activeIds = new Set(environmentIds);
+    for (const [environmentId, entry] of watched) {
+      if (activeIds.has(environmentId)) continue;
+      entry.unsubscribe();
+      watched.delete(environmentId);
+    }
+    for (const environmentId of environmentIds) {
+      if (!watched.has(environmentId)) watched.set(environmentId, watchEnvironment(environmentId));
+    }
+  };
+
+  const pruneRemovedEnvironments = () => {
+    const activeIds = new Set(registry.get(environmentSummaries.environmentIdsAtom));
+    const count = pending.size;
+    for (const notifications of [pending, squirePending]) {
+      for (const [tag, entry] of notifications) {
+        if (activeIds.has(entry.environmentId)) continue;
+        entry.notification.close();
+        notifications.delete(tag);
+      }
+    }
+    if (count !== pending.size) setNotificationBadge(pending.size);
+  };
+
+  // Listeners that only exist for some notification modes, rebuilt when the mode changes.
+  let appliedMode: ClientSettings["notificationMode"] | null = null;
+  let stopModeListeners = () => {};
+  const applyMode = () => {
+    const nextMode = getClientSettings().notificationMode;
+    if (nextMode === appliedMode) return;
+    appliedMode = nextMode;
+    stopModeListeners();
+    clearPending();
+    const stops: Array<() => void> = [];
+    if (hasDesktopNotifications(nextMode)) {
+      const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear?.(clearPending);
+      window.addEventListener("focus", clearPending);
+      stops.push(() => {
+        unsubscribeBadgeClear?.();
+        window.removeEventListener("focus", clearPending);
+        clearPending();
+      });
+    }
+    if (hasNotificationSound(nextMode)) {
+      document.addEventListener("pointerdown", unlockNotificationAudio);
+      document.addEventListener("keydown", unlockNotificationAudio);
+      stops.push(() => {
+        document.removeEventListener("pointerdown", unlockNotificationAudio);
+        document.removeEventListener("keydown", unlockNotificationAudio);
+      });
+    }
+    stopModeListeners = () => {
+      for (const stop of stops) stop();
+    };
+  };
+
+  const onSettings = () => {
+    applyMode();
+    syncEnvironments();
+  };
+  const unsubscribeSettings = subscribeClientSettings(onSettings);
+  const unsubscribeEnvironmentIds = registry.subscribe(
+    environmentSummaries.environmentIdsAtom,
+    () => {
+      pruneRemovedEnvironments();
+      syncEnvironments();
+    },
+  );
+  onSettings();
+
+  return () => {
+    unsubscribeSettings();
+    unsubscribeEnvironmentIds();
+    for (const entry of watched.values()) entry.unsubscribe();
+    watched.clear();
+    stopSquireAlerts?.();
+    stopAppStatuses?.();
+    stopModeListeners();
+  };
+}
+
+/** One alert per `notification.pushed` intent; a question card writes none. */
+function startSquireAlerts(
+  registry: AtomRegistry.AtomRegistry,
+  router: AnyRouter,
+  trackNotification: (environmentId: EnvironmentId, notification: Notification) => void,
+): () => void {
+  let seenByEnvironment = new Map<EnvironmentId, ReadonlyMap<SquireId, number>>();
+
+  // Each shown alert is recorded once; the server ignores a repeat for the same card.
+  const alerted = (environmentId: EnvironmentId, intent: SquireNotificationIntent) => {
+    if (!registry.get(squireEnvironment.notificationAlerted.permissionAtom(environmentId))) return;
+    const pushedLog = squireEnvironment.actionLog({
+      environmentId,
+      input: { squireId: intent.squireId, kinds: ["notification.pushed"], limit: 20 },
+    });
+    void reportSquireAlert(intent, {
+      readLog: () =>
+        Effect.runPromise(
+          AtomRegistry.getResult(registry, pushedLog, { suspendOnWaiting: true }).pipe(
+            Effect.map((result) => result.entries),
+            Effect.timeout("10 seconds"),
+            Effect.orElseSucceed(() => null),
+          ),
+        ),
+      report: (cardId) =>
+        squireEnvironment.notificationAlerted.run(registry, {
+          environmentId,
+          input: {
+            requestId: randomUUID(),
+            squireId: intent.squireId,
+            cardId,
+            surface: "desktop",
+          },
+        }),
+    });
+  };
+
+  const presentSquire = (environmentId: EnvironmentId, intent: SquireNotificationIntent) => {
+    const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
+    const active = (router.state.matches.at(-1)?.params ?? {}) as {
+      environmentId?: string;
+      squireId?: string;
+    };
+    const open = () => {
+      void router.navigate({
+        to: "/squires/$environmentId/$squireId",
+        params: { environmentId, squireId: intent.squireId },
+      });
+    };
+    if (hasNotificationSound(mode)) {
+      void playNotificationSound("input", () =>
+        hasNotificationSound(getClientSettings().notificationMode),
+      );
+    }
+    if (
+      inAppNotificationsEnabled &&
+      document.visibilityState === "visible" &&
+      document.hasFocus() &&
+      (active.environmentId !== environmentId || active.squireId !== intent.squireId)
+    ) {
+      const toastId = toastManager.add({
+        type: "info",
+        title: intent.title,
+        description: intent.body,
+        data: {
+          hideCopyButton: true,
+          leadingIcon: <BellIcon aria-hidden className="size-4 text-info-foreground" />,
+        },
+        actionProps: {
+          children: "Open Squire",
+          onClick: () => {
+            toastManager.close(toastId);
+            open();
+          },
+        },
+      });
+      alerted(environmentId, intent);
+      return;
+    }
+    if (
+      !hasDesktopNotifications(mode) ||
+      (document.visibilityState === "visible" && document.hasFocus()) ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted"
+    )
+      return;
+    try {
+      const notification = new Notification(intent.title, {
+        body: intent.body,
+        tag: squireNotificationTag(environmentId, intent.squireId),
+        silent: true,
+      });
+      trackNotification(environmentId, notification);
+      alerted(environmentId, intent);
+      notification.addEventListener("click", () => {
+        notification.close();
+        window.focus();
+        open();
+      });
+    } catch {
+      // Some browsers expose Notification but reject desktop presentation.
+    }
+  };
+
+  return registry.subscribe(
+    readableSquireEnvironmentsAtom,
+    (environments) => {
+      const nextSeen = new Map<EnvironmentId, ReadonlyMap<SquireId, number>>();
+      for (const { environmentId, state } of environments) {
+        const { seen, intents } = squireNotificationIntents(
+          seenByEnvironment.get(environmentId) ?? null,
+          state,
+        );
+        nextSeen.set(environmentId, seen);
+        for (const intent of intents) presentSquire(environmentId, intent);
+      }
+      seenByEnvironment = nextSeen;
+    },
+    { immediate: true },
+  );
 }

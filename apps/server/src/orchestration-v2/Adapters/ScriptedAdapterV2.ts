@@ -382,8 +382,12 @@ export const makeScriptedAdapterV2 = Effect.fn("makeScriptedAdapterV2")(function
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver: SCRIPTED_PROVIDER,
-    getCapabilities: () => Effect.succeed(ScriptedProviderCapabilitiesV2),
-    planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    getCapabilities: Effect.fn("ScriptedAdapterV2.getCapabilities")(function () {
+      return Effect.succeed(ScriptedProviderCapabilitiesV2);
+    }),
+    planSelectionTransition: Effect.fn("ScriptedAdapterV2.planSelectionTransition")(function () {
+      return Effect.succeed(turnScopedSelectionTransition());
+    }),
     openSession: Effect.fn("ScriptedAdapterV2.openSession")(function* (
       input: ProviderAdapter.ProviderAdapterV2OpenSessionInput,
     ) {

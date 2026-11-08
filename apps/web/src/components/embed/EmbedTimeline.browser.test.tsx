@@ -186,7 +186,6 @@ async function renderTimeline(options: {
       contentInsetEndAdjustment={0}
       liveFollowEnabled
       onIsAtEndChange={() => {}}
-      onManualNavigation={() => {}}
       timelineEntries={turns(options.toolSource)}
     />
   );

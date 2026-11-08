@@ -12,7 +12,6 @@ import {
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 
@@ -73,8 +72,7 @@ const threadsLayer = Layer.mock(ThreadManagement.ThreadManagementService)({
 });
 
 const projectsLayer = Layer.mock(ProjectService.ProjectService)({
-  getShell: (projectId) =>
-    Effect.succeed(Option.some(projectShell(projectId, projectId === appProject))),
+  getShell: (projectId) => Effect.succeedSome(projectShell(projectId, projectId === appProject)),
 });
 
 const threadScope = (threadId: ThreadId): McpInvocationContext.McpInvocationScope => ({

@@ -51,7 +51,7 @@ it.effect(
           const result = yield* checkStaveWorktreeRpcOwnership(
             {
               list: Effect.succeed([ordinary, project]),
-              getActiveByWorkspaceRoot: () => Effect.succeed(Option.some(ordinary)),
+              getActiveByWorkspaceRoot: () => Effect.succeedSome(ordinary),
             },
             {
               check: (input) => {
@@ -123,7 +123,7 @@ it.effect(
       yield* checkStaveWorktreeRpcOwnership(
         {
           list: Effect.succeed([]),
-          getActiveByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getActiveByWorkspaceRoot: () => Effect.succeedNone,
         },
         admission,
         { operation: "pr.prepare", intent: "pr.prepare", cwd: unrelated },

@@ -5,7 +5,7 @@ import {
 import {
   audioMimeTypeFromExtension,
   mediaMimeTypeFromExtension,
-} from "@lecturn/shared/filePreview";
+} from "@lecturn/shared/mediaPreview";
 import { splitFilePathPosition } from "@lecturn/shared/fileLinks";
 import { parseMarkdownFileLink } from "@lecturn/shared/markdownLinks";
 import {

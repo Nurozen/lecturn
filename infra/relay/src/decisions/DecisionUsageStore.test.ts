@@ -184,10 +184,9 @@ describe.skipIf(!url)("Decisions usage PostgreSQL", () => {
             input,
             { ...input, principal: other, requestId: `${input.requestId}-b` },
           ];
-          const results = yield* Effect.all(
-            requests.map((x) => Effect.result(store.reserve(x))),
-            { concurrency: 2 },
-          );
+          const results = yield* Effect.forEach(requests, (x) => Effect.result(store.reserve(x)), {
+            concurrency: 2,
+          });
           expect(results.filter((x) => x._tag === "Success")).toHaveLength(1);
           const failed = results.find((x) => x._tag === "Failure");
           expect(failed?._tag === "Failure" ? failed.failure.code : null).toBe(
@@ -444,8 +443,9 @@ describe.skipIf(!url)("Decisions usage PostgreSQL", () => {
           ...config,
           globalExposureNanoUsd: current[0]!.exposure + 10_000_000,
         });
-        const results = yield* Effect.all(
-          [first.input, second.input].map((input) => Effect.result(capped.reserve(input))),
+        const results = yield* Effect.forEach(
+          [first.input, second.input],
+          (input) => Effect.result(capped.reserve(input)),
           { concurrency: 2 },
         );
         expect(results.filter((x) => x._tag === "Success")).toHaveLength(1);

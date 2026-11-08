@@ -453,16 +453,18 @@ const layerToolSource = Layer.effect(
   Effect.gen(function* () {
     const toolkit = yield* AppToolkit;
     return AppToolSource.of({
-      listFor: (scope) =>
-        toolkit.listFor(scope).pipe(
+      listFor: Effect.fn("AppToolSource.listFor")(function (scope) {
+        return toolkit.listFor(scope).pipe(
           Effect.map((tools) => tools.map((tool) => encodeTool(tool))),
           Effect.orDie,
-        ),
-      call: (scope, name, args, meta) =>
-        toolkit.call(scope, name, isRecord(args) ? args : {}, meta ?? {}).pipe(
+        );
+      }),
+      call: Effect.fn("AppToolSource.call")(function (scope, name, args, meta) {
+        return toolkit.call(scope, name, isRecord(args) ? args : {}, meta ?? {}).pipe(
           Effect.catch((error) => Effect.succeed(errorResult(error.message))),
           Effect.map((result) => encodeResult(result)),
-        ),
+        );
+      }),
     });
   }),
 );

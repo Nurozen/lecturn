@@ -502,12 +502,20 @@ const make = Effect.gen(function* () {
   const touch = Effect.flatMap(nowIso, (now) => touchUserActivity(repository, now));
 
   return SquireRules.of({
-    create: (input) => create(input).pipe(Effect.tap(() => touch)),
-    remove: (input) => remove(input).pipe(Effect.tap(() => touch)),
+    create: Effect.fn("SquireRules.create")(function (input) {
+      return create(input).pipe(Effect.tap(() => touch));
+    }),
+    remove: Effect.fn("SquireRules.remove")(function (input) {
+      return remove(input).pipe(Effect.tap(() => touch));
+    }),
     list,
     disableOutOfScope,
-    offerFor: (card) => offer(card, "allow"),
-    askFirstOfferFor: (card) => offer(card, "ask-first"),
+    offerFor: Effect.fn("SquireRules.offerFor")(function (card) {
+      return offer(card, "allow");
+    }),
+    askFirstOfferFor: Effect.fn("SquireRules.askFirstOfferFor")(function (card) {
+      return offer(card, "ask-first");
+    }),
     recordMatch,
   });
 });

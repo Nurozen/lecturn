@@ -39,7 +39,7 @@ vi.mock("./use-composer-drafts", async (importOriginal) => {
 });
 
 import { appAtomRegistry } from "./atom-registry";
-import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages-atom";
 import { pendingThreadCreationOutcomesAtom } from "./pending-thread-creation";
 import { clearThreadOutboxEnvironment, removeThreadOutboxMessage } from "./thread-outbox-removal";
 import type { QueuedThreadMessage } from "./thread-outbox-model";

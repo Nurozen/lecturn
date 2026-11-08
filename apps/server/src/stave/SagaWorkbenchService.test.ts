@@ -182,15 +182,13 @@ const harness = Effect.fn("harness")(function* (
     Layer.mock(StaveOrchestration)({
       getInferenceTurnPairs: () => Effect.succeed(turns),
       getThreadShellById: (id) =>
-        Effect.succeed(
-          Option.some(
-            [threadFor(identity.projectId), threadFor(memberIdentity.projectId)].find(
-              (thread) => thread.id === id,
-            ) ?? threadFor(identity.projectId),
-          ),
+        Effect.succeedSome(
+          [threadFor(identity.projectId), threadFor(memberIdentity.projectId)].find(
+            (thread) => thread.id === id,
+          ) ?? threadFor(identity.projectId),
         ),
       getProjectShellById: (id) =>
-        Effect.succeed(Option.some(id === memberIdentity.projectId ? memberProject : project)),
+        Effect.succeedSome(id === memberIdentity.projectId ? memberProject : project),
       getShellSnapshot: () =>
         Effect.succeed({
           snapshotSequence: 0,

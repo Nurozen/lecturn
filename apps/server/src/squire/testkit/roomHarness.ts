@@ -47,23 +47,26 @@ export interface RoomCast {
   readonly lead: { readonly squireId: SquireId; readonly homeThreadId: ThreadId };
 }
 
-const createThread = (threadId: ThreadId, projectId: ProjectId, title: string) =>
-  Effect.gen(function* () {
-    yield* (yield* Orchestrator.OrchestratorV2).dispatch({
-      type: "thread.create",
-      commandId: CommandId.make(`${threadId}:create`),
-      threadId,
-      projectId,
-      title,
-      modelSelection: scriptedModel,
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      branch: null,
-      worktreePath: null,
-      createdBy: "user",
-      creationSource: "web",
-    });
+const createThread = Effect.fn("createThread")(function* (
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: string,
+) {
+  yield* (yield* Orchestrator.OrchestratorV2).dispatch({
+    type: "thread.create",
+    commandId: CommandId.make(`${threadId}:create`),
+    threadId,
+    projectId,
+    title,
+    modelSelection: scriptedModel,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    createdBy: "user",
+    creationSource: "web",
   });
+});
 
 export interface RoomCastOptions extends Phase4Options {
   /** Permissions for both Squires (decoded with the contract defaults). */
@@ -73,118 +76,114 @@ export interface RoomCastOptions extends Phase4Options {
 }
 
 /** Runs `body` with the cast created, inside the real Squire stack. */
-export const withRoomCast = <A, E>(
+export const withRoomCast = Effect.fn("withRoomCast")(function* <A, E>(
   body: (cast: RoomCast) => Effect.Effect<A, E, Phase4Services | Scope.Scope>,
   options: RoomCastOptions = {},
-) =>
-  Effect.gen(function* () {
-    const { root, baseDir } = yield* tempRoot;
-    return yield* Effect.gen(function* () {
-      yield* seedProject(billing, initRepo(`${root}/billing-service`));
-      yield* seedProject(webApp, initRepo(`${root}/web-app`));
-      yield* createThread(invoiceThread, billing, "Fix invoice rounding");
-      yield* createThread(currencyThread, webApp, "Currency formatter");
-      const service = yield* need(SquireService.SquireService);
-      const make = (requestId: string, name: string, projectId: ProjectId) =>
-        service.create(
-          decodeCreateInput({
-            requestId,
-            homeProjectId: billing,
-            providerInstanceId: scripted,
-            modelSelection: scriptedModel,
-            name,
-            brief: `${name} brief`,
-            grants: [{ kind: "project", targetId: projectId }],
-            events: {},
-            permissions: options.squirePermissions ?? {},
-            budgets: {},
-          }),
-        );
-      const release = yield* make("release", "Release", billing);
-      const research = yield* make("research", "Research", webApp);
-      const lead = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
-      const leadRow = Option.getOrThrow(yield* service.get(lead.id));
-      if (options.leadManageSquires !== undefined) {
-        yield* service.update({
-          requestId: "lead-manage",
-          squireId: lead.id,
-          expectedRevision: leadRow.revision,
-          permissions: { ...leadRow.permissions, manageSquires: options.leadManageSquires },
-        });
-      }
-      return yield* body({
-        release: { squireId: release.id, homeThreadId: release.homeThreadId! },
-        research: { squireId: research.id, homeThreadId: research.homeThreadId! },
-        lead: { squireId: lead.id, homeThreadId: lead.homeThreadId! },
+) {
+  const { root, baseDir } = yield* tempRoot;
+  return yield* Effect.gen(function* () {
+    yield* seedProject(billing, initRepo(`${root}/billing-service`));
+    yield* seedProject(webApp, initRepo(`${root}/web-app`));
+    yield* createThread(invoiceThread, billing, "Fix invoice rounding");
+    yield* createThread(currencyThread, webApp, "Currency formatter");
+    const service = yield* need(SquireService.SquireService);
+    const make = (requestId: string, name: string, projectId: ProjectId) =>
+      service.create(
+        decodeCreateInput({
+          requestId,
+          homeProjectId: billing,
+          providerInstanceId: scripted,
+          modelSelection: scriptedModel,
+          name,
+          brief: `${name} brief`,
+          grants: [{ kind: "project", targetId: projectId }],
+          events: {},
+          permissions: options.squirePermissions ?? {},
+          budgets: {},
+        }),
+      );
+    const release = yield* make("release", "Release", billing);
+    const research = yield* make("research", "Research", webApp);
+    const lead = Option.getOrThrow(yield* service.ensureLead({ requestId: "lead" }));
+    const leadRow = Option.getOrThrow(yield* service.get(lead.id));
+    if (options.leadManageSquires !== undefined) {
+      yield* service.update({
+        requestId: "lead-manage",
+        squireId: lead.id,
+        expectedRevision: leadRow.revision,
+        permissions: { ...leadRow.permissions, manageSquires: options.leadManageSquires },
       });
-    }).pipe(Effect.scoped, Effect.provide(phase4Layer(baseDir, options)), Effect.orDie);
-  }).pipe(Effect.scoped);
+    }
+    return yield* body({
+      release: { squireId: release.id, homeThreadId: release.homeThreadId! },
+      research: { squireId: research.id, homeThreadId: research.homeThreadId! },
+      lead: { squireId: lead.id, homeThreadId: lead.homeThreadId! },
+    });
+  }).pipe(Effect.scoped, Effect.provide(phase4Layer(baseDir, options)), Effect.orDie);
+}, Effect.scoped);
 
 let userTurns = 0;
 /**
  * A run the user's own message starts on `who`'s home thread once any run
  * there has ended, so the tool calls that follow bind to it and act as `user`.
  */
-export const userTurn = (who: { readonly homeThreadId: ThreadId }) =>
-  Effect.gen(function* () {
-    const orchestrator = yield* need(Orchestrator.OrchestratorV2);
-    const worker = yield* need(EffectWorker.OrchestrationEffectWorkerV2);
-    const projections = yield* need(ProjectionStore.ProjectionStoreV2);
-    let afterSequence = 0;
-    for (;;) {
-      yield* worker.drain();
-      const shell = yield* projections.getThreadShell(who.homeThreadId);
-      if (shell?.activityRunStatus == null) break;
-      const next = yield* orchestrator
-        .streamStoredEventsFrom({
-          threadId: who.homeThreadId,
-          afterSequence,
-          eventType: "run.updated",
-        })
-        .pipe(Stream.runHead);
-      afterSequence = Option.getOrThrow(next).sequence;
-    }
-    const key = `user-turn-${++userTurns}`;
-    yield* orchestrator.dispatch({
-      type: "message.dispatch",
-      commandId: CommandId.make(`test:${key}`),
-      threadId: who.homeThreadId,
-      messageId: MessageId.make(`message:user:${key}`),
-      text: "Go ahead.",
-      attachments: [],
-      dispatchMode: { type: "start_immediately" },
-      createdBy: "user",
-      creationSource: "web",
-    });
+export const userTurn = Effect.fn("userTurn")(function* (who: { readonly homeThreadId: ThreadId }) {
+  const orchestrator = yield* need(Orchestrator.OrchestratorV2);
+  const worker = yield* need(EffectWorker.OrchestrationEffectWorkerV2);
+  const projections = yield* need(ProjectionStore.ProjectionStoreV2);
+  let afterSequence = 0;
+  for (;;) {
+    yield* worker.drain();
+    const shell = yield* projections.getThreadShell(who.homeThreadId);
+    if (shell?.activityRunStatus == null) break;
+    const next = yield* orchestrator
+      .streamStoredEventsFrom({
+        threadId: who.homeThreadId,
+        afterSequence,
+        eventType: "run.updated",
+      })
+      .pipe(Stream.runHead);
+    afterSequence = Option.getOrThrow(next).sequence;
+  }
+  const key = `user-turn-${++userTurns}`;
+  yield* orchestrator.dispatch({
+    type: "message.dispatch",
+    commandId: CommandId.make(`test:${key}`),
+    threadId: who.homeThreadId,
+    messageId: MessageId.make(`message:user:${key}`),
+    text: "Go ahead.",
+    attachments: [],
+    dispatchMode: { type: "start_immediately" },
+    createdBy: "user",
+    creationSource: "web",
   });
+});
 
 /**
  * A tool call as `who`, in its home thread's current run; with no run at all
  * the call's origin is `unknown`, so start one with `userTurn` first.
  */
-export const callTool = (
+export const callTool = Effect.fn("callTool")(function* (
   who: { readonly squireId: SquireId; readonly homeThreadId: ThreadId },
   role: SquireRole,
   tool: string,
   args: Record<string, unknown>,
-) =>
-  Effect.gen(function* () {
-    const tools = yield* need(SquireTools.SquireTools);
-    return yield* tools.call(
-      { squireId: who.squireId, role, threadId: who.homeThreadId },
-      tool,
-      args,
-    );
-  });
+) {
+  const tools = yield* need(SquireTools.SquireTools);
+  return yield* tools.call(
+    { squireId: who.squireId, role, threadId: who.homeThreadId },
+    tool,
+    args,
+  );
+});
 
 /** Delivers whatever is ready for the Squire and drains the effect worker. */
-export const deliver = (squireId: SquireId) =>
-  Effect.gen(function* () {
-    const delivery = yield* need(SquireDelivery.SquireDelivery);
-    yield* delivery.deliverReady(squireId);
-    yield* delivery.drain;
-    yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
-  });
+export const deliver = Effect.fn("deliver")(function* (squireId: SquireId) {
+  const delivery = yield* need(SquireDelivery.SquireDelivery);
+  yield* delivery.deliverReady(squireId);
+  yield* delivery.drain;
+  yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+});
 
 const ROUTED_TO_NOBODY = '{"via":{"kind":"rule","rule":"none","match":""},"recipients":[]}';
 
@@ -192,57 +191,56 @@ const ROUTED_TO_NOBODY = '{"via":{"kind":"rule","rule":"none","match":""},"recip
  * An open room of Release and Research holding one post by `author` at
  * `hop`, seeded straight into the store with every cursor at 0.
  */
-export const seedBotPost = (
+export const seedBotPost = Effect.fn("seedBotPost")(function* (
   cast: RoomCast,
   input: { readonly author: SquireId; readonly hop: number; readonly body?: string },
-) =>
-  Effect.gen(function* () {
-    const repository = yield* need(SquireRepository.SquireRepository);
-    const store = yield* need(SquireRoomStore.SquireRoomStore);
-    const now = DateTime.formatIso(yield* DateTime.now);
-    const roomId = SquireRoomId.make("room:bot-post");
-    yield* repository.transaction(
-      Effect.gen(function* () {
-        yield* store.insertRoom({
-          id: roomId,
-          topic: "Invoice rounding",
-          about_json: "[]",
-          status: "open",
-          muted: 0,
-          bot_messaging: "on",
-          idle_ttl_seconds: 86_400,
-          creator_kind: "user",
-          proposal_event_id: null,
-          last_post_at: now,
-          closed_reason: null,
-          create_request_id: "seed-bot-post",
-          revision: 0,
-          created_at: now,
-          updated_at: now,
-        });
-        for (const member of [cast.release.squireId, cast.research.squireId]) {
-          yield* store.addMember({
-            room_id: roomId,
-            member_kind: "squire",
-            member_id: member,
-            read_cursor: 0,
-            user_seen_cursor: null,
-          });
-        }
-        yield* store.insertPost({
-          message_key: "seed-bot-post",
+) {
+  const repository = yield* need(SquireRepository.SquireRepository);
+  const store = yield* need(SquireRoomStore.SquireRoomStore);
+  const now = DateTime.formatIso(yield* DateTime.now);
+  const roomId = SquireRoomId.make("room:bot-post");
+  yield* repository.transaction(
+    Effect.gen(function* () {
+      yield* store.insertRoom({
+        id: roomId,
+        topic: "Invoice rounding",
+        about_json: "[]",
+        status: "open",
+        muted: 0,
+        bot_messaging: "on",
+        idle_ttl_seconds: 86_400,
+        creator_kind: "user",
+        proposal_event_id: null,
+        last_post_at: now,
+        closed_reason: null,
+        create_request_id: "seed-bot-post",
+        revision: 0,
+        created_at: now,
+        updated_at: now,
+      });
+      for (const member of [cast.release.squireId, cast.research.squireId]) {
+        yield* store.addMember({
           room_id: roomId,
-          author_kind: "squire",
-          author_id: input.author,
-          body: input.body ?? "Rerun the checks on Auto, it is safe.",
-          reply_to: null,
-          refs_json: "[]",
-          hop: input.hop,
-          routing_json: ROUTED_TO_NOBODY,
-          rerouted_from: null,
-          created_at: now,
+          member_kind: "squire",
+          member_id: member,
+          read_cursor: 0,
+          user_seen_cursor: null,
         });
-      }),
-    );
-    return roomId;
-  });
+      }
+      yield* store.insertPost({
+        message_key: "seed-bot-post",
+        room_id: roomId,
+        author_kind: "squire",
+        author_id: input.author,
+        body: input.body ?? "Rerun the checks on Auto, it is safe.",
+        reply_to: null,
+        refs_json: "[]",
+        hop: input.hop,
+        routing_json: ROUTED_TO_NOBODY,
+        rerouted_from: null,
+        created_at: now,
+      });
+    }),
+  );
+  return roomId;
+});

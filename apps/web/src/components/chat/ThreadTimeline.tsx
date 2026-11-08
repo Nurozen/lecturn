@@ -83,5 +83,11 @@ export function ThreadTimeline({
           },
   });
   const shownEntries = useComposerCardTimelineEntries(displayed.entries, composerCardApprovals);
-  return <MessagesTimeline {...timelineProps} timelineEntries={shownEntries} />;
+  return (
+    <MessagesTimeline
+      {...timelineProps}
+      detailLoading={detailLoading}
+      timelineEntries={shownEntries}
+    />
+  );
 }

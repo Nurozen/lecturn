@@ -16,7 +16,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
-/** Features that are still settling in. Each is off until turned on here. */
+/** Features that are still settling in. The new design is off until turned on here. */
 export function BetaSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -25,7 +25,7 @@ export function BetaSettingsPanel() {
       <SettingsSection id="beta" title="Beta">
         <SettingsRow
           {...searchableSetting("new-design")}
-          description="Try the quieter design: gray sidebar icons, dimmer read threads, and simpler composer controls."
+          description="Try the new design: a true black dark mode, dimmer read threads, and simpler composer controls."
           resetAction={
             settings.redesignEnabled !== DEFAULT_UNIFIED_SETTINGS.redesignEnabled ? (
               <SettingResetButton

@@ -38,6 +38,7 @@ const fail = (message: string) => new TeamError({ code: "conflict", message });
 const unavailable = () =>
   new TeamError({ code: "unavailable", message: "Team billing is temporarily unavailable" });
 const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
+const encodeJsonText = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 export interface TeamBillingRepository {
   acquire(org: string, time: number): Effect.Effect<BillingTeam, TeamError>;
   save(account: BillingTeam, time: number): Effect.Effect<void, TeamError>;
@@ -65,7 +66,7 @@ export const makeTeamBillingRepository = Effect.gen(function* () {
     }),
     save: Effect.fn("TeamBilling.save")(function* (a: BillingTeam, time: number) {
       const rows = yield* query(
-        sql`UPDATE relay_team_accounts SET customer_id=${a.customer_id},subscription_id=${a.subscription_id},purchased_seats=${a.purchased_seats},access_until=${a.access_until},access_window_start=${a.access_window_start},current_period_end=${a.current_period_end},interval=${a.interval},pending_seats=${a.pending_seats},billing_state=${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(a.billing_state).pipe(Effect.mapError(unavailable))}::jsonb,suspended=${a.suspended},status=${a.status},updated_at=${time} WHERE organization_id=${a.organization_id} AND generation=${a.generation} AND billing_lease_owner=${a.billing_lease_owner} AND billing_lease_expires_at>${time} RETURNING organization_id`,
+        sql`UPDATE relay_team_accounts SET customer_id=${a.customer_id},subscription_id=${a.subscription_id},purchased_seats=${a.purchased_seats},access_until=${a.access_until},access_window_start=${a.access_window_start},current_period_end=${a.current_period_end},interval=${a.interval},pending_seats=${a.pending_seats},billing_state=${yield* encodeJsonText(a.billing_state).pipe(Effect.mapError(unavailable))}::jsonb,suspended=${a.suspended},status=${a.status},updated_at=${time} WHERE organization_id=${a.organization_id} AND generation=${a.generation} AND billing_lease_owner=${a.billing_lease_owner} AND billing_lease_expires_at>${time} RETURNING organization_id`,
       );
       if (!rows.length) return yield* fail("Team changed; refresh before continuing");
     }),

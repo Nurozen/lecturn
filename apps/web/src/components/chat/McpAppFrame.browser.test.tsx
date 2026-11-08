@@ -100,18 +100,22 @@ const SHOWCASE_HTML = showcaseTemplate.replace(
 );
 let appHtml = APP_HTML;
 
-vi.mock(import("../../assets/assetUrls"), async (original) => ({
+vi.mock(import("../../assets/longLivedAssetUrls"), async (original) => ({
   ...(await original()),
-  useAssetUrlState: (() => ({
+  useLongLivedAssetUrl: (() => ({
     _tag: "Success",
     url: `data:text/html,${encodeURIComponent(appHtml)}`,
     expiresAt: Date.now() + 60 * 60_000,
   })) as never,
-  useAssetUrlRefresh: (() => async () => null) as never,
 }));
 vi.mock(import("../../state/queries"), async (original) => ({
   ...(await original()),
   useTurnItemDetail: (() => ({ data: undefined })) as never,
+}));
+// The tool definition query would discover a real environment; the app gets no definition.
+vi.mock(import("../../state/query"), async (original) => ({
+  ...(await original()),
+  useEnvironmentQuery: (() => ({ data: null, error: null })) as never,
 }));
 vi.mock(import("../../state/use-atom-command"), async (original) => ({
   ...(await original()),
@@ -131,7 +135,8 @@ const idlePage = () =>
   vi.waitFor(() => expect(navigator.userActivation.isActive).toBe(false), { timeout: 10_000 });
 
 function setup() {
-  let skew = 0;
+  // The host notes the activation the page had when its module loaded; start past it.
+  let skew = 5_000;
   appHtml = APP_HTML;
   // Advance the host cooldown without manufacturing browser user activation.
   const now = performance.now.bind(performance);

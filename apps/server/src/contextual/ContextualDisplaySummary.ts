@@ -104,7 +104,7 @@ export const make = Effect.gen(function* () {
     yield* generate(receipt).pipe(
       permits.withPermits(1),
       // Optional presentation must never fail delivery or retain source-bearing errors.
-      Effect.catchCause(() => Effect.void),
+      Effect.ignoreCause,
       Effect.ensuring(
         Effect.sync(() => active.delete(packetId)).pipe(
           Effect.andThen(Deferred.succeed(done, undefined)),

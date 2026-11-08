@@ -54,7 +54,7 @@ export function useAgentNotificationNavigation(pathname: string): void {
 
   useEffect(() => {
     if (!accountsReady || !catalog.isReady) return;
-    for (const account of appAtomRegistry.get(knownConnectAccountsAtom)) {
+    for (const account of accounts) {
       if (account.signedIn) requestedSignIns.current.delete(account.accountId);
     }
     const handleResponse = (response: unknown, retain = true) => {

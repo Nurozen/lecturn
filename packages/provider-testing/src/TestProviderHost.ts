@@ -56,15 +56,19 @@ export const layer = (
           changes: Stream.empty,
           subscribe: Effect.succeed(Stream.empty),
         },
-        shouldRunBackgroundWork: () => Effect.succeed(options.runBackgroundWork ?? true),
+        shouldRunBackgroundWork: Effect.fn("ProviderHost.shouldRunBackgroundWork")(function () {
+          return Effect.succeed(options.runBackgroundWork ?? true);
+        }),
         resolveAttachmentPath: (attachment) => path.join(attachmentsDir, attachment.id),
         // Tests run with the environment they were started in.
         shellEnvironment: {
           status: () => "ready",
-          await: () => Effect.succeed({ status: "ready" }),
+          await: Effect.fn("ProviderHost.shellEnvironment.await")(function () {
+            return Effect.succeed({ status: "ready" as const });
+          }),
         },
-        credentials: (namespace, bindingId) =>
-          Effect.sync(() => {
+        credentials: Effect.fn("ProviderHost.credentials")(function (namespace, bindingId) {
+          return Effect.sync(() => {
             const key = `${namespace}:${bindingId}`;
             return {
               binding: { owner: "lecturn" as const, key },
@@ -72,7 +76,8 @@ export const layer = (
               set: (value: Uint8Array) => Effect.sync(() => void credentials.set(key, value)),
               remove: Effect.sync(() => void credentials.delete(key)),
             };
-          }),
+          });
+        }),
       });
       return Context.make(ProviderHost.ProviderHost, host).pipe(
         Context.add(TestProviderHostSettings, {

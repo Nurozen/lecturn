@@ -22,7 +22,7 @@ const safeStorageLayer = Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, 
   isEncryptionAvailable: Effect.succeed(true),
   encryptString: (value) => Effect.succeed(textEncoder.encode(`encrypted:${value}`)),
   decryptString: (value) => Effect.succeed(textDecoder.decode(value).slice("encrypted:".length)),
-  selectedStorageBackend: Effect.succeed(Option.none()),
+  selectedStorageBackend: Effect.succeedNone,
 } satisfies ElectronSafeStorage.ElectronSafeStorage["Service"]);
 
 // Each call builds a fresh store, which stands in for a new desktop process.

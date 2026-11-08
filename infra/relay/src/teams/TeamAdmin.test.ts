@@ -4,6 +4,9 @@ import { Effect } from "effect";
 import { TeamError, type TeamAccount, type TeamStore } from "./TeamStore.ts";
 import type { TeamDirectory } from "./TeamDirectory.ts";
 import { makeTeamAdmin } from "./TeamAdmin.ts";
+
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - These optional results require undefined, not the wider void type.
+const succeedUndefined = Effect.succeed(undefined);
 const account: TeamAccount = {
   organization_id: "org_team",
   owner_user_id: "owner",
@@ -78,7 +81,7 @@ function fixture() {
       ]),
     ),
     history: vi.fn(() => Effect.succeed([])),
-    assignSeat: vi.fn(() => Effect.succeed(undefined)),
+    assignSeat: vi.fn(() => succeedUndefined),
     revokeSeat: vi.fn(() =>
       Effect.sync(() => {
         events.push("seat.revoke");
@@ -86,10 +89,10 @@ function fixture() {
       }),
     ),
     updatePolicy: vi.fn(() => Effect.void),
-    funding: vi.fn(() => Effect.succeed(undefined)),
-    access: vi.fn(() => Effect.succeed(undefined)),
-    bindEnvironment: vi.fn(() => Effect.succeed(undefined)),
-    unbindEnvironment: vi.fn(() => Effect.succeed(undefined)),
+    funding: vi.fn(() => succeedUndefined),
+    access: vi.fn(() => succeedUndefined),
+    bindEnvironment: vi.fn(() => succeedUndefined),
+    unbindEnvironment: vi.fn(() => succeedUndefined),
   } satisfies TeamStore["Service"];
   return {
     store,

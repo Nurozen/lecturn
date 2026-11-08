@@ -499,11 +499,22 @@ export function getReadyReviewCheckpoints(
   );
 }
 
+export function reviewTurnDiffsBySectionId(
+  checkpoints: ReadonlyArray<Pick<ThreadCheckpointSummary, "checkpointTurnCount">>,
+  diffByTurnCount: Readonly<Record<number, string | undefined>>,
+): Readonly<Record<string, string | undefined>> {
+  return Object.fromEntries(
+    checkpoints.map((checkpoint) => [
+      getReviewSectionIdForCheckpoint(checkpoint),
+      diffByTurnCount[checkpoint.checkpointTurnCount],
+    ]),
+  );
+}
+
 export function buildReviewSectionItems(input: {
   readonly checkpoints: ReadonlyArray<ThreadCheckpointSummary>;
   readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
   readonly turnDiffById: Readonly<Record<string, string | undefined>>;
-  readonly loadingTurnIds: Readonly<Record<string, boolean | undefined>>;
   readonly loadingGitSections: boolean;
   /** Scopes inline comments as well as review UI state to a Stave checkout. */
   readonly gitCwd?: string;
@@ -517,7 +528,7 @@ export function buildReviewSectionItems(input: {
         title: checkpointTitle(checkpoint),
         subtitle: checkpointSubtitle(checkpoint),
         diff: input.turnDiffById[id] ?? null,
-        isLoading: input.loadingTurnIds[id] === true,
+        isLoading: false,
       };
     },
   );
@@ -564,6 +575,20 @@ export function getDefaultReviewSectionId(
   sections: ReadonlyArray<ReviewSectionItem>,
 ): string | null {
   return (sections.find((section) => section.kind === "branch-range") ?? sections[0])?.id ?? null;
+}
+
+/**
+ * The store holds only the user's pick. While that section is missing (still loading, or the
+ * working tree went clean) the default shows, and the pick returns once the section does: the
+ * thread-feed entry relies on this, as it selects a section before the sections have loaded.
+ */
+export function resolveReviewSelectedSectionId(
+  sections: ReadonlyArray<ReviewSectionItem>,
+  storedSectionId: string | null,
+): string | null {
+  return storedSectionId !== null && sections.some((section) => section.id === storedSectionId)
+    ? storedSectionId
+    : getDefaultReviewSectionId(sections);
 }
 
 export function buildReviewParsedDiff(

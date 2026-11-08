@@ -68,9 +68,7 @@ export const ManagedGatewayLive = ManagedGateway.make(
           const webRequest = yield* HttpServerRequest.toWeb(request);
           return gatewayHttpResponse(yield* Effect.promise(() => gateway.fetch(webRequest)));
         }).pipe(
-          Effect.catch(() =>
-            Effect.succeed(HttpServerResponse.text("Invalid request", { status: 400 })),
-          ),
+          Effect.orElseSucceed(() => HttpServerResponse.text("Invalid request", { status: 400 })),
         ),
       };
     });

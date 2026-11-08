@@ -79,6 +79,12 @@ import {
   type ThreadStatusLabel,
 } from "./thread-status-badge";
 
+const TITLE_FAVICON_SIZE = 15;
+// Centers the favicon on the first line of the text-base title.
+const TITLE_FAVICON_OFFSET = 4;
+// Lines below the title start where the title text does.
+const TITLE_TEXT_INSET = TITLE_FAVICON_SIZE + 8;
+
 const WOKE_STATUS_LABEL: ThreadStatusLabel = {
   label: "Woke",
   icon: "bell.badge",
@@ -496,7 +502,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
   readonly project: EnvironmentProject | null;
-  readonly projectTitle?: string;
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
   readonly providerInstance: ThreadRowProviderInstance | null;
   readonly environmentLabel: string | null;
@@ -664,6 +669,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const canUnsettle = variant === "slim";
   // Keep time in state; cached render-time reads freeze the gate and trigger 50ms expiry loops.
   const [snoozeGateClock, setSnoozeGateClock] = useState(() => ({ thread, now: Date.now() }));
+  // oxlint-disable-next-line react/purity -- Reseeds the snooze gate clock only in the render-phase adjustment that runs when the thread changes.
   if (snoozeGateClock.thread !== thread) setSnoozeGateClock({ thread, now: Date.now() });
   const snoozeGateNow = new Date(snoozeGateClock.now).toISOString();
   const snoozeGateExpiryMs = props.snoozeSupported
@@ -685,7 +691,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     snoozed: snoozedRow,
   });
   const snoozePresets = useMemo(
+    // oxlint-disable-next-line react/purity -- The memo recomputes on the snoozePresetMinute tick, so preset times refresh every minute.
     () => (swipeActions.secondary === "snooze" ? resolveSnoozePresets(new Date()) : ([] as const)),
+    // oxlint-disable-next-line react/memo-dependencies -- The minute tick refreshes relative snooze times while the row remains mounted.
     [props.snoozePresetMinute, swipeActions.secondary],
   );
   const snoozePresetActions = useMemo<MenuAction[]>(
@@ -732,7 +740,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       props.reorderSupported,
       props.pinningSupported,
       thread.pinnedAt,
-      variant,
     ],
   );
   const autoSettleMenuItems = useMemo<MenuAction[]>(
@@ -972,72 +979,70 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
   // Selection has its own solid marker; status and PR colors retain their meaning.
+  // The title keeps the full row width; status sits on the line below it.
+  const titleTextInset = props.project && !props.nested ? TITLE_TEXT_INSET : 0;
   const cardContent = (
     <>
-      <View className="flex-row items-center gap-1.5">
+      <View className="flex-row items-start gap-2">
         {props.project && !props.nested ? (
-          <ProjectFavicon
-            environmentId={thread.environmentId}
-            faviconPath={props.project.faviconPath}
-            projectIcon={props.project.projectIcon}
-            size={15}
-            projectTitle={props.project.title}
-            workspaceRoot={props.project.workspaceRoot}
-          />
+          <View style={{ marginTop: TITLE_FAVICON_OFFSET }}>
+            <ProjectFavicon
+              environmentId={thread.environmentId}
+              faviconPath={props.project.faviconPath}
+              projectIcon={props.project.projectIcon}
+              size={TITLE_FAVICON_SIZE}
+              projectTitle={props.project.title}
+              workspaceRoot={props.project.workspaceRoot}
+            />
+          </View>
         ) : null}
         <Text
-          className="flex-1 text-sm font-lecturn-medium text-foreground-muted"
-          numberOfLines={1}
-        >
-          {props.nested ? thread.title : (props.projectTitle ?? props.project?.title ?? "")}
-        </Text>
-        {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-        {pinnedRow ? (
-          <SymbolView
-            name="pin"
-            size={11}
-            tintColorClassName="accent-foreground-muted"
-            type="monochrome"
-          />
-        ) : null}
-        {showsWoke ? (
-          <Pressable
-            className="-m-2.5 p-2.5"
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss Woke notification"
-            onPress={handleAcknowledgeWoke}
-            onLongPress={() => undefined}
-            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-          >
-            <ThreadStatusBadge label={WOKE_STATUS_LABEL} />
-          </Pressable>
-        ) : visibleStatusLabel ? (
-          <ThreadStatusBadge
-            label={visibleStatusLabel}
-            detail={
-              status === "waiting" ? (
-                <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
-              ) : null
-            }
-          />
-        ) : (
-          <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
-        )}
-      </View>
-      {!props.nested ? (
-        <Text
-          className={cn("mt-1 text-base text-foreground", !recede && "font-lecturn-medium")}
+          className={cn("flex-1 text-base text-foreground", !recede && "font-lecturn-medium")}
           numberOfLines={2}
         >
           {thread.title}
         </Text>
-      ) : null}
+      </View>
       {props.searchMatch ? (
-        <View className="mt-1">
+        <View className="mt-1" style={{ paddingLeft: titleTextInset }}>
           <ThreadSearchMatchExcerpt match={props.searchMatch} query={props.searchQuery ?? ""} />
         </View>
       ) : null}
-      <View className="mt-1 flex-row items-center gap-2">
+      <View className="mt-1 flex-row items-center gap-2" style={{ paddingLeft: titleTextInset }}>
+        <View className="flex-row items-center gap-1.5">
+          {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+          {pinnedRow ? (
+            <SymbolView
+              name="pin"
+              size={11}
+              tintColorClassName="accent-foreground-muted"
+              type="monochrome"
+            />
+          ) : null}
+          {showsWoke ? (
+            <Pressable
+              className="-m-2.5 p-2.5"
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss Woke notification"
+              onPress={handleAcknowledgeWoke}
+              onLongPress={() => undefined}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+            >
+              <ThreadStatusBadge label={WOKE_STATUS_LABEL} />
+            </Pressable>
+          ) : visibleStatusLabel ? (
+            <ThreadStatusBadge
+              label={visibleStatusLabel}
+              detail={
+                status === "waiting" ? (
+                  <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
+                ) : null
+              }
+            />
+          ) : (
+            <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
+          )}
+        </View>
         {(status === "failed" || status === "limited") && thread.runtime?.lastError ? (
           <Text
             className={cn(
@@ -1052,27 +1057,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           >
             {thread.runtime.lastError}
           </Text>
-        ) : thread.branch || props.environmentLabel ? (
+        ) : props.environmentLabel ? (
           <View className="min-w-0 flex-1 flex-row items-center gap-1">
-            <Text className="shrink text-xs text-foreground-muted" numberOfLines={1}>
-              {thread.branch ? (
-                <Text className="text-xs text-foreground-muted" style={{ fontFamily: MONO_FONT }}>
-                  {thread.branch}
-                </Text>
-              ) : null}
-              {thread.branch && props.environmentLabel ? "  ·  " : null}
-              {props.environmentLabel ? (
-                <Text
-                  className={cn(
-                    "text-xs",
-                    selected ? "text-foreground-muted" : "text-foreground-tertiary",
-                  )}
-                >
-                  {props.environmentLabel}
-                </Text>
-              ) : null}
-            </Text>
-            {props.environmentLabel && props.environmentMachine ? (
+            {props.environmentMachine ? (
               <EnvironmentMachineSymbol
                 kind={props.environmentMachine}
                 size={11}
@@ -1081,6 +1068,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 }
               />
             ) : null}
+            <Text
+              className={cn(
+                "shrink text-xs",
+                selected ? "text-foreground-muted" : "text-foreground-tertiary",
+              )}
+              numberOfLines={1}
+            >
+              {props.environmentLabel}
+            </Text>
           </View>
         ) : (
           <View className="flex-1" />
@@ -1127,11 +1123,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : null}
         {providerInstance ? (
           <View className="flex-row items-center">
-            {providerDrivers.slice(0, -1).map((driver, index) => (
-              <View key={`${driver}:${index}`} className="-mr-1 opacity-30">
-                <ProviderIcon provider={driver} size={12} />
-              </View>
-            ))}
+            {providerDrivers.slice(0, -1).map(
+              (driver, index) => (
+                /* oxlint-disable react/no-array-index-key -- Provider history can repeat a driver; these decorative icons have no local state. */ <View
+                  key={`${driver}:${index}`}
+                  className="-mr-1 opacity-30"
+                >
+                  <ProviderIcon provider={driver} size={12} />
+                </View>
+              ) /* oxlint-enable react/no-array-index-key */,
+            )}
             <ProviderInstanceIcon
               iconUrl={providerIconUrl}
               provider={providerInstance.driverKind}

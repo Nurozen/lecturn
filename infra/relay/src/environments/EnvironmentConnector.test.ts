@@ -49,6 +49,7 @@ const decodeHealthRequestBody = Schema.decodeUnknownSync(
 const decodeMintRequestBody = Schema.decodeUnknownSync(
   Schema.fromJsonString(RelayCloudMintCredentialRequest),
 );
+const decodeJsonText = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 const isEnvironmentConnectNotAuthorized = Schema.is(
   EnvironmentConnector.EnvironmentConnectNotAuthorized,
 );
@@ -86,11 +87,10 @@ function signTestJwt(payload: object, typ: string, privateKey: string): string {
 // Model an independently deployed host: do not import the relay's protocol constants here.
 function verifyHostRequest(proof: string, typ: string): void {
   const [header, payload, signature] = proof.split(".");
-  expect(
-    Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
-      Buffer.from(header!, "base64url").toString(),
-    ),
-  ).toEqual({ alg: "EdDSA", typ });
+  expect(decodeJsonText(Buffer.from(header!, "base64url").toString())).toEqual({
+    alg: "EdDSA",
+    typ,
+  });
   expect(
     NodeCrypto.verify(
       null,

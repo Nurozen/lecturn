@@ -4,50 +4,62 @@ import {
   EMPTY_TERMINAL_BUFFER_STATE,
   type TerminalBufferState,
 } from "@lecturn/client-runtime/state/terminal";
+import * as Cause from "effect/Cause";
+import { AsyncResult, type Atom, AtomRegistry } from "effect/reactivity";
 
-const query = vi.hoisted(() => ({
-  attach: { data: null as unknown, error: null as string | null },
-}));
-vi.mock(import("./terminal"), async (original) => ({
-  ...(await original()),
-  terminalEnvironment: { attach: () => "attach", metadata: () => "metadata" } as never,
-}));
-vi.mock(import("./session"), async (original) => ({
-  ...(await original()),
-  useEnvironmentScope: () => true,
-}));
-vi.mock(import("./query"), async (original) => ({
-  ...(await original()),
-  useEnvironmentQuery: ((kind: string) =>
-    kind === "attach" ? query.attach : { data: null, error: null }) as never,
-}));
-
-import { render } from "../../test/render";
-import { useAttachedTerminalSession } from "./terminalSessions";
-
-function Fixture() {
-  const state = useAttachedTerminalSession({
-    environmentId: EnvironmentId.make("synthetic-phone"),
-    terminal: { threadId: ThreadId.make("synthetic-auth"), terminalId: "auth", cwd: "/synthetic" },
-  });
-  return <output>{state.status}</output>;
-}
-it("does not report a live auth PTY closed while its reconnect snapshot is pending", async () => {
-  await using screen = await render(<Fixture />);
-  const status = () => screen.container.textContent;
-  expect(status()).toBe("starting");
-  const update = async (state: TerminalBufferState | null, error: string | null = null) => {
-    query.attach = { data: state, error };
-    await screen.rerender(<Fixture />);
+const attach = vi.hoisted(() => ({ atom: null as unknown }));
+vi.mock("./terminal", async () => {
+  const { AsyncResult, Atom } = await import("effect/reactivity");
+  const attachAtom = Atom.make(AsyncResult.initial(true));
+  attach.atom = attachAtom;
+  return {
+    terminalEnvironment: {
+      attach: () => attachAtom,
+      metadata: () => Atom.make(AsyncResult.initial(true)),
+    },
   };
-  await update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 1, status: "running" });
-  expect(status()).toBe("running");
-  await update(null, "Synthetic disconnect");
-  expect(status()).toBe("error");
-  await update(EMPTY_TERMINAL_BUFFER_STATE);
+});
+vi.mock("./session", async () => {
+  const { AsyncResult, Atom } = await import("effect/reactivity");
+  const granted = Atom.make(AsyncResult.success({}));
+  return {
+    environmentSession: { sessionStateAtom: () => granted },
+    sessionHasScope: () => true,
+    useEnvironmentScope: () => true,
+  };
+});
+
+import { attachedTerminalSessionAtom } from "./terminalSessions";
+
+it("does not report a live auth PTY closed while its reconnect snapshot is pending", () => {
+  const registry = AtomRegistry.make();
+  const session = attachedTerminalSessionAtom(EnvironmentId.make("synthetic-phone"), {
+    threadId: ThreadId.make("synthetic-auth"),
+    terminalId: "auth",
+    cwd: "/synthetic",
+  });
+  const unmount = registry.mount(session);
+  const attachAtom = attach.atom as Atom.Writable<
+    AsyncResult.AsyncResult<TerminalBufferState, string>
+  >;
+  const status = () => registry.get(session).status;
+  const update = (state: TerminalBufferState | null) =>
+    registry.set(
+      attachAtom,
+      state === null
+        ? AsyncResult.failure(Cause.fail("Synthetic disconnect"))
+        : AsyncResult.success(state),
+    );
   expect(status()).toBe("starting");
-  await update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 1, status: "running" });
+  update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 1, status: "running" });
   expect(status()).toBe("running");
-  await update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 2, status: "closed" });
+  update(null);
+  expect(status()).toBe("error");
+  update(EMPTY_TERMINAL_BUFFER_STATE);
+  expect(status()).toBe("starting");
+  update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 1, status: "running" });
+  expect(status()).toBe("running");
+  update({ ...EMPTY_TERMINAL_BUFFER_STATE, version: 2, status: "closed" });
   expect(status()).toBe("closed");
+  unmount();
 });

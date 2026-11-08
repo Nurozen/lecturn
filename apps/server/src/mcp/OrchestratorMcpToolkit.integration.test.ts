@@ -222,7 +222,7 @@ describe("orchestrator MCP toolkit", () => {
           Layer.provide(layerUnusedScheduledTaskStub),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
-              getShell: () => Effect.succeed(Option.none()),
+              getShell: () => Effect.succeedNone,
             }),
           ),
           Layer.provideMerge(

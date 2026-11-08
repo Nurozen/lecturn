@@ -12,7 +12,6 @@ import {
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "vite-plus/test";
@@ -161,7 +160,7 @@ it("readThread prefers activity-run status over a newer cancelled queued run", a
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry.ProviderRegistry["Service"]>),
         Layer.mock(ProjectService.ProjectService)({
-          getShell: () => Effect.succeed(Option.none()),
+          getShell: () => Effect.succeedNone,
         }),
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({
@@ -278,7 +277,7 @@ it("taskStatus returns task.providerInstanceId rather than the driver kind", asy
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry.ProviderRegistry["Service"]>),
         Layer.mock(ProjectService.ProjectService)({
-          getShell: () => Effect.succeed(Option.none()),
+          getShell: () => Effect.succeedNone,
         }),
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({
@@ -407,7 +406,7 @@ it("readThread and sendToThread reach threads in other projects", async () => {
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry.ProviderRegistry["Service"]>),
         Layer.mock(ProjectService.ProjectService)({
-          getShell: () => Effect.succeed(Option.none()),
+          getShell: () => Effect.succeedNone,
         }),
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({

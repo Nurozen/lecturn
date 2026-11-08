@@ -197,7 +197,7 @@ const makeEnvironmentLayer = (name: string, gate?: PromotionGate) =>
     ),
     Layer.provide(
       Layer.mock(AppRegistryService)({
-        get: () => Effect.succeed(Option.some({ status: { name: APP_NAME } } as never)),
+        get: () => Effect.succeedSome({ status: { name: APP_NAME } } as never),
       }),
     ),
     Layer.provide(

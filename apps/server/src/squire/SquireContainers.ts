@@ -62,20 +62,24 @@ export const layerFixtureStave = Layer.effect(
     const memberships = yield* Ref.make(new Map<ProjectId, SquireStaveMembership>());
     const names = yield* Ref.make(new Map<string, string>());
     return SquireFixtureStave.of({
-      setName: (containerId, name) =>
-        Ref.update(names, (current) => new Map(current).set(containerId, name)),
-      nameOf: (containerId) =>
-        Ref.get(names).pipe(
+      setName: Effect.fn("SquireFixtureStave.setName")(function (containerId, name) {
+        return Ref.update(names, (current) => new Map(current).set(containerId, name));
+      }),
+      nameOf: Effect.fn("SquireFixtureStave.nameOf")(function (containerId) {
+        return Ref.get(names).pipe(
           Effect.map((current) => Option.fromUndefinedOr(current.get(containerId))),
-        ),
-      set: (projectId, membership) =>
-        Ref.update(memberships, (current) =>
+        );
+      }),
+      set: Effect.fn("SquireFixtureStave.set")(function (projectId, membership) {
+        return Ref.update(memberships, (current) =>
           new Map(current).set(projectId, { status: "known", ...membership }),
-        ),
-      ofProject: (projectId) =>
-        Ref.get(memberships).pipe(
+        );
+      }),
+      ofProject: Effect.fn("SquireFixtureStave.ofProject")(function (projectId) {
+        return Ref.get(memberships).pipe(
           Effect.map((current) => Option.fromUndefinedOr(current.get(projectId))),
-        ),
+        );
+      }),
     });
   }),
 );
@@ -185,16 +189,18 @@ export const layerTest = (input: {
   Layer.succeed(
     SquireContainers,
     SquireContainers.of({
-      ofProject: (projectId) => {
-        if (input.unknownProjectIds?.includes(projectId)) {
-          return Effect.succeed({ status: "unknown" });
-        }
-        const space = input.spaces?.find((candidate) => candidate.projectIds.includes(projectId));
-        return Effect.succeed(
-          space === undefined
-            ? noStave
-            : { status: "known", spaceId: space.spaceId, sagaId: space.sagaId ?? null },
-        );
-      },
+      ofProject: Effect.fn("SquireContainers.ofProject")(
+        function (projectId): Effect.Effect<SquireStaveMembership> {
+          if (input.unknownProjectIds?.includes(projectId)) {
+            return Effect.succeed({ status: "unknown" });
+          }
+          const space = input.spaces?.find((candidate) => candidate.projectIds.includes(projectId));
+          return Effect.succeed(
+            space === undefined
+              ? noStave
+              : { status: "known", spaceId: space.spaceId, sagaId: space.sagaId ?? null },
+          );
+        },
+      ),
     }),
   );

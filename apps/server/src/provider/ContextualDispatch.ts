@@ -74,8 +74,7 @@ export function prepareContextualDispatch(
     receipts.set(key, value);
     if (input.onContextualReceipt) {
       const observe = input.onContextualReceipt(value);
-      if (acceptance === "accepted" || afterDispatch)
-        yield* observe.pipe(Effect.catchCause(() => Effect.void));
+      if (acceptance === "accepted" || afterDispatch) yield* observe.pipe(Effect.ignoreCause);
       else yield* observe.pipe(Effect.orDie);
     }
     return value;

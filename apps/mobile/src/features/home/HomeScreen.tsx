@@ -5,7 +5,6 @@ import { accountSectionFrames } from "./accountSectionFrames";
 import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
 import { HIERARCHY_LAYOUT_TRANSITION } from "./hierarchyMotion";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
-import Animated from "react-native-reanimated";
 import { AccountSurfaceColorContext } from "../../lib/accountTintContext";
 import { useAccountRowColors } from "./useAccountRowColors";
 import { useActiveNewTask } from "../../state/active-new-task";
@@ -96,8 +95,6 @@ import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import {
   isThreadListV2ListItem,
   threadListV2ListItemsAreEqual,
-  THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
@@ -577,17 +574,6 @@ export function HomeScreen(props: HomeScreenProps) {
   const handleDeleteThread = props.onDeleteThread;
   const handleForkThread = props.onForkThread;
   const handleUnsettleThread = props.onUnsettleThread;
-  const [settledVisibleCount, setSettledVisibleCount] = useState(
-    THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  );
-  const settledResetKey = `${props.selectedEnvironmentId ?? "all"}:${v2ProjectScopeKey ?? "all"}:${props.searchQuery.trim()}`;
-  const [lastSettledResetKey, setLastSettledResetKey] = useState(settledResetKey);
-  if (lastSettledResetKey !== settledResetKey) {
-    setLastSettledResetKey(settledResetKey);
-    setSettledVisibleCount(THREAD_LIST_V2_SETTLED_INITIAL_COUNT);
-  }
-  const showMoreSettled = () =>
-    setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT);
   const {
     loaded: shelfPreferencesLoaded,
     settledShelfExpanded,
@@ -687,7 +673,7 @@ export function HomeScreen(props: HomeScreenProps) {
       bumpSnoozeWakeTick(Date.now());
     }, delayMs);
     return () => clearTimeout(id);
-    // snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
   }, [nextSnoozeWakeAt, snoozeWakeTick]);
   // Lecturn: the Squires section above the project tree.
   const squireItems = useSquireHomeItems({
@@ -844,9 +830,6 @@ export function HomeScreen(props: HomeScreenProps) {
         snoozeWakeLabelText={item.snoozeWakeLabelText}
         timeLabel={item.timeLabel}
         project={projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId)) ?? null}
-        projectTitle={v2ProjectTitleByProjectKey.get(
-          scopedProjectKey(thread.environmentId, thread.projectId),
-        )}
         providerInstance={resolveProviderInstance(thread)}
         providers={providersByEnvironmentId.get(thread.environmentId)}
         environmentLabel={
@@ -1006,6 +989,7 @@ export function HomeScreen(props: HomeScreenProps) {
       {listHeader}
       {Platform.OS === "ios" && workspace ? (
         <ThreadListFilters
+          gutter={primaryColumn ? 8 : 0}
           environments={props.environments}
           projects={projectScopes.map((scope) => ({ key: scope.key, label: scope.title }))}
           selectedEnvironmentId={props.selectedEnvironmentId}
@@ -1110,7 +1094,6 @@ export function HomeScreen(props: HomeScreenProps) {
                           : {})}
                       onPress={() => {
                         olderSettledShelf.retry();
-                        showMoreSettled();
                       }}
                     />
                   ) : null

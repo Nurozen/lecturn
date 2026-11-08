@@ -59,11 +59,12 @@ const fromRef = (
             return saved;
           }),
         ),
-    whileOn: (effect) =>
-      changes.pipe(
+    whileOn: Effect.fn("SquireSwitch.whileOn")(function (effect) {
+      return changes.pipe(
         Stream.switchMap((on) => (on ? Stream.fromEffect(effect) : Stream.empty)),
         Stream.runDrain,
-      ),
+      );
+    }),
   });
 };
 

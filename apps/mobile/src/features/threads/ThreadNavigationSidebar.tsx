@@ -26,10 +26,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
-import {
-  threadSearchMatchKey,
-  type EnvironmentThreadSearchMatch,
-} from "@lecturn/client-runtime/state/thread-search";
+import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -104,8 +101,6 @@ import type { ThreadPrPresentation } from "../../state/thread-pr-presentation";
 import {
   isThreadListV2ListItem,
   threadListV2ListItemsAreEqual,
-  THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
 } from "./threadListV2";
 import { SquireHomeListRow, useSquireHomeItems } from "../squires/SquireHomeRows";
@@ -377,17 +372,6 @@ function ThreadNavigationSidebarPane(
     return map;
   }, [projects]);
 
-  const [settledVisibleCount, setSettledVisibleCount] = useState(
-    THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  );
-  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${selectedProjectKey ?? "all"}:${props.searchQuery.trim()}`;
-  const [lastSettledResetKey, setLastSettledResetKey] = useState(settledResetKey);
-  if (lastSettledResetKey !== settledResetKey) {
-    setLastSettledResetKey(settledResetKey);
-    setSettledVisibleCount(THREAD_LIST_V2_SETTLED_INITIAL_COUNT);
-  }
-  const showMoreSettled = () =>
-    setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT);
   const {
     loaded: shelfPreferencesLoaded,
     settledShelfExpanded,
@@ -405,6 +389,7 @@ function ThreadNavigationSidebarPane(
   // same boundary, before the next minute tick.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(() => Date.now());
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Refreshes the minute clock when the minute interval starts.
     setNow(new Date().toISOString());
     const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
     return () => clearInterval(id);
@@ -483,7 +468,7 @@ function ThreadNavigationSidebarPane(
       bumpSnoozeWakeTick(Date.now());
     }, delayMs);
     return () => clearTimeout(id);
-    // snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
   }, [nextSnoozeWakeAt, snoozeWakeTick]);
   // Lecturn: the Squires section above the project tree, as on Home.
   const squireItems = useSquireHomeItems({
@@ -790,7 +775,6 @@ function ThreadNavigationSidebarPane(
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
             project={projectByKey.get(scopeKey) ?? null}
-            projectTitle={projectTitleByProjectKey.get(scopeKey)}
             providerInstance={resolveProviderInstance(thread)}
             providers={providersByEnvironmentId.get(thread.environmentId)}
             environmentLabel={
@@ -893,10 +877,7 @@ function ThreadNavigationSidebarPane(
             pane={SIDEBAR_ROW_PANE}
             hiddenCount={item.hiddenCount}
             {...(item.state === undefined ? {} : { state: item.state })}
-            onPress={() => {
-              olderSettledShelf.retry();
-              showMoreSettled();
-            }}
+            onPress={() => olderSettledShelf.retry()}
           />
         );
       case "header":

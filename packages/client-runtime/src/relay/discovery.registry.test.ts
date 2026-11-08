@@ -88,7 +88,7 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
       ClientCapabilities.CloudSession,
       ClientCapabilities.CloudSession.of({
         accountIds: Effect.succeed([ACCOUNT_ID]),
-        identity: (accountId) => Effect.succeed(Option.some({ accountId })),
+        identity: (accountId) => Effect.succeedSome({ accountId }),
         clerkToken: (accountId) => Effect.succeed(accountToken(accountId)),
       }),
     ),
@@ -131,7 +131,7 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
     Layer.succeed(
       ConnectionProfileStore.ConnectionProfileStore,
       ConnectionProfileStore.ConnectionProfileStore.of({
-        get: () => Effect.succeed(Option.none()),
+        get: () => Effect.succeedNone,
         put: () => unused("Profile storage"),
         remove: () => deleted("profile"),
       }),
@@ -139,7 +139,7 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
     Layer.succeed(
       ConnectionCredentialStore.ConnectionCredentialStore,
       ConnectionCredentialStore.ConnectionCredentialStore.of({
-        get: () => Effect.succeed(Option.none()),
+        get: () => Effect.succeedNone,
         put: () => unused("Credential storage"),
         remove: () => deleted("credential"),
       }),

@@ -28,7 +28,11 @@ const completed = {
 describe("Extensions binding boundary", () => {
   it.effect("cannot fall back to public fetch when the private binding is absent", () =>
     Effect.gen(function* () {
-      const client = makeExtensionsEvaluatorClient(Effect.succeed(undefined), 1000);
+      const client = makeExtensionsEvaluatorClient(
+        // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional binding requires undefined, not the wider void type.
+        Effect.succeed(undefined),
+        1000,
+      );
       expect(yield* client.available).toBe(false);
       expect((yield* client.evaluate(identity, {}).pipe(Effect.flip)).code).toBe("unavailable");
     }),

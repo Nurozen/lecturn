@@ -17,7 +17,7 @@ import {
 import { classifyMarkdownImageSource } from "@lecturn/client-runtime/markdown-images";
 import { resolveMediaSource } from "@lecturn/client-runtime/media-source";
 import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
-import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
+import { isWorkspaceImagePreviewPath } from "@lecturn/shared/mediaPreview";
 import { formatTokens } from "@lecturn/shared/usageFormat";
 import { classifyToolActivity } from "@lecturn/shared/toolActivity";
 import { appToolSummaryFromToolItem, toolOutputIndicatesFailure } from "@lecturn/shared/toolOutput";
@@ -240,10 +240,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function workLogEntryIsToolLike(entry: WorkLogPresentationEntry): boolean {

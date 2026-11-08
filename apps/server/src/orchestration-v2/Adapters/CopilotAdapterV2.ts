@@ -167,7 +167,7 @@ export function makeCopilotAcpAdapterFlavor(
             Effect.flatMap((configOptions) =>
               configOptions.some((option) => option.category === "model")
                 ? runtime.setModel(modelSelection.model).pipe(Effect.as(modelSelection.model))
-                : Effect.succeed(undefined),
+                : Effect.undefined,
             ),
           ),
     configureSessionForPolicy: ({ runtime, runtimePolicy }) =>

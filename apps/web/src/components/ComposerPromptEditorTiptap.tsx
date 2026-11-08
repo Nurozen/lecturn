@@ -1,3 +1,4 @@
+import { documentIconColorForFileName } from "~/pierre-icons";
 import { isProviderSkillUserInvocable } from "@lecturn/client-runtime/providerSkills";
 import { formatProviderSkillDisplayName } from "@lecturn/shared/inlineSkills";
 import {
@@ -45,6 +46,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
@@ -110,11 +112,9 @@ import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
 import { FileTagChipContent } from "./chat/FileTagChip";
-import { SkillChipIcon } from "./chat/SkillInlineText";
+import { SkillChipPopover, skillPopoverDescription } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
-import { ContextChipPopover } from "./contextChipParts";
-import { Button } from "./ui/button";
 import { ContextChip } from "./ContextChip";
 import {
   ComposerContextActionsContext,
@@ -264,9 +264,11 @@ const ComposerMentionExtension = Node.create({
 function ComposerMentionNodeView({ node }: NodeViewProps) {
   const actions = use(ComposerContextActionsContext);
   const path = (node.attrs.path as string) ?? "";
+  const accent = documentIconColorForFileName(path);
   const chip = (
     <ContextChip
       kind="mention"
+      style={accent ? ({ "--context-chip-accent": accent } as CSSProperties) : undefined}
       dir="ltr"
       render={<button type="button" />}
       onClick={() => actions.openMention(path)}
@@ -348,31 +350,19 @@ function ComposerSkillNodeView({ node }: NodeViewProps) {
   const skill = skills.find(
     (candidate) => candidate.name === skillName && isProviderSkillUserInvocable(candidate),
   );
-  const description = skill
-    ? skill.description?.trim() || skill.shortDescription?.trim()
-    : skillDescription;
   // The node outlives a provider switch, so its stored label can be another provider's.
   const skillLabel = skill
     ? formatProviderSkillDisplayName(skill)
     : (node.attrs.skillLabel as string) || skillName;
   return (
     <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
-      <ContextChipPopover
-        kind="skill"
-        icon={<SkillChipIcon />}
+      <SkillChipPopover
         label={skillLabel}
-        accessibleLabel={`Skill ${skillLabel}`}
-      >
-        <div className="space-y-3 p-2 text-sm">
-          <p className="font-medium">{skillLabel}</p>
-          <p>{description || "No description is available for this skill."}</p>
-          {skill?.path && actions.environmentId ? (
-            <Button variant="outline" size="sm" onClick={() => actions.openMention(skill.path)}>
-              View instructions
-            </Button>
-          ) : null}
-        </div>
-      </ContextChipPopover>
+        description={skill ? skillPopoverDescription(skill) : skillDescription}
+        onViewInstructions={
+          skill?.path && actions.environmentId ? () => actions.openMention(skill.path) : undefined
+        }
+      />
     </NodeViewWrapper>
   );
 }

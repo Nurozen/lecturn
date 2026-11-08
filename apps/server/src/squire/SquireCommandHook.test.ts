@@ -183,7 +183,7 @@ const registryLayer = (
   );
 
 const squireRepositoryMock = Layer.mock(SquireRepository.SquireRepository)({
-  getSquire: () => Effect.succeed(Option.some({ name: "Release" } as SquireRepository.SquireRow)),
+  getSquire: () => Effect.succeedSome({ name: "Release" } as SquireRepository.SquireRow),
 });
 
 const outcome = (command: OrchestrationV2ServerCommand, origin = false) =>
@@ -473,9 +473,7 @@ const orchestratorLayer = (squireEnabled: boolean) =>
         createWorktree: () => Effect.succeed({} as never),
       }),
     ),
-    Layer.provide(
-      Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeed(Option.none()) }),
-    ),
+    Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
     Layer.provideMerge(
       Layer.merge(
         NodeServices.layer,

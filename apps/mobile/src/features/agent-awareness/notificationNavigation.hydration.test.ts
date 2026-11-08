@@ -25,7 +25,11 @@ vi.mock("./androidNotifications", () => ({ setAndroidThreadOnScreen: vi.fn() }))
 vi.mock("../squires/squireLinks", () => ({ useSquireHomeThreadOnScreen: () => null }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: unknown) =>
-    atom === state.accountReadyAtom ? state.accountsReady : { isReady: state.catalogReady },
+    atom === state.accountReadyAtom
+      ? state.accountsReady
+      : atom === state.accountsAtom
+        ? [{ accountId: "b", signedIn: true }]
+        : { isReady: state.catalogReady },
 }));
 vi.mock("@react-navigation/native", () => ({
   useLinkTo: () => state.linkTo,

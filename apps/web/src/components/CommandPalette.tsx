@@ -11,7 +11,11 @@ import {
 import { threadPullRequestLinkMode } from "@lecturn/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@lecturn/shared/threadPullRequests";
 
-import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@lecturn/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -86,7 +90,7 @@ import {
   TextSearchIcon,
   MessagesSquareIcon,
 } from "lucide-react";
-import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { openThreadFind } from "./chat/threadFindStore";
 import {
   useDeferredValue,
   useEffect,
@@ -888,7 +892,9 @@ function OpenCommandPaletteDialog(props: {
 
   const { projectCwdById, projectByKey, projectTitleById } = useProjectLookups();
 
-  const activeThreadId = activeThread?.id;
+  const activeThreadKey = activeThread
+    ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
+    : null;
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
@@ -1147,6 +1153,14 @@ function OpenCommandPaletteDialog(props: {
     });
   };
 
+  const openImportFolderView = (environmentId: EnvironmentId): void => {
+    setImportFolderEnvironmentId(environmentId);
+    pushPaletteView({
+      addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
+      groups: [{ value: IMPORT_FOLDER_VIEW_VALUE, label: "Folders", items: [] }],
+    });
+  };
+
   function popView(): void {
     browseNavigation.invalidate();
     setAddProjectCloneFlow(null);
@@ -1274,11 +1288,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <ImportIcon className={ITEM_ICON_CLASS} />,
         keepOpen: true,
         run: async () => {
-          setImportFolderEnvironmentId(environmentId);
-          pushPaletteView({
-            addonIcon: <ImportIcon className={ADDON_ICON_CLASS} />,
-            groups: [{ value: IMPORT_FOLDER_VIEW_VALUE, label: "Folders", items: [] }],
-          });
+          openImportFolderView(environmentId);
         },
       });
     }
@@ -1336,7 +1346,7 @@ function OpenCommandPaletteDialog(props: {
               }
             />
             <TooltipPopup align="end" side="left">
-              {disabledHint ?? "Open Settings -> Source Control to configure this provider."}
+              {disabledHint ?? "Open Settings -> Source control to configure this provider."}
             </TooltipPopup>
           </Tooltip>
         </span>
@@ -1626,7 +1636,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThreadId && supportsThreadFind) {
+  if (activeThreadKey !== null && supportsThreadFind) {
     actionItems.push({
       kind: "action",
       value: "find-current-thread",
@@ -1635,7 +1645,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.find",
       run: async () => {
-        requestThreadFindOpen();
+        openThreadFind(activeThreadKey);
       },
     });
   }
@@ -2533,6 +2543,7 @@ function OpenCommandPaletteDialog(props: {
       input: {
         projectId,
         title: inferProjectTitleFromPath(destinationPath),
+        // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
         createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
@@ -2900,11 +2911,17 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     // ChatView ignores shortcuts while the palette is open, so intercept find here.
-    if (command === "chat.find" && activeThreadId && !event.nativeEvent.isComposing) {
+    if (command === "chat.find" && activeThreadKey !== null && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
       setOpen(false);
-      requestThreadFindOpen();
+      if (supportsThreadFind) openThreadFind(activeThreadKey);
+      else
+        toastManager.add({
+          id: "thread-find-unavailable",
+          title: "Thread search is unavailable on this server.",
+          description: "Update the server to enable it.",
+        });
       return;
     }
 

@@ -24,7 +24,11 @@ export class ManagedAccess extends Context.Service<
   }
 >()("lecturn-relay/billing/ManagedAccess") {}
 
-export const disabled = ManagedAccess.of({ check: () => Effect.void });
+export const disabled = ManagedAccess.of({
+  check: Effect.fn("ManagedAccess.check")(function () {
+    return Effect.void;
+  }),
+});
 export const layerDisabled = Layer.succeed(ManagedAccess, disabled);
 
 /** Local canonical projection only: no Stripe calls on ordinary authorization paths. */
