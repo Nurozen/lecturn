@@ -14,7 +14,6 @@ import {
   squireLeadFoldKey,
   squireHomeRowLabel,
   squireHomeRowStatusLine,
-  squireHomeRowTrailing,
 } from "./squireHomeItems.logic";
 import { withSquireRoomSeen } from "./squireRooms.logic";
 
@@ -317,53 +316,27 @@ describe("Lead fold", () => {
     expect(squireHomeLeadAggregateCount(null)).toBe(0);
   });
 
-  it("shows the group's total while folded, ahead of working, and the Lead's own state open", () => {
-    const working = squireEntryIndicator(entry(LEAD, { role: "lead", homeThreadId: "t-1" }), {
-      runtime: { status: "running", activeRunId: "run-1" },
-      latestRun: { runId: "run-1", status: "running" },
-    } as unknown as Parameters<typeof squireEntryIndicator>[1]);
-    expect(squireHomeLeadTrailing(working, 4, true)).toEqual({ kind: "badge", count: 4 });
-    expect(squireHomeLeadTrailing(working, 4, false)).toEqual({ kind: "working" });
-    expect(squireHomeLeadTrailing(working, 0, true)).toEqual({ kind: "working" });
-    expect(squireHomeRowLabel("Lead", working, { kind: "badge", count: 4 })).toBe(
-      "Lead, 4 need a decision",
-    );
+  it("reads any hidden decision as needs-you while folded, and the Lead's own state open", () => {
+    expect(squireHomeLeadTrailing("working", 4, true)).toBe("needs-you");
+    expect(squireHomeLeadTrailing("working", 4, false)).toBe("working");
+    expect(squireHomeLeadTrailing("unread", 0, true)).toBe("unread");
   });
 });
 
 describe("row trailing and status", () => {
-  const workingShell = {
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    pendingSubagentRequest: null,
-    runtime: { status: "running", activeRunId: "run-1" },
-    latestRun: { runId: "run-1", status: "running" },
-    interactionMode: "default",
-    hasActionableProposedPlan: false,
-  } as unknown as Parameters<typeof squireEntryIndicator>[1];
-
-  it("badges open decisions only, with FYI never counted", () => {
-    const fyiOnly = squireEntryIndicator(entry("docs", { fyi: 4 }), null);
-    expect(squireHomeRowTrailing(fyiOnly)).toEqual({ kind: "none" });
-    const waiting = squireEntryIndicator(entry("docs", { openDecisionCount: 2, fyi: 4 }), null);
-    expect(squireHomeRowTrailing(waiting)).toEqual({ kind: "badge", count: 2 });
-    expect(squireHomeRowLabel("Docs", waiting)).toBe("Docs, 2 need a decision");
-  });
-
-  it("shows working in the badge's place while the home thread runs", () => {
-    const working = squireEntryIndicator(
-      entry("docs", { openDecisionCount: 2, homeThreadId: "t-1" }),
-      workingShell,
-    );
-    expect(squireHomeRowTrailing(working)).toEqual({ kind: "working" });
-    expect(squireHomeRowLabel("Docs", working)).toBe("Docs, working");
+  it("reads the one state aloud", () => {
+    const idle = squireEntryIndicator(entry("docs", {}), null);
+    expect(squireHomeRowLabel("Docs", "needs-you", idle)).toBe("Docs, needs you");
+    expect(squireHomeRowLabel("Docs", "working", idle)).toBe("Docs, working");
+    expect(squireHomeRowLabel("Docs", "unread", idle)).toBe("Docs, new messages");
+    expect(squireHomeRowLabel("Docs", "none", idle)).toBe("Docs");
   });
 
   it("asks for a provider while the Lead has none, and is silent once ready", () => {
     const lead = entry(LEAD, { role: "lead", lifecycle: "needs_provider" });
     const indicator = squireEntryIndicator(lead, null);
     expect(squireHomeRowStatusLine(lead, indicator)).toBe("Choose a provider for the Lead");
-    expect(squireHomeRowTrailing(indicator)).toEqual({ kind: "none" });
+    expect(squireHomeRowLabel("Lead", "none", indicator)).toBe("Lead, needs a provider");
     const ready = entry(LEAD, { role: "lead" });
     expect(squireHomeRowStatusLine(ready, squireEntryIndicator(ready, null))).toBeNull();
   });

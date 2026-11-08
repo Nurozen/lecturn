@@ -3,8 +3,10 @@ import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   createSquireEnvironmentAtoms,
   squireEntryIndicator,
+  squireSidebarState,
   type SquireEnvironmentState,
   type SquireIndicatorState,
+  type SquireSidebarState,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { AuthOrchestrationReadScope, type EnvironmentId, type SquireId } from "@lecturn/contracts";
@@ -91,4 +93,16 @@ export function useSquireIndicator(
     homeThreadId === null ? null : scopeThreadRef(environmentId, homeThreadId),
   );
   return squireEntryIndicator(entry, homeShell);
+}
+
+/** The one state a Squire's list row shows, from the same home thread shell. */
+export function useSquireSidebarState(
+  environmentId: EnvironmentId,
+  entry: Pick<SquireSnapshotEntry, "squire" | "openDecisionCount" | "held" | "lastMessageAt">,
+): SquireSidebarState {
+  const homeThreadId = entry.squire.homeThreadId;
+  const homeShell = useQuietThreadShell(
+    homeThreadId === null ? null : scopeThreadRef(environmentId, homeThreadId),
+  );
+  return squireSidebarState(entry, homeShell);
 }

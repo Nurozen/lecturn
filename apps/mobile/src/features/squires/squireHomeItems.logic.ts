@@ -3,6 +3,7 @@ import {
   squireStateLine,
   type SquireEnvironmentState,
   type SquireIndicatorState,
+  type SquireSidebarState,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireId, SquireRoomId, SquireRoomRow } from "@lecturn/contracts";
@@ -200,19 +201,7 @@ export function homeSquireItemsAreEqual(previous: HomeSquireItem, item: HomeSqui
   }
 }
 
-export type SquireHomeRowTrailing =
-  | { readonly kind: "working" }
-  | { readonly kind: "badge"; readonly count: number }
-  | { readonly kind: "none" };
-
-/** The open decision count (FYI is not a decision), or "working" in its place. */
-export function squireHomeRowTrailing(indicator: SquireIndicatorState): SquireHomeRowTrailing {
-  if (indicator.workingLabel) return { kind: "working" };
-  if (indicator.badge !== null && indicator.badge > 0) {
-    return { kind: "badge", count: indicator.badge };
-  }
-  return { kind: "none" };
-}
+export type SquireHomeRowTrailing = SquireSidebarState;
 
 /**
  * Every open decision in the Lead's group, once (web `squireLeadAggregateCount`): a Lead-raised
@@ -228,17 +217,13 @@ export function squireHomeLeadAggregateCount(state: SquireEnvironmentState | nul
   }, 0);
 }
 
-/**
- * A folded Lead stands for the rows it hides, so its group's total takes the place of its own
- * count, ahead of "working", because the hidden badges would otherwise go unseen.
- */
+/** A folded Lead stands for the rows it hides, so any decision among them reads as its state. */
 export function squireHomeLeadTrailing(
-  indicator: SquireIndicatorState,
+  state: SquireSidebarState,
   aggregate: number,
   collapsed: boolean,
 ): SquireHomeRowTrailing {
-  if (collapsed && aggregate > 0) return { kind: "badge", count: aggregate };
-  return squireHomeRowTrailing(indicator);
+  return collapsed && aggregate > 0 ? "needs-you" : state;
 }
 
 /** A not-ready Squire's line under its name, e.g. "Choose a provider for the Lead". */
@@ -256,26 +241,20 @@ export function squireHomeRowStatusLine(
   });
 }
 
-/** Read aloud, since the indicator's state is otherwise only color and ring. */
+/** Read aloud, since the row's state is otherwise only a mark. */
 export function squireHomeRowLabel(
   name: string,
-  indicator: SquireIndicatorState,
-  /** A folded Lead reads its group's total, as its badge shows it. */
-  folded?: SquireHomeRowTrailing,
+  state: SquireHomeRowTrailing,
+  indicator: Pick<SquireIndicatorState, "state">,
 ): string {
-  if (folded?.kind === "badge") {
-    return `${name}, ${folded.count} ${folded.count === 1 ? "needs" : "need"} a decision`;
-  }
-  switch (indicator.state) {
+  switch (state) {
+    case "needs-you":
+      return `${name}, needs you`;
     case "working":
       return `${name}, working`;
-    case "waiting":
-      return indicator.badge === null
-        ? `${name}, waiting on you`
-        : `${name}, ${indicator.badge} ${indicator.badge === 1 ? "needs" : "need"} a decision`;
-    case "needs_provider":
-      return `${name}, needs a provider`;
-    case "idle":
-      return name;
+    case "unread":
+      return `${name}, new messages`;
+    case "none":
+      return indicator.state === "needs_provider" ? `${name}, needs a provider` : name;
   }
 }
