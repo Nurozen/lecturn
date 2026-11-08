@@ -42,6 +42,25 @@ describe("Squire skill text", () => {
     }
   });
 
+  it.each(roles)("tells a %s that quiet means no text and when an alert is earned", (role) => {
+    const text = squireSkillSections(role).join("\n\n");
+    for (const phrase of [
+      "Quiet means no text",
+      "`squire_stay_quiet`",
+      "blocked on the user",
+      "a failure",
+      "only the user can make",
+      "asked to hear about",
+      "an FYI is quiet",
+      "short headline",
+    ]) {
+      assert.include(text, phrase);
+    }
+    for (const stale of ["not watching", "reaches nobody", "squire_merge_items", "user's queue"]) {
+      assert.notInclude(text, stale);
+    }
+  });
+
   it("covers the Squire behaviors the bar judges", () => {
     const text = squireSkillSections("squire").join("\n\n");
     for (const phrase of [

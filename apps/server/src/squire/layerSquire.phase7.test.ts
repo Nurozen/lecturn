@@ -47,7 +47,6 @@ const PHASE7_LEAD_TOOLS = [
   "squire_resume",
   "squire_rescope",
   "squire_forward_item",
-  "squire_merge_items",
   "squire_recommend_steer",
   "squire_send_steer",
   "squire_route_task",

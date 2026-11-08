@@ -113,7 +113,7 @@ export function SquirePermissionsSection(
         />
       </SetupRow>
       {isLead ? (
-        <SetupRow label="Manage Squires" description="Pause, resume, rescope, forward, and merge.">
+        <SetupRow label="Manage Squires" description="Pause, resume, rescope, and forward.">
           <SetupSegmented
             label="Manage Squires"
             value={draft.permissions.manageSquires ?? "recommend"}

@@ -169,10 +169,6 @@ const RescopeArgs = Schema.Struct({
   reason: Reason,
 });
 const ForwardArgs = Schema.Struct({ itemId: SquireCardId, toSquireId: SquireId, reason: Reason });
-const MergeArgs = Schema.Struct({
-  itemIds: Schema.Array(SquireCardId).check(Schema.isMinLength(2), Schema.isMaxLength(6)),
-  reason: Reason,
-});
 
 const str = (description: string) => ({ type: "string", description });
 const reasonProp = str("Why, in one sentence the user reads on the item.");
@@ -1084,27 +1080,6 @@ const make = Effect.gen(function* () {
         squireId: null,
         cardIds: [args.itemId],
         toSquireId: args.toSquireId,
-      }),
-    ),
-    handler(
-      definition(
-        "squire_merge_items",
-        `Merge duplicate open items (same thread, each raised by a different Squire) into the first one. ${MANAGE_NOTE}`,
-        {
-          itemIds: {
-            type: "array",
-            description: "The items, the one to keep first.",
-            items: { type: "string" },
-          },
-          reason: reasonProp,
-        },
-        ["itemIds", "reason"],
-      ),
-      MergeArgs,
-      (args, ctx) => ({
-        ...base("merge", ctx, args.reason),
-        squireId: null,
-        cardIds: args.itemIds,
       }),
     ),
   ]);
