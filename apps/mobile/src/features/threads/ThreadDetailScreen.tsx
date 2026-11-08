@@ -423,14 +423,32 @@ const threadVisitTracker = createThreadVisitTracker({
 const COMPOSER_HEIGHT_SETTLE_MS = 220;
 
 // Anchors, the submitted message, follow state and pending scrolls belong to
-// one thread, so the body remounts when the thread changes.
+// one thread, so the body remounts when the thread changes. Lecturn: the canvas and
+// backdrop stay outside the keyed body, so a project or account change sweeps the glass.
 export function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  const feedCanvas = !props.draftMode && (props.showContent ?? true);
   return (
     <AccountTintScope environmentId={props.environmentId}>
-      <ThreadDetailBody
-        key={scopedThreadKey(props.environmentId, props.selectedThread.id)}
-        {...props}
-      />
+      <View className="flex-1">
+        {feedCanvas ? (
+          <View
+            pointerEvents="none"
+            className={
+              Platform.OS === "android"
+                ? "absolute inset-0 bg-thread-canvas"
+                : "absolute inset-0 bg-screen"
+            }
+          />
+        ) : null}
+        {/* Above the opaque canvas so glass surfaces sample it. */}
+        <ArcaneBackdrop
+          transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`}
+        />
+        <ThreadDetailBody
+          key={scopedThreadKey(props.environmentId, props.selectedThread.id)}
+          {...props}
+        />
+      </View>
     </AccountTintScope>
   );
 }
@@ -561,8 +579,6 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const composerOverlayRef = useRef<ViewInstance>(null);
   const listRef = useRef<LegendListRef>(null);
   const feedTouchStartRef = useRef<{ pageX: number; pageY: number } | null>(null);
-  // Aborted when this thread's body unmounts, so async work started for it
-  // stops touching a list or composer that now shows another thread.
   // Aborted when the screen hides or unmounts; a hidden Activity pane keeps its state but re-runs
   // effects when shown, so each show arms a fresh scope.
   const threadScope = useRef(new AbortController());
@@ -1354,26 +1370,19 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const handleFeedTouchCancel = () => {
     feedTouchStartRef.current = null;
   };
-  const arcaneBackdrop = (
-    <ArcaneBackdrop transitionKey={`${props.environmentId}:${props.selectedThread.projectId}`} />
-  );
-
   return (
     <View className="flex-1" onLayout={handleScreenLayout}>
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
       {props.draftMode ? (
-        <>
-          {arcaneBackdrop}
-          {props.draftMode.content(
-            navigationHeaderHeight,
-            liveKeyboardHeight + estimatedOverlayHeight + 24,
-            screenAreaHeight -
-              navigationHeaderHeight -
-              liveKeyboardHeight -
-              estimatedOverlayHeight -
-              24,
-          )}
-        </>
+        props.draftMode.content(
+          navigationHeaderHeight,
+          liveKeyboardHeight + estimatedOverlayHeight + 24,
+          screenAreaHeight -
+            navigationHeaderHeight -
+            liveKeyboardHeight -
+            estimatedOverlayHeight -
+            24,
+        )
       ) : showContent ? (
         <View
           style={{ flex: 1 }}
@@ -1382,17 +1391,6 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
           onTouchEnd={handleFeedTouchEnd}
           onTouchCancel={handleFeedTouchCancel}
         >
-          <View
-            pointerEvents="none"
-            className={
-              Platform.OS === "android"
-                ? "absolute inset-0 bg-thread-canvas"
-                : "absolute inset-0 bg-screen"
-            }
-          />
-          {/* Lecturn backdrop sits above the opaque canvas so
-              glass surfaces sample it and the solid layer cannot hide it. */}
-          {arcaneBackdrop}
           <RenderErrorBoundary
             key={selectedThreadKey}
             resetKeys={[props.threadCwd]}
@@ -1466,7 +1464,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
           </RenderErrorBoundary>
         </View>
       ) : (
-        <View className="flex-1">{arcaneBackdrop}</View>
+        <View className="flex-1" />
       )}
 
       {showContent && allows("previews") ? (

@@ -47,3 +47,17 @@ it("places the panel workspace icon before the label by default and after it in 
   using _redesign = redesign(true);
   expect([display("leading"), display("trailing")]).toEqual(["none", "contents"]);
 });
+
+it("paints the new design's true black only when it is on, and leaves themes alone", () => {
+  const root = document.documentElement;
+  root.classList.add("dark");
+  using _dark = { [Symbol.dispose]: () => root.classList.remove("dark") };
+  const canvas = () => getComputedStyle(root).getPropertyValue("--background").trim();
+  const lecturn = canvas();
+  expect(lecturn).not.toBe("#000");
+  using _redesign = redesign(true);
+  expect(canvas()).toBe("#000");
+  root.setAttribute("data-theme-id", "grove");
+  using _theme = { [Symbol.dispose]: () => root.removeAttribute("data-theme-id") };
+  expect(canvas()).not.toBe("#000");
+});

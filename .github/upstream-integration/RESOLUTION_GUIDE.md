@@ -1299,8 +1299,10 @@ from upstream's side.
   and user themes still win.
 - **#25324 New design on by default (lead decision D1).** Lecturn does not take it:
   `redesignEnabled` decodes to `false` in `packages/contracts/src/settings.ts`, and the Beta row
-  keeps its opt-in copy ("Try the new design: ..."). Redesign palette overrides (true-black
-  canvas) stay in `:root:where([data-redesign])`, never `html.dark[data-redesign]`. With the
+  keeps its opt-in copy ("Try the new design: ..."). Redesign palette (canvas and surface)
+  overrides never go in `html.dark[data-redesign]` (upstream's diff-icon blocks there are fine):
+  light values sit in `:root:where([data-redesign])` before the Lecturn palette, and the opt-in
+  true black in `:root.dark:where([data-redesign]):not([data-theme-id])` after it. With the
   toggle off, `:root`, `.dark` and `[data-app-sidebar]` custom properties equal fork main's.
 - **#24850 instructions.** Take upstream's short sections with Lecturn names; keep the
   `lecturn-thread://` link rule, Squire and connected-app overrides, and the ACP-only MCP
@@ -1358,7 +1360,8 @@ from upstream's side.
 - **PR list restore (#25364).** The fork merge picks a deterministic owner for duplicate rows,
   so `restorePullRequestList` keeps each pull request's newest kept row before merging.
 - **Mobile cloud accounts (#25150).** `MultiAccountCloudAuthBridge` owns account transitions;
-  upstream's single-account `features/cloud/cloudAccountService.ts` is not taken.
+  upstream's single-account `features/cloud/cloudAccountService.ts` is not taken. The
+  client-runtime `relay/cloudAccountService.ts` is kept for upstream parity (only its test uses it).
   `CloudAuthProvider` takes upstream's module-level config check and no-config deactivate.
 - **Mobile thread rows (#25415).** The title leads at full width (2 lines). The fork status
   cluster (queued, pin, Woke or stage badge, time) starts the meta line, never beside the title;

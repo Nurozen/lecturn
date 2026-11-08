@@ -1268,18 +1268,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --popover-foreground: var(--color-zinc-900);
   /* One step past the accent, so a user turn stands off the near-white canvas. */
   --message-surface: color-mix(in srgb, var(--color-zinc-200) 55%, var(--color-zinc-100));
-
-  @variant dark {
-    /* True black canvas; raised surfaces keep the neutral-950 tone so they still lift. */
-    --background: #000;
-    --surface-raised: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
-    --card: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
-    --popover: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
-    --muted-foreground: var(--color-neutral-400);
-    --message-surface: color-mix(in srgb, var(--color-neutral-950) 92%, var(--color-white));
-    --border: --alpha(var(--color-white) / 8%);
-    --input: --alpha(var(--color-white) / 11%);
-  }
 }
 
 /* Keep both sidebar implementations (default and legacy) on the same quiet
@@ -1451,6 +1439,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(lecturn-
   --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
   --sidebar-stage-fade: var(--sidebar);
+}
+
+/* New design, dark: true black canvas over the Lecturn palette (a user theme keeps its own).
+   Raised surfaces keep the neutral-950 tone so they still lift. */
+:root.dark:where([data-redesign]):not([data-theme-id]) {
+  --background: #000;
+  --surface-raised: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
+  --card: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
+  --popover: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
+  --muted-foreground: var(--color-neutral-400);
+  --message-surface: color-mix(in srgb, var(--color-neutral-950) 92%, var(--color-white));
+  --border: --alpha(var(--color-white) / 8%);
+  --input: --alpha(var(--color-white) / 11%);
 }
 
 /* New design: modified files get a muted blue so added and deleted files lead. Built from the

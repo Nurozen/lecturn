@@ -177,6 +177,48 @@ function renderDetailScreen(input: {
   return { composer: rendered.composer!, onRespondToApproval, onSendMessage };
 }
 
+describe("backdrop", () => {
+  it("is drawn once, by the screen around the per-thread body", () => {
+    const backdrops: Array<string | undefined> = [];
+    const { exports } = loadCompiledMobileModule({
+      file: "src/features/threads/ThreadDetailScreen.tsx",
+      modules: modulesWith({
+        "@lecturn/client-runtime/state/thread-requests": ThreadRequests,
+        "@lecturn/contracts": stubbed({ isProviderNativeSubagentThread: () => false }),
+        "./threadRouteControls": { allowsThreadRouteControl },
+        "../../components/ArcaneBackdrop": {
+          ArcaneBackdrop: (props: { readonly transitionKey?: string }) => {
+            backdrops.push(props.transitionKey);
+            return null;
+          },
+        },
+      }),
+      expose: ["ThreadDetailBody"],
+    });
+    const Screen = exports.ThreadDetailScreen as Screen;
+    const Body = exports.ThreadDetailBody as Screen;
+    const base = {
+      environmentId: "environment-1",
+      selectedThread: onlyTheFields({ id: "thread-1", projectId: "project-1" }),
+      contentPresentation: { kind: "ready" },
+      selectedThreadFeed: [],
+      activePendingApprovals: [],
+      queuedMessages: [],
+      feedbackSubmissions: [],
+      creationState: null,
+      queuedRunEdit: null,
+    };
+    for (const draftMode of [undefined, onlyTheFields({ content: () => null })]) {
+      backdrops.length = 0;
+      // The body remounts per thread, so a sweep drawn inside it would never animate.
+      renderToStaticMarkup(<Body {...base} draftMode={draftMode} />);
+      expect(backdrops).toEqual([]);
+      renderToStaticMarkup(<Screen {...base} draftMode={draftMode} />);
+      expect(backdrops).toEqual(["environment-1:project-1"]);
+    }
+  });
+});
+
 const providerApproval: ThreadRequests.ThreadPendingApproval = {
   requestId: RuntimeRequestId.make("provider-approval"),
   requestKind: "command",

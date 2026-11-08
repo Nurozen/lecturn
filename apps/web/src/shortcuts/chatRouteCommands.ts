@@ -6,6 +6,7 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { appComposerHandleRef } from "../composerHandleContext";
 import { dispatchPreviewAction, type PreviewAction } from "../components/preview/previewActionBus";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { useAppsNewThreadTarget } from "../components/apps/useAppsSidebarShortcuts";
@@ -38,7 +39,7 @@ const CHAT_ROUTE_ID = "/_chat";
  * the scope is registered once instead of re-registering on every store change.
  */
 export function installChatRouteCommands(router: AnyRouter): () => void {
-  const handleNewThread = createNewThreadHandler(router);
+  const handleNewThread = createNewThreadHandler(router, appComposerHandleRef);
   const scratch = createScratchProjectActions({
     environments: () =>
       [...appAtomRegistry.get(environmentPresentations.presentationsAtom)].map(

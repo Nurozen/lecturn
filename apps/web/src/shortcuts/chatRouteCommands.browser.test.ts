@@ -1,8 +1,15 @@
 import type { AnyRouter } from "@tanstack/react-router";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { appComposerHandleRef } from "../composerHandleContext";
+import { createNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { installChatRouteCommands } from "./chatRouteCommands";
+
+vi.mock("../hooks/useHandleNewThread", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../hooks/useHandleNewThread")>();
+  return { ...actual, createNewThreadHandler: vi.fn(actual.createNewThreadHandler) };
+});
 
 type Match = { readonly routeId: string; readonly pathname: string };
 
@@ -46,6 +53,14 @@ describe("chat route commands", () => {
     expect(useThreadSelectionStore.getState().selectedThreadKeys.size).toBe(0);
     // With nothing selected, Escape is left for other handlers.
     expect(pressEscape().defaultPrevented).toBe(false);
+  });
+
+  it("hands Cmd+N the shell composer so reusing an open empty draft focuses it", () => {
+    const { router } = routerAt(CHAT);
+    using stack = new DisposableStack();
+    stack.defer(installChatRouteCommands(router));
+
+    expect(createNewThreadHandler).toHaveBeenCalledWith(router, appComposerHandleRef);
   });
 
   it("stays out of the way off the chat route and under modal pages", () => {
