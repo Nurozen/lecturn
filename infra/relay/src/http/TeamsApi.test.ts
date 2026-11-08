@@ -5,7 +5,7 @@ import { vi } from "vite-plus/test";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no HMAC for signing this webhook fixture.
 import * as NodeCrypto from "node:crypto";
 import { createClerkClient, verifyToken } from "@clerk/backend";
-import { Effect, Layer, Option, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -14,6 +14,9 @@ import { TeamDirectory } from "../teams/TeamDirectory.ts";
 import { TeamBillingService } from "../teams/TeamBillingService.ts";
 import { teamsRoutes, TeamGatewaySync } from "./TeamsApi.ts";
 import { RelayConfiguration } from "../Config.ts";
+
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - These optional results require undefined, not the wider void type.
+const succeedUndefined = Effect.succeed(undefined);
 vi.mock("@clerk/backend", () => ({ createClerkClient: vi.fn(), verifyToken: vi.fn() }));
 const account: TeamAccount = {
   organization_id: "org_team",
@@ -94,7 +97,7 @@ function fixture() {
       ]),
     ),
     history: vi.fn(() => Effect.succeed([])),
-    assignSeat: vi.fn(() => Effect.succeed(undefined)),
+    assignSeat: vi.fn(() => succeedUndefined),
     revokeSeat: vi.fn(() =>
       Effect.sync(() => {
         events.push("seat.revoke");
@@ -102,10 +105,10 @@ function fixture() {
       }),
     ),
     updatePolicy: vi.fn(() => Effect.void),
-    funding: vi.fn(() => Effect.succeed(undefined)),
-    access: vi.fn(() => Effect.succeed(undefined)),
-    bindEnvironment: vi.fn(() => Effect.succeed(undefined)),
-    unbindEnvironment: vi.fn(() => Effect.succeed(undefined)),
+    funding: vi.fn(() => succeedUndefined),
+    access: vi.fn(() => succeedUndefined),
+    bindEnvironment: vi.fn(() => succeedUndefined),
+    unbindEnvironment: vi.fn(() => succeedUndefined),
   } satisfies TeamStore["Service"];
   return {
     store,
@@ -199,7 +202,7 @@ function run(
           Layer.mergeAll(
             Layer.succeed(EnvironmentCredentials, {
               create: () => Effect.succeed("credential"),
-              authenticate: () => Effect.succeed(Option.none()),
+              authenticate: () => Effect.succeedNone,
               revokeForEnvironmentPublicKey: () => Effect.succeed(false),
             }),
             Layer.succeed(EnvironmentLinks, {

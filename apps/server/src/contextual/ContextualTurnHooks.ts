@@ -12,6 +12,7 @@ import {
   type RunId,
   type ThreadId,
   TurnId,
+  parseGoalCommand,
 } from "@lecturn/contracts";
 import { Cause, Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -156,7 +157,8 @@ export const make = Effect.gen(function* () {
 
   const beforeTurnStart = Effect.fn("ContextualTurnHooks.beforeTurnStart")(
     function* (input: LecturnTurnStartInput) {
-      if (input.compaction) return;
+      // Codex and Claude send a /goal prompt verbatim (no prefix), so the packet waits a turn.
+      if (input.compaction || parseGoalCommand(input.message) !== null) return;
       const { thread, run, message } = input;
       // Retries of one run reuse the dispatch bound by the first attempt.
       const cached = inFlight.get(run.id);

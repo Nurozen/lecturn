@@ -224,15 +224,15 @@ export function MultiAccountCloudAuthBridge({ children }: { readonly children: R
     return () => {
       cancelled = true;
     };
-    // Account removals and relay capability changes are explicit synchronization signals.
   }, [
     clerk,
     isLoaded,
     key,
     userId,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Account removals and relay capability changes are explicit synchronization signals.
     removalRevision,
-    remove,
     multiAccountPushSupported,
+    remove,
     catalog,
     unlisted,
   ]);

@@ -284,47 +284,42 @@ const make = Effect.gen(function* () {
   );
 
   return HeadlessToolHost.of({
-    acquire: (appId, projectId) =>
-      Effect.acquireRelease(hold(appId, projectId), () => release(appId, projectId)).pipe(
-        Effect.asVoid,
-      ),
+    acquire: Effect.fn("HeadlessToolHost.acquire")(function* (appId, projectId) {
+      yield* Effect.acquireRelease(hold(appId, projectId), () => release(appId, projectId));
+    }),
     listTools: listFromProcess,
-    call: (appId, projectId, request) =>
-      withProcess(appId, projectId, (connection) =>
+    call: Effect.fn("HeadlessToolHost.call")(function* (appId, projectId, request) {
+      const result = yield* withProcess(appId, projectId, (connection) =>
         connection.request("tools/call", {
           name: request.name,
           arguments: request.arguments,
           _meta: request.meta,
         }),
-      ).pipe(
-        Effect.flatMap((result) =>
-          decodeCallResult(result).pipe(
-            Effect.mapError(
-              () =>
-                new AppsError({
-                  code: "unavailable",
-                  message: `The app answered ${request.name} with a result Lecturn cannot read.`,
-                }),
-            ),
-          ),
+      );
+      return yield* decodeCallResult(result).pipe(
+        Effect.mapError(
+          () =>
+            new AppsError({
+              code: "unavailable",
+              message: `The app answered ${request.name} with a result Lecturn cannot read.`,
+            }),
         ),
-      ),
-    readResource: (appId, projectId, uri) =>
-      withProcess(appId, projectId, (connection) =>
+      );
+    }),
+    readResource: Effect.fn("HeadlessToolHost.readResource")(function* (appId, projectId, uri) {
+      const result = yield* withProcess(appId, projectId, (connection) =>
         connection.request("resources/read", { uri }),
-      ).pipe(
-        Effect.flatMap((result) =>
-          decodeReadResult(result).pipe(
-            Effect.mapError(
-              () =>
-                new AppsError({
-                  code: "unavailable",
-                  message: `The app answered ${uri} with a resource Lecturn cannot read.`,
-                }),
-            ),
-          ),
+      );
+      return yield* decodeReadResult(result).pipe(
+        Effect.mapError(
+          () =>
+            new AppsError({
+              code: "unavailable",
+              message: `The app answered ${uri} with a resource Lecturn cannot read.`,
+            }),
         ),
-      ),
+      );
+    }),
     refreshDefinitions: Effect.fn("HeadlessToolHost.refreshDefinitions")(
       function* (appId, projectId) {
         const listed = yield* listFromCommand(appId, projectId);

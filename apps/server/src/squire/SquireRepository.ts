@@ -985,15 +985,18 @@ const make = Effect.gen(function* () {
 
   return SquireRepository.of({
     transaction,
-    createSquire: (row) => insert("createSquire", "squire", row),
-    getSquire: (id) =>
-      read(
+    createSquire: Effect.fn("SquireRepository.createSquire")(function (row) {
+      return insert("createSquire", "squire", row);
+    }),
+    getSquire: Effect.fn("SquireRepository.getSquire")(function (id) {
+      return read(
         "getSquire",
         sql`SELECT * FROM squire WHERE id = ${id}`.pipe(
           Effect.flatMap(decodeSquires),
           Effect.map(Option.fromIterable),
         ),
-      ),
+      );
+    }),
     listSquires: read(
       "listSquires",
       sql`SELECT * FROM squire ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeSquires)),
@@ -1005,16 +1008,24 @@ const make = Effect.gen(function* () {
         Effect.map(Option.fromIterable),
       ),
     ),
-    getSquireByCreateRequestId: (requestId) =>
-      read(
-        "getSquireByCreateRequestId",
-        sql`SELECT * FROM squire WHERE create_request_id = ${requestId}`.pipe(
-          Effect.flatMap(decodeSquires),
-          Effect.map(Option.fromIterable),
-        ),
-      ),
-    updateSquire: ({ id, expectedRevision, patch, updatedAt }) =>
-      write(
+    getSquireByCreateRequestId: Effect.fn("SquireRepository.getSquireByCreateRequestId")(
+      function (requestId) {
+        return read(
+          "getSquireByCreateRequestId",
+          sql`SELECT * FROM squire WHERE create_request_id = ${requestId}`.pipe(
+            Effect.flatMap(decodeSquires),
+            Effect.map(Option.fromIterable),
+          ),
+        );
+      },
+    ),
+    updateSquire: Effect.fn("SquireRepository.updateSquire")(function ({
+      id,
+      expectedRevision,
+      patch,
+      updatedAt,
+    }) {
+      return write(
         "updateSquire",
         sql`UPDATE squire
           SET ${setColumns(patch, updatedAt, ["id", "revision", "created_at"])},
@@ -1025,77 +1036,97 @@ const make = Effect.gen(function* () {
           ])}
           RETURNING *`.pipe(Effect.flatMap(decodeSquires), Effect.map(Option.fromIterable)),
         Option.isSome,
-      ),
-    touchUserActiveAt: ({ id, at, staleBefore }) =>
-      read(
+      );
+    }),
+    touchUserActiveAt: Effect.fn("SquireRepository.touchUserActiveAt")(function ({
+      id,
+      at,
+      staleBefore,
+    }) {
+      return read(
         "touchUserActiveAt",
         sql`UPDATE squire SET user_active_at = ${at}
           WHERE id = ${id} AND (user_active_at IS NULL OR user_active_at <= ${staleBefore})
           RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
-      ),
-    claimDigestDate: ({ id, from, to }) =>
-      read(
+      );
+    }),
+    claimDigestDate: Effect.fn("SquireRepository.claimDigestDate")(function ({ id, from, to }) {
+      return read(
         "claimDigestDate",
         sql`UPDATE squire SET digest_last_date = ${to}
           WHERE id = ${id} AND digest_last_date IS ${from}
           RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
-      ),
+      );
+    }),
     deleteSquireRows,
-    listGrants: (squireId) =>
-      read(
+    listGrants: Effect.fn("SquireRepository.listGrants")(function (squireId) {
+      return read(
         "listGrants",
         sql`SELECT * FROM squire_grant WHERE squire_id = ${squireId}
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeGrants)),
-      ),
-    listGrantsForTarget: ({ kind, targetId }) =>
-      read(
+      );
+    }),
+    listGrantsForTarget: Effect.fn("SquireRepository.listGrantsForTarget")(function ({
+      kind,
+      targetId,
+    }) {
+      return read(
         "listGrantsForTarget",
         sql`SELECT * FROM squire_grant WHERE kind = ${kind} AND target_id = ${targetId}
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeGrants)),
-      ),
-    insertGrant: (row) =>
-      write(
+      );
+    }),
+    insertGrant: Effect.fn("SquireRepository.insertGrant")(function (row) {
+      return write(
         "insertGrant",
         sql`INSERT OR IGNORE INTO squire_grant ${sql.insert(row)} RETURNING squire_id`.pipe(
           Effect.map((rows) => rows.length > 0),
         ),
         (inserted) => inserted,
-      ),
-    deleteGrant: ({ squireId, kind, targetId }) =>
-      write(
+      );
+    }),
+    deleteGrant: Effect.fn("SquireRepository.deleteGrant")(function ({ squireId, kind, targetId }) {
+      return write(
         "deleteGrant",
         sql`DELETE FROM squire_grant
           WHERE squire_id = ${squireId} AND kind = ${kind} AND target_id = ${targetId}
           RETURNING squire_id`.pipe(Effect.map((rows) => rows.length > 0)),
         (deleted) => deleted,
-      ),
-    deleteGrantsForTarget: ({ kind, targetId }) =>
-      write(
+      );
+    }),
+    deleteGrantsForTarget: Effect.fn("SquireRepository.deleteGrantsForTarget")(function ({
+      kind,
+      targetId,
+    }) {
+      return write(
         "deleteGrantsForTarget",
         sql`DELETE FROM squire_grant WHERE kind = ${kind} AND target_id = ${targetId}
           RETURNING squire_id`.pipe(Effect.map((rows) => rows.length)),
         (deleted) => deleted > 0,
-      ),
-    insertEvent: (row) =>
-      write(
+      );
+    }),
+    insertEvent: Effect.fn("SquireRepository.insertEvent")(function (row) {
+      return write(
         "insertEvent",
         sql`INSERT OR IGNORE INTO squire_event ${sql.insert(row)} RETURNING id`.pipe(
           Effect.map((rows) => rows.length > 0),
         ),
         (inserted) => inserted,
-      ),
-    pruneEventPayloads: ({ before }) =>
-      write(
+      );
+    }),
+    pruneEventPayloads: Effect.fn("SquireRepository.pruneEventPayloads")(function ({ before }) {
+      return write(
         "pruneEventPayloads",
         sql`UPDATE squire_event SET payload_json = NULL
           WHERE status IN ('delivered', 'dropped') AND payload_json IS NOT NULL
             AND created_at < ${before}
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (pruned) => pruned > 0,
-      ),
+      );
+    }),
     pruneHistory,
-    dropDeferredEvents: (squireId, at) =>
-      write(
+    dropDeferredEvents: Effect.fn("SquireRepository.dropDeferredEvents")(function (squireId, at) {
+      return write(
         "dropDeferredEvents",
         sql`UPDATE squire_event SET status = 'dropped'
           WHERE ${sql.and([
@@ -1105,34 +1136,49 @@ const make = Effect.gen(function* () {
           ])}
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
-      ),
-    dropQueuedEvents: (squireId) =>
-      write(
+      );
+    }),
+    dropQueuedEvents: Effect.fn("SquireRepository.dropQueuedEvents")(function (squireId) {
+      return write(
         "dropQueuedEvents",
         sql`UPDATE squire_event SET status = 'dropped'
           WHERE squire_id = ${squireId} AND status IN ('deferred', 'pending')
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
-      ),
-    reassignQueuedEvent: ({ id, squireId }) =>
-      write(
+      );
+    }),
+    reassignQueuedEvent: Effect.fn("SquireRepository.reassignQueuedEvent")(function ({
+      id,
+      squireId,
+    }) {
+      return write(
         "reassignQueuedEvent",
         sql`UPDATE OR IGNORE squire_event SET squire_id = ${squireId}
           WHERE id = ${id} AND status IN ('deferred', 'pending')
           RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
         (moved) => moved,
-      ),
-    insertCard: (row) => insert("insertCard", "squire_card", row),
-    getCard: (id) =>
-      read(
+      );
+    }),
+    insertCard: Effect.fn("SquireRepository.insertCard")(function (row) {
+      return insert("insertCard", "squire_card", row);
+    }),
+    getCard: Effect.fn("SquireRepository.getCard")(function (id) {
+      return read(
         "getCard",
         sql`SELECT * FROM squire_card WHERE id = ${id}`.pipe(
           Effect.flatMap(decodeCards),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    listCards: ({ squireId, ownerSquireId, statuses, targetThreadId, kinds }) =>
-      statuses?.length === 0 || kinds?.length === 0
+      );
+    }),
+    listCards: Effect.fn("SquireRepository.listCards")(function ({
+      squireId,
+      ownerSquireId,
+      statuses,
+      targetThreadId,
+      kinds,
+    }) {
+      return statuses?.length === 0 || kinds?.length === 0
         ? Effect.succeed([])
         : read(
             "listCards",
@@ -1144,9 +1190,15 @@ const make = Effect.gen(function* () {
               ...(targetThreadId === undefined ? [] : [sql`target_thread_id = ${targetThreadId}`]),
               ...(kinds === undefined ? [] : [sql`kind IN ${sql.in(kinds)}`]),
             ])} ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeCards)),
-          ),
-    updateCard: ({ id, fromStatuses, patch, updatedAt }) =>
-      fromStatuses.length === 0
+          );
+    }),
+    updateCard: Effect.fn("SquireRepository.updateCard")(function ({
+      id,
+      fromStatuses,
+      patch,
+      updatedAt,
+    }) {
+      return fromStatuses.length === 0
         ? Effect.succeedNone
         : write(
             "updateCard",
@@ -1155,9 +1207,14 @@ const make = Effect.gen(function* () {
               WHERE id = ${id} AND status IN ${sql.in(fromStatuses)}
               RETURNING *`.pipe(Effect.flatMap(decodeCards), Effect.map(Option.fromIterable)),
             Option.isSome,
-          ),
-    outdateCardsForThread: ({ threadId, resolution, updatedAt }) =>
-      write(
+          );
+    }),
+    outdateCardsForThread: Effect.fn("SquireRepository.outdateCardsForThread")(function ({
+      threadId,
+      resolution,
+      updatedAt,
+    }) {
+      return write(
         "outdateCardsForThread",
         sql`UPDATE squire_card
           SET status = 'outdated', resolution = ${resolution}, updated_at = ${updatedAt}
@@ -1167,10 +1224,11 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => rows.map((row) => row.id)),
         ),
         (outdated) => outdated.length > 0,
-      ),
+      );
+    }),
     openHeldCards,
-    expireDueApprovals: (now) =>
-      write(
+    expireDueApprovals: Effect.fn("SquireRepository.expireDueApprovals")(function (now) {
+      return write(
         "expireDueApprovals",
         sql`UPDATE squire_card
           SET status = 'outdated', resolution = 'expired', executes_at = NULL, updated_at = ${now}
@@ -1181,7 +1239,8 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => rows.map((row) => row.id)),
         ),
         (ids) => ids.length > 0,
-      ),
+      );
+    }),
     earliestApprovalExpiryAt: read(
       "earliestApprovalExpiryAt",
       sql`SELECT min(expires_at) AS expires_at FROM squire_card
@@ -1190,8 +1249,8 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => Option.fromNullishOr(rows[0]?.expires_at)),
       ),
     ),
-    clearDenials: ({ squireId, before, at }) =>
-      write(
+    clearDenials: Effect.fn("SquireRepository.clearDenials")(function ({ squireId, before, at }) {
+      return write(
         "clearDenials",
         sql`UPDATE squire_card SET expires_at = ${at}
           WHERE squire_id = ${squireId} AND status = 'dismissed'
@@ -1201,11 +1260,21 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => rows.length),
         ),
         (n) => n > 0,
-      ),
-    insertBudgetUsage: (row) => insert("insertBudgetUsage", "squire_budget_usage", row),
-    insertActionLog: (row) => insertReturningId("insertActionLog", "squire_action_log", row),
-    listActionLog: ({ squireId, kinds, afterId, limit }) =>
-      kinds?.length === 0
+      );
+    }),
+    insertBudgetUsage: Effect.fn("SquireRepository.insertBudgetUsage")(function (row) {
+      return insert("insertBudgetUsage", "squire_budget_usage", row);
+    }),
+    insertActionLog: Effect.fn("SquireRepository.insertActionLog")(function (row) {
+      return insertReturningId("insertActionLog", "squire_action_log", row);
+    }),
+    listActionLog: Effect.fn("SquireRepository.listActionLog")(function ({
+      squireId,
+      kinds,
+      afterId,
+      limit,
+    }) {
+      return kinds?.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLog",
@@ -1214,60 +1283,71 @@ const make = Effect.gen(function* () {
               ...(kinds === undefined ? [] : [sql`kind IN ${sql.in(kinds)}`]),
               ...(afterId === undefined ? [] : [sql`id > ${afterId}`]),
             ])} ORDER BY id LIMIT ${limit}`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    getToolCall: (invocationKey) =>
-      selectActionLog("getToolCall", "tool.called", "invocation_key", invocationKey),
-    getExecution: (executionKey) =>
-      selectActionLog("getExecution", "action.executed", "execution_key", executionKey),
-    listCardLog: ({ cardId, kinds }) =>
-      kinds.length === 0
+          );
+    }),
+    getToolCall: Effect.fn("SquireRepository.getToolCall")(function (invocationKey) {
+      return selectActionLog("getToolCall", "tool.called", "invocation_key", invocationKey);
+    }),
+    getExecution: Effect.fn("SquireRepository.getExecution")(function (executionKey) {
+      return selectActionLog("getExecution", "action.executed", "execution_key", executionKey);
+    }),
+    listCardLog: Effect.fn("SquireRepository.listCardLog")(function ({ cardId, kinds }) {
+      return kinds.length === 0
         ? Effect.succeed([])
         : read(
             "listCardLog",
             sql`SELECT * FROM squire_action_log
               WHERE card_id = ${cardId} AND kind IN ${sql.in(kinds)}
               ORDER BY id`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    insertRoomPost: (row) =>
-      insertReturningId("insertRoomPost", "squire_room_post", row).pipe(
+          );
+    }),
+    insertRoomPost: Effect.fn("SquireRepository.insertRoomPost")(function (row) {
+      return insertReturningId("insertRoomPost", "squire_room_post", row).pipe(
         Effect.map(SquireRoomPostId.make),
-      ),
-    insertRule: (row) => insert("insertRule", "squire_rule", row),
-    listRules: ({ squireId, status }) =>
-      read(
+      );
+    }),
+    insertRule: Effect.fn("SquireRepository.insertRule")(function (row) {
+      return insert("insertRule", "squire_rule", row);
+    }),
+    listRules: Effect.fn("SquireRepository.listRules")(function ({ squireId, status }) {
+      return read(
         "listRules",
         sql`SELECT * FROM squire_rule WHERE ${sql.and([
           sql`squire_id = ${squireId}`,
           ...(status === undefined ? [] : [sql`status = ${status}`]),
         ])} ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeRules)),
-      ),
-    countRules: ({ squireId, effect }) =>
-      read(
+      );
+    }),
+    countRules: Effect.fn("SquireRepository.countRules")(function ({ squireId, effect }) {
+      return read(
         "countRules",
         sql`SELECT count(*) AS n FROM squire_rule
           WHERE squire_id = ${squireId} AND effect = ${effect}`.pipe(
           Effect.flatMap(decodeCount),
           Effect.map(countOf),
         ),
-      ),
-    getRule: (id) =>
-      read(
+      );
+    }),
+    getRule: Effect.fn("SquireRepository.getRule")(function (id) {
+      return read(
         "getRule",
         sql`SELECT * FROM squire_rule WHERE id = ${id}`.pipe(
           Effect.flatMap(decodeRules),
           Effect.map((rows) => Option.fromUndefinedOr(rows[0])),
         ),
-      ),
-    deleteRule: (id) =>
-      write(
+      );
+    }),
+    deleteRule: Effect.fn("SquireRepository.deleteRule")(function (id) {
+      return write(
         "deleteRule",
         sql`DELETE FROM squire_rule WHERE id = ${id} RETURNING id`.pipe(
           Effect.map((rows) => rows.length > 0),
         ),
         (deleted) => deleted,
-      ),
-    setRuleStatus: ({ ids, status }) =>
-      ids.length === 0
+      );
+    }),
+    setRuleStatus: Effect.fn("SquireRepository.setRuleStatus")(function ({ ids, status }) {
+      return ids.length === 0
         ? Effect.succeed(0)
         : write(
             "setRuleStatus",
@@ -1275,74 +1355,91 @@ const make = Effect.gen(function* () {
               WHERE id IN ${sql.in(ids)} AND status != ${status}
               RETURNING id`.pipe(Effect.map((rows) => rows.length)),
             (updated) => updated > 0,
-          ),
-    recordRuleMatch: ({ id, matchedAt }) =>
-      write(
+          );
+    }),
+    recordRuleMatch: Effect.fn("SquireRepository.recordRuleMatch")(function ({ id, matchedAt }) {
+      return write(
         "recordRuleMatch",
         sql`UPDATE squire_rule
           SET match_count = match_count + 1, last_matched_at = ${matchedAt}
           WHERE id = ${id} RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
         (updated) => updated,
-      ),
-    listBudgetUsage: ({ squireId, since }) =>
-      read(
+      );
+    }),
+    listBudgetUsage: Effect.fn("SquireRepository.listBudgetUsage")(function ({ squireId, since }) {
+      return read(
         "listBudgetUsage",
         sql`SELECT * FROM squire_budget_usage
           WHERE squire_id = ${squireId} AND executed_at >= ${since}
           ORDER BY executed_at, id`.pipe(Effect.flatMap(decodeBudgetUsage)),
-      ),
-    insertSummary: (row) =>
-      write(
+      );
+    }),
+    insertSummary: Effect.fn("SquireRepository.insertSummary")(function (row) {
+      return write(
         "insertSummary",
         sql`INSERT OR IGNORE INTO squire_summary ${sql.insert(row)} RETURNING thread_id`.pipe(
           Effect.map((rows) => rows.length > 0),
         ),
         (inserted) => inserted,
-      ),
-    getSummary: ({ thread_id, run_id, stage }) =>
-      read(
+      );
+    }),
+    getSummary: Effect.fn("SquireRepository.getSummary")(function ({ thread_id, run_id, stage }) {
+      return read(
         "getSummary",
         sql`SELECT * FROM squire_summary
           WHERE thread_id = ${thread_id} AND run_id = ${run_id} AND stage = ${stage}`.pipe(
           Effect.flatMap(decodeSummaries),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    listRunSummaries: ({ thread_id, run_id }) =>
-      read(
+      );
+    }),
+    listRunSummaries: Effect.fn("SquireRepository.listRunSummaries")(function ({
+      thread_id,
+      run_id,
+    }) {
+      return read(
         "listRunSummaries",
         sql`SELECT * FROM squire_summary WHERE thread_id = ${thread_id} AND run_id = ${run_id}
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeSummaries)),
-      ),
-    listThreadSummaries: ({ threadId, limit }) =>
-      read(
+      );
+    }),
+    listThreadSummaries: Effect.fn("SquireRepository.listThreadSummaries")(function ({
+      threadId,
+      limit,
+    }) {
+      return read(
         "listThreadSummaries",
         sql`SELECT * FROM squire_summary WHERE thread_id = ${threadId} AND status != 'generating'
           ORDER BY created_at DESC, rowid DESC LIMIT ${limit}`.pipe(
           Effect.flatMap(decodeSummaries),
         ),
-      ),
+      );
+    }),
     // `+thread_id` keeps SQLite from walking the whole primary key to group;
     // the window's range on squire_summary_recent is the small side.
-    listRecentlySummarizedThreadIds: ({ since, limit }) =>
-      read(
-        "listRecentlySummarizedThreadIds",
-        sql`SELECT thread_id FROM squire_summary
+    listRecentlySummarizedThreadIds: Effect.fn("SquireRepository.listRecentlySummarizedThreadIds")(
+      function ({ since, limit }) {
+        return read(
+          "listRecentlySummarizedThreadIds",
+          sql`SELECT thread_id FROM squire_summary
           WHERE updated_at >= ${since} AND status != 'generating'
           GROUP BY +thread_id ORDER BY max(updated_at) DESC, thread_id LIMIT ${limit}`.pipe(
-          Effect.flatMap(decodeSummaryThreadIds),
-          Effect.map((rows) => rows.map((row) => row.thread_id)),
-        ),
-      ),
-    deleteThreadSummaries: (threadId) =>
-      write(
+            Effect.flatMap(decodeSummaryThreadIds),
+            Effect.map((rows) => rows.map((row) => row.thread_id)),
+          ),
+        );
+      },
+    ),
+    deleteThreadSummaries: Effect.fn("SquireRepository.deleteThreadSummaries")(function (threadId) {
+      return write(
         "deleteThreadSummaries",
         sql`DELETE FROM squire_summary WHERE thread_id = ${threadId} RETURNING thread_id`.pipe(
           Effect.map((rows) => rows.length),
         ),
         (deleted) => deleted > 0,
-      ),
-    finishSummary: ({
+      );
+    }),
+    finishSummary: Effect.fn("SquireRepository.finishSummary")(function ({
       thread_id,
       run_id,
       stage,
@@ -1350,8 +1447,8 @@ const make = Effect.gen(function* () {
       summary_json,
       payer_squire_id,
       updated_at,
-    }) =>
-      write(
+    }) {
+      return write(
         "finishSummary",
         sql`UPDATE squire_summary
           SET status = ${status}, summary_json = ${summary_json},
@@ -1360,29 +1457,37 @@ const make = Effect.gen(function* () {
             AND status = 'generating'
           RETURNING thread_id`.pipe(Effect.map((rows) => rows.length > 0)),
         (finished) => finished,
-      ),
-    settleGeneratingSummaries: (updatedAt) =>
-      write(
-        "settleGeneratingSummaries",
-        sql`UPDATE squire_summary SET status = 'partial', updated_at = ${updatedAt}
+      );
+    }),
+    settleGeneratingSummaries: Effect.fn("SquireRepository.settleGeneratingSummaries")(
+      function (updatedAt) {
+        return write(
+          "settleGeneratingSummaries",
+          sql`UPDATE squire_summary SET status = 'partial', updated_at = ${updatedAt}
           WHERE status = 'generating' RETURNING thread_id`.pipe(Effect.map((rows) => rows.length)),
-        (settled) => settled > 0,
-      ),
-    insertTrigger: (row) => insert("insertTrigger", "squire_trigger", row),
-    getTrigger: (id) =>
-      read(
+          (settled) => settled > 0,
+        );
+      },
+    ),
+    insertTrigger: Effect.fn("SquireRepository.insertTrigger")(function (row) {
+      return insert("insertTrigger", "squire_trigger", row);
+    }),
+    getTrigger: Effect.fn("SquireRepository.getTrigger")(function (id) {
+      return read(
         "getTrigger",
         sql`SELECT * FROM squire_trigger WHERE id = ${id}`.pipe(
           Effect.flatMap(decodeTriggers),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    listTriggers: (squireId) =>
-      read(
+      );
+    }),
+    listTriggers: Effect.fn("SquireRepository.listTriggers")(function (squireId) {
+      return read(
         "listTriggers",
         sql`SELECT * FROM squire_trigger WHERE squire_id = ${squireId}
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeTriggers)),
-      ),
+      );
+    }),
     listArmedTriggers: read(
       "listArmedTriggers",
       sql`SELECT * FROM squire_trigger
@@ -1390,7 +1495,7 @@ const make = Effect.gen(function* () {
         ORDER BY next_slot_at, rowid`.pipe(Effect.flatMap(decodeTriggers)),
     ),
     // squire_trigger has no updated_at, so this skips `setColumns`.
-    updateTrigger: ({ id, patch }) => {
+    updateTrigger: Effect.fn("SquireRepository.updateTrigger")(function ({ id, patch }) {
       const columns = Object.fromEntries(
         Object.entries(patch).filter(
           ([column, value]) => value !== undefined && !triggerImmutableColumns.has(column),
@@ -1410,18 +1515,23 @@ const make = Effect.gen(function* () {
               RETURNING *`.pipe(Effect.flatMap(decodeTriggers), Effect.map(Option.fromIterable)),
             Option.isSome,
           );
-    },
-    insertTriggerEvent: (row) =>
-      write(
+    }),
+    insertTriggerEvent: Effect.fn("SquireRepository.insertTriggerEvent")(function (row) {
+      return write(
         "insertTriggerEvent",
         sql`INSERT OR IGNORE INTO squire_event ${sql.insert(row)} RETURNING id`.pipe(
           Effect.flatMap(decodeIds),
           Effect.map((rows) => Option.fromUndefinedOr(rows[0]?.id)),
         ),
         Option.isSome,
-      ),
-    hasThreadlessEvent: ({ squireId, kind, stateKey }) =>
-      read(
+      );
+    }),
+    hasThreadlessEvent: Effect.fn("SquireRepository.hasThreadlessEvent")(function ({
+      squireId,
+      kind,
+      stateKey,
+    }) {
+      return read(
         "hasThreadlessEvent",
         sql`SELECT count(*) AS n FROM squire_event
           WHERE squire_id = ${squireId} AND kind = ${kind} AND ifnull(thread_id, '') = ''
@@ -1429,18 +1539,29 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeCount),
           Effect.map((rows) => countOf(rows) > 0),
         ),
-      ),
-    listActionLogAfter: ({ squireId, kinds, after }) =>
-      kinds.length === 0
+      );
+    }),
+    listActionLogAfter: Effect.fn("SquireRepository.listActionLogAfter")(function ({
+      squireId,
+      kinds,
+      after,
+    }) {
+      return kinds.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLogAfter",
             sql`SELECT * FROM squire_action_log
               WHERE squire_id = ${squireId} AND kind IN ${sql.in(kinds)} AND created_at > ${after}
               ORDER BY created_at, id`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    listActionLogBefore: ({ squireId, kinds, before, limit }) =>
-      kinds.length === 0
+          );
+    }),
+    listActionLogBefore: Effect.fn("SquireRepository.listActionLogBefore")(function ({
+      squireId,
+      kinds,
+      before,
+      limit,
+    }) {
+      return kinds.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLogBefore",
@@ -1451,49 +1572,60 @@ const make = Effect.gen(function* () {
             ])} ORDER BY created_at DESC, id DESC LIMIT ${limit}`.pipe(
               Effect.flatMap(decodeActionLogs),
             ),
-          ),
-    listActionLogForTasks: ({ taskIds, kinds }) =>
-      taskIds.length === 0 || kinds.length === 0
+          );
+    }),
+    listActionLogForTasks: Effect.fn("SquireRepository.listActionLogForTasks")(function ({
+      taskIds,
+      kinds,
+    }) {
+      return taskIds.length === 0 || kinds.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLogForTasks",
             sql`SELECT * FROM squire_action_log
               WHERE task_id IN ${sql.in(taskIds)} AND kind IN ${sql.in(kinds)}
               ORDER BY id`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    listCardsForTasks: (taskIds) =>
-      taskIds.length === 0
+          );
+    }),
+    listCardsForTasks: Effect.fn("SquireRepository.listCardsForTasks")(function (taskIds) {
+      return taskIds.length === 0
         ? Effect.succeed([])
         : read(
             "listCardsForTasks",
             sql`SELECT * FROM squire_card WHERE routed_task_id IN ${sql.in(taskIds)}
               ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeCards)),
-          ),
+          );
+    }),
     // ── Delivery and clock ──
-    listEventsByStatus: ({ squireId, statuses }) =>
-      statuses.length === 0
+    listEventsByStatus: Effect.fn("SquireRepository.listEventsByStatus")(function ({
+      squireId,
+      statuses,
+    }) {
+      return statuses.length === 0
         ? Effect.succeed([])
         : read(
             "listEventsByStatus",
             sql`SELECT * FROM squire_event
               WHERE squire_id = ${squireId} AND status IN ${sql.in(statuses)}
               ORDER BY id`.pipe(Effect.flatMap(decodeEventRows)),
-          ),
+          );
+    }),
     listBatchedEvents: read(
       "listBatchedEvents",
       sql`SELECT * FROM squire_event WHERE status = 'batched' ORDER BY squire_id, id`.pipe(
         Effect.flatMap(decodeEventRows),
       ),
     ),
-    listBatch: (batchId) =>
-      read(
+    listBatch: Effect.fn("SquireRepository.listBatch")(function (batchId) {
+      return read(
         "listBatch",
         sql`SELECT * FROM squire_event WHERE batch_id = ${batchId} ORDER BY id`.pipe(
           Effect.flatMap(decodeEventRows),
         ),
-      ),
-    markEventsBatched: ({ ids, batchId }) =>
-      ids.length === 0
+      );
+    }),
+    markEventsBatched: Effect.fn("SquireRepository.markEventsBatched")(function ({ ids, batchId }) {
+      return ids.length === 0
         ? Effect.succeed(0)
         : write(
             "markEventsBatched",
@@ -1501,9 +1633,10 @@ const make = Effect.gen(function* () {
               WHERE id IN ${sql.in(ids)} AND status = 'pending'
               RETURNING id`.pipe(Effect.map((rows) => rows.length)),
             (batched) => batched > 0,
-          ),
-    markBatchDelivered: (batchId) =>
-      write(
+          );
+    }),
+    markBatchDelivered: Effect.fn("SquireRepository.markBatchDelivered")(function (batchId) {
+      return write(
         "markBatchDelivered",
         sql`UPDATE squire_event SET status = 'delivered'
           WHERE batch_id = ${batchId} AND status = 'batched'
@@ -1512,9 +1645,10 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => rows.toSorted((a, b) => a.id - b.id)),
         ),
         (rows) => rows.length > 0,
-      ),
-    dropPendingEvents: (ids) =>
-      ids.length === 0
+      );
+    }),
+    dropPendingEvents: Effect.fn("SquireRepository.dropPendingEvents")(function (ids) {
+      return ids.length === 0
         ? Effect.succeed(0)
         : write(
             "dropPendingEvents",
@@ -1522,7 +1656,8 @@ const make = Effect.gen(function* () {
               WHERE id IN ${sql.in(ids)} AND status = 'pending'
               RETURNING id`.pipe(Effect.map((rows) => rows.length)),
             (dropped) => dropped > 0,
-          ),
+          );
+    }),
     earliestDeferredAt: read(
       "earliestDeferredAt",
       sql`SELECT min(not_before) AS not_before FROM squire_event
@@ -1537,8 +1672,11 @@ const make = Effect.gen(function* () {
         WHERE escalate_at IS NOT NULL AND opened_at IS NULL AND kind IN ('steer', 'proposal')
         ORDER BY escalate_at, rowid`.pipe(Effect.flatMap(decodeCards)),
     ),
-    listNotificationIntents: ({ squireId, since }) =>
-      read(
+    listNotificationIntents: Effect.fn("SquireRepository.listNotificationIntents")(function ({
+      squireId,
+      since,
+    }) {
+      return read(
         "listNotificationIntents",
         // Two indexed halves instead of one OR, which would scan the Squire's whole log.
         sql`WITH intents AS (
@@ -1557,7 +1695,8 @@ const make = Effect.gen(function* () {
               WHERE d.card_id = c.id AND d.kind = 'notification.delivery') AS deliveries_json
           FROM intents i JOIN squire_card c ON c.id = i.card_id
           ORDER BY i.id`.pipe(Effect.flatMap(decodeNotificationIntents)),
-      ),
+      );
+    }),
     listSquiresWithPendingEvents: read(
       "listSquiresWithPendingEvents",
       sql`SELECT DISTINCT squire_id FROM squire_event WHERE status = 'pending'
@@ -1567,28 +1706,37 @@ const make = Effect.gen(function* () {
       ),
     ),
     // ── Integration ──
-    resetBatchedEvents: (squireId) =>
-      write(
+    resetBatchedEvents: Effect.fn("SquireRepository.resetBatchedEvents")(function (squireId) {
+      return write(
         "resetBatchedEvents",
         sql`UPDATE squire_event SET status = 'pending', batch_id = NULL
           WHERE squire_id = ${squireId} AND status = 'batched'
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (reset) => reset > 0,
-      ),
-    dropBatch: (batchId) =>
-      write(
+      );
+    }),
+    dropBatch: Effect.fn("SquireRepository.dropBatch")(function (batchId) {
+      return write(
         "dropBatch",
         sql`UPDATE squire_event SET status = 'dropped'
           WHERE batch_id = ${batchId} AND status = 'batched'
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
-      ),
+      );
+    }),
     // ── Reactor ──
-    listEvents: ({ statuses, deferReasons, threadId, kinds, ids, dueBy }) =>
-      statuses.length === 0 ||
-      deferReasons?.length === 0 ||
-      kinds?.length === 0 ||
-      ids?.length === 0
+    listEvents: Effect.fn("SquireRepository.listEvents")(function ({
+      statuses,
+      deferReasons,
+      threadId,
+      kinds,
+      ids,
+      dueBy,
+    }) {
+      return statuses.length === 0 ||
+        deferReasons?.length === 0 ||
+        kinds?.length === 0 ||
+        ids?.length === 0
         ? Effect.succeed([])
         : read(
             "listEvents",
@@ -1600,9 +1748,16 @@ const make = Effect.gen(function* () {
               ...(ids === undefined ? [] : [sql`id IN ${sql.in(ids)}`]),
               ...(dueBy === undefined ? [] : [sql`not_before <= ${dueBy}`]),
             ])} ORDER BY id`.pipe(Effect.flatMap(decodeEventRows)),
-          ),
-    setEventStatus: ({ ids, fromStatuses, status, deferReason, notBefore }) =>
-      ids.length === 0 || fromStatuses.length === 0
+          );
+    }),
+    setEventStatus: Effect.fn("SquireRepository.setEventStatus")(function ({
+      ids,
+      fromStatuses,
+      status,
+      deferReason,
+      notBefore,
+    }) {
+      return ids.length === 0 || fromStatuses.length === 0
         ? Effect.succeed([])
         : write(
             "setEventStatus",
@@ -1617,15 +1772,17 @@ const make = Effect.gen(function* () {
               Effect.map((rows) => rows.toSorted((a, b) => a.id - b.id)),
             ),
             (rows) => rows.length > 0,
-          ),
-    deleteThreadEvents: (threadId) =>
-      write(
+          );
+    }),
+    deleteThreadEvents: Effect.fn("SquireRepository.deleteThreadEvents")(function (threadId) {
+      return write(
         "deleteThreadEvents",
         sql`DELETE FROM squire_event WHERE thread_id = ${threadId} RETURNING id`.pipe(
           Effect.map((rows) => rows.length),
         ),
         (deleted) => deleted > 0,
-      ),
+      );
+    }),
     // The cursor is reactor bookkeeping that advances on every event, so its
     // writes publish nothing. A missing row (migrate-dev-db clears the table)
     // reads as disabled, so the next enabling start fast-forwards it.
@@ -1639,28 +1796,35 @@ const make = Effect.gen(function* () {
         })),
       ),
     ),
-    writeCursor: ({ sequence, enabled }) =>
-      read(
+    writeCursor: Effect.fn("SquireRepository.writeCursor")(function ({ sequence, enabled }) {
+      return read(
         "writeCursor",
         sql`INSERT INTO squire_reactor_cursor(id, sequence, enabled)
           VALUES (1, ${sequence}, ${enabled ? 1 : 0})
           ON CONFLICT(id) DO UPDATE SET sequence = excluded.sequence, enabled = excluded.enabled`.pipe(
           Effect.asVoid,
         ),
-      ),
+      );
+    }),
     subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
     changeGeneration: Ref.get(generation),
     // ── Dev fixtures ──
-    deleteBudgetUsage: (squireId) =>
-      write(
+    deleteBudgetUsage: Effect.fn("SquireRepository.deleteBudgetUsage")(function (squireId) {
+      return write(
         "deleteBudgetUsage",
         sql`DELETE FROM squire_budget_usage WHERE squire_id = ${squireId} RETURNING id`.pipe(
           Effect.map((rows) => rows.length),
         ),
         (deleted) => deleted > 0,
-      ),
-    getEventByKey: ({ squireId, kind, threadId, stateKey }) =>
-      read(
+      );
+    }),
+    getEventByKey: Effect.fn("SquireRepository.getEventByKey")(function ({
+      squireId,
+      kind,
+      threadId,
+      stateKey,
+    }) {
+      return read(
         "getEventByKey",
         sql`SELECT * FROM squire_event
           WHERE squire_id = ${squireId} AND kind = ${kind}
@@ -1668,7 +1832,8 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeEventRows),
           Effect.map((rows) => Option.fromUndefinedOr(rows[0])),
         ),
-      ),
+      );
+    }),
     // ── Read model ──
     listCardStats: read(
       "listCardStats",
@@ -1678,8 +1843,14 @@ const make = Effect.gen(function* () {
         Effect.flatMap(decodeCardStats),
       ),
     ),
-    listCardsPage: ({ queueOf, statuses, kinds, before, limit }) =>
-      statuses?.length === 0 || kinds?.length === 0
+    listCardsPage: Effect.fn("SquireRepository.listCardsPage")(function ({
+      queueOf,
+      statuses,
+      kinds,
+      before,
+      limit,
+    }) {
+      return statuses?.length === 0 || kinds?.length === 0
         ? Effect.succeed([])
         : read(
             "listCardsPage",
@@ -1694,9 +1865,16 @@ const make = Effect.gen(function* () {
             ])} ORDER BY created_at DESC, rowid DESC LIMIT ${limit}`.pipe(
               Effect.flatMap(decodeCards),
             ),
-          ),
-    listActionLogDesc: ({ squireId, kinds, triggerId, beforeId, limit }) =>
-      kinds?.length === 0
+          );
+    }),
+    listActionLogDesc: Effect.fn("SquireRepository.listActionLogDesc")(function ({
+      squireId,
+      kinds,
+      triggerId,
+      beforeId,
+      limit,
+    }) {
+      return kinds?.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLogDesc",
@@ -1706,9 +1884,14 @@ const make = Effect.gen(function* () {
               ...(triggerId === undefined ? [] : [sql`trigger_id = ${triggerId}`]),
               ...(beforeId === undefined ? [] : [sql`id < ${beforeId}`]),
             ])} ORDER BY id DESC LIMIT ${limit}`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    listActionLogForRuns: ({ squireId, kinds, runIds }) =>
-      kinds.length === 0 || runIds.length === 0
+          );
+    }),
+    listActionLogForRuns: Effect.fn("SquireRepository.listActionLogForRuns")(function ({
+      squireId,
+      kinds,
+      runIds,
+    }) {
+      return kinds.length === 0 || runIds.length === 0
         ? Effect.succeed([])
         : read(
             "listActionLogForRuns",
@@ -1716,18 +1899,22 @@ const make = Effect.gen(function* () {
               WHERE squire_id = ${squireId} AND kind IN ${sql.in(kinds)}
                 AND run_id IN ${sql.in(runIds)}
               ORDER BY id`.pipe(Effect.flatMap(decodeActionLogs)),
-          ),
-    listLatestRunSummaries: (threadId) =>
-      read(
-        "listLatestRunSummaries",
-        sql`SELECT * FROM squire_summary WHERE thread_id = ${threadId}
+          );
+    }),
+    listLatestRunSummaries: Effect.fn("SquireRepository.listLatestRunSummaries")(
+      function (threadId) {
+        return read(
+          "listLatestRunSummaries",
+          sql`SELECT * FROM squire_summary WHERE thread_id = ${threadId}
             AND run_id = (SELECT run_id FROM squire_summary WHERE thread_id = ${threadId}
               ORDER BY created_at DESC, rowid DESC LIMIT 1)
           ORDER BY created_at, rowid`.pipe(Effect.flatMap(decodeSummaries)),
-      ),
+        );
+      },
+    ),
     // A user who posts has seen the room, so only others' posts make it unread.
-    listRoomRows: ({ closedSince }) =>
-      read(
+    listRoomRows: Effect.fn("SquireRepository.listRoomRows")(function ({ closedSince }) {
+      return read(
         "listRoomRows",
         sql`SELECT room.id, room.topic, room.status, room.muted, room.last_post_at,
           (SELECT json_group_array(member_id) FROM (
@@ -1743,7 +1930,8 @@ const make = Effect.gen(function* () {
         FROM squire_room AS room
         WHERE room.status = 'open' OR room.updated_at >= ${closedSince}
         ORDER BY room.created_at, room.rowid`.pipe(Effect.flatMap(decodeRoomRows)),
-      ),
+      );
+    }),
   });
 });
 

@@ -75,7 +75,7 @@ const OrchestrationLayer = Layer.mergeAll(
   Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-      getInstance: () => Effect.succeed(undefined),
+      getInstance: () => Effect.undefined,
       listInstances: Effect.succeed([]),
       listUnavailable: Effect.succeed([]),
       streamChanges: Stream.empty,

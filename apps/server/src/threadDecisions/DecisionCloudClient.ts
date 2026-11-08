@@ -171,13 +171,11 @@ export const make = Effect.gen(function* () {
     if (revoked) return { ...local, state: "revoked" as const, eligible: false };
     return yield* fetchStatus.pipe(
       Effect.tap(save),
-      Effect.catch(() =>
-        Effect.succeed({
-          ...local,
-          state: local.state === "unfunded" ? ("unfunded" as const) : ("unavailable" as const),
-          eligible: false,
-        }),
-      ),
+      Effect.orElseSucceed(() => ({
+        ...local,
+        state: local.state === "unfunded" ? ("unfunded" as const) : ("unavailable" as const),
+        eligible: false,
+      })),
     );
   });
   const fundingStatus = fundingStatusUnsafe.pipe(Effect.tap(observe), fundingMutex.withPermits(1));
@@ -234,7 +232,7 @@ export const make = Effect.gen(function* () {
           (status) => status.state === "revoked" && !status.eligible,
           unavailable,
         ),
-        Effect.catch(() => Effect.succeed(stopped)),
+        Effect.orElseSucceed(() => stopped),
       );
       yield* save(status);
       return { status, challenge: null };
@@ -276,10 +274,7 @@ export const make = Effect.gen(function* () {
       return;
     }
     yield* fundingUnsafe({ operation: "revoke", expectedGeneration: current.generation });
-  }).pipe(
-    fundingMutex.withPermits(1),
-    Effect.catch(() => Effect.void),
-  );
+  }).pipe(fundingMutex.withPermits(1), Effect.ignore);
   const evaluate = Effect.fn("Decisions.cloud.evaluate")(function* (
     input: DecisionEvaluationRequest,
   ) {

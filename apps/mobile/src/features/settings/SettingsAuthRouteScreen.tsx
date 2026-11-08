@@ -1,6 +1,5 @@
 import type { UserProfileCustomPage } from "@clerk/expo/native-components";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useLayoutEffect } from "react";
+import type { StaticScreenProps } from "@react-navigation/native";
 
 import { MobileAccountProfile } from "./MobileAccountProfile";
 import { SettingsAddAccountAuthContent } from "./SettingsAddAccountRouteScreen";
@@ -18,18 +17,12 @@ function userProfileCustomPages(accountId: string): UserProfileCustomPage[] {
   ];
 }
 
+// Without cloud config the app has no entry point here and appLinking drops the deep link.
 export function SettingsAuthRouteScreen(
   props: StaticScreenProps<{ accountId?: string } | undefined>,
 ) {
-  const navigation = useNavigation();
   const accountId = props.route.params?.accountId;
   const customPages = accountId ? userProfileCustomPages(accountId) : undefined;
-
-  useLayoutEffect(() => {
-    if (!hasCloudPublicConfig()) {
-      navigation.goBack();
-    }
-  }, [navigation]);
 
   return hasCloudPublicConfig() ? (
     accountId ? (

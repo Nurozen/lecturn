@@ -1,4 +1,4 @@
-import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
+import { isWorkspaceImagePreviewPath } from "@lecturn/shared/mediaPreview";
 import { COMPUTER_USE_TOOL_SOURCE, dynamicToolSurface } from "@lecturn/shared/toolActivity";
 import type {
   ToolActivityIcon,

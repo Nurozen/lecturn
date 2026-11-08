@@ -1,3 +1,4 @@
+import { documentChipKindForFileName } from "~/pierre-icons";
 import { isSvgAttachment } from "@lecturn/shared/image";
 import { useRenderedAppearance } from "../../hooks/useTheme";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
@@ -30,7 +31,6 @@ import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ContextChipPopover as UserMessageContextPopover,
-  ContextChipShell,
   FileChip,
   ImageChipButton,
   PULL_REQUEST_CHIP_KINDS,
@@ -47,7 +47,11 @@ import { formatComposerContextReference } from "@lecturn/shared/composerContextR
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
-import { SkillChipIcon } from "./SkillInlineText";
+import {
+  SkillChipPopover,
+  skillInstructionsOpener,
+  skillPopoverDescription,
+} from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
@@ -66,7 +70,7 @@ function UserMessageMentionChip(props: {
       <TooltipTrigger
         render={
           <ContextChip
-            kind="mention"
+            kind={documentChipKindForFileName(props.record.path) ?? "mention"}
             render={<button type="button" />}
             aria-label={`Preview ${props.record.path}`}
             data-markdown-copy={props.copyMarkdown}
@@ -96,22 +100,18 @@ function UserMessageMentionChip(props: {
   );
 }
 
-function UserMessageContextChip(props: {
-  icon: ReactNode;
-  label: string;
-  kindLabel?: string;
+function UserMessageSkillChip(props: {
+  record: Extract<KnownComposerContextRecord, { kind: "skill" }>;
   copyMarkdown: string;
-  tooltip?: string;
-  kind: ContextChipKind;
 }) {
+  const { skills, threadRef } = use(TimelineRowCtx);
+  const skill = skills.find((candidate) => candidate.name === props.record.name);
   return (
-    <ContextChipShell
-      kind={props.kind}
-      icon={props.icon}
-      label={props.label}
-      aria-label={props.kindLabel ? `${props.kindLabel}, ${props.label}` : undefined}
-      data-markdown-copy={props.copyMarkdown}
-      tooltip={props.tooltip}
+    <SkillChipPopover
+      label={props.record.label || props.record.name}
+      description={skill ? skillPopoverDescription(skill) : null}
+      copyMarkdown={props.copyMarkdown}
+      onViewInstructions={skillInstructionsOpener(threadRef, skill)}
     />
   );
 }
@@ -312,14 +312,7 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       canRender: (record) => record.kind === "skill",
       render: (record, context) =>
         record.kind === "skill" ? (
-          <UserMessageContextChip
-            icon={<SkillChipIcon />}
-            label={record.label || record.name}
-            kindLabel="Skill"
-            tooltip={`$${record.name}`}
-            copyMarkdown={context.copyMarkdown}
-            kind="skill"
-          />
+          <UserMessageSkillChip record={record} copyMarkdown={context.copyMarkdown} />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),
@@ -559,6 +552,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           <ChatMarkdown
             text={comment.text}
             cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
             skills={ctx.skills}
             parseRawHtml={false}
             lineBreaks

@@ -21,6 +21,12 @@ const runtimeVersionPolicy =
 const personalTeamBundleIdentifier = repoEnv.LECTURN_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
+// Compiled into the native project. Without a relay, Observe's native side could dispatch to
+// Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
+const observeEndpointUrl = repoEnv.LECTURN_RELAY_URL?.trim()
+  ? new URL("/v1/mobile/observe", repoEnv.LECTURN_RELAY_URL.trim()).toString()
+  : "https://observe.invalid";
+
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 // Universal exports already contain their own rounded-square silhouette. Using one as an adaptive
 // foreground makes Android draw an icon shape inside the launcher's mask.
@@ -459,6 +465,7 @@ const config: ExpoConfig = {
     },
     eas: {
       projectId: "28b6b009-1a3e-4b67-94f9-1153621531ae",
+      observe: { endpointUrl: observeEndpointUrl },
     },
   },
   owner: "nurozen",

@@ -590,6 +590,10 @@
     "./model-traits": {
       "types": "./src/modelTraits.ts",
       "default": "./src/modelTraits.ts"
+    },
+    "./provider-clients": {
+      "types": "./src/providerClients.ts",
+      "default": "./src/providerClients.ts"
     }
   },
   "scripts": {
@@ -598,6 +602,14 @@
   },
   "dependencies": {
     "@lecturn/contracts": "workspace:*",
+    "@lecturn/provider-acp-registry": "workspace:*",
+    "@lecturn/provider-core": "workspace:*",
+    "@lecturn/provider-cursor": "workspace:*",
+    "@lecturn/provider-fx": "workspace:*",
+    "@lecturn/provider-grok": "workspace:*",
+    "@lecturn/provider-muse": "workspace:*",
+    "@lecturn/provider-opencode": "workspace:*",
+    "@lecturn/provider-pi": "workspace:*",
     "@lecturn/shared": "workspace:*",
     "@lecturn/source-control-core": "workspace:*",
     "@lecturn/source-control-definitions": "workspace:*",

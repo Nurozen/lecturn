@@ -312,7 +312,7 @@ describe("SquireReadModel", () => {
         assert.strictEqual(offerOf(expired.id), offer.text);
         assert.isUndefined(offerOf(denied.id));
       }),
-      Layer.mock(SquireRules.SquireRules)({ offerFor: () => Effect.succeed(Option.some(offer)) }),
+      Layer.mock(SquireRules.SquireRules)({ offerFor: () => Effect.succeedSome(offer) }),
     );
   });
 

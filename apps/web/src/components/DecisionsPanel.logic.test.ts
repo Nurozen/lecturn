@@ -30,7 +30,7 @@ const status = Schema.decodeUnknownSync(DecisionProcessingStatus)({
   incompleteJobs: [],
   activeScans: [],
 });
-const source = Schema.decodeUnknownSync(ThreadDecisionSourceWindowResult)({
+const source = Schema.decodeSync(ThreadDecisionSourceWindowResult)({
   outcome: "exact",
   threadId: "t",
   messageId: "m",

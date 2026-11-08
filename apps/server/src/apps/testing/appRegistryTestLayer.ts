@@ -78,32 +78,51 @@ export const makeRegistryLayer = (
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-app-registry-" })));
   const liveClient = Layer.succeed(LiveToolClient)({
-    listTools: () =>
-      Effect.sync(() => {
+    listTools: Effect.fn("LiveToolClient.listTools")(function () {
+      return Effect.sync(() => {
         liveListCalls.count++;
         return liveDefinitions;
-      }),
-    call: () => Effect.die("unused"),
-    readResource: () => Effect.die("unused"),
+      });
+    }),
+    call: Effect.fn("LiveToolClient.call")(function () {
+      return Effect.die("unused");
+    }),
+    readResource: Effect.fn("LiveToolClient.readResource")(function () {
+      return Effect.die("unused");
+    }),
   });
   const projects = Layer.succeed(AppProjectService)({
-    ensureWorkspace: () => Effect.die("unused"),
-    resolveAppForProject: (projectId) =>
-      Effect.succeed(
+    ensureWorkspace: Effect.fn("AppProjectService.ensureWorkspace")(function () {
+      return Effect.die("unused");
+    }),
+    resolveAppForProject: Effect.fn("AppProjectService.resolveAppForProject")(function (projectId) {
+      return Effect.succeed(
         projectId === appProject
           ? Option.some({ appId: registration.appId, workspaceRoot: "/work/rocket" })
           : Option.none(),
-      ),
-    listThreads: () => Effect.die("unused"),
+      );
+    }),
+    listThreads: Effect.fn("AppProjectService.listThreads")(function () {
+      return Effect.die("unused");
+    }),
     streamThreads: () => Stream.die("unused"),
-    setThreadAppData: () => Effect.die("unused"),
-    createEmbedThread: () => Effect.die("unused"),
-    setEmbedDefaultModel: () => Effect.die("unused"),
-    markThreadsCopied: () => Effect.die("unused"),
-    deleteAppProjects: (appId) =>
-      (options.deleteAppProjects?.(appId) ?? Effect.void).pipe(
+    setThreadAppData: Effect.fn("AppProjectService.setThreadAppData")(function () {
+      return Effect.die("unused");
+    }),
+    createEmbedThread: Effect.fn("AppProjectService.createEmbedThread")(function () {
+      return Effect.die("unused");
+    }),
+    setEmbedDefaultModel: Effect.fn("AppProjectService.setEmbedDefaultModel")(function () {
+      return Effect.die("unused");
+    }),
+    markThreadsCopied: Effect.fn("AppProjectService.markThreadsCopied")(function () {
+      return Effect.die("unused");
+    }),
+    deleteAppProjects: Effect.fn("AppProjectService.deleteAppProjects")(function (appId) {
+      return (options.deleteAppProjects?.(appId) ?? Effect.void).pipe(
         Effect.tap(() => Effect.sync(() => deletedProjectsOf.push(appId))),
-      ),
+      );
+    }),
   });
   const sessions = SessionStore.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
@@ -128,15 +147,14 @@ export const sidecar = (overrides: Record<string, unknown> = {}): AppSidecarBoot
 });
 
 /** Delivers a stream's elements in order, so tests await each one instead of sleeping. */
-export const streamQueue = <A, E>(stream: Stream.Stream<A, E>) =>
-  Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<A>();
-    yield* stream.pipe(
-      Stream.runForEach((value) => Queue.offer(queue, value)),
-      Effect.forkChild({ startImmediately: true }),
-    );
-    return queue;
-  });
+export const streamQueue = Effect.fn("streamQueue")(function* <A, E>(stream: Stream.Stream<A, E>) {
+  const queue = yield* Queue.unbounded<A>();
+  yield* stream.pipe(
+    Stream.runForEach((value) => Queue.offer(queue, value)),
+    Effect.forkChild({ startImmediately: true }),
+  );
+  return queue;
+});
 
 const isAppsError = Schema.is(AppsError);
 

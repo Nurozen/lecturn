@@ -49,7 +49,7 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.35",
+    "@cursor/sdk": "1.0.38",
     "@lecturn/contracts": "workspace:*",
     "@lecturn/provider-core": "workspace:*",
     "@lecturn/shared": "workspace:*",

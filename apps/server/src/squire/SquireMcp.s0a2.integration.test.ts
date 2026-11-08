@@ -75,7 +75,6 @@ const awaitSettled = (threadId: ThreadId, runs: number) =>
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const events = yield* OrchestrationEventStore.OrchestrationEventStore;
     const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
-    // oxlint-disable-next-line lecturn/no-polling-loop-in-tests -- runs only against a live provider, whose effect retries announce no event.
     for (;;) {
       const head = yield* events.latestApplicationSequence;
       if (Option.isSome(worker)) yield* worker.value.drain();
@@ -92,8 +91,7 @@ const awaitSettled = (threadId: ThreadId, runs: number) =>
       yield* events.streamApplicationEvents({ afterSequence: head }).pipe(
         Stream.filter((stored) => "event" in stored && stored.event.threadId === threadId),
         Stream.runHead,
-        // oxlint-disable-next-line lecturn/no-real-time-wait-in-tests -- a live provider is on a real clock, and no thread event announces an effect retry.
-        Effect.raceFirst(Effect.sleep("2 seconds")),
+        Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.void }),
       );
     }
   });

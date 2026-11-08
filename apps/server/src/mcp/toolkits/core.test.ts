@@ -1,3 +1,4 @@
+import * as DocumentText from "../../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -20,7 +21,6 @@ import {
 import * as McpProviderSessions from "@lecturn/provider-core/server/McpProviderSessions";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -136,8 +136,8 @@ it.effect("an answered question reports already answered instead of not found", 
     const respond = (id: string) =>
       server
         .callTool({
-          name: "lecturn_pending_request_respond",
-          arguments: { requestId: id, answers: { size: "large" } },
+          name: "lecturn_pending_request",
+          arguments: { action: "respond", requestId: id, answers: { size: "large" } },
         })
         .pipe(
           Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
@@ -271,7 +271,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
         Layer.provide(
           ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-mcp-html-render-" }),
         ),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(
           Layer.mock(ThreadManagement.ThreadManagementService)({
@@ -476,8 +476,8 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
     });
 
     const forked = yield* call(
-      "lecturn_thread_fork",
-      { sourcePoint: { type: "latest_stable" } },
+      "lecturn_thread_transfer",
+      { action: "fork", sourcePoint: { type: "latest_stable" } },
       clientScope("auto"),
     );
     expect(declaredFailure(forked)).toMatchObject({ code: "target_required" });
@@ -522,7 +522,7 @@ it.effect("a read-only client reads threads and is refused every write before it
           Effect.provideService(McpSchema.McpServerClient, client),
         );
 
-    const configuration = yield* call("lecturn_thread_configuration", {
+    const configuration = yield* call("lecturn_thread_configure", {
       threadId: "other-project-thread",
     });
     expect(configuration.isError).toBe(false);
@@ -606,7 +606,7 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -625,18 +625,20 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
           Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
           Effect.provideService(McpSchema.McpServerClient, client),
         );
-    const update = yield* call("update_scheduled_task", {
+    const update = yield* call("schedule_task", {
       scheduledTaskId: "task-full-access",
       prompt: "Run something else",
     });
     expect(declaredFailure(update)).toMatchObject({ code: "runtime_mode_escalation_denied" });
     const remove = yield* call("delete_scheduled_task", { scheduledTaskId: "task-full-access" });
     expect(declaredFailure(remove)).toMatchObject({ code: "runtime_mode_escalation_denied" });
-    const allowed = yield* call("update_scheduled_task", {
+    const allowed = yield* call("schedule_task", {
       scheduledTaskId: "task-auto",
       enabled: false,
     });
     expect(allowed.isError).toBe(false);
+    const incomplete = yield* call("schedule_task", { prompt: "Run nightly" });
+    expect(declaredFailure(incomplete)).toMatchObject({ code: "invalid_request" });
   }).pipe(
     Effect.provide(
       layerOrchestratorToolkit.pipe(
@@ -663,7 +665,7 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
         ),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -751,7 +753,7 @@ it.effect.each(["lecturn_thread_interrupt", "lecturn_workflow_stop"])(
           Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
-              getShell: () => Effect.succeed(Option.none()),
+              getShell: () => Effect.succeedNone,
             }),
           ),
           Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -847,7 +849,7 @@ it.effect("discovers workflow stop targets and requires orchestration capability
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(
           Layer.mock(ProjectService.ProjectService)({
-            getShell: () => Effect.succeed(Option.none()),
+            getShell: () => Effect.succeedNone,
           }),
         ),
         Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -905,7 +907,7 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
         Layer.provide(ServerSecretStore.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-mcp-attachment-" })),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       ),
     ),
   ),

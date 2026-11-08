@@ -1,6 +1,6 @@
 import { ContextualProjectSettings } from "../contextual/ContextualProjectSettings";
 import { StaveLifecycleNotice } from "../stave/StaveLifecycleNotice";
-import { useStaveArchiveLanding } from "../stave/staveSpaceLifecycle";
+import { staveArchiveLandingSaga } from "../stave/staveLifecycle.logic";
 import { prepareStaveProjectDeletion } from "../../lib/staveProjectDeletion";
 import { useAtomValue } from "@effect/atom-react";
 import { useComposerMenuState } from "../chat/useComposerMenuState";
@@ -18,10 +18,10 @@ import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environ
 import { planProjectRemoval } from "@lecturn/client-runtime/state/projects";
 import { AsyncResult } from "effect/reactivity";
 import { type EnvironmentId, type ProjectIconOverride } from "@lecturn/contracts";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { Navigate, useLocation, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import { InfoIcon, Trash2Icon } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useRef, useState, type ReactNode } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
@@ -31,7 +31,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
+import { useProjects, useThreadShells, waitForProjectRemoval } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { serverEnvironment } from "../../state/server";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -73,6 +73,31 @@ function memberKey(member: { environmentId: string; id: string }): string {
 
 export type ProjectSettingsCategory = "general" | "source-control" | "project";
 
+interface ProjectSelection {
+  readonly key: string;
+  readonly environmentId: EnvironmentId | null;
+  readonly checkoutKey: string | null;
+  readonly memberKeys: ReadonlyArray<string>;
+  /** Lecturn: a restored Stave member keeps its id; an archived saga member lands on its board. */
+  readonly memberIds: ReadonlyArray<string>;
+  readonly sagaMember: { readonly environmentId: EnvironmentId; readonly sagaId: string } | null;
+}
+
+function sameProjectSelection(a: ProjectSelection | null, b: ProjectSelection): boolean {
+  return (
+    a !== null &&
+    a.key === b.key &&
+    a.environmentId === b.environmentId &&
+    a.checkoutKey === b.checkoutKey &&
+    a.memberKeys.length === b.memberKeys.length &&
+    a.memberKeys.every((key, index) => key === b.memberKeys[index]) &&
+    a.memberIds.length === b.memberIds.length &&
+    a.memberIds.every((id, index) => id === b.memberIds[index]) &&
+    a.sagaMember?.environmentId === b.sagaMember?.environmentId &&
+    a.sagaMember?.sagaId === b.sagaMember?.sagaId
+  );
+}
+
 export function ProjectSettingsPanel({
   projectKey,
   environmentId = null,
@@ -85,8 +110,8 @@ export function ProjectSettingsPanel({
   unavailable?: ReactNode;
 }) {
   const groups = useSettingsProjectGroups(projectKey);
-  const navigate = useNavigate({ from: "/settings" });
   const pathname = useLocation({ select: (location) => location.pathname });
+  const projects = useProjects();
 
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
   const members =
@@ -96,21 +121,11 @@ export function ProjectSettingsPanel({
         (checkoutKey === null || member.physicalProjectKey === checkoutKey),
     ) ?? [];
 
-  const landAfterArchive = useStaveArchiveLanding();
-
   // Retain group members so grouping-rule changes can follow the project to its new group.
-  const lastSelectionRef = useRef<{
-    key: string;
-    environmentId: EnvironmentId | null;
-    checkoutKey: string | null;
-    memberKeys: string[];
-    memberIds: string[];
-    sagaMember: { environmentId: EnvironmentId; sagaId: string } | null;
-  } | null>(null);
-  useEffect(() => {
-    if (!selected || members.length === 0) return;
+  const [lastSelection, setLastSelection] = useState<ProjectSelection | null>(null);
+  if (selected && members.length > 0) {
     const sagaMember = members.find((member) => member.stave?.memberOf);
-    lastSelectionRef.current = {
+    const current: ProjectSelection = {
       key: selected.projectKey,
       environmentId,
       checkoutKey,
@@ -120,61 +135,67 @@ export function ProjectSettingsPanel({
         ? { environmentId: sagaMember.environmentId, sagaId: sagaMember.stave.memberOf }
         : null,
     };
-  }, [selected, members, environmentId, checkoutKey]);
+    if (!sameProjectSelection(lastSelection, current)) setLastSelection(current);
+  }
 
   // A grouping-rule change or a Stave restore (moves the workspace root) replaces the group
   // key mid-visit; follow the project. An archived or removed project leaves instead of
   // parking on not-found: a saga member for its saga's board, anything else for home.
-  useEffect(() => {
-    if (members.length > 0) return;
-    const last = lastSelectionRef.current;
-    if (
-      last?.key !== projectKey ||
-      last.environmentId !== environmentId ||
-      last.checkoutKey !== checkoutKey
-    )
-      return;
-    const successor =
-      groups.find((group) =>
-        group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
-      ) ??
-      groups.find((group) =>
-        group.memberProjects.some(
-          (member) =>
-            last.memberIds.includes(memberKey(member)) && member.stave?.state !== "archived",
-        ),
-      );
-    if (successor) {
-      void navigate({
-        to: pathname,
-        search: () => ({
+  const lost =
+    members.length === 0 &&
+    lastSelection?.key === projectKey &&
+    lastSelection.environmentId === environmentId &&
+    lastSelection.checkoutKey === checkoutKey
+      ? lastSelection
+      : null;
+  const successor =
+    lost === null
+      ? undefined
+      : (groups.find((group) =>
+          group.memberProjects.some((member) =>
+            lost.memberKeys.includes(member.physicalProjectKey),
+          ),
+        ) ??
+        groups.find((group) =>
+          group.memberProjects.some(
+            (member) =>
+              lost.memberIds.includes(memberKey(member)) && member.stave?.state !== "archived",
+          ),
+        ));
+  if (successor) {
+    return (
+      <Navigate
+        to={pathname}
+        search={{
           project: successor.projectKey,
           machine: environmentId ?? undefined,
           checkout: checkoutKey ?? undefined,
-        }),
-        replace: true,
-        hashScrollIntoView: false,
-      });
-    } else if (groups.length > 0) {
-      const archived = groups.some((group) =>
-        group.memberProjects.some(
-          (member) =>
-            last.memberIds.includes(memberKey(member)) && member.stave?.state === "archived",
-        ),
-      );
-      if (archived && last.sagaMember) landAfterArchive(last.sagaMember);
-      else void navigate({ to: "/", replace: true });
-    }
-  }, [
-    groups,
-    landAfterArchive,
-    navigate,
-    pathname,
-    projectKey,
-    members.length,
-    environmentId,
-    checkoutKey,
-  ]);
+        }}
+        replace
+        hashScrollIntoView={false}
+      />
+    );
+  }
+  if (lost !== null && groups.length > 0) {
+    const archived = groups.some((group) =>
+      group.memberProjects.some(
+        (member) =>
+          lost.memberIds.includes(memberKey(member)) && member.stave?.state === "archived",
+      ),
+    );
+    const saga =
+      archived && lost.sagaMember ? staveArchiveLandingSaga(projects, lost.sagaMember) : null;
+    return saga ? (
+      <Navigate
+        to="/sagas/$environmentId/$projectId"
+        params={{ environmentId: saga.environmentId, projectId: saga.id }}
+        search={{ view: "board" }}
+        replace
+      />
+    ) : (
+      <Navigate to="/" replace />
+    );
+  }
 
   if ((!selected || members.length === 0) && unavailable != null) return unavailable;
 

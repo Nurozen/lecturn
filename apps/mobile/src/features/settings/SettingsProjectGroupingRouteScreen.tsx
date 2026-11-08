@@ -17,6 +17,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { useSidebarNestSagas } from "../../state/stave";
 import { SettingsChoiceRow } from "./components/SettingsChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
+import { NewThreadSettingsSection, WorkingSectionSettings } from "./ThreadSettingsSections";
 
 const GROUPING_OPTIONS: ReadonlyArray<{
   readonly mode: SidebarProjectGroupingMode;
@@ -52,7 +53,7 @@ export function SettingsProjectGroupingRouteScreen() {
     : null;
 
   return (
-    <SettingsScreen title="Organization">
+    <SettingsScreen title="General">
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -96,6 +97,8 @@ export function SettingsProjectGroupingRouteScreen() {
             <Text className="text-sm text-foreground-muted">{nestSagas ? "On" : "Off"}</Text>
           </Pressable>
         </SettingsSection>
+        <WorkingSectionSettings />
+        <NewThreadSettingsSection />
       </ScrollView>
     </SettingsScreen>
   );

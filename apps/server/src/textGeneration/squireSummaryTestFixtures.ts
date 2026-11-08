@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { SquireSummaryInput } from "@lecturn/contracts";
 
-export const squireSummaryInputFixture = Schema.decodeUnknownSync(SquireSummaryInput)({
+export const squireSummaryInputFixture = Schema.decodeSync(SquireSummaryInput)({
   thread: { threadId: "thread-1", title: "Fix login", project: "web", provider: "codex" },
   turnId: "run-1",
   session: { status: "completed", pendingRuntimeRequest: null, interruptedBy: null },

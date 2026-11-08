@@ -22,7 +22,6 @@
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
-        "scripts/evaluate-thread-titles.ts",
         "scripts/fetch-expo-schema.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
@@ -135,8 +134,9 @@
       // setup-worktree.ts runs directly from the lecturn.json setup action,
       // smoke-pack-install.ts runs by hand against a built vendoring kit,
       // verify-windows-desktop-artifact.ts checks a Windows payload built on another host,
-      // electron-builder loads the macOS signer (sign-macos.ts) by path, and mobile-e2e.ts runs
-      // agent-device's CLI by path.
+      // electron-builder loads the macOS signer (sign-macos.ts) by path, mobile-e2e.ts runs
+      // agent-device's CLI by path. smoke-desktop-app.ts (the desktop launch check) runs by
+      // hand until it has a fixture database from a Lecturn build.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
@@ -148,6 +148,7 @@
         "mobile-native-client.ts",
         "setup-worktree.ts",
         "sign-macos.ts",
+        "smoke-desktop-app.ts",
         "smoke-pack-install.ts",
         "verify-windows-desktop-artifact.ts",
       ],

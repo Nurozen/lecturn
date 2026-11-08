@@ -32,6 +32,8 @@ const RUST = /^native\/(resource-monitor|kde-snap-shot|hyprland-snap-shot)\//;
 
 // These tests read other packages without declaring dependencies.
 const TEST_ONLY_DEPS = {
+  // Evals import the server's source to test its real model-facing text.
+  "@lecturn/evals": ["lecturn"],
   "@lecturn/provider-pi": ["@lecturn/client-runtime"],
   "@lecturn/scripts": [
     "@lecturn/desktop",

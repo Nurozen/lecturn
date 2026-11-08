@@ -101,21 +101,20 @@ const make = Effect.gen(function* () {
 
   return AppToolApprovalRegistry.of({
     register,
-    resolve: (requestId, outcome) =>
-      lookup(requestId).pipe(
-        Effect.flatMap((deferred) =>
-          deferred === undefined ? Effect.succeed(false) : Deferred.succeed(deferred, outcome),
-        ),
-      ),
-    claims: (requestId) => lookup(requestId).pipe(Effect.map((deferred) => deferred !== undefined)),
-    awaitDecision: (requestId) =>
-      lookup(requestId).pipe(
-        Effect.flatMap((deferred) =>
-          deferred === undefined
-            ? Effect.die(new Error(`App tool approval ${requestId} was never registered.`))
-            : Deferred.await(deferred),
-        ),
-      ),
+    resolve: Effect.fn("AppToolApprovalRegistry.resolve")(function* (requestId, outcome) {
+      const deferred = yield* lookup(requestId);
+      return deferred === undefined ? false : yield* Deferred.succeed(deferred, outcome);
+    }),
+    claims: Effect.fn("AppToolApprovalRegistry.claims")(function* (requestId) {
+      return (yield* lookup(requestId)) !== undefined;
+    }),
+    awaitDecision: Effect.fn("AppToolApprovalRegistry.awaitDecision")(function* (requestId) {
+      const deferred = yield* lookup(requestId);
+      if (deferred === undefined) {
+        return yield* Effect.die(new Error(`App tool approval ${requestId} was never registered.`));
+      }
+      return yield* Deferred.await(deferred);
+    }),
   });
 });
 

@@ -77,12 +77,10 @@ export function makeCoordinator(
         decision.action === "send" ? { ...decision, deadlineAt } : decision,
       ),
       Effect.timeout("60 seconds"),
-      Effect.catch(() =>
-        Effect.succeed(
-          queued.state === "held"
-            ? ({ action: "hold" } as const)
-            : ({ action: "send", preparation: null, packet: null } as const),
-        ),
+      Effect.orElseSucceed(() =>
+        queued.state === "held"
+          ? ({ action: "hold" } as const)
+          : ({ action: "send", preparation: null, packet: null } as const),
       ),
     );
   });

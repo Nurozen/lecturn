@@ -172,10 +172,11 @@ export class SquireToolRegistry extends Context.Service<
 const makeRegistry = Effect.sync(() => {
   const handlers = new Map<string, SquireToolHandler>();
   return SquireToolRegistry.of({
-    register: (added) =>
-      Effect.sync(() => {
+    register: Effect.fn("SquireToolRegistry.register")(function (added) {
+      return Effect.sync(() => {
         for (const handler of added) handlers.set(handler.definition.name, handler);
-      }),
+      });
+    }),
     get: (name) => Option.fromNullishOr(handlers.get(name)),
     forRole: (role) => [...handlers.values()].filter((handler) => handler.roles.includes(role)),
   });

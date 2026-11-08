@@ -208,6 +208,7 @@ const makeHarness = Effect.fn("Squire.testHarness")(function* (
     subscribeServerConfig: (payload) => client.subscribeServerConfig(payload),
     ready: Effect.void,
     probe: Effect.void,
+    inboundFrames: Effect.succeed(0),
     closed: Effect.never,
   };
   const supervisor = EnvironmentSupervisor.of({

@@ -1,6 +1,6 @@
 import * as Alchemy from "alchemy";
 import type { HttpEffect } from "alchemy/Http";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import { Effect, Redacted } from "effect";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
@@ -68,9 +68,7 @@ export const ManagedGatewayLive = ManagedGateway.make(
           const webRequest = yield* HttpServerRequest.toWeb(request);
           return gatewayHttpResponse(yield* Effect.promise(() => gateway.fetch(webRequest)));
         }).pipe(
-          Effect.catch(() =>
-            Effect.succeed(HttpServerResponse.text("Invalid request", { status: 400 })),
-          ),
+          Effect.orElseSucceed(() => HttpServerResponse.text("Invalid request", { status: 400 })),
         ),
       };
     });

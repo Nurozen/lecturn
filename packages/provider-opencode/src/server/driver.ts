@@ -152,12 +152,12 @@ function selectOpenCodeRuntimeAdapter(input: {
       Effect.flatMap(pick(input.probe.get), (adapter) => adapter.openSession(session)),
     squireReadiness: pick(input.probe.get).pipe(
       Effect.flatMap((adapter) => adapter.squireReadiness ?? Effect.succeed(null)),
-      Effect.flatMap((gap) =>
-        gap !== null
-          ? Effect.succeed(gap)
-          : input.hasManagedConfig.pipe(
-              Effect.map((managed) => (managed ? OPENCODE_SQUIRE_MANAGED_CONFIG : null)),
-            ),
+      Effect.filterOrElse(
+        (gap) => gap !== null,
+        (_gap) =>
+          input.hasManagedConfig.pipe(
+            Effect.map((managed) => (managed ? OPENCODE_SQUIRE_MANAGED_CONFIG : null)),
+          ),
       ),
     ),
   };

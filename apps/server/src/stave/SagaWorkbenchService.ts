@@ -806,12 +806,24 @@ export const make = Effect.gen(function* () {
     getActivity,
     preparePromptInference,
     inferFromPrompt,
-    configure: (input, actor) => mutate("configure", input, actor),
-    setStage: (input, actor) => mutate("stage", input, actor),
-    approve: (input, actor) => mutate("approve", input, actor),
-    complete: (input, actor) => mutate("complete", input, actor),
-    reopen: (input, actor) => mutate("reopen", input, actor),
-    summarize: (input, actor) => summaryLock.withPermits(1)(infer(input, actor)),
+    configure: Effect.fn("SagaWorkbenchService.configure")(function (input, actor) {
+      return mutate("configure", input, actor);
+    }),
+    setStage: Effect.fn("SagaWorkbenchService.setStage")(function (input, actor) {
+      return mutate("stage", input, actor);
+    }),
+    approve: Effect.fn("SagaWorkbenchService.approve")(function (input, actor) {
+      return mutate("approve", input, actor);
+    }),
+    complete: Effect.fn("SagaWorkbenchService.complete")(function (input, actor) {
+      return mutate("complete", input, actor);
+    }),
+    reopen: Effect.fn("SagaWorkbenchService.reopen")(function (input, actor) {
+      return mutate("reopen", input, actor);
+    }),
+    summarize: Effect.fn("SagaWorkbenchService.summarize")(function (input, actor) {
+      return summaryLock.withPermits(1)(infer(input, actor));
+    }),
   });
 });
 export const layer = Layer.effect(SagaWorkbenchService, make);

@@ -15,6 +15,10 @@ const ui = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  AccessibilityInfo: {
+    addEventListener: () => ({ remove() {} }),
+    isReduceMotionEnabled: () => Promise.resolve(false),
+  },
   ActivityIndicator: () => null,
   Platform: { OS: "android" },
   View: ({ children }: { children: ReactNode }) => children,
@@ -292,8 +296,8 @@ async function mount() {
 }
 async function render() {
   await mount();
-  // The screen opens on Limits; coverage lives on the Usage tab.
-  await act(() => ui.press.get("Usage")!());
+  // The screen opens on Limits; coverage lives on the usage views (Cost, Tokens).
+  await act(() => ui.press.get("Cost")!());
 }
 const visibleText = () => ui.text.join("\n");
 
@@ -333,7 +337,7 @@ describe("mobile usage coverage with the actual useUsage hook", () => {
     addEnvironment(unavailable, "Unavailable host", Effect.fail(new Error("scan failed")));
     await mount();
     expect(visibleText()).not.toContain("could not report usage");
-    await act(() => ui.press.get("Usage")!());
+    await act(() => ui.press.get("Cost")!());
     expect(visibleText()).toContain("Unavailable host could not report usage");
   });
 

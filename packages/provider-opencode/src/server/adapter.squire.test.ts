@@ -79,8 +79,8 @@ const NATIVE_TOOLS = [
 const USER_MCP_TOOL = "sentinel-user_sentinel_user_probe";
 const SQUIRE_TOOL = "lecturn_squire_notify";
 
-const SETTINGS = Schema.decodeUnknownSync(OpenCodeSettings)({});
-const EXTERNAL_SETTINGS = Schema.decodeUnknownSync(OpenCodeSettings)({
+const SETTINGS = Schema.decodeSync(OpenCodeSettings)({});
+const EXTERNAL_SETTINGS = Schema.decodeSync(OpenCodeSettings)({
   serverUrl: "http://192.168.1.20:4096",
 });
 const USER_ENVIRONMENT = {

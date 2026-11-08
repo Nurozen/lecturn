@@ -13,6 +13,7 @@ import "~/index.css";
 
 import { AppRoot } from "~/AppRoot";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { isMacPlatform } from "~/lib/utils";
 import { getRouter, type AppRouter } from "~/router";
 import {
   ENVIRONMENT_ID,
@@ -232,9 +233,10 @@ it("app-switch-thread", async () => {
   await report("app-switch-thread", [await measure(go(B)), await measure(go(A))]);
 });
 
-// Through the diff.toggle shortcut, the same handler as the header's diff button.
+// Through the diff.toggle shortcut (mod+d), the same handler as the header's diff button.
+const modD = isMacPlatform(navigator.platform) ? "{Meta>}d{/Meta}" : "{Control>}d{/Control}";
 const toggleDiff = (to: "open" | "close") => async () => {
-  await userEvent.keyboard("{Control>}d{/Control}");
+  await userEvent.keyboard(modD);
   const diff = page.getByRole("group", { name: "Diff layout" });
   if (to === "open") await expect.element(diff).toBeVisible();
   else await expect.element(diff).not.toBeInTheDocument();
@@ -252,7 +254,7 @@ const openSettings =
   (router: AppRouter, to: "/settings/general" | "/settings/appearance") => async () => {
     await act(() => router.navigate({ to }));
     // A section title from each page, since neither page has a heading that names it.
-    const name = to === "/settings/general" ? "Time format" : "Motion";
+    const name = to === "/settings/general" ? "Time format" : "Interface";
     await expect.element(page.getByRole("heading", { name, exact: true })).toBeVisible();
     // Appearance highlights its code font preview off-thread, then attaches it in a shadow root.
     if (to === "/settings/appearance") {

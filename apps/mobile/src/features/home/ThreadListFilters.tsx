@@ -14,7 +14,10 @@ export function ThreadListFilters(
     | "selectedProjectKey"
     | "onEnvironmentChange"
     | "onProjectChange"
-  >,
+  > & {
+    /** List padding the scroller bleeds through so pills start where row content does. */
+    readonly gutter: number;
+  },
 ) {
   // Lecturn: with several Connect accounts, group environments per account
   // (single-account users get upstream's flat list).
@@ -30,7 +33,8 @@ export function ThreadListFilters(
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 2, paddingBottom: 10, gap: 8 }}
+      style={{ marginHorizontal: -props.gutter }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 2, paddingBottom: 10, gap: 8 }}
     >
       <ListFilterMenu
         label={selectedEnvironment?.label ?? "All environments"}

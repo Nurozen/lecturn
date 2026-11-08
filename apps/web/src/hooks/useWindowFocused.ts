@@ -1,15 +1,17 @@
-import { useSyncExternalStore } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 
-const subscribe = (onChange: () => void) => {
-  window.addEventListener("focus", onChange);
-  window.addEventListener("blur", onChange);
-  return () => {
-    window.removeEventListener("focus", onChange);
-    window.removeEventListener("blur", onChange);
-  };
-};
-const read = () => document.hasFocus();
+export const windowFocusedAtom = Atom.make((get) => {
+  const sync = () => get.setSelf(document.hasFocus());
+  window.addEventListener("focus", sync);
+  window.addEventListener("blur", sync);
+  get.addFinalizer(() => {
+    window.removeEventListener("focus", sync);
+    window.removeEventListener("blur", sync);
+  });
+  return document.hasFocus();
+}).pipe(Atom.withLabel("window-focused"));
 
 export function useWindowFocused(): boolean {
-  return useSyncExternalStore(subscribe, read, () => true);
+  return useAtomValue(windowFocusedAtom);
 }

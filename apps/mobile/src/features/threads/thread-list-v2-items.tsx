@@ -21,17 +21,9 @@ import type { EnvironmentThreadSearchMatch } from "@lecturn/client-runtime/state
 import { formatWorkingDurationLabel } from "@lecturn/client-runtime/state/models";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@lecturn/contracts";
 import { useRecyclingState, useViewabilityAmount } from "@legendapp/list/react-native";
-import { canSnooze, resolveSnoozePresets } from "@lecturn/client-runtime/state/thread-settled";
+import { canSnooze } from "@lecturn/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { memo, useCallback, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -42,12 +34,20 @@ import { Menu } from "../../components/ui/Menu";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIcon";
+import { useNowAfter } from "../../lib/clock";
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { relativeTime } from "../../lib/time";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useEnvironmentScope } from "../../state/session";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import {
+  pendingDraftBranchNeedsRefs,
+  resolvePendingDraftBranch,
+} from "../../state/pending-new-tasks-model";
+import { useBranches } from "../../state/queries";
+import { useNewTaskProjectDefaults } from "./use-new-task-project-defaults";
+import { resolveNewTaskGitCwd } from "./new-task-context-presentation";
 import {
   resolveThreadPrBadgeAction,
   type ThreadPrPresentation,
@@ -63,6 +63,7 @@ import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2SnoozeMenuSelection,
+  resolveThreadListV2SnoozePresets,
   resolveThreadListV2Status,
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
@@ -71,6 +72,7 @@ import { QueuedMessageIcon } from "./queued-message-icon";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 import { ThreadHierarchyChevron } from "./thread-list-items";
+import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import { pullRequestStatus } from "../pull-requests/pullRequestStatus";
 import {
@@ -354,7 +356,29 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
     [deleteLabel, handleDelete, pendingTask.title],
   );
   const projectTitle = props.projectTitle ?? props.project?.title ?? pendingTask.projectTitle ?? "";
-  const branch = pendingTask.branch;
+  // The git cwd: a Stave space lists its primary repo's branches.
+  const projectCwd = resolveNewTaskGitCwd(props.project);
+  // Drafts only; the reads are shared per-project atoms, and queued rows skip them.
+  const projectDefaults = useNewTaskProjectDefaults(isDraft ? props.project : null);
+  const draftDefaults = {
+    canChooseWorkspace: !projectDefaults.isScratch,
+    defaultMode: projectDefaults.defaultWorkspaceMode,
+    defaultModeSettled: projectDefaults.defaultWorkspaceModeSettled,
+  };
+  const draftBranchRefs = useBranches({
+    environmentId: pendingTask.environmentId,
+    cwd:
+      isDraft && pendingDraftBranchNeedsRefs(pendingTask.draft, draftDefaults) ? projectCwd : null,
+  });
+  const branch = isDraft
+    ? resolvePendingDraftBranch({
+        draft: pendingTask.draft,
+        defaults: draftDefaults,
+        isGitRepo: draftBranchRefs.data?.isRepo ?? true,
+        branches: draftBranchRefs.data?.refs ?? [],
+        projectCwd,
+      })
+    : pendingTask.branch;
 
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -496,7 +520,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
   readonly project: EnvironmentProject | null;
-  readonly projectTitle?: string;
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
   readonly providerInstance: ThreadRowProviderInstance | null;
   readonly environmentLabel: string | null;
@@ -545,7 +568,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly searchQuery?: string;
   readonly simultaneousSwipeGesture?: ComponentProps<typeof ThreadSwipeable>["simultaneousWith"];
 }) {
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const titleTypography = useScaledTextRole("body");
+  const metadataTypography = useScaledTextRole("label");
+  // Lecturn's 15pt favicon and 11pt machine glyph at the default text size, scaled with it.
+  const projectIconSize = ((titleTypography.fontSize * 15) / 16) * fontScale;
+  const machineIconSize = ((metadataTypography.fontSize * 11) / 13) * fontScale;
+  const titleLineHeight = titleTypography.lineHeight * fontScale;
   const {
     thread,
     variant,
@@ -662,21 +691,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
 
   const canUnsettle = variant === "slim";
-  // Keep time in state; cached render-time reads freeze the gate and trigger 50ms expiry loops.
-  const [snoozeGateClock, setSnoozeGateClock] = useState(() => ({ thread, now: Date.now() }));
-  if (snoozeGateClock.thread !== thread) setSnoozeGateClock({ thread, now: Date.now() });
-  const snoozeGateNow = new Date(snoozeGateClock.now).toISOString();
+  // The gate's only time-dependent edge is the queued-turn grace window, so its
+  // expiry is known without a clock: evaluate at the message's own timestamp.
+  // A gate held by runtime status has no expiry, and no clock tick opens it.
   const snoozeGateExpiryMs = props.snoozeSupported
-    ? resolveThreadListV2SnoozeGateExpiryMs(thread, { now: snoozeGateNow })
+    ? resolveThreadListV2SnoozeGateExpiryMs(thread, { now: thread.latestUserMessageAt ?? "" })
     : null;
-  useEffect(() => {
-    // A gate still closed past its expiry is held by runtime status, not time,
-    // so no clock tick can open it.
-    if (snoozeGateExpiryMs === null || snoozeGateExpiryMs <= snoozeGateClock.now) return;
-    const delayMs = Math.min(snoozeGateExpiryMs - Date.now() + 50, 2_147_483_647);
-    const id = setTimeout(() => setSnoozeGateClock({ thread, now: Date.now() }), delayMs);
-    return () => clearTimeout(id);
-  }, [snoozeGateExpiryMs, snoozeGateClock.now, thread]);
+  // The window is inclusive, so wake just past it.
+  const snoozeGateNowMs = useNowAfter(snoozeGateExpiryMs === null ? null : snoozeGateExpiryMs + 1);
+  const snoozeGateNow = new Date(snoozeGateNowMs).toISOString();
   const swipeActions = resolveThreadListV2SwipeActions({
     variant,
     settlementSupported: props.settlementSupported,
@@ -684,10 +707,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     snoozable: canSnooze(thread, { now: snoozeGateNow }),
     snoozed: snoozedRow,
   });
-  const snoozePresets = useMemo(
-    () => (swipeActions.secondary === "snooze" ? resolveSnoozePresets(new Date()) : ([] as const)),
-    [props.snoozePresetMinute, swipeActions.secondary],
-  );
+  const snoozePresets = resolveThreadListV2SnoozePresets({
+    secondary: swipeActions.secondary,
+    now: props.snoozePresetMinute || snoozeGateNow,
+  });
   const snoozePresetActions = useMemo<MenuAction[]>(
     () => [
       ...snoozePresets.map((preset) => ({
@@ -732,7 +755,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       props.reorderSupported,
       props.pinningSupported,
       thread.pinnedAt,
-      variant,
     ],
   );
   const autoSettleMenuItems = useMemo<MenuAction[]>(
@@ -972,72 +994,70 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
   // Selection has its own solid marker; status and PR colors retain their meaning.
+  // The title keeps the full row width; status sits on the line below it.
+  const titleTextInset = props.project && !props.nested ? projectIconSize + 8 : 0;
   const cardContent = (
     <>
-      <View className="flex-row items-center gap-1.5">
+      <View className="flex-row items-start gap-2">
         {props.project && !props.nested ? (
-          <ProjectFavicon
-            environmentId={thread.environmentId}
-            faviconPath={props.project.faviconPath}
-            projectIcon={props.project.projectIcon}
-            size={15}
-            projectTitle={props.project.title}
-            workspaceRoot={props.project.workspaceRoot}
-          />
+          <View className="justify-center" style={{ height: titleLineHeight }}>
+            <ProjectFavicon
+              environmentId={thread.environmentId}
+              faviconPath={props.project.faviconPath}
+              projectIcon={props.project.projectIcon}
+              size={projectIconSize}
+              projectTitle={props.project.title}
+              workspaceRoot={props.project.workspaceRoot}
+            />
+          </View>
         ) : null}
         <Text
-          className="flex-1 text-sm font-lecturn-medium text-foreground-muted"
-          numberOfLines={1}
-        >
-          {props.nested ? thread.title : (props.projectTitle ?? props.project?.title ?? "")}
-        </Text>
-        {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-        {pinnedRow ? (
-          <SymbolView
-            name="pin"
-            size={11}
-            tintColorClassName="accent-foreground-muted"
-            type="monochrome"
-          />
-        ) : null}
-        {showsWoke ? (
-          <Pressable
-            className="-m-2.5 p-2.5"
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss Woke notification"
-            onPress={handleAcknowledgeWoke}
-            onLongPress={() => undefined}
-            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-          >
-            <ThreadStatusBadge label={WOKE_STATUS_LABEL} />
-          </Pressable>
-        ) : visibleStatusLabel ? (
-          <ThreadStatusBadge
-            label={visibleStatusLabel}
-            detail={
-              status === "waiting" ? (
-                <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
-              ) : null
-            }
-          />
-        ) : (
-          <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
-        )}
-      </View>
-      {!props.nested ? (
-        <Text
-          className={cn("mt-1 text-base text-foreground", !recede && "font-lecturn-medium")}
+          className={cn("flex-1 text-base text-foreground", !recede && "font-lecturn-medium")}
           numberOfLines={2}
         >
           {thread.title}
         </Text>
-      ) : null}
+      </View>
       {props.searchMatch ? (
-        <View className="mt-1">
+        <View className="mt-1" style={{ paddingLeft: titleTextInset }}>
           <ThreadSearchMatchExcerpt match={props.searchMatch} query={props.searchQuery ?? ""} />
         </View>
       ) : null}
-      <View className="mt-1 flex-row items-center gap-2">
+      <View className="mt-1 flex-row items-center gap-2" style={{ paddingLeft: titleTextInset }}>
+        <View className="flex-row items-center gap-1.5">
+          {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+          {pinnedRow ? (
+            <SymbolView
+              name="pin"
+              size={11}
+              tintColorClassName="accent-foreground-muted"
+              type="monochrome"
+            />
+          ) : null}
+          {showsWoke ? (
+            <Pressable
+              className="-m-2.5 p-2.5"
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss Woke notification"
+              onPress={handleAcknowledgeWoke}
+              onLongPress={() => undefined}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+            >
+              <ThreadStatusBadge label={WOKE_STATUS_LABEL} />
+            </Pressable>
+          ) : visibleStatusLabel ? (
+            <ThreadStatusBadge
+              label={visibleStatusLabel}
+              detail={
+                status === "waiting" ? (
+                  <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
+                ) : null
+              }
+            />
+          ) : (
+            <Text className="text-xs tabular-nums text-foreground-tertiary">{timeLabel}</Text>
+          )}
+        </View>
         {(status === "failed" || status === "limited") && thread.runtime?.lastError ? (
           <Text
             className={cn(
@@ -1052,35 +1072,26 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           >
             {thread.runtime.lastError}
           </Text>
-        ) : thread.branch || props.environmentLabel ? (
+        ) : props.environmentLabel ? (
           <View className="min-w-0 flex-1 flex-row items-center gap-1">
-            <Text className="shrink text-xs text-foreground-muted" numberOfLines={1}>
-              {thread.branch ? (
-                <Text className="text-xs text-foreground-muted" style={{ fontFamily: MONO_FONT }}>
-                  {thread.branch}
-                </Text>
-              ) : null}
-              {thread.branch && props.environmentLabel ? "  ·  " : null}
-              {props.environmentLabel ? (
-                <Text
-                  className={cn(
-                    "text-xs",
-                    selected ? "text-foreground-muted" : "text-foreground-tertiary",
-                  )}
-                >
-                  {props.environmentLabel}
-                </Text>
-              ) : null}
-            </Text>
-            {props.environmentLabel && props.environmentMachine ? (
+            {props.environmentMachine ? (
               <EnvironmentMachineSymbol
                 kind={props.environmentMachine}
-                size={11}
+                size={machineIconSize}
                 tintColorClassName={
                   selected ? "accent-foreground-muted" : "accent-foreground-tertiary"
                 }
               />
             ) : null}
+            <Text
+              className={cn(
+                "shrink text-xs",
+                selected ? "text-foreground-muted" : "text-foreground-tertiary",
+              )}
+              numberOfLines={1}
+            >
+              {props.environmentLabel}
+            </Text>
           </View>
         ) : (
           <View className="flex-1" />
@@ -1127,11 +1138,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : null}
         {providerInstance ? (
           <View className="flex-row items-center">
-            {providerDrivers.slice(0, -1).map((driver, index) => (
-              <View key={`${driver}:${index}`} className="-mr-1 opacity-30">
-                <ProviderIcon provider={driver} size={12} />
-              </View>
-            ))}
+            {providerDrivers.slice(0, -1).map(
+              (driver, index) => (
+                /* oxlint-disable react/no-array-index-key -- Provider history can repeat a driver; these decorative icons have no local state. */ <View
+                  key={`${driver}:${index}`}
+                  className="-mr-1 opacity-30"
+                >
+                  <ProviderIcon provider={driver} size={12} />
+                </View>
+              ) /* oxlint-enable react/no-array-index-key */,
+            )}
             <ProviderInstanceIcon
               iconUrl={providerIconUrl}
               provider={providerInstance.driverKind}

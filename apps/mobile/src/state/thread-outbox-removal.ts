@@ -1,7 +1,7 @@
 import type { EnvironmentId } from "@lecturn/contracts";
 
 import { appAtomRegistry } from "./atom-registry";
-import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages-atom";
 import { pendingThreadCreationOutcomesAtom } from "./pending-thread-creation-outcomes";
 import { threadOutboxManager } from "./thread-outbox";
 import type { QueuedThreadMessage } from "./thread-outbox-model";

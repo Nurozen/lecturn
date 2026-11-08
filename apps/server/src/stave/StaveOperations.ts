@@ -611,8 +611,9 @@ export const make = Effect.fn("StaveOperations.make")(function* (
           ? Effect.succeed(true)
           : fileSystem.readLink(root).pipe(
               Effect.as(true),
-              Effect.catch((error) =>
-                error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error),
+              Effect.catchIf(
+                (error) => error.reason._tag === "NotFound",
+                () => Effect.succeed(false),
               ),
             ),
       ),
@@ -3507,12 +3508,20 @@ export const make = Effect.fn("StaveOperations.make")(function* (
   return StaveOperations.of({
     run,
     observe,
-    dryRun: (operation) => withExecution(operation, dryRun(operation)),
+    dryRun: Effect.fn("StaveOperations.dryRun")(function (operation) {
+      return withExecution(operation, dryRun(operation));
+    }),
     withSpaceLock,
     summary,
     reconcileIncomplete,
-    executeLifecycle: (operation, revalidate, revalidateParticipant) =>
-      withExecution(operation, executeLifecycle(operation, revalidate, revalidateParticipant)),
+    executeLifecycle: Effect.fn("StaveOperations.executeLifecycle")(
+      function (operation, revalidate, revalidateParticipant) {
+        return withExecution(
+          operation,
+          executeLifecycle(operation, revalidate, revalidateParticipant),
+        );
+      },
+    ),
   });
 });
 

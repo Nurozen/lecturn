@@ -1,7 +1,12 @@
+// @effect-diagnostics nodeBuiltinImport:off - one sha256 inside a synchronous Output.map.
+import * as NodeCrypto from "node:crypto";
+
 import * as Alchemy from "alchemy";
-import * as Axiom from "alchemy/Axiom";
+import * as Axiom from "@alchemy.run/axiom";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Output from "alchemy/Output";
 import * as Cause from "effect/Cause";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -14,6 +19,7 @@ import { OtlpExporter, OtlpSerialization, OtlpTracer } from "effect/observabilit
 import { relayPhysicalName } from "./physicalIdentity.ts";
 
 import { relayResourceNameForStage } from "./deploymentConfig.ts";
+import { MobileMonitoring } from "./mobileTelemetry/monitoring.ts";
 import { RelayMonitoring } from "./monitoring.ts";
 
 const relayRecentSpansQuery = (dataset: string) =>
@@ -26,6 +32,64 @@ const relayRecentSpansQuery = (dataset: string) =>
     `| order by _time desc`,
     `| limit 200`,
   ].join("\n");
+
+/**
+ * Deploy-time switch for mobile crash telemetry, off by default. Off, the relay creates
+ * none of its resources (Axiom logs and metrics datasets, ingest token, dashboard and monitors,
+ * R2 source maps bucket and upload token) or Worker bindings, and `/v1/mobile/observe` answers
+ * 404, which expo-observe treats as final and drops. Turning it on is this one variable.
+ */
+export const mobileTelemetryEnabled = Config.Boolean("MOBILE_TELEMETRY_ENABLED").pipe(
+  Config.withDefault(false),
+);
+
+export const whenMobileTelemetryEnabled = Effect.fn("whenMobileTelemetryEnabled")(function* <
+  A,
+  E,
+  R,
+>(effect: Effect.Effect<A, E, R>) {
+  return (yield* mobileTelemetryEnabled) ? yield* effect : undefined;
+});
+
+// expo-observe data, forwarded by src/mobileTelemetry. Mobile spans share the traces dataset.
+const MobileTelemetryObservability = Effect.fn("MobileTelemetryObservability")(function* (
+  traces: Axiom.Dataset,
+) {
+  const { stage } = yield* Alchemy.Stack;
+  const mobileLogs = yield* Axiom.Dataset("MobileLogsDataset", {
+    name: relayResourceNameForStage("lecturn-mobile-logs", stage),
+    kind: "otel:logs:v1",
+    description: "Lecturn mobile app errors, crashes, and log events from expo-observe.",
+    retentionDays: 30,
+    useRetentionPeriod: true,
+  });
+  const mobileMetrics = yield* Axiom.Dataset("MobileMetricsDataset", {
+    name: relayResourceNameForStage("lecturn-mobile-metrics", stage),
+    kind: "otel:metrics:v1",
+    description: "Lecturn mobile app startup and update metrics from expo-observe.",
+    retentionDays: 30,
+    useRetentionPeriod: true,
+  });
+  const mobileTelemetryIngestToken = yield* Axiom.ApiToken("MobileTelemetryAxiomIngestToken", {
+    name: relayResourceNameForStage("lecturn-mobile-telemetry-ingest", stage),
+    description: "Owned by Alchemy. Scoped ingest token the relay forwards mobile telemetry with.",
+    datasetCapabilities: Output.map(
+      Output.all(traces.name, mobileLogs.name, mobileMetrics.name),
+      (datasets) =>
+        Object.fromEntries(datasets.map((dataset) => [dataset, { ingest: ["create" as const] }])),
+    ),
+  });
+
+  const mobileSourceMaps = yield* Cloudflare.R2.Bucket("MobileSourceMapsBucket", {
+    name: mobileSourceMapsBucketName(stage),
+    // R2 refuses to delete a non-empty bucket, which would half tear down every non-prod stage.
+    forceDestroy: stage !== "prod",
+  });
+
+  yield* MobileMonitoring(mobileLogs, traces);
+
+  return { mobileLogs, mobileMetrics, mobileTelemetryIngestToken, mobileSourceMaps } as const;
+});
 
 export const RelayObservability = Effect.gen(function* () {
   const { stage } = yield* Alchemy.Stack;
@@ -67,6 +131,8 @@ export const RelayObservability = Effect.gen(function* () {
     })),
   });
 
+  const mobileTelemetry = yield* whenMobileTelemetryEnabled(MobileTelemetryObservability(traces));
+
   yield* Axiom.View("RelayRecentSpansView", {
     name: relayResourceNameForStage(relayPhysicalName("lecturn-relay-recent-spans", stage), stage),
     description: "Recent relay HTTP request spans.",
@@ -76,7 +142,49 @@ export const RelayObservability = Effect.gen(function* () {
 
   yield* RelayMonitoring(traces);
 
-  return { traces, workerIngestToken, mobileIngestToken, clientIngestToken } as const;
+  return {
+    traces,
+    workerIngestToken,
+    mobileIngestToken,
+    clientIngestToken,
+    /** Undefined unless `MOBILE_TELEMETRY_ENABLED` is set for the deploy. */
+    mobileTelemetry,
+  } as const;
+});
+
+const mobileSourceMapsBucketName = (stage: string) =>
+  relayResourceNameForStage("lecturn-mobile-sourcemaps", stage);
+
+/**
+ * Write-only S3 credentials for the source maps bucket: the `MOBILE_SOURCEMAPS_R2` secret.
+ * R2's S3 access key id is the API token's id and the secret the SHA-256 of its value.
+ */
+export const MobileSourceMapsUploadCredentials = Effect.gen(function* () {
+  const { stage } = yield* Alchemy.Stack;
+  const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment;
+  const bucketName = mobileSourceMapsBucketName(stage);
+  const token = yield* Cloudflare.ApiToken.AccountApiToken("MobileSourceMapsUploadToken", {
+    name: relayResourceNameForStage("lecturn-mobile-sourcemaps-upload", stage),
+    policies: [
+      {
+        effect: "allow",
+        permissionGroups: ["Workers R2 Storage Bucket Item Write"],
+        resources: { [`com.cloudflare.edge.r2.bucket.${accountId}_default_${bucketName}`]: "*" },
+      },
+    ],
+  });
+  return Output.map(Output.all(token.tokenId, token.value), ([tokenId, value]) =>
+    Redacted.make(
+      JSON.stringify({
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        bucketName,
+        accessKeyId: tokenId,
+        secretAccessKey: NodeCrypto.createHash("sha256")
+          .update(Redacted.value(value))
+          .digest("hex"),
+      }),
+    ),
+  );
 });
 
 export const withSpanAttributes =

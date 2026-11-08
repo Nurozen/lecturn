@@ -79,7 +79,7 @@ describe("SquireMcpGate on the bound /mcp", () => {
         // The registry the gate fences: thread writes, actsAsCaller, preview and device tools.
         for (const name of [
           "lecturn_thread_send",
-          "lecturn_pending_request_respond",
+          "lecturn_pending_request",
           "html_render",
           "delegate_task",
           "create_threads",

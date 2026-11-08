@@ -89,17 +89,19 @@ interface Entry {
 const make = Effect.gen(function* () {
   const byThread = yield* Ref.make(new Map<ThreadId, Entry>());
   return SquireFakeScripts.of({
-    set: (threadId, scripts, fill) =>
-      Ref.update(byThread, (current) =>
+    set: Effect.fn("SquireFakeScripts.set")(function (threadId, scripts, fill) {
+      return Ref.update(byThread, (current) =>
         new Map(current).set(threadId, { scripts, fillScript: fill }),
-      ),
-    clear: (threadId) =>
-      Ref.update(byThread, (current) => {
+      );
+    }),
+    clear: Effect.fn("SquireFakeScripts.clear")(function (threadId) {
+      return Ref.update(byThread, (current) => {
         if (threadId === undefined) return new Map();
         const next = new Map(current);
         next.delete(threadId);
         return next;
-      }),
+      });
+    }),
     scriptFor: Effect.fn("SquireFakeScripts.scriptFor")(function* (threadId, message) {
       const entry = (yield* Ref.get(byThread)).get(threadId);
       if (entry === undefined) return undefined;
@@ -118,7 +120,9 @@ const layerScriptSource = Layer.effect(
   Effect.gen(function* () {
     const fakes = yield* SquireFakeScripts;
     return ScriptedScriptSource.of({
-      scriptFor: (input) => fakes.scriptFor(input.threadId, input.message),
+      scriptFor: Effect.fn("ScriptedScriptSource.scriptFor")(function (input) {
+        return fakes.scriptFor(input.threadId, input.message);
+      }),
     });
   }),
 );

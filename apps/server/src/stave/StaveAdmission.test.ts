@@ -67,12 +67,12 @@ it.effect.each([false, true])(
             Layer.mergeAll(
               Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
                 invalidate: () => Effect.void,
-                load: () => Effect.succeed(Option.none()),
+                load: () => Effect.succeedNone,
               }),
               Layer.mock(StaveLifecycleRepository)({
                 getByWorkspaceRoot: () =>
                   Effect.succeed(withProjectId ? Option.none() : Option.some(archivedRow)),
-                getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
+                getByProjectId: () => Effect.succeedSome(archivedRow),
               }),
             ),
           ),
@@ -95,13 +95,11 @@ it.effect("admits a live manifest restored externally despite its stale archived
             Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
               invalidate: () => Effect.void,
               load: () =>
-                Effect.succeed(
-                  Option.some({ ...spaceInfo, createdAt: archivedRow.manifestCreatedAt! }),
-                ),
+                Effect.succeedSome({ ...spaceInfo, createdAt: archivedRow.manifestCreatedAt! }),
             }),
             Layer.mock(StaveLifecycleRepository)({
-              getByWorkspaceRoot: () => Effect.succeed(Option.none()),
-              getByProjectId: () => Effect.succeed(Option.some(archivedRow)),
+              getByWorkspaceRoot: () => Effect.succeedNone,
+              getByProjectId: () => Effect.succeedSome(archivedRow),
             }),
           ),
         ),
@@ -306,7 +304,7 @@ describe("Stave lifecycle admission", () => {
           Layer.provide(
             Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
               invalidate: () => Effect.void,
-              load: () => Effect.succeed(Option.some({ ...spaceInfo, state: "archived" })),
+              load: () => Effect.succeedSome({ ...spaceInfo, state: "archived" }),
             }),
           ),
         ),
@@ -327,29 +325,27 @@ describe("Stave lifecycle admission", () => {
               makeRecordingReader([]),
               Layer.mock(StaveLifecycleRepository)({
                 getByWorkspaceRoot: () =>
-                  Effect.succeed(
-                    Option.some({
-                      projectId: ProjectId.make("p"),
-                      workspaceRoot: SPACE_ROOT,
-                      spaceId: "alpha",
-                      manifestCreatedAt: null,
-                      disposition: "archiving",
-                      ownerToken: "owner",
-                      leaseEpoch: 1,
-                      leaseUntil: "2026-09-09T00:00:00Z",
-                      deleteIntentSequence: null,
-                      sagaRemoveConfirmed: false,
-                      sagaTeardown: null,
-                      refusalCode: null,
-                      refusalMessage: null,
-                      anchorAt: null,
-                      scheduledAt: null,
-                      archiveDeadlineAt: null,
-                      archiveBasename: null,
-                      updatedAt: "2026-09-09T00:00:00Z",
-                      refreshedAt: null,
-                    }),
-                  ),
+                  Effect.succeedSome({
+                    projectId: ProjectId.make("p"),
+                    workspaceRoot: SPACE_ROOT,
+                    spaceId: "alpha",
+                    manifestCreatedAt: null,
+                    disposition: "archiving",
+                    ownerToken: "owner",
+                    leaseEpoch: 1,
+                    leaseUntil: "2026-09-09T00:00:00Z",
+                    deleteIntentSequence: null,
+                    sagaRemoveConfirmed: false,
+                    sagaTeardown: null,
+                    refusalCode: null,
+                    refusalMessage: null,
+                    anchorAt: null,
+                    scheduledAt: null,
+                    archiveDeadlineAt: null,
+                    archiveBasename: null,
+                    updatedAt: "2026-09-09T00:00:00Z",
+                    refreshedAt: null,
+                  }),
               }),
             ),
           ),
@@ -396,8 +392,8 @@ it.effect("ignores an old project's terminal row after a root is re-added", () =
           Layer.mergeAll(
             makeRecordingReader([]),
             Layer.mock(StaveLifecycleRepository)({
-              getByWorkspaceRoot: () => Effect.succeed(Option.some(oldRow)),
-              getByProjectId: () => Effect.succeed(Option.none()),
+              getByWorkspaceRoot: () => Effect.succeedSome(oldRow),
+              getByProjectId: () => Effect.succeedNone,
             }),
           ),
         ),
@@ -426,29 +422,27 @@ it.effect(
               makeRecordingReader([]),
               Layer.mock(StaveLifecycleRepository)({
                 getByWorkspaceRoot: () =>
-                  Effect.succeed(
-                    Option.some({
-                      projectId: ProjectId.make("old"),
-                      workspaceRoot: SPACE_ROOT,
-                      spaceId: "alpha",
-                      manifestCreatedAt: null,
-                      disposition: "archiving",
-                      ownerToken: "old-owner",
-                      leaseEpoch: 2,
-                      leaseUntil: "2030-01-01T00:00:00Z",
-                      deleteIntentSequence: null,
-                      sagaRemoveConfirmed: false,
-                      sagaTeardown: null,
-                      refusalCode: null,
-                      refusalMessage: null,
-                      anchorAt: null,
-                      scheduledAt: null,
-                      archiveDeadlineAt: null,
-                      archiveBasename: null,
-                      updatedAt: "2026-01-01T00:00:00Z",
-                      refreshedAt: null,
-                    }),
-                  ),
+                  Effect.succeedSome({
+                    projectId: ProjectId.make("old"),
+                    workspaceRoot: SPACE_ROOT,
+                    spaceId: "alpha",
+                    manifestCreatedAt: null,
+                    disposition: "archiving",
+                    ownerToken: "old-owner",
+                    leaseEpoch: 2,
+                    leaseUntil: "2030-01-01T00:00:00Z",
+                    deleteIntentSequence: null,
+                    sagaRemoveConfirmed: false,
+                    sagaTeardown: null,
+                    refusalCode: null,
+                    refusalMessage: null,
+                    anchorAt: null,
+                    scheduledAt: null,
+                    archiveDeadlineAt: null,
+                    archiveBasename: null,
+                    updatedAt: "2026-01-01T00:00:00Z",
+                    refreshedAt: null,
+                  }),
                 getByProjectId: () =>
                   Effect.die("A root lease must refuse before looking up the new project"),
               }),
@@ -494,10 +488,10 @@ it.effect.each(
             Layer.mergeAll(
               Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
                 invalidate: () => Effect.void,
-                load: () => Effect.succeed(Option.some(spaceInfo)),
+                load: () => Effect.succeedSome(spaceInfo),
               }),
               Layer.mock(StaveLifecycleRepository)({
-                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByWorkspaceRoot: () => Effect.succeedSome(row),
                 getByProjectId: () => Effect.succeedNone,
               }),
             ),
@@ -567,7 +561,7 @@ it.effect.each(["live", "refused", "destroyed"] as const)(
             ),
             Layer.provide(
               Layer.mock(StaveLifecycleRepository)({
-                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByWorkspaceRoot: () => Effect.succeedSome(row),
                 getByProjectId: (id) =>
                   Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
               }),
@@ -603,20 +597,18 @@ it.effect(
               Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
                 invalidate: () => Effect.void,
                 load: (root) =>
-                  Effect.succeed(
-                    Option.some({
-                      ...spaceInfo,
-                      createdAt:
-                        root === SPACE_ROOT
-                          ? "2026-08-31T20:00:00.100000000-04:00"
-                          : "2026-09-02T00:00:00Z",
-                    }),
-                  ),
+                  Effect.succeedSome({
+                    ...spaceInfo,
+                    createdAt:
+                      root === SPACE_ROOT
+                        ? "2026-08-31T20:00:00.100000000-04:00"
+                        : "2026-09-02T00:00:00Z",
+                  }),
               }),
               Layer.mock(StaveLifecycleRepository)({
                 getByWorkspaceRoot: (root) =>
                   Effect.succeed(root === SPACE_ROOT ? Option.some(row) : Option.none()),
-                getByProjectId: () => Effect.succeed(Option.some(row)),
+                getByProjectId: () => Effect.succeedSome(row),
               }),
             ),
           ),
@@ -654,11 +646,10 @@ it.effect(
             Layer.mergeAll(
               Layer.mock(StaveWorkspaceReader.StaveWorkspaceReader)({
                 invalidate: () => Effect.void,
-                load: () =>
-                  Effect.succeed(Option.some({ ...spaceInfo, createdAt: row.manifestCreatedAt! })),
+                load: () => Effect.succeedSome({ ...spaceInfo, createdAt: row.manifestCreatedAt! }),
               }),
               Layer.mock(StaveLifecycleRepository)({
-                getByWorkspaceRoot: () => Effect.succeed(Option.some(row)),
+                getByWorkspaceRoot: () => Effect.succeedSome(row),
                 getByProjectId: (id) =>
                   Effect.succeed(id === row.projectId ? Option.some(row) : Option.none()),
               }),

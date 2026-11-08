@@ -25,15 +25,17 @@ declare module "vite-plus/test/browser" {
   }
 }
 
+// A null atom is a disabled query, which the real hook reports as idle with no data;
+// components such as ContextualMessageDisclosure rely on that.
 vi.mock(import("~/state/query"), async (original) => ({
   ...(await original()),
-  useEnvironmentQuery: (() => ({
-    data: { tasks: [] },
+  useEnvironmentQuery: ((atom: unknown) => ({
+    data: atom === null ? null : { tasks: [] },
     dataUpdatedAt: 0,
     error: null,
     failure: null,
     isPending: false,
-    isSuccess: true,
+    isSuccess: atom !== null,
     refresh: () => {},
   })) as never,
 }));

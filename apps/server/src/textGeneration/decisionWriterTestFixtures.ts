@@ -36,7 +36,7 @@ export const decisionWriterInputFixture = Schema.decodeUnknownSync(DecisionWrite
   existingDecisions: [],
   resolvedCandidateIds: [],
 });
-export const decisionWriterOutputFixture = Schema.decodeUnknownSync(DecisionWriterOutputV2)({
+export const decisionWriterOutputFixture = Schema.decodeSync(DecisionWriterOutputV2)({
   version: 2,
   actions: [
     {

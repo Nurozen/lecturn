@@ -14,7 +14,8 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentAtomList, environmentIdsKey } from "./environmentAtomList";
 import { useEnvironmentIdentities } from "./environments";
-import { useEnvironmentsWithScope } from "./session";
+import { environmentSummaries } from "./presentation";
+import { environmentSession, sessionHasScope, useEnvironmentsWithScope } from "./session";
 
 export const appsEnvironment = createAppsEnvironmentAtoms(connectionAtomRuntime);
 
@@ -59,6 +60,24 @@ const appStatusesAtom = Atom.family((idsKey: string) => {
     ),
   ).pipe(Atom.withLabel(`web-app-statuses-flat:${idsKey}`));
 });
+
+/** `useAppStatuses` for services that run outside React, such as thread notifications. */
+export const readableAppStatusesAtom = Atom.make((get) =>
+  get(
+    appStatusesAtom(
+      environmentIdsKey(
+        get(environmentSummaries.identitiesAtom)
+          .map((environment) => environment.environmentId)
+          .filter((environmentId) =>
+            sessionHasScope(
+              get(environmentSession.sessionStateAtom(environmentId)),
+              AuthAccessReadScope,
+            ),
+          ),
+      ),
+    ),
+  ),
+).pipe(Atom.withLabel("web-app-statuses-readable"));
 
 /**
  * Every app status this client may read, tagged with its environment. Environments

@@ -1,4 +1,4 @@
-import { mediaKindFromPath } from "@lecturn/shared/filePreview";
+import { mediaKindFromPath } from "@lecturn/shared/mediaPreview";
 import { mediaUrlReference } from "@lecturn/client-runtime/media-reference";
 import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";

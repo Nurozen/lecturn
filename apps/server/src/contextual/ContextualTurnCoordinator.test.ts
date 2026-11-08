@@ -100,7 +100,7 @@ function fixture(
     {
       get: () => (options.readFailure ? Effect.fail(unavailable) : Effect.succeed(current)),
       update: (value) => Effect.succeed(value),
-      receipt: () => Effect.succeed(undefined),
+      receipt: () => Effect.undefined,
     },
     {
       setState: (_thread, _run, state) =>

@@ -332,9 +332,15 @@ export const make = Effect.fn("StaveWorkspaceReader.make")(function* (
   });
 
   return StaveWorkspaceReader.of({
-    load: (workspaceRoot) => Cache.get(cache, workspaceRoot),
-    invalidate: (workspaceRoot) => Cache.invalidate(cache, workspaceRoot),
-    invalidateAll: () => Cache.invalidateAll(cache),
+    load: Effect.fn("StaveWorkspaceReader.load")(function (workspaceRoot) {
+      return Cache.get(cache, workspaceRoot);
+    }),
+    invalidate: Effect.fn("StaveWorkspaceReader.invalidate")(function (workspaceRoot) {
+      return Cache.invalidate(cache, workspaceRoot);
+    }),
+    invalidateAll: Effect.fn("StaveWorkspaceReader.invalidateAll")(function () {
+      return Cache.invalidateAll(cache);
+    }),
   });
 });
 
@@ -344,8 +350,14 @@ export const layer = Layer.effect(StaveWorkspaceReader, make());
 export const layerNoop = Layer.succeed(
   StaveWorkspaceReader,
   StaveWorkspaceReader.of({
-    load: () => Effect.succeed(Option.none()),
-    invalidate: () => Effect.void,
-    invalidateAll: () => Effect.void,
+    load: Effect.fn("StaveWorkspaceReader.load")(function () {
+      return Effect.succeedNone;
+    }),
+    invalidate: Effect.fn("StaveWorkspaceReader.invalidate")(function () {
+      return Effect.void;
+    }),
+    invalidateAll: Effect.fn("StaveWorkspaceReader.invalidateAll")(function () {
+      return Effect.void;
+    }),
   }),
 );

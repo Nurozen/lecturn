@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   LECTURN_MCP_TOOL_NAMES,
+  resolveLecturnMcpSummaryAction,
+  resolveLecturnMcpToolDefinition,
   resolveLecturnMcpToolPresentation,
 } from "./lecturnMcpToolPresentation.ts";
 
@@ -41,5 +43,38 @@ describe("resolveLecturnMcpToolPresentation", () => {
     expect(
       resolveLecturnMcpToolPresentation("lecturn-thread_opencode2-adapter_not_a_tool"),
     ).toBeNull();
+  });
+});
+
+describe("resolveLecturnMcpToolDefinition", () => {
+  it("labels an action tool call as the action it ran", () => {
+    expect(
+      resolveLecturnMcpToolDefinition("mcp__lecturn__preview_act", { action: "type" })?.labels,
+    ).toEqual(resolveLecturnMcpToolDefinition("preview_type")?.labels);
+    expect(
+      resolveLecturnMcpToolDefinition("lecturn_thread_transfer", { action: "fork" })?.displayName,
+    ).toBe(resolveLecturnMcpToolDefinition("lecturn_thread_fork")?.displayName);
+    expect(resolveLecturnMcpToolDefinition("preview_act", { action: "unknown" })?.labels[2]).toBe(
+      "Used",
+    );
+  });
+});
+
+describe("resolveLecturnMcpSummaryAction", () => {
+  it("summarizes an action tool by the action each call ran", () => {
+    expect(resolveLecturnMcpSummaryAction("mcp__lecturn__lecturn_queue", { action: "list" })).toBe(
+      "queue-list",
+    );
+    expect(resolveLecturnMcpSummaryAction("lecturn_queue", { action: "edit" })).toBe("queue-edit");
+    expect(resolveLecturnMcpSummaryAction("lecturn_thread_transfer", { action: "status" })).toBe(
+      "thread-transfers",
+    );
+    expect(resolveLecturnMcpSummaryAction("lecturn_thread_configure", {})).toBe(
+      "thread-configuration",
+    );
+    expect(resolveLecturnMcpSummaryAction("schedule_task", { scheduledTaskId: "task-1" })).toBe(
+      "schedule-update",
+    );
+    expect(resolveLecturnMcpSummaryAction("delegate_task", { task: "x" })).toBe("delegate");
   });
 });

@@ -45,7 +45,6 @@ const RETRY_AFTER_FAILURE = Duration.seconds(30);
 
 // ── Pure excerpting ───────────────────────────────────────────
 
-// eslint-disable-next-line no-control-regex -- ANSI escapes are control characters.
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-_]/g;
 const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s?/;
 const REDACTED = "[redacted]";
@@ -179,8 +178,8 @@ export const layerSourceFromRegistry = Layer.effect(
       (value) => value.get(SourceControlProviderKind.make("github"))?.readCiFailure,
     );
     return SquireCiSource.of({
-      read: (input) =>
-        Option.match(read, {
+      read: Effect.fn("SquireCiSource.read")(function (input) {
+        return Option.match(read, {
           onNone: () => Effect.succeedNone,
           onSome: (readCiFailure) =>
             readCiFailure({
@@ -191,7 +190,8 @@ export const layerSourceFromRegistry = Layer.effect(
               Effect.asSome,
               Effect.mapError((cause) => new SquireCiReadError({ cause })),
             ),
-        }),
+        });
+      }),
     });
   }),
 );

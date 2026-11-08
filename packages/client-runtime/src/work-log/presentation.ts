@@ -10,6 +10,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import {
+  resolveLecturnMcpSummaryAction,
   resolveLecturnMcpToolDefinition,
   type LecturnMcpToolDefinition,
   type LecturnMcpToolSummaryAction,
@@ -17,7 +18,7 @@ import {
 import { classifyMarkdownImageSource } from "@lecturn/client-runtime/markdown-images";
 import { resolveMediaSource } from "@lecturn/client-runtime/media-source";
 import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
-import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
+import { isWorkspaceImagePreviewPath } from "@lecturn/shared/mediaPreview";
 import { formatTokens } from "@lecturn/shared/usageFormat";
 import { classifyToolActivity } from "@lecturn/shared/toolActivity";
 import { appToolSummaryFromToolItem, toolOutputIndicatesFailure } from "@lecturn/shared/toolOutput";
@@ -151,6 +152,16 @@ export function workEntryToolName(
   return resolveLecturnMcpToolDefinition(entry.toolTitle) ? entry.toolTitle : entry.label;
 }
 
+function workEntryToolInput(
+  entry: Pick<WorkLogPresentationEntry, "toolData" | "structuredPayload">,
+): unknown {
+  const item = entry.structuredPayload;
+  const data = asRecord(entry.toolData);
+  return item?.type === "dynamic_tool"
+    ? item.input
+    : (data?.arguments ?? data?.input ?? data?.rawInput);
+}
+
 function workEntryToolOutput(
   entry: Pick<WorkLogPresentationEntry, "toolData" | "structuredPayload">,
 ): unknown {
@@ -227,7 +238,10 @@ export function resolveWorkEntryToolPresentation(
   >,
   fallbackStatus?: "inProgress" | "completed",
 ) {
-  const definition = resolveLecturnMcpToolDefinition(workEntryToolName(entry));
+  const definition = resolveLecturnMcpToolDefinition(
+    workEntryToolName(entry),
+    workEntryToolInput(entry),
+  );
   const status = entry.toolLifecycleStatus ?? fallbackStatus;
   return resolveLecturnMcpToolPresentation(
     definition,
@@ -240,10 +254,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function workLogEntryIsToolLike(entry: WorkLogPresentationEntry): boolean {
@@ -466,16 +476,8 @@ function toolGroupActionLabel(action: ToolGroupAction, count: number): string {
 }
 
 function lecturnToolSummaryCall(entry: WorkLogPresentationEntry): LecturnToolSummaryCall {
-  const item = entry.structuredPayload;
-  const data =
-    entry.toolData !== null && typeof entry.toolData === "object"
-      ? (entry.toolData as Record<string, unknown>)
-      : undefined;
   return {
-    input:
-      item?.type === "dynamic_tool"
-        ? item.input
-        : (data?.arguments ?? data?.input ?? data?.rawInput),
+    input: workEntryToolInput(entry),
     output: workEntryToolOutput(entry),
     outcome:
       entry.toolLifecycleStatus === "failed" ||
@@ -553,8 +555,10 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
   >();
   const sources = new Map<string, ToolActivitySource>();
   for (const entry of entries) {
-    const lecturnAction =
-      resolveLecturnMcpToolDefinition(workEntryToolName(entry))?.summaryAction ?? null;
+    const lecturnAction = resolveLecturnMcpSummaryAction(
+      workEntryToolName(entry),
+      lecturnToolSummaryCall(entry).input,
+    );
     if (entry.toolSource && lecturnAction === null) {
       sources.set(entry.toolSource.key, entry.toolSource);
       continue;

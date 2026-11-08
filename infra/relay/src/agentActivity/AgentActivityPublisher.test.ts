@@ -18,6 +18,9 @@ import {
   ManagedAccessUnavailable,
 } from "../billing/ManagedAccess.ts";
 
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - These optional results require undefined, not the wider void type.
+const succeedUndefined = Effect.succeed(undefined);
+
 const layerPublisherWithAccess = (access: Layer.Layer<ManagedAccess> = layerDisabled) =>
   AgentActivityPublisher.layer.pipe(
     Layer.provide(
@@ -712,9 +715,9 @@ describe("company activity ingestion", () => {
           Layer.succeed(LiveActivities.LiveActivities, makeLiveActivities()),
           Layer.succeed(ApnsDeliveries.ApnsDeliveries, makeApnsDeliveries()),
           Layer.succeed(TeamRuntime, {
-            prepareLink: () => Effect.succeed(undefined),
-            access: () => Effect.succeed(undefined),
-            funding: () => Effect.succeed(undefined),
+            prepareLink: () => succeedUndefined,
+            access: () => succeedUndefined,
+            funding: () => succeedUndefined,
             unlinked: () => Effect.void,
             policy,
           }),

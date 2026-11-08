@@ -432,50 +432,49 @@ export const make = Effect.gen(function* () {
       );
     }),
 
-    withPushNotificationLock: <A, E, R>(
-      target: TargetRow,
-      use: (target: TargetRow) => Effect.Effect<A, E, R>,
-    ) => {
-      const persistenceError = (cause: unknown) =>
-        new LiveActivityDeliveryMarkPersistenceError({
-          operation: "lock-push-notified",
-          userId: target.user_id,
-          deviceId: target.device_id,
-          kind: "push_notification",
-          cause,
-        });
-      return db.$client
-        .withTransaction(
-          Effect.gen(function* () {
-            const rows = yield* db
-              .select({ events: relayMobileDevices.notifiedPushEventsJson })
-              .from(relayMobileDevices)
-              .where(
-                and(
-                  eq(relayMobileDevices.userId, target.user_id),
-                  eq(relayMobileDevices.deviceId, target.device_id),
-                ),
-              )
-              .for("update")
-              .pipe(Effect.mapError(persistenceError));
-            const row = rows[0];
-            if (!row) return null;
-            const json =
-              row.events === null
-                ? null
-                : yield* encodeJsonValue(row.events).pipe(Effect.mapError(persistenceError));
-            // Keep the lock until queueing and markPushNotified have both finished.
-            // A failed queue send rolls back the record, leaving the event retryable.
-            return yield* use({ ...target, notified_push_events_json: json });
-          }),
-        )
-        .pipe(
-          // `use` brings its own error type, so match the transaction's SqlError by guard.
-          Effect.mapError((cause) =>
-            SqlError.isSqlError(cause) ? persistenceError(cause) : cause,
-          ),
-        );
-    },
+    withPushNotificationLock: Effect.fn("relay.live_activities.with_push_notification_lock")(
+      <A, E, R>(target: TargetRow, use: (target: TargetRow) => Effect.Effect<A, E, R>) => {
+        const persistenceError = (cause: unknown) =>
+          new LiveActivityDeliveryMarkPersistenceError({
+            operation: "lock-push-notified",
+            userId: target.user_id,
+            deviceId: target.device_id,
+            kind: "push_notification",
+            cause,
+          });
+        return db.$client
+          .withTransaction(
+            Effect.gen(function* () {
+              const rows = yield* db
+                .select({ events: relayMobileDevices.notifiedPushEventsJson })
+                .from(relayMobileDevices)
+                .where(
+                  and(
+                    eq(relayMobileDevices.userId, target.user_id),
+                    eq(relayMobileDevices.deviceId, target.device_id),
+                  ),
+                )
+                .for("update")
+                .pipe(Effect.mapError(persistenceError));
+              const row = rows[0];
+              if (!row) return null;
+              const json =
+                row.events === null
+                  ? null
+                  : yield* encodeJsonValue(row.events).pipe(Effect.mapError(persistenceError));
+              // Keep the lock until queueing and markPushNotified have both finished.
+              // A failed queue send rolls back the record, leaving the event retryable.
+              return yield* use({ ...target, notified_push_events_json: json });
+            }),
+          )
+          .pipe(
+            // `use` brings its own error type, so match the transaction's SqlError by guard.
+            Effect.mapError((cause) =>
+              SqlError.isSqlError(cause) ? persistenceError(cause) : cause,
+            ),
+          );
+      },
+    ),
 
     markPushNotified: Effect.fn("relay.live_activities.mark_push_notified")(function* (input) {
       yield* Effect.annotateCurrentSpan({

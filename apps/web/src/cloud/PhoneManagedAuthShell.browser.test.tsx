@@ -63,8 +63,7 @@ vi.mock(import("./relayTokenCache"), async (original) => ({
   ...(await original()),
   resetRelayTokenCache: test.reset as never,
 }));
-vi.mock(import("../environmentOwnedState"), async (original) => ({
-  ...(await original()),
+vi.mock(import("../environmentOwnedState"), () => ({
   clearEnvironmentOwnedState: test.clear as never,
 }));
 vi.mock(import("./accountGone"), async (original) => ({

@@ -138,7 +138,6 @@ const NOT_EXPORTED = "so the signals it configures are not exported";
 
 const endpoint = (name: string) =>
   readOrWarn(name, parseHttpUrl, `${name} is not an http or https URL, ${NOT_EXPORTED}`);
-
 const decodeOtlpProtocol = Schema.decodeUnknownOption(OtlpProtocol);
 
 // The specification reads enum values case-insensitively.

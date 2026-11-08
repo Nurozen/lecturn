@@ -25,7 +25,7 @@ import { DecisionSourceDialog } from "./DecisionSourceDialog";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 const environmentId = EnvironmentId.make("remote"),
   projectId = ProjectId.make("project");
-const evidence = Schema.decodeUnknownSync(DecisionEvidence)({
+const evidence = Schema.decodeSync(DecisionEvidence)({
   id: "e",
   threadId: "thread",
   messageId: "message",
@@ -41,7 +41,7 @@ const evidence = Schema.decodeUnknownSync(DecisionEvidence)({
   occurrence: 0,
   availability: "available",
 });
-const source = Schema.decodeUnknownSync(ThreadDecisionSourceWindowResult)({
+const source = Schema.decodeSync(ThreadDecisionSourceWindowResult)({
   outcome: "exact",
   threadId: "thread",
   messageId: "message",

@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@lecturn/contracts";
-import { mediaMimeType } from "@lecturn/shared/filePreview";
+import { mediaMimeType } from "@lecturn/shared/mediaPreview";
 import {
   getProjectFaviconCacheKey,
   getProjectFaviconResourceKey,

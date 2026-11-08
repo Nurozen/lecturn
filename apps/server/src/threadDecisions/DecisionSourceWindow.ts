@@ -11,6 +11,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { requireDecisionProject } from "./DecisionRevisions.ts";
 import { v2Messages } from "./V2ProjectionSources.ts";
 
+const decodeSourceMessage = Schema.decodeUnknownEffect(DecisionSourceMessage);
+const isThreadDecisionError = Schema.is(ThreadDecisionError);
+
 interface MessageRow {
   message_id: string;
   role: string;
@@ -83,7 +86,7 @@ export const decisionSourceWindow = Effect.fn("Decisions.sourceWindow")(function
           a.created_at.localeCompare(b.created_at) || a.message_id.localeCompare(b.message_id),
       ),
       (message) =>
-        Schema.decodeUnknownEffect(DecisionSourceMessage)({
+        decodeSourceMessage({
           id: message.message_id,
           role: message.role,
           text: message.text,
@@ -106,7 +109,7 @@ export const decisionSourceWindow = Effect.fn("Decisions.sourceWindow")(function
     };
   }).pipe(
     Effect.mapError((error) =>
-      Schema.is(ThreadDecisionError)(error)
+      isThreadDecisionError(error)
         ? error
         : new ThreadDecisionError({
             code: "unavailable",

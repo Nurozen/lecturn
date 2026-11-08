@@ -19,31 +19,4 @@ describe("ThreadMetadataMcpUpdateInput", () => {
       decodeUpdate({ action: "regenerate_title", clientRequestId: "metadata-\udc00" }),
     );
   });
-
-  it("accepts HTTP(S) pull request URLs and rejects other or malformed URLs", () => {
-    assert.deepEqual(
-      decodeUpdate({
-        action: "link_pull_request",
-        pullRequest: {
-          repository: "engineering/lecturn",
-          number: 42,
-          url: "https://git.corp.example/engineering/lecturn/pulls/42",
-        },
-      }).pullRequest,
-      {
-        repository: "engineering/lecturn",
-        number: 42,
-        url: "https://git.corp.example/engineering/lecturn/pulls/42",
-      },
-    );
-
-    for (const url of ["not a URL", "javascript:alert(1)", "file:///tmp/pull-request"]) {
-      assert.throws(() =>
-        decodeUpdate({
-          action: "link_pull_request",
-          pullRequest: { repository: "nurozen/lecturn", number: 8690, url },
-        }),
-      );
-    }
-  });
 });

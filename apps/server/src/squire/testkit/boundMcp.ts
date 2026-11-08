@@ -17,7 +17,6 @@ import type { McpProviderSessionConfig } from "@lecturn/provider-core/server/mcp
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpRouter, HttpServer } from "effect/http";
@@ -43,6 +42,7 @@ import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
+import * as DocumentText from "../../provider/DocumentText.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as PullRequestReviewGuideService from "../../pullRequest/PullRequestReviewGuideService.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
@@ -80,7 +80,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
   // No installed browser, so `html_render` publishes without launching one.
-  Layer.mock(PreviewBrowser.PreviewBrowser)({ installed: Effect.succeed(Option.none()) }),
+  Layer.mock(PreviewBrowser.PreviewBrowser)({ installed: Effect.succeedNone }),
 );
 
 const layerConfig = (squireEnabled: boolean) =>
@@ -105,10 +105,13 @@ const layerExternalClient = (
   client === undefined
     ? Layer.empty
     : Layer.succeed(McpHttpServer.McpClientAuthenticator, {
-        authenticate: (request) =>
-          Effect.succeed(
-            request.headers.authorization === `Bearer ${client.token}` ? client.scope : undefined,
-          ),
+        authenticate: Effect.fn("McpHttpServer.McpClientAuthenticator.authenticate")(
+          function (request) {
+            return Effect.succeed(
+              request.headers.authorization === `Bearer ${client.token}` ? client.scope : undefined,
+            );
+          },
+        ),
       });
 
 export interface BoundMcp {
@@ -162,6 +165,7 @@ export const serveBoundMcp = (options: {
       Layer.provide(PreviewAutomationBroker.layer),
       Layer.provide(McpProviderSessions.layer),
       Layer.provide(layerStubServices),
+      Layer.provide(DocumentText.layer),
       Layer.provide(Layer.succeedContext(config)),
       Layer.provide(layerEnvironment),
       Layer.provide(NodeServices.layer),

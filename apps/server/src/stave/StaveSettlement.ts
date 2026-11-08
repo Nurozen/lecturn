@@ -138,12 +138,14 @@ export const make = Effect.gen(function* () {
   });
 
   return StaveSettlement.of({
-    decorateProjects: (projects) =>
-      Option.isSome(shells) ? shells.value.decorate(projects) : Effect.succeed(projects),
-    sagaMergedProjects: (projects) =>
-      Option.isSome(mergeSignal)
+    decorateProjects: Effect.fn("StaveSettlement.decorateProjects")(function (projects) {
+      return Option.isSome(shells) ? shells.value.decorate(projects) : Effect.succeed(projects);
+    }),
+    sagaMergedProjects: Effect.fn("StaveSettlement.sagaMergedProjects")(function (projects) {
+      return Option.isSome(mergeSignal)
         ? mergeSignal.value.candidates(projects)
-        : Effect.succeed(new Set<ProjectId>()),
+        : Effect.succeed(new Set<ProjectId>());
+    }),
     spacePullRequest,
   });
 });

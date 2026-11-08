@@ -25,6 +25,9 @@ import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentLinker from "./EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
 
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - These optional results require undefined, not the wider void type.
+const succeedUndefined = Effect.succeed(undefined);
+
 const relayKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
@@ -52,6 +55,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
   managedEndpointNamespace: undefined,
 });
 const isEnvironmentLinkProofInvalid = Schema.is(EnvironmentLinker.EnvironmentLinkProofInvalid);
+const decodeJsonText = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 function signTestJwt(payload: object, typ: string, privateKey: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "EdDSA", typ })).toString("base64url");
@@ -189,8 +193,8 @@ describe("EnvironmentLinker", () => {
           prepared++;
           return undefined;
         }),
-      access: () => Effect.succeed(undefined),
-      funding: () => Effect.succeed(undefined),
+      access: () => succeedUndefined,
+      funding: () => succeedUndefined,
       unlinked: () => Effect.void,
       policy: () => Effect.succeed(null),
     };
@@ -303,9 +307,7 @@ describe("EnvironmentLinker", () => {
       const result = yield* linker.link({ userId: "user_123", request });
       // This is an externally deployed protocol identifier, deliberately not derived from shared constants.
       expect(
-        yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
-          Buffer.from(request.proof.split(".")[0]!, "base64url").toString(),
-        ),
+        yield* decodeJsonText(Buffer.from(request.proof.split(".")[0]!, "base64url").toString()),
       ).toEqual({ alg: "EdDSA", typ: "lecturn-env-link+jwt" });
       expect(payload.iss).toBe("lecturn-env:env-link-test");
       expect(result.environmentId).toBe(payload.environmentId);

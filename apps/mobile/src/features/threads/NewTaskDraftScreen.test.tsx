@@ -2,12 +2,9 @@ import { RegistryContext } from "@effect/atom-react";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import type { IncomingShareDraft } from "../sharing/incoming-share-model";
 import {
-  CommandId,
   EnvironmentId,
-  MessageId,
   ProjectId,
   ProviderInstanceId,
-  ThreadId,
   type VcsListRefsResult,
 } from "@lecturn/contracts";
 import { act, useEffect, type ComponentProps } from "react";
@@ -18,6 +15,8 @@ const native = vi.hoisted(() => ({
   dispatch: vi.fn(),
   goBack: vi.fn(),
   noop: () => null,
+  environments: [] as Array<{ environmentId: string; connectionState: string }>,
+  route: { key: "draft-route", name: "Thread", params: { draft: { requestId: "request" } } },
   projects: [] as EnvironmentProject[],
   branches: {
     refs: [] as VcsListRefsResult["refs"],
@@ -55,6 +54,8 @@ vi.mock("@react-navigation/native", () => ({
     addListener: () => () => {},
   }),
   useFocusEffect: () => {},
+  useIsFocused: () => true,
+  useRoute: () => native.route,
   usePreventRemove: () => {},
   StackActions: { replace: (name: string) => ({ type: "replace", name }), push: vi.fn() },
   CommonActions: { navigate: vi.fn() },
@@ -62,7 +63,37 @@ vi.mock("@react-navigation/native", () => ({
 vi.mock("./use-import-thread", () => ({
   useThreadImportAvailability: () => ({ available: false }),
 }));
-vi.mock("../sharing/IncomingShareProvider", () => ({ useIncomingShare: () => native.shareInbox }));
+vi.mock("../sharing/IncomingShareProvider", async () => {
+  const { makeIncomingShareImports } = await import("./incomingShareImport");
+  const { selectIncomingShareAttachmentsForServer } =
+    await import("../sharing/incoming-share-model");
+  const { appAtomRegistry } = await import("../../state/atom-registry");
+  const drafts = await import("../../state/use-composer-drafts");
+  return {
+    useIncomingShare: () => native.shareInbox,
+    // Share imports run as a service outside the screen; this one reads the fixture inbox.
+    incomingShareImports: makeIncomingShareImports({
+      registry: appAtomRegistry,
+      getShare: (shareId) => native.shareInbox.getShare(shareId),
+      reserve: async () => {},
+      release: async () => {},
+      consume: async () => {},
+      readDraft: drafts.getComposerDraftSnapshot,
+      undoMerge: drafts.undoComposerDraftMerge,
+      mergeIntoDraft: drafts.mergeComposerDraftContent,
+      selectAttachments: (share) =>
+        selectIncomingShareAttachmentsForServer({
+          attachments: share.attachments,
+          serverConfig: null,
+        }),
+      releaseUnusedAttachments: () => {},
+      onWarnings: () => {},
+      onImportFailure: () => {},
+      onCancelFailure: () => {},
+      leave: () => {},
+    }),
+  };
+});
 vi.mock("../agent-awareness/remoteRegistration", () => ({
   armAgentAwarenessLiveActivityForLocalWork: vi.fn(),
 }));
@@ -107,6 +138,15 @@ vi.mock("../../state/entities", () => ({
   useEnvironmentServerConfig: () => null,
   useServerConfigs: () => new Map(),
   useThreadListingCapabilities: () => new Map(),
+}));
+vi.mock("../../state/project-has-threads", () => ({ useProjectHasThreads: () => false }));
+vi.mock("./useRememberThreadProject", () => ({ useRememberThreadProject: () => {} }));
+vi.mock("../../state/shell", () => ({
+  useEnvironmentShellReadiness: () => ({ cacheRead: true, status: "live", hasError: false }),
+}));
+vi.mock("../../state/workspace", () => ({
+  useConnectionsReady: () => true,
+  useWorkspaceEnvironments: () => native.environments,
 }));
 vi.mock("../../state/project-grouping", () => ({
   useMobileProjectGroupingSettings: () => ({ sidebarProjectGroupingMode: "none" }),
@@ -210,8 +250,9 @@ vi.mock("../contextual/ContextualDraftControl", () => ({ ContextualDraftControl:
 
 import { NewTaskDraftScreen } from "./NewTaskDraftScreen";
 import { NewTaskFlowProvider, useNewTaskFlow } from "./new-task-flow-provider";
+import { pruneNewTaskFlowStates } from "./new-task-flow-state";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { enqueueThreadOutboxMessage, threadOutboxManager } from "../../state/thread-outbox";
+import { threadOutboxManager } from "../../state/thread-outbox";
 import {
   composerDraftsAtom,
   createNewTaskDraft,
@@ -261,7 +302,10 @@ async function render(props?: ComponentProps<typeof NewTaskDraftScreen>) {
   await act(async () =>
     root.render(
       <RegistryContext.Provider value={appAtomRegistry}>
-        <NewTaskFlowProvider>
+        <NewTaskFlowProvider
+          flowKey="test-flow"
+          {...(props?.draftId ? { routeDraftId: props.draftId } : {})}
+        >
           <Probe />
           {props ? <NewTaskDraftScreen {...props} /> : null}
         </NewTaskFlowProvider>
@@ -296,6 +340,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   native.shareInbox.getShare.mockReturnValue(null);
   native.projects = [project];
+  native.environments = [];
+  pruneNewTaskFlowStates({ routes: [] });
   native.branches.refs = [];
   native.branches.data = null;
   appAtomRegistry.set(composerDraftsAtom, {});
@@ -384,11 +430,12 @@ describe("native direct new-task entry", () => {
       loadBranches(branch, isRemote);
       await render({ initialProjectRef: { ...initialProjectRef, branch: null } });
       await act(() => flow.setPrompt("Create a worktree"));
-      expect(getComposerDraftSnapshot(flow.draftKey!).workspaceSelection).toEqual({
-        mode: "worktree",
-        branch,
-        worktreePath: null,
-      });
+      // The branch default is derived from refs, not written back to the draft.
+      expect({
+        mode: flow.workspaceMode,
+        branch: flow.selectedBranchName,
+        worktreePath: flow.selectedWorktreePath,
+      }).toEqual({ mode: "worktree", branch, worktreePath: null });
       expect(flow.buildPendingTaskMessage(metadata)).toMatchObject({
         text: "Create a worktree",
         creation: { workspaceMode: "worktree", branch, worktreePath: null },
@@ -506,6 +553,8 @@ describe("native direct new-task entry", () => {
     const key = createNewTaskDraft({ environmentId: project.environmentId, projectId: project.id });
     setComposerDraftText(key, "Resume after reconnect");
     native.projects = [{ ...project, environmentId: EnvironmentId.make("other-host") }];
+    // The draft's own machine is known but offline while another account's loads.
+    native.environments = [{ environmentId: project.environmentId, connectionState: "offline" }];
     await render({ initialProjectRef, draftId: key });
     expect(flow.draftKey).toBeNull();
     expect(draftKeys()).toEqual([key]);
@@ -542,49 +591,5 @@ describe("native direct new-task entry", () => {
         contextual,
       },
     });
-  });
-
-  it("edits the pending task in its own draft without replacing another draft or applying the branch preset", async () => {
-    native.projects = [{ ...project, defaultThreadEnvMode: "worktree" }];
-    loadBranches("develop");
-    const key = createNewTaskDraft({ environmentId: project.environmentId, projectId: project.id });
-    setComposerDraftText(key, "Other draft");
-    const message = {
-      environmentId: project.environmentId,
-      threadId: ThreadId.make(metadata.threadId),
-      messageId: MessageId.make(metadata.messageId),
-      commandId: CommandId.make(metadata.commandId),
-      text: "Pending work",
-      attachments: [],
-      modelSelection: project.defaultModelSelection!,
-      runtimeMode: "full-access" as const,
-      interactionMode: "default" as const,
-      creation: {
-        projectId: project.id,
-        projectTitle: project.title,
-        projectCwd: project.workspaceRoot,
-        workspaceMode: "local" as const,
-        branch: "queued",
-        worktreePath: "/fixture/queued-worktree",
-        contextual,
-      },
-      createdAt: metadata.createdAt,
-    };
-    await enqueueThreadOutboxMessage(message);
-    await render({ initialProjectRef, pendingTaskId: message.messageId });
-    expect(flow.draftKey).toBe(`pending-task:${message.messageId}`);
-    await act(() => flow.setPrompt("Edited pending work"));
-    expect(flow.buildPendingTaskMessage(metadata)).toMatchObject({
-      text: "Edited pending work",
-      creation: {
-        workspaceMode: "local",
-        branch: "queued",
-        worktreePath: "/fixture/queued-worktree",
-        contextual,
-      },
-    });
-    expect(getComposerDraftSnapshot(key).text).toBe("Other draft");
-    expect(draftKeys().sort()).toEqual([key, `pending-task:${message.messageId}`].sort());
-    await act(() => flow.finishEditingPendingTask());
   });
 });

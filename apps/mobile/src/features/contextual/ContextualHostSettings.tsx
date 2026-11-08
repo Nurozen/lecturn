@@ -644,6 +644,7 @@ function Funding({
   useEffect(() => {
     if (!pending || funding.error || !fundingSupersedesChallenge(pending, funding.data)) return;
     pendingId.current = undefined;
+    // oxlint-disable-next-line react/set-state-in-effect -- Funding arrives from a server query; once it covers the pending request, the request and its stored challenge are dropped.
     setPending(null);
     setPendingState(null);
     setPayer(null);

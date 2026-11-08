@@ -14,6 +14,7 @@ const CONTENT_SIGNALED_SCENES: ReadonlySet<ShowcaseScene> = new Set([
   "review",
 ]);
 
+/** Lecturn: the theme each mounted scene last drew in, so surfaces report independently. */
 export type ShowcaseRenderSignal = ReadonlyMap<ShowcaseScene, MobileThemeId>;
 
 type ShowcaseRenderReport = Readonly<{
@@ -22,15 +23,25 @@ type ShowcaseRenderReport = Readonly<{
 }>;
 
 const listeners = new Set<() => void>();
-let renderSignal: ShowcaseRenderSignal = new Map();
+export type ShowcaseRenderSnapshot = Readonly<{
+  signal: ShowcaseRenderSignal;
+  // A redraw can repeat the same scene and theme; counting reports lets it restart the settle delay.
+  reports: number;
+}>;
 
-function publish(next: ShowcaseRenderSignal): void {
-  renderSignal = next;
+let snapshot: ShowcaseRenderSnapshot = { signal: new Map(), reports: 0 };
+
+function publish(signal: ShowcaseRenderSignal): void {
+  snapshot = { signal, reports: snapshot.reports + 1 };
   for (const listener of listeners) listener();
 }
 
+export function getShowcaseRenderSnapshot(): ShowcaseRenderSnapshot {
+  return snapshot;
+}
+
 export function getShowcaseRenderSignal(): ShowcaseRenderSignal {
-  return renderSignal;
+  return snapshot.signal;
 }
 
 export function subscribeToShowcaseRenderSignal(listener: () => void): () => void {
@@ -39,12 +50,16 @@ export function subscribeToShowcaseRenderSignal(listener: () => void): () => voi
 }
 
 export function reportShowcaseSceneRendered(report: ShowcaseRenderReport): void {
-  if (renderSignal.get(report.scene) === report.themeId) return;
-  publish(new Map(renderSignal).set(report.scene, report.themeId));
+  const current = snapshot.signal;
+  publish(
+    current.get(report.scene) === report.themeId
+      ? current
+      : new Map(current).set(report.scene, report.themeId),
+  );
 }
 
 export function clearShowcaseRenderSignal(): void {
-  if (renderSignal.size === 0) return;
+  if (snapshot.signal.size === 0) return;
   publish(new Map());
 }
 
@@ -72,8 +87,8 @@ export function useShowcaseSceneRendered(
 export function isShowcaseNativeContentReady(input: {
   readonly scene: ShowcaseScene;
   readonly themeId: MobileThemeId;
-  readonly renderSignal: ShowcaseRenderSignal;
+  readonly renderSignal: ShowcaseRenderSignal | null;
 }): boolean {
   if (!CONTENT_SIGNALED_SCENES.has(input.scene)) return true;
-  return input.renderSignal.get(input.scene) === input.themeId;
+  return input.renderSignal?.get(input.scene) === input.themeId;
 }

@@ -42,14 +42,17 @@ export function ContextualControl({
   hidden = false,
 }: {
   environmentId: EnvironmentId;
-  threadId: ThreadId;
+  /** Null until the server has the thread; an earlier read answers not-found and sticks. */
+  threadId: ThreadId | null;
   size?: "sm" | "xs";
   hidden?: boolean;
 }) {
   const available = useContextualAvailable(environmentId);
   const access = useContextualAccess(environmentId);
   const status = useEnvironmentQuery(
-    available ? contextualEnvironment.status({ environmentId, input: { threadId } }) : null,
+    available && threadId !== null
+      ? contextualEnvironment.status({ environmentId, input: { threadId } })
+      : null,
   );
   const update = useAtomCommand(contextualEnvironment.updateThreadSettings, {
     reportFailure: false,
@@ -65,7 +68,7 @@ export function ContextualControl({
     sourceIdsOverride?: NonNullable<typeof data>["thread"]["sourceIds"],
   ) {
     const sourceIds = sourceIdsOverride === undefined ? data?.thread.sourceIds : sourceIdsOverride;
-    if (!data || !sourceIds || !access.operate || busy) return;
+    if (!data || !sourceIds || threadId === null || !access.operate || busy) return;
     setBusy(true);
     setError(null);
     const attempt = async () => {
@@ -80,7 +83,7 @@ export function ContextualControl({
     });
   }
   async function refreshContext() {
-    if (!data || !access.operate || busy) return;
+    if (!data || threadId === null || !access.operate || busy) return;
     setBusy(true);
     setError(null);
     const attempt = async () => {

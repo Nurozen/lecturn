@@ -259,8 +259,7 @@ it.effect("refuses changed editable checkout paths until the projection catches 
   Effect.gen(function* () {
     const service = yield* make({
       project: project(manifest([repo("api")])),
-      load: () =>
-        Effect.succeed(Option.some(manifest([{ ...repo("api"), path: "replacement/api" }]))),
+      load: () => Effect.succeedSome(manifest([{ ...repo("api"), path: "replacement/api" }])),
       provider: provider({
         getChangeRequest: () => Effect.die("Must refuse a changed routing target"),
       }),

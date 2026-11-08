@@ -137,7 +137,6 @@ async function renderAppThread({
     contentInsetEndAdjustment: 0,
     liveFollowEnabled: true,
     onIsAtEndChange: () => {},
-    onManualNavigation: () => {},
   };
   await testScreen.rerender(<ChatCanvas timeline={props} threadError={threadError} />);
   return listRef;

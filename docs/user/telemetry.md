@@ -20,10 +20,25 @@ environment before starting it. Relay tracing also stops when `LECTURN_OTEL_SDK_
 The desktop app reads `LECTURN_TELEMETRY_ENABLED` from your shell profile (for example `~/.zshrc`) on macOS and
 Linux, so export it there and restart the app. On Windows, set it as a user environment variable.
 
+## Mobile app crash reports
+
+Crash reporting is not switched on yet. Until maintainers enable it on the relay
+(`MOBILE_TELEMETRY_ENABLED`, see
+[Enabling mobile telemetry](../operations/relay-observability.md#enabling-mobile-telemetry)), the
+relay turns reports away unread and the app discards them, so nothing is stored.
+
+Once it is on, when the iOS or Android app crashes or hits an error, it sends a report to Lecturn:
+the error message, the stack trace, the app version, and the device model and OS version. Each
+launch also sends startup timings, and every report carries a random ID for the install. Reports go
+through the Lecturn Connect relay to Axiom. They do not include your threads, prompts, or
+connection details, but an error message can quote a value the app was handling.
+
+To stop sending them, turn off **Send crash reports** in **Settings > About Lecturn > Diagnostics**.
+
 ## Export diagnostics to your own receiver
 
 To send traces, metrics, or logs to an OpenTelemetry receiver, open
-**Settings > General > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
+**Settings > Maintenance > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
 endpoint under **OpenTelemetry export** (for example `http://localhost:4318/v1/traces`). Save, then
 restart that environment's server. The receiver must be reachable from the server's machine.
 **Test** sends an empty export from the server to check an endpoint before or after you save it;

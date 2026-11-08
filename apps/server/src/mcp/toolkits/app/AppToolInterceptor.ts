@@ -36,12 +36,15 @@ export class AppToolSource extends Context.Service<AppToolSource, AppToolSourceS
 
 /** For `/mcp` servers that serve no connected apps, such as tests of built-in toolkits. */
 export const layerNoAppTools = Layer.succeed(AppToolSource)({
-  listFor: () => Effect.succeed([]),
-  call: (_scope, name) =>
-    Effect.succeed({
+  listFor: Effect.fn("AppToolSource.listFor")(function () {
+    return Effect.succeed([]);
+  }),
+  call: Effect.fn("AppToolSource.call")(function (_scope, name) {
+    return Effect.succeed({
       isError: true,
       content: [{ type: "text", text: `Unknown app tool ${name}.` }],
-    }),
+    });
+  }),
 });
 
 const JsonRpcId = Schema.Union([Schema.String, Schema.Number]);

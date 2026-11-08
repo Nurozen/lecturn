@@ -579,7 +579,7 @@ const make = Effect.gen(function* () {
     // The reactor outdates the finding when this PR leaves the failing state on this head.
     const shell = yield* projections
       .getThreadShell(candidate.threadId)
-      .pipe(Effect.catch(() => Effect.succeed(null)));
+      .pipe(Effect.orElseSucceed(() => null));
     const link = (shell?.pullRequests ?? []).find(
       (entry) => entry.number === candidate.pullRequestNumber,
     );

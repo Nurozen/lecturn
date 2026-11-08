@@ -29,6 +29,7 @@ const decodeError = Schema.decodeUnknownSync(StaveOperationError);
 const encodeError = Schema.encodeUnknownSync(StaveOperationError);
 const decodeNameExit = Schema.decodeUnknownExit(StaveName);
 const decodeRunInput = Schema.decodeUnknownSync(StaveRunOperationInput);
+const encodeRepoEntry = Schema.encodeSync(StaveRepoEntry);
 
 const ROOT = "/work/spaces/ticket-42";
 const SAGA_ROOT = "/work/spaces/epic-7";
@@ -520,6 +521,6 @@ describe("Stave repo checkout metadata", () => {
         },
       },
     };
-    expect(Schema.encodeSync(StaveRepoEntry)(decode(enriched))).toEqual(enriched);
+    expect(encodeRepoEntry(decode(enriched))).toEqual(enriched);
   });
 });

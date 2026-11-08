@@ -165,8 +165,18 @@ export const layer = Layer.effect(
 
 /** Only explicit test seams use this; production layers require the shared service. */
 export const noop = StaveRuntimeFence.of({
-  withFence: (_root, effect) => effect,
-  withStart: (_cwd, effect) => effect,
+  withFence: Effect.fn("StaveRuntimeFence.withFence")(function <A, E, R>(
+    _root: string,
+    effect: Effect.Effect<A, E, R>,
+  ) {
+    return effect;
+  }),
+  withStart: Effect.fn("StaveRuntimeFence.withStart")(function <A, E, R>(
+    _cwd: string,
+    effect: Effect.Effect<A, E, R>,
+  ) {
+    return effect;
+  }),
   isUnder: isPathUnder,
 });
 export const layerNoop = Layer.succeed(StaveRuntimeFence, noop);

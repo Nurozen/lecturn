@@ -89,10 +89,9 @@ describe.skipIf(!databaseUrl)("ManagedReservations PostgreSQL", () => {
         const { userId, reservations } = yield* testAccount;
         yield* reservations.reserve({ userId, environmentId: "first" });
         yield* reservations.reserve({ userId, environmentId: "second" });
-        const results = yield* Effect.all(
-          ["third", "fourth"].map((environmentId) =>
-            reservations.reserve({ userId, environmentId }).pipe(Effect.result),
-          ),
+        const results = yield* Effect.forEach(
+          ["third", "fourth"],
+          (environmentId) => reservations.reserve({ userId, environmentId }).pipe(Effect.result),
           { concurrency: "unbounded" },
         );
         expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);
@@ -109,8 +108,9 @@ describe.skipIf(!databaseUrl)("ManagedReservations PostgreSQL", () => {
       run(
         Effect.gen(function* () {
           const { userId, reservations } = yield* testAccount;
-          const results = yield* Effect.all(
-            [1, 2].map(() => reservations.reserve({ userId, environmentId: "same" })),
+          const results = yield* Effect.forEach(
+            [1, 2],
+            () => reservations.reserve({ userId, environmentId: "same" }),
             { concurrency: "unbounded" },
           );
           expect(results[0]!.generation).not.toBe(results[1]!.generation);

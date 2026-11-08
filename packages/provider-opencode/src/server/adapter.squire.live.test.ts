@@ -252,7 +252,7 @@ const sentinelEvents = (log: string) =>
         .filter((line) => line.length > 0)
     : [];
 
-const SETTINGS = Schema.decodeUnknownSync(OpenCodeSettings)({});
+const SETTINGS = Schema.decodeSync(OpenCodeSettings)({});
 const instanceId = ProviderInstanceId.make("opencode");
 const modelSelection = { instanceId, model };
 

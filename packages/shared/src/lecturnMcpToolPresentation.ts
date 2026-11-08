@@ -195,6 +195,7 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     "browser",
     "Snapshot the preview page",
   ),
+  preview_act: tool(["Use", "Using", "Used", "the preview browser"], "browser", "browser"),
   preview_click: tool(
     ["Click", "Clicking", "Clicked", "in the preview browser"],
     "browser",
@@ -277,6 +278,11 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     ["Run", "Running", "Requested a run of", "a scheduled task"],
     "schedule-run",
   ),
+  lecturn_queue: tool(["Manage", "Managing", "Managed", "queued messages"], "queue-edit"),
+  lecturn_pending_request: tool(
+    ["Handle", "Handling", "Handled", "pending questions"],
+    "question-respond",
+  ),
   lecturn_queue_list: tool(["List", "Listing", "Listed", "queued messages"], "queue-list"),
   lecturn_queue_read: tool(["Read", "Reading", "Read", "a queued message"], "queue-read"),
   lecturn_queue_edit: tool(["Edit", "Editing", "Edited", "a queued message"], "queue-edit"),
@@ -308,7 +314,11 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
     ["Read", "Reading", "Read", "thread configuration"],
     "thread-configuration",
   ),
-  lecturn_thread_configure: tool(["Set", "Setting", "Set", "thread model"], "thread-configure"),
+  lecturn_thread_configure: tool(
+    ["Use", "Using", "Used", "thread model settings"],
+    "thread-configure",
+  ),
+  lecturn_thread_transfer: tool(["Use", "Using", "Used", "thread transfers"], "thread-fork"),
   lecturn_thread_fork: tool(
     ["Fork", "Forking", "Requested a fork of", "this thread"],
     "thread-fork",
@@ -423,16 +433,63 @@ export function resolveLecturnMcpToolId(toolName: string | null | undefined): st
   return name !== null && Object.hasOwn(LECTURN_MCP_TOOLS, name) ? name : null;
 }
 
+type SummaryInput = Readonly<Record<string, unknown>>;
+
+const asSummaryInput = (input: unknown): SummaryInput | undefined =>
+  typeof input === "object" && input !== null ? (input as SummaryInput) : undefined;
+
+/** Action tools present each call as the single-purpose tool its action replaced. */
+const ACTION_TOOLS: Readonly<Record<string, (action: string) => string | undefined>> = {
+  preview_act: (action) => `preview_${action}`,
+  lecturn_queue: (action) => `lecturn_queue_${action}`,
+  lecturn_pending_request: (action) => `lecturn_pending_request_${action}`,
+  lecturn_thread_transfer: (action) =>
+    ({
+      fork: "lecturn_thread_fork",
+      merge_back: "lecturn_thread_merge_back",
+      status: "lecturn_thread_transfers",
+    })[action],
+};
+
+/** Pass the call's input so an action tool resolves to the labels and summary of its action. */
 export function resolveLecturnMcpToolDefinition(
   toolName: string | null | undefined,
+  input?: unknown,
 ): LecturnMcpToolDefinition | null {
   const name = toolName == null ? null : resolveLecturnMcpToolName(toolName);
-  return name !== null && Object.hasOwn(LECTURN_MCP_TOOLS, name) ? LECTURN_MCP_TOOLS[name]! : null;
+  if (name === null || !Object.hasOwn(LECTURN_MCP_TOOLS, name)) return null;
+  const action = asSummaryInput(input)?.action;
+  const actionTool = typeof action === "string" ? ACTION_TOOLS[name]?.(action) : undefined;
+  return actionTool !== undefined && Object.hasOwn(LECTURN_MCP_TOOLS, actionTool)
+    ? LECTURN_MCP_TOOLS[actionTool]!
+    : LECTURN_MCP_TOOLS[name]!;
+}
+
+/** Tools whose summary depends on which fields a call sets. */
+const ACTION_SUMMARIES: Readonly<
+  Record<string, (input: SummaryInput) => LecturnMcpToolSummaryAction | undefined>
+> = {
+  lecturn_thread_configure: ({ modelSelection }) =>
+    modelSelection === undefined ? "thread-configuration" : "thread-configure",
+  schedule_task: ({ scheduledTaskId }) =>
+    scheduledTaskId === undefined ? "schedule-create" : "schedule-update",
+};
+
+export function resolveLecturnMcpSummaryAction(
+  toolName: string | null | undefined,
+  input: unknown,
+): LecturnMcpToolSummaryAction | null {
+  const definition = resolveLecturnMcpToolDefinition(toolName, input);
+  if (definition === null) return null;
+  const summarize = ACTION_SUMMARIES[resolveLecturnMcpToolName(toolName!) ?? ""];
+  const fields = asSummaryInput(input);
+  return (fields && summarize?.(fields)) ?? definition.summaryAction;
 }
 
 export function resolveLecturnMcpToolPresentation(
   toolName: string | null | undefined,
+  input?: unknown,
 ): LecturnMcpToolPresentation | null {
-  const definition = resolveLecturnMcpToolDefinition(toolName);
+  const definition = resolveLecturnMcpToolDefinition(toolName, input);
   return definition === null ? null : { displayName: definition.displayName, logo: "lecturn" };
 }

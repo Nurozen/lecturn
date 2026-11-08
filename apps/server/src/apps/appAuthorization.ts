@@ -532,7 +532,9 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
       Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(deny()))),
     );
 
-  const authorizeRpc: AppAuthorization["Service"]["authorizeRpc"] = (session, method, payload) => {
+  const authorizeRpc: AppAuthorization["Service"]["authorizeRpc"] = Effect.fn(
+    "AppAuthorization.authorizeRpc",
+  )(function (session, method, payload) {
     const subject = parseAppSubject(session.subject);
     if (subject === null) return Effect.void;
     const call = describeCall(method, payload);
@@ -555,7 +557,7 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
         }),
       ),
     );
-  };
+  });
 
   const filterShellItem: AppAuthorization["Service"]["filterShellItem"] = (session, item) => {
     const subject = parseAppSubject(session.subject);
@@ -565,7 +567,9 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
     ).pipe(Effect.orElseSucceed(() => Option.none()));
   };
 
-  const authorizeHttp: AppAuthorization["Service"]["authorizeHttp"] = (session, path) => {
+  const authorizeHttp: AppAuthorization["Service"]["authorizeHttp"] = Effect.fn(
+    "AppAuthorization.authorizeHttp",
+  )(function (session, path) {
     const subject = parseAppSubject(session.subject);
     if (subject === null) return Effect.void;
     const deny = () =>
@@ -578,7 +582,7 @@ export const makeWith = (deps: AppAuthorizationDeps): AppAuthorization["Service"
     return route.kind === "thread"
       ? decide(ownsThread(subject, route.threadId), deny)
       : Effect.void;
-  };
+  });
 
   const mintEmbedToken = Effect.fn("AppAuthorization.mintEmbedToken")(function* (
     appId: AppId,

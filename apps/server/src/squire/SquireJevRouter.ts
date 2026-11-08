@@ -79,7 +79,9 @@ export class SquireJevRelay extends Context.Service<
 
 const unfundedRelay = SquireJevRelay.of({
   availability: Effect.succeed({ available: false, reason: "unfunded" }),
-  route: () => Effect.fail(new SquireJevRelayError({ reason: "error" })),
+  route: Effect.fn("SquireJevRelay.route")(function () {
+    return Effect.fail(new SquireJevRelayError({ reason: "error" }));
+  }),
 });
 
 const toAvailability = (status: ExtensionFundingStatusResult): JevAvailability => {
@@ -113,8 +115,8 @@ export const layerRelay = Layer.effect(
         Effect.map(toAvailability),
         Effect.orElseSucceed((): JevAvailability => ({ available: false, reason: "unavailable" })),
       ),
-      route: (request) =>
-        client.route(request).pipe(
+      route: Effect.fn("SquireJevRelay.route")(function (request) {
+        return client.route(request).pipe(
           Effect.flatMap((result) => {
             const [judgment] = result.judgments;
             return judgment === undefined
@@ -132,7 +134,8 @@ export const layerRelay = Layer.effect(
             ExtensionsRouteError: (error) =>
               Effect.fail(new SquireJevRelayError({ reason: error.reason })),
           }),
-        ),
+        );
+      }),
     });
   }),
 );

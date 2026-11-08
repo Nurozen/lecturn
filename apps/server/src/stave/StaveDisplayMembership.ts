@@ -45,7 +45,9 @@ export const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
   return StaveDisplayMembership.of({
-    enrich: (root, info) => enrich(root, info).pipe(Effect.map((result) => result ?? info)),
+    enrich: Effect.fn("StaveDisplayMembership.enrich")(function (root, info) {
+      return enrich(root, info).pipe(Effect.map((result) => result ?? info));
+    }),
   });
 });
 export const layer = Layer.effect(StaveDisplayMembership, make);

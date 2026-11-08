@@ -21,7 +21,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
@@ -204,7 +203,7 @@ const run = Effect.fn("ThreadPullRequestService.stave.run")(function* (options: 
     // The store knows nothing about Stave; the decorator attaches the manifest.
     Layer.mock(ProjectStore.ProjectStoreV2)({
       listShells: () => Effect.succeed([plainShell]),
-      getShell: () => Effect.succeed(Option.some(plainShell)),
+      getShell: () => Effect.succeedSome(plainShell),
     }),
     Layer.mock(StaveProjectShells)({
       decorate: (shells) =>

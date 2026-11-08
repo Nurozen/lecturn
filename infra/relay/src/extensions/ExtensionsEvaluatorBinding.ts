@@ -1,4 +1,4 @@
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import { Effect, Schema } from "effect";
 
 export const EXTENSIONS_EVALUATOR_BINDING = "LECTURN_EXTENSIONS_EVALUATOR";

@@ -6,6 +6,7 @@ import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/Antigrav
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@lecturn/provider-cursor/server";
+import { FxDriver, type FxDriverEnv } from "@lecturn/provider-fx/server";
 import { GrokDriver, type GrokDriverEnv } from "@lecturn/provider-grok/server";
 import { CopilotDriver, type CopilotDriverEnv } from "./Drivers/CopilotDriver.ts";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@lecturn/provider-opencode/server";
@@ -22,6 +23,7 @@ export type BuiltInDriversEnv =
   | ClaudeDriverEnv
   | CodexDriverEnv
   | CursorDriverEnv
+  | FxDriverEnv
   | GrokDriverEnv
   | CopilotDriverEnv
   | OpenCodeDriverEnv
@@ -34,6 +36,7 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CursorDriver,
   GrokDriver,
   CopilotDriver,
+  FxDriver,
   OpenCodeDriver,
   AntigravityDriver,
   PiDriver,

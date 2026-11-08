@@ -10,10 +10,9 @@ const originalConfig =
   "# keep these bytes\r\nroot: '/workspace/雪'\nagentWorkDir: '/workspace/A'\n";
 const replacementConfig = "root: /workspace/B\nagentWorkDir: /workspace/B/spaces\n";
 const currentSnapshot = StaveExecutionContext.pipe(
-  Effect.flatMap((snapshot) =>
-    snapshot === undefined
-      ? Effect.die("Execution context must be bound inside withExecution")
-      : Effect.succeed(snapshot),
+  Effect.filterOrElse(
+    (snapshot) => !(snapshot === undefined),
+    (_snapshot) => Effect.die("Execution context must be bound inside withExecution"),
   ),
 );
 

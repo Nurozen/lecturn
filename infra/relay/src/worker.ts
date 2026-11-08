@@ -26,8 +26,8 @@ import {
 } from "./environments/ManagedGatewayHttpClient.ts";
 import * as HttpClient from "effect/http/HttpClient";
 import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Drizzle from "alchemy/Drizzle/Postgres";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Drizzle from "@alchemy.run/drizzle/Postgres";
 import * as Config from "effect/Config";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -118,6 +118,7 @@ import * as HookForwarder from "./hooks/HookForwarder.ts";
 import * as HeldHooks from "./hooks/HeldHooks.ts";
 import * as HookInbox from "./hooks/HookInbox.ts";
 import * as HookInboxObject from "./hooks/HookInboxObject.ts";
+import * as MobileTelemetry from "./mobileTelemetry/MobileTelemetry.ts";
 
 const layerWebcrypto = Layer.succeed(
   Crypto.Crypto,
@@ -138,8 +139,16 @@ const layerHttpPlatformNotSupported = Layer.succeed(HttpPlatform.HttpPlatform, {
     algorithms: new Set<HttpPlatform.CompressionAlgorithm>(),
     compressResponse: (response) => Effect.succeed(response),
   },
-  fileResponse: () => Effect.die("Relay API does not serve filesystem responses"),
-  fileWebResponse: () => Effect.die("Relay API does not serve file responses"),
+  fileResponse: Effect.fn("HttpPlatform.fileResponse")(function () {
+    return Effect.die("Relay API does not serve filesystem responses");
+  }),
+  fileWebResponse: Effect.fn("HttpPlatform.fileWebResponse")(function () {
+    return Effect.die("Relay API does not serve file responses");
+  }),
+});
+
+const teamsDisabled = Effect.fn("TeamBillingService.teamsDisabled")(function () {
+  return Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" }));
 });
 
 const layerRelayApi = Layer.mergeAll(
@@ -386,8 +395,8 @@ export const layer = Api.make(
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
     // Named statements collide behind Hyperdrive transaction pooling (Effect-TS/effect#8320); use unnamed statements.
-    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, undefined, {
-      prepare: false,
+    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, {
+      client: { prepare: false },
     });
 
     const managedEndpointTunnelBinding = yield* Cloudflare.Tunnel.ReadWriteTunnel();
@@ -418,6 +427,28 @@ export const layer = Api.make(
       },
     });
     const hookInboxes = yield* HookInboxObject.HookInboxObject;
+    // Bound only with MOBILE_TELEMETRY_ENABLED; off, the route answers 404 (see observability.ts).
+    const mobileTelemetryResources = observability.mobileTelemetry;
+    const mobileTelemetryBindings =
+      mobileTelemetryResources === undefined
+        ? undefined
+        : {
+            rateLimit: yield* Cloudflare.RateLimit("MOBILE_TELEMETRY_RATE_LIMIT", {
+              namespaceId: 1003,
+              simple: {
+                limit: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.limit,
+                period: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.periodSeconds,
+              },
+            }),
+            sourceMaps: yield* Cloudflare.R2.ReadBucket(mobileTelemetryResources.mobileSourceMaps),
+            token: yield* mobileTelemetryResources.mobileTelemetryIngestToken.token,
+            tracesUrl: yield* observability.traces.otelTracesEndpoint,
+            tracesDataset: yield* observability.traces.name,
+            logsUrl: yield* mobileTelemetryResources.mobileLogs.otelLogsEndpoint,
+            logsDataset: yield* mobileTelemetryResources.mobileLogs.name,
+            metricsUrl: yield* mobileTelemetryResources.mobileMetrics.otelMetricsEndpoint,
+            metricsDataset: yield* mobileTelemetryResources.mobileMetrics.name,
+          };
 
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
 
@@ -461,34 +492,49 @@ export const layer = Api.make(
             ),
           );
         return ManagedGatewayEnrollment.of({
-          enabledFor: (userId) =>
-            Effect.succeed(
+          enabledFor: Effect.fn("ManagedGateway.enabledFor")(function (userId) {
+            return Effect.succeed(
               gatewayConfig.enabled &&
                 (gatewayConfig.enforcementUsers.includes("*") ||
                   gatewayConfig.enforcementUsers.includes(userId)),
-            ),
-          get: ({ userId, environmentId }) => mappingFor(userId, environmentId),
-          registerPending: (input) =>
-            available(store.registerPending(input)).pipe(
+            );
+          }),
+          get: Effect.fn("ManagedGateway.get")(function ({ userId, environmentId }) {
+            return mappingFor(userId, environmentId);
+          }),
+          registerPending: Effect.fn("ManagedGateway.registerPending")(function (input) {
+            return available(store.registerPending(input)).pipe(
               Effect.map((mapping) => ({
                 ...mapping,
                 originDnsRecordId: mapping.originDnsRecordId ?? null,
               })),
-            ),
-          recordOriginDns: (input) => available(store.recordOriginDns(input)),
-          checkpointAllocation: (input) => available(store.checkpointAllocation(input)),
-          withAllocation: (input, effect) =>
-            store
+            );
+          }),
+          recordOriginDns: Effect.fn("ManagedGateway.recordOriginDns")(function (input) {
+            return available(store.recordOriginDns(input));
+          }),
+          checkpointAllocation: Effect.fn("ManagedGateway.checkpointAllocation")(function (input) {
+            return available(store.checkpointAllocation(input));
+          }),
+          withAllocation: Effect.fn("ManagedGateway.withAllocation")(function <A, E, R>(
+            input: Parameters<ManagedGatewayEnrollment["Service"]["withAllocation"]>[0],
+            effect: Effect.Effect<A, E, R>,
+          ) {
+            return store
               .withAllocation(input, effect)
-              .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) })),
+              .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) }));
+          }),
           markReady: Effect.fn("ManagedGateway.markReady")(function* (input) {
             const mapping = yield* mappingFor(input.userId, input.environmentId);
             if (!mapping || mapping.deleting || mapping.generation !== input.generation)
               return false;
             return yield* available(store.markReady(mapping));
           }),
-          pause: (input) =>
-            available(store.pause(input)).pipe(Effect.map((mapping) => mapping !== undefined)),
+          pause: Effect.fn("ManagedGateway.pause")(function (input) {
+            return available(store.pause(input)).pipe(
+              Effect.map((mapping) => mapping !== undefined),
+            );
+          }),
           remove: Effect.fn("ManagedGateway.remove")(function* (input) {
             const mapping = yield* mappingFor(input.userId, input.environmentId);
             if (!mapping || mapping.generation !== input.generation) return false;
@@ -503,7 +549,9 @@ export const layer = Api.make(
               )) !== undefined
             );
           }),
-          finalizeRemove: (input) => available(store.finalizeRemove(input)),
+          finalizeRemove: Effect.fn("ManagedGateway.finalizeRemove")(function (input) {
+            return available(store.finalizeRemove(input));
+          }),
           sync,
         });
       }),
@@ -544,12 +592,21 @@ export const layer = Api.make(
           ),
         );
     const layerHookInbox = Layer.succeed(HookInbox.HookInbox, {
-      hold: ({ endpointKey, baseUrl, hook }) =>
-        hookInboxes.getByName(endpointKey).hold(hook, baseUrl).pipe(inboxCall("hold", endpointKey)),
-      wake: ({ endpointKey, baseUrl }) =>
-        hookInboxes.getByName(endpointKey).wake(baseUrl).pipe(inboxCall("wake", endpointKey)),
-      clear: ({ endpointKey }) =>
-        hookInboxes.getByName(endpointKey).clear().pipe(inboxCall("clear", endpointKey)),
+      hold: Effect.fn("HookInbox.hold")(function ({ endpointKey, baseUrl, hook }) {
+        return hookInboxes
+          .getByName(endpointKey)
+          .hold(hook, baseUrl)
+          .pipe(inboxCall("hold", endpointKey));
+      }),
+      wake: Effect.fn("HookInbox.wake")(function ({ endpointKey, baseUrl }) {
+        return hookInboxes
+          .getByName(endpointKey)
+          .wake(baseUrl)
+          .pipe(inboxCall("wake", endpointKey));
+      }),
+      clear: Effect.fn("HookInbox.clear")(function ({ endpointKey }) {
+        return hookInboxes.getByName(endpointKey).clear().pipe(inboxCall("clear", endpointKey));
+      }),
     });
 
     const relayTraceLayer = Layer.unwrap(
@@ -623,8 +680,8 @@ export const layer = Api.make(
               Effect.gen(function* () {
                 const runtime = yield* ManagedGatewayRuntime;
                 return {
-                  sync: (userId: string) =>
-                    runtime.sync(userId).pipe(
+                  sync: Effect.fn("TeamGatewaySync.sync")(function (userId: string) {
+                    return runtime.sync(userId).pipe(
                       Effect.mapError(
                         () =>
                           new TeamError({
@@ -632,28 +689,24 @@ export const layer = Api.make(
                             message: "Team connection update is pending. Please retry.",
                           }),
                       ),
-                    ),
+                    );
+                  }),
                 };
               }),
             ).pipe(Layer.provide(gatewayRuntimeLayer)),
           ),
         )
       : Layer.succeed(TeamBillingService, {
-          checkout: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          preview: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          confirm: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          reconcile: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          portal: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          receiveWebhook: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          closeOrganization: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          processPending: () => Effect.void,
+          checkout: teamsDisabled,
+          preview: teamsDisabled,
+          confirm: teamsDisabled,
+          reconcile: teamsDisabled,
+          portal: teamsDisabled,
+          receiveWebhook: teamsDisabled,
+          closeOrganization: teamsDisabled,
+          processPending: Effect.fn("TeamBillingService.processPending")(function () {
+            return Effect.void;
+          }),
         });
 
     const layerRuntime = Layer.empty
@@ -689,10 +742,12 @@ export const layer = Api.make(
           FcmDeliveries.layer.pipe(
             Layer.provide(
               Layer.succeed(FcmDeliveryQueueSender.FcmDeliveryQueueSender, {
-                send: (body) =>
-                  fcmDeliveryQueueSender
-                    .send(body)
-                    .pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+                send: Effect.fn("FcmDeliveryQueueSender.send")(
+                  function* (body) {
+                    return yield* fcmDeliveryQueueSender.send(body);
+                  },
+                  Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                ),
               }),
             ),
             Layer.provideMerge(
@@ -754,18 +809,19 @@ export const layer = Api.make(
       )
       .pipe(Layer.provideMerge(layerWebcrypto));
 
-    // Fails open: a limiter outage must not drop webhooks the environment would accept.
+    // Fails open: a limiter outage must not drop webhooks or app telemetry.
     const allowWith =
-      (limiter: typeof hookRateLimit) =>
+      (
+        limiter: typeof hookRateLimit,
+        failedOpenAttribute = "relay.hook.rate_limiter_failed_open",
+      ) =>
       (key: string): Effect.Effect<boolean> =>
         limiter.limit({ key }).pipe(
           Effect.map((result) => result.success),
           Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
           Effect.catch((error) =>
-            Effect.logWarning("Hook rate limiter unavailable", { error: error.message }).pipe(
-              Effect.andThen(
-                Effect.annotateCurrentSpan({ "relay.hook.rate_limiter_failed_open": true }),
-              ),
+            Effect.logWarning("Rate limiter unavailable", { error: error.message }).pipe(
+              Effect.andThen(Effect.annotateCurrentSpan({ [failedOpenAttribute]: true })),
               Effect.as(true),
             ),
           ),
@@ -778,10 +834,76 @@ export const layer = Api.make(
     // like every other internal request; a same-zone fetch would not reach them.
     const layerHookHttpClient = Layer.effect(
       HttpClient.HttpClient,
-      Effect.gen(function* () {
-        return yield* ManagedGatewayHttpClient;
-      }),
+      Effect.service(ManagedGatewayHttpClient),
     ).pipe(Layer.provide(gatewayHttpClientLayer));
+
+    const layerMobileTelemetryApi =
+      mobileTelemetryBindings === undefined
+        ? MobileTelemetry.layerApiDisabled
+        : yield* Effect.gen(function* () {
+            // `fetch` rebuilds its layers per request; the source map cache must outlive one.
+            const mobileSourceMapLookups = yield* MobileTelemetry.SourceMaps.pipe(
+              Effect.provide(MobileTelemetry.layerSourceMaps),
+              Effect.provideService(MobileTelemetry.SourceMapObjects, {
+                get: (key) =>
+                  mobileTelemetryBindings.sourceMaps.get(key).pipe(
+                    Effect.map((object) =>
+                      object === null
+                        ? undefined
+                        : {
+                            size: object.size,
+                            text: object.text().pipe(
+                              Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                              Effect.mapError(
+                                (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                              ),
+                            ),
+                          },
+                    ),
+                    Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                    Effect.mapError(
+                      (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                    ),
+                  ),
+              }),
+            );
+            const layerMobileTelemetry = MobileTelemetry.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.effect(
+                    MobileTelemetry.MobileTelemetrySettings,
+                    Effect.gen(function* () {
+                      return MobileTelemetry.MobileTelemetrySettings.of({
+                        axiomToken: yield* mobileTelemetryBindings.token,
+                        destinations: {
+                          traces: {
+                            url: yield* mobileTelemetryBindings.tracesUrl,
+                            dataset: yield* mobileTelemetryBindings.tracesDataset,
+                          },
+                          logs: {
+                            url: yield* mobileTelemetryBindings.logsUrl,
+                            dataset: yield* mobileTelemetryBindings.logsDataset,
+                          },
+                          metrics: {
+                            url: yield* mobileTelemetryBindings.metricsUrl,
+                            dataset: yield* mobileTelemetryBindings.metricsDataset,
+                          },
+                        },
+                      });
+                    }),
+                  ),
+                  Layer.succeed(MobileTelemetry.MobileTelemetryRateLimiter, {
+                    allow: allowWith(
+                      mobileTelemetryBindings.rateLimit,
+                      "relay.mobile_telemetry.rate_limiter_failed_open",
+                    ),
+                  }),
+                  Layer.succeed(MobileTelemetry.SourceMaps, mobileSourceMapLookups),
+                ),
+              ),
+            );
+            return MobileTelemetry.layerApi.pipe(Layer.provide(layerMobileTelemetry));
+          });
 
     const layerApp = Layer.mergeAll(
       layerRelayApi,
@@ -797,6 +919,7 @@ export const layer = Api.make(
         appOrigin: billingConfig.appOrigin,
         additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
       }),
+      layerMobileTelemetryApi,
     ).pipe(
       Layer.provideMerge(RelayHttpApi.layerClientAuth),
       Layer.provideMerge(RelayHttpApi.layerDpopClientAuth),
@@ -942,14 +1065,14 @@ export const layer = Api.make(
             );
           }
           // Independent deadlines keep provider outages from starving cutoff and health reporting.
-          yield* Effect.all(
-            tasks.map((task) =>
+          yield* Effect.forEach(
+            tasks,
+            (task) =>
               task.pipe(
                 Effect.catch(() =>
                   Effect.logWarning("An independent billing maintenance task failed"),
                 ),
               ),
-            ),
             { concurrency: "unbounded", discard: true },
           );
         }).pipe(Effect.provide(layerRuntime), (maintenance) =>
@@ -1138,6 +1261,7 @@ export const layer = Api.make(
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
         Layer.provideMerge(Cloudflare.Workers.RateLimitBinding),
+        Layer.provideMerge(Cloudflare.R2.ReadBucketBinding),
         Layer.provideMerge(HookInboxObject.layer),
         Layer.provideMerge(ManagedGatewayLive),
       ),

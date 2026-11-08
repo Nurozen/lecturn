@@ -395,62 +395,59 @@ const make = Effect.gen(function* () {
   });
 
   return AppToolApprovalService.of({
-    request: (context, info) =>
-      Effect.scoped(
+    request: Effect.fn("AppToolApprovalService.request")(function* (context, info) {
+      const shown = yield* withToolTitle(info);
+      const raised = yield* buildRequest(context, shown).pipe(
+        Effect.mapError(unavailable("Could not prepare the app tool approval")),
+      );
+      if (raised === undefined) return NOT_RAISED;
+      const { requestId } = raised;
+      // Claimed before the commit, so an answer that races the write still finds its waiter.
+      yield* registry.register(requestId);
+      const afterSequence = yield* eventSink
+        .latestSequence({ threadId: context.threadId })
+        .pipe(Effect.mapError(unavailable("Could not raise the app tool approval")));
+      const wait = Effect.gen(function* () {
+        yield* Effect.forkScoped(settleFromEvents(context.threadId, requestId, afterSequence));
+        yield* Effect.forkScoped(expireAfterTtl(context.threadId, requestId));
+        yield* cancelIfShutOut(info.appId);
+        const outcome = yield* registry.awaitDecision(requestId);
+        const reason = outcome === "cancelled" ? cancelReasons.get(requestId) : undefined;
+        return (
+          reason === undefined ? { outcome, requestId } : { outcome, requestId, reason }
+        ) satisfies AppToolApprovalAnswer;
+      });
+      // From the commit on, a call that stops waiting has a card to take down.
+      return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const shown = yield* withToolTitle(info);
-          const raised = yield* buildRequest(context, shown).pipe(
-            Effect.mapError(unavailable("Could not prepare the app tool approval")),
-          );
-          if (raised === undefined) return NOT_RAISED;
-          const { requestId } = raised;
-          // Claimed before the commit, so an answer that races the write still finds its waiter.
-          yield* registry.register(requestId);
-          const afterSequence = yield* eventSink
-            .latestSequence({ threadId: context.threadId })
+          const { committed } = yield* eventSink
+            .writeIfRunCurrent({
+              threadId: context.threadId,
+              runId: raised.runId,
+              activeAttemptId: raised.activeAttemptId,
+              expectedStatus: "running",
+              events: raised.events,
+            })
             .pipe(Effect.mapError(unavailable("Could not raise the app tool approval")));
-          const wait = Effect.gen(function* () {
-            yield* Effect.forkScoped(settleFromEvents(context.threadId, requestId, afterSequence));
-            yield* Effect.forkScoped(expireAfterTtl(context.threadId, requestId));
-            yield* cancelIfShutOut(info.appId);
-            const outcome = yield* registry.awaitDecision(requestId);
-            const reason = outcome === "cancelled" ? cancelReasons.get(requestId) : undefined;
-            return (
-              reason === undefined ? { outcome, requestId } : { outcome, requestId, reason }
-            ) satisfies AppToolApprovalAnswer;
+          // The run settled between the read and the write; nobody can answer the request now.
+          if (!committed) return NOT_RAISED;
+          waiting.set(requestId, {
+            threadId: context.threadId,
+            appId: info.appId,
+            appName: info.appName,
           });
-          // From the commit on, a call that stops waiting has a card to take down.
-          return yield* Effect.uninterruptibleMask((restore) =>
-            Effect.gen(function* () {
-              const { committed } = yield* eventSink
-                .writeIfRunCurrent({
-                  threadId: context.threadId,
-                  runId: raised.runId,
-                  activeAttemptId: raised.activeAttemptId,
-                  expectedStatus: "running",
-                  events: raised.events,
-                })
-                .pipe(Effect.mapError(unavailable("Could not raise the app tool approval")));
-              // The run settled between the read and the write; nobody can answer the request now.
-              if (!committed) return NOT_RAISED;
-              waiting.set(requestId, {
-                threadId: context.threadId,
-                appId: info.appId,
-                appName: info.appName,
-              });
-              return yield* restore(wait).pipe(
-                Effect.onInterrupt(() => withdraw(context.threadId, requestId)),
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    waiting.delete(requestId);
-                    cancelReasons.delete(requestId);
-                  }),
-                ),
-              );
-            }),
+          return yield* restore(wait).pipe(
+            Effect.onInterrupt(() => withdraw(context.threadId, requestId)),
+            Effect.ensuring(
+              Effect.sync(() => {
+                waiting.delete(requestId);
+                cancelReasons.delete(requestId);
+              }),
+            ),
           );
         }),
-      ),
+      );
+    }, Effect.scoped),
   });
 });
 

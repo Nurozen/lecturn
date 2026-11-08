@@ -1,228 +1,62 @@
-import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
-import { DesktopActivityBridge } from "../components/pullRequest/DesktopActivityBridge";
-import { AuthPreviewOperateScope } from "@lecturn/contracts";
 import { scopedThreadKey } from "@lecturn/client-runtime/environment";
-import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-router";
-import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useState } from "react";
+import {
+  Outlet,
+  createFileRoute,
+  redirect,
+  useMatches,
+  useRouter,
+  type AnyRouter,
+} from "@tanstack/react-router";
+import { useEffect, useEffectEvent, useState } from "react";
+import type { ScopedThreadRef } from "@lecturn/contracts";
 
+import { DesktopActivityBridge } from "../components/pullRequest/DesktopActivityBridge";
+import { useForkThread } from "../hooks/useForkThread";
+import { registerCommands } from "../shortcuts/dispatcher";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { SidebarInset } from "../components/ui/sidebar";
-import type { ThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
+import { retainThreadFindForRoute } from "../components/chat/threadFindStore";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
-import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
-import { isPreviewAvailableFor } from "../browser/previewRuntime";
-import { usePrimaryEnvironmentId } from "../state/environments";
-import { useEnvironmentScope } from "../state/session";
-import { selectProjectGroupingSettings } from "../logicalProject";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
-import { dispatchPreviewAction } from "../components/preview/previewActionBus";
-import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useForkThread } from "../hooks/useForkThread";
-import { useScratchProject } from "../hooks/useScratchProject";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { isPreviewFocused } from "../lib/previewFocus";
-import { isTerminalFocused } from "../lib/terminalFocus";
-import { isEditableFocused } from "../lib/editableFocus";
-import { isModelPickerOpen } from "../modelPickerVisibility";
-import { resolveShortcutCommand } from "../keybindings";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
-import { useThreadSelectionStore } from "../threadSelectionStore";
-import { stackedThreadToast, toastManager } from "~/components/ui/toast";
-import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
-import { useAppsNewThreadTarget } from "../components/apps/useAppsSidebarShortcuts";
-import { useUiStateStore } from "../uiStateStore";
-
-function ChatRouteGlobalShortcuts() {
-  const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
-  const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
-  const canOperatePreview = useEnvironmentScope(
-    routeThreadRef?.environmentId ?? null,
-    AuthPreviewOperateScope,
-  );
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const projects = useProjects();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
-  const { forkThreadAtLatestTurn } = useForkThread();
-  const projectGroupCount = buildSidebarProjectSnapshots({
-    projects: projectsForProjectsMode(projects),
-    settings: projectGroupingSettings,
-    primaryEnvironmentId,
-    resolveEnvironmentLabel: () => null,
-  }).length;
-  const terminalOpen = useTerminalUiStateStore((state) =>
-    routeThreadRef
-      ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
-      : false,
-  );
-  // This flag is store-only; dispatch the action bus to reuse ChatView's URL-aware arbitration.
-  const previewOpen = useRightPanelStore((state) =>
-    routeThreadRef
-      ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
-      : false,
-  );
-  useEffect(() => {
-    const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: {
-          terminalFocus: isTerminalFocused(),
-          terminalOpen,
-          previewFocus: isPreviewFocused(),
-          previewOpen,
-          editableFocus: isEditableFocused(event.target),
-          modelPickerOpen: isModelPickerOpen(),
-        },
-      });
-
-      if (isCommandPaletteOpen()) {
-        return;
-      }
-
-      if (event.key === "Escape" && selectedThreadKeysSize > 0) {
-        event.preventDefault();
-        clearSelection();
-        return;
-      }
-
-      if (command === "chat.newLocal") {
-        event.preventDefault();
-        event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
-        return;
-      }
-
-      if (command === "chat.newWithoutProject") {
-        const environmentId = scratchEnvironmentId(
-          activeThread?.environmentId ?? activeDraftThread?.environmentId ?? primaryEnvironmentId,
-        );
-        if (environmentId === null) return;
-        event.preventDefault();
-        event.stopPropagation();
-        void startScratchThread(environmentId);
-        return;
-      }
-
-      if (command === "chat.new") {
-        event.preventDefault();
-        event.stopPropagation();
-        const appsTarget = useAppsNewThreadTarget.getState().target;
-        if (useUiStateStore.getState().sidebarMode === "apps" && appsTarget !== null) {
-          void handleNewThread(appsTarget);
-          return;
-        }
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
-          openCommandPalette({ open: "new-thread-in" });
-          return;
-        }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
-        return;
-      }
-
-      if (command === "chat.fork") {
-        event.preventDefault();
-        event.stopPropagation();
-        // Only server threads fork; drafts and non-thread routes no-op. The
-        // fork callback toasts when provider or turn state blocks it.
-        if (routeThreadRef) {
-          void forkThreadAtLatestTurn(routeThreadRef);
-        }
-        return;
-      }
-
-      if (command === "preview.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!routeThreadRef || (!canOperatePreview && !previewOpen)) return;
-        if (!isPreviewAvailableFor(routeThreadRef.environmentId)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: "Preview is desktop-only",
-              description: "Open Lecturn in the desktop app to use the in-app preview.",
-            }),
-          );
-          return;
-        }
-        dispatchPreviewAction("toggle-panel");
-        return;
-      }
-
-      if (
-        command === "preview.refresh" ||
-        command === "preview.focusUrl" ||
-        command === "preview.zoomIn" ||
-        command === "preview.zoomOut" ||
-        command === "preview.resetZoom"
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!canOperatePreview) return;
-        const action =
-          command === "preview.refresh"
-            ? "refresh"
-            : command === "preview.focusUrl"
-              ? "focus-url"
-              : command === "preview.zoomIn"
-                ? "zoom-in"
-                : command === "preview.zoomOut"
-                  ? "zoom-out"
-                  : "reset-zoom";
-        dispatchPreviewAction(action);
-      }
-    };
-
-    window.addEventListener("keydown", onWindowKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onWindowKeyDown);
-    };
-  }, [
-    activeDraftThread,
-    activeThread,
-    clearSelection,
-    canOperatePreview,
-    forkThreadAtLatestTurn,
-    handleNewThread,
-    keybindings,
-    defaultProjectRef,
-    previewOpen,
-    primaryEnvironmentId,
-    projectGroupCount,
-    routeThreadRef,
-    scratchEnvironmentId,
-    selectedThreadKeysSize,
-    startScratchThread,
-    legacySidebarEnabled,
-    terminalOpen,
-  ]);
-
-  return null;
-}
 
 function threadRouteTargetKey(target: ThreadRouteTarget | null) {
   if (!target) return null;
   return target.kind === "server" ? scopedThreadKey(target.threadRef) : target.draftId;
+}
+
+function readRouteThreadRef(router: AnyRouter): ScopedThreadRef | null {
+  const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+  return target?.kind === "server" ? target.threadRef : null;
+}
+
+/** The Fork thread shortcut needs the fork command hook, so it registers from the layout. */
+function ChatRouteForkShortcut() {
+  const router = useRouter();
+  const { forkThreadAtLatestTurn } = useForkThread();
+  const forkRouteThread = useEffectEvent((threadRef: ScopedThreadRef) => {
+    void forkThreadAtLatestTurn(threadRef);
+  });
+  useEffect(
+    () =>
+      registerCommands(
+        {
+          "chat.fork": (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            // Only server threads fork; the fork callback toasts when provider or turn state blocks it.
+            const threadRef = readRouteThreadRef(router);
+            if (threadRef) forkRouteThread(threadRef);
+          },
+        },
+        { when: () => !isCommandPaletteOpen() },
+      ),
+    [router],
+  );
+  return null;
 }
 
 function ChatRouteLayout() {
@@ -240,7 +74,7 @@ function ChatRouteLayout() {
   const shownTarget = modalOpen ? backgroundTarget : threadTarget;
   return (
     <>
-      {modalOpen ? null : <ChatRouteGlobalShortcuts />}
+      {modalOpen ? null : <ChatRouteForkShortcut />}
       <DesktopActivityBridge />
       {shownTarget?.kind === "server" && !modalOpen ? (
         <ThreadLinkPrompt threadRef={shownTarget.threadRef} />
@@ -258,13 +92,29 @@ function ChatRouteLayout() {
 }
 
 export const Route = createFileRoute("/_chat")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
     if (
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"
     ) {
       throw redirect({ to: "/pair", replace: true });
     }
+    return { appModalPage: isAppModalPage(location.pathname) };
   },
   component: ChatRouteLayout,
+  // Every match carries the whole location's params, so this layout sees the thread route's too.
+  onEnter: ({ context, params }) => retainThreadFindForRouteMatch(context.appModalPage, params),
+  onStay: ({ context, params }) => retainThreadFindForRouteMatch(context.appModalPage, params),
+  onLeave: () => retainThreadFindForRoute({ modalPage: false, threadRef: null }),
 });
+
+function retainThreadFindForRouteMatch(
+  modalPage: boolean,
+  params: Partial<Record<"environmentId" | "threadId", string>>,
+) {
+  const target = resolveThreadRouteTarget(params);
+  retainThreadFindForRoute({
+    modalPage,
+    threadRef: target?.kind === "server" ? target.threadRef : null,
+  });
+}
