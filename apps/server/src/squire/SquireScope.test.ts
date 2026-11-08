@@ -269,6 +269,80 @@ describe("SquireScope", () => {
     ),
   );
 
+  it.effect("owns a thread by grant rank: thread, saga, space, then project", () =>
+    withScope(
+      Effect.gen(function* () {
+        const scope = yield* SquireScope.SquireScope;
+        const repository = yield* SquireRepository.SquireRepository;
+        const space = SquireId.make("squire:space");
+        const threadId = ThreadId.make("thread:ranked");
+        yield* seed(
+          [
+            squireRow(billing, { created_at: "2026-11-01T00:00:00.000Z" }),
+            squireRow(space, { created_at: "2026-11-02T00:00:00.000Z" }),
+            squireRow(saga, { created_at: "2026-11-03T00:00:00.000Z" }),
+            squireRow(release, { created_at: "2026-11-04T00:00:00.000Z" }),
+          ],
+          [
+            grantRow(billing, "project", projectA),
+            grantRow(space, "staveSpace", "space-a"),
+            grantRow(saga, "staveSaga", "saga-1"),
+          ],
+        );
+        yield* createThread(threadId, projectA);
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(saga));
+        yield* repository.insertGrant(grantRow(release, "thread", threadId));
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(release));
+        yield* repository.deleteGrant({ squireId: release, kind: "thread", targetId: threadId });
+        yield* repository.deleteGrant({ squireId: saga, kind: "staveSaga", targetId: "saga-1" });
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(space));
+        yield* repository.deleteGrant({
+          squireId: space,
+          kind: "staveSpace",
+          targetId: "space-a",
+        });
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(billing));
+      }),
+    ),
+  );
+
+  it.effect("breaks an ownership tie by age and skips paused, deleting, and excluded Squires", () =>
+    withScope(
+      Effect.gen(function* () {
+        const scope = yield* SquireScope.SquireScope;
+        const repository = yield* SquireRepository.SquireRepository;
+        const newest = SquireId.make("squire:newest");
+        const threadId = ThreadId.make("thread:tied");
+        // Inserted newest first, so the winner comes from created_at, not insertion.
+        yield* seed(
+          [
+            squireRow(newest, { created_at: "2026-11-04T00:00:00.000Z" }),
+            squireRow(billing, { created_at: "2026-11-03T00:00:00.000Z" }),
+            squireRow(release, { created_at: "2026-11-02T00:00:00.000Z" }),
+          ],
+          [
+            grantRow(newest, "project", projectA),
+            grantRow(billing, "project", projectA),
+            grantRow(release, "project", projectA),
+          ],
+        );
+        yield* createThread(threadId, projectA);
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(release));
+
+        const patch = (id: SquireId, fields: Partial<SquireRepository.SquireRow>) =>
+          repository.updateSquire({ id, patch: fields, updatedAt: "2026-11-05T00:00:00.000Z" });
+        yield* patch(release, { status: "paused" });
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(billing));
+        yield* patch(billing, { lifecycle: "deleting" });
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.some(newest));
+        yield* repository.insertGrant(grantRow(newest, "exclusion", threadId));
+        assert.deepStrictEqual(yield* scope.ownerOf(threadId), Option.none());
+        // A paused tracker still tracks; it only stops being woken.
+        assert.isTrue(yield* scope.isTracked(release, threadId));
+      }),
+    ),
+  );
+
   it.effect("checks rule targets against uncommitted grant writes", () =>
     withScope(
       Effect.gen(function* () {

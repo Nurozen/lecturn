@@ -1,5 +1,5 @@
 /**
- * A durable cursor over committed events: each is classified from its own stored payload and every interested Squire
+ * A durable cursor over committed events: each is classified from its own stored payload and the thread's owning Squire
  * gets an `INSERT OR IGNORE` row, so ingestion is idempotent across lag and restarts. Summary generation and
  * re-homing are forked so a slow model call never holds the cursor; `drainThrough` waits for both.
  */
@@ -302,15 +302,10 @@ const make = Effect.gen(function* () {
   ) {
     const threadId = candidates[0]?.threadId;
     if (threadId === undefined) return;
-    const trackerIds = yield* scope.trackersOf(threadId);
-    if (trackerIds.length === 0) return;
+    const owner = yield* scope.ownerOf(threadId);
+    if (Option.isNone(owner)) return;
     if (shell !== null && (yield* isFixtureProject(config, projects, shell.projectId))) return;
-    const tracking = (yield* repository.listSquires).filter(
-      (row) => row.role === "squire" && trackerIds.includes(row.id),
-    );
-    const interested = tracking.filter(
-      (row) => row.status === "active" && row.lifecycle !== "deleting",
-    );
+    const interested = (yield* repository.listSquires).filter((row) => row.id === owner.value);
     if (interested.length === 0) return;
     const createdAt = yield* nowIso;
     const inserted: Array<InsertedRow> = [];
@@ -364,7 +359,7 @@ const make = Effect.gen(function* () {
     }
     if (immediate.length > 0) yield* promote(immediate);
     for (const { key, ids } of bySummary.values()) {
-      yield* ensureThenPromote(key, tracking, ids);
+      yield* ensureThenPromote(key, interested, ids);
     }
   });
 

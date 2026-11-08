@@ -5,7 +5,6 @@ import {
   ProjectId,
   RunId,
   SQUIRE_CARD_OUTCOME_MAX_CHARS,
-  SquireCardPayload,
   SquireCreateInput,
   SquireEvent,
   SquireId,
@@ -39,7 +38,7 @@ import * as StaveSpaceLock from "../stave/StaveSpaceLock.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
-import { squireCardRowFields, squireFyiOutcome } from "./SquireItems.ts";
+import { squireFyiOutcome } from "./SquireItems.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRoomStore from "./SquireRoomStore.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
@@ -81,7 +80,6 @@ const encodeEvent = Schema.encodeSync(Schema.fromJsonString(SquireEvent));
 const decodeCreateInput = Schema.decodeSync(SquireCreateInput);
 const decodeSummary = Schema.decodeSync(SquireTurnSummary);
 const encodePayload = Schema.encodeSync(SquireEventPayloadJson);
-const decodeCardPayload = Schema.decodeUnknownSync(Schema.fromJsonString(SquireCardPayload));
 
 const testLayer = (baseDir: string) => {
   const server = serverLayer(baseDir, { defaultModelSelection: scriptedModel });
@@ -735,7 +733,7 @@ describe("SquireDelivery", () => {
           "turn-finished:batched",
         ]);
         const repository = yield* SquireRepository.SquireRepository;
-        assert.lengthOf(yield* repository.listCards({ squireId, kinds: ["fyi"] }), 1);
+        assert.lengthOf(yield* repository.listCards({ squireId }), 0);
       }),
     ),
   );
@@ -903,7 +901,7 @@ describe("SquireDelivery", () => {
     ),
   );
 
-  it.live("writes one FYI per delivered summary event, and none on a repeated finalize", () =>
+  it.live("a delivered summary event creates no card, even when the run ends twice", () =>
     withHome(({ squireId, homeThreadId }) =>
       Effect.gen(function* () {
         const delivery = yield* SquireDelivery.SquireDelivery;
@@ -914,29 +912,13 @@ describe("SquireDelivery", () => {
         const [message] = yield* squireMessages(homeThreadId);
         const run = yield* finishRun(squireId, homeThreadId, message!);
         yield* delivery.finalizeRun({ squireId, homeThreadId, runId: run.id, status: run.status });
+        yield* delivery.finalizeRun({ squireId, homeThreadId, runId: run.id, status: run.status });
 
-        const cards = yield* repository.listCards({ squireId, kinds: ["fyi"] });
-        assert.lengthOf(cards, 1);
-        const card = cards[0]!;
-        assert.equal(card.status, "open");
-        assert.equal(card.target_thread_id, tracked);
-        assert.deepEqual(decodeCardPayload(card.payload_json), {
-          type: "fyi",
-          source: "summary",
-          text: "Fix invoice rounding: finished",
-          threadId: tracked,
-        });
-        assert.include(card.trigger_json, '"runId":"run-1"');
-        // The snapshot row carries the outcome, so the client never fetches the card for it.
-        assert.equal(squireCardRowFields(card).outcome, "finished");
-        const created = yield* repository.listActionLog({
-          squireId,
-          kinds: ["card.created"],
-          limit: 10,
-        });
-        assert.lengthOf(created, 1);
-        assert.equal(created[0]!.card_id, card.id);
-        assert.isNotNull(created[0]!.event_id);
+        assert.lengthOf(yield* repository.listCards({ squireId }), 0);
+        assert.lengthOf(
+          yield* repository.listActionLog({ squireId, kinds: ["card.created"], limit: 10 }),
+          0,
+        );
         assert.deepEqual(yield* statuses(squireId), ["turn-finished:delivered"]);
       }),
     ),

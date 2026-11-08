@@ -557,12 +557,6 @@ export class SquireRepository extends Context.Service<
     readonly markBatchDelivered: (batchId: string) => Result<ReadonlyArray<SquireEventRow>>;
     /** `pending` rows become `dropped`. */
     readonly dropPendingEvents: (ids: ReadonlyArray<number>) => Result<number>;
-    /** Whether the run's `card.created` rows name a non-FYI card for the thread. */
-    readonly runRaisedDecisionCard: (input: {
-      readonly squireId: SquireId;
-      readonly runId: string;
-      readonly threadId: ThreadId;
-    }) => Result<boolean>;
     /** The earliest `not_before` of deferred rows waiting on a time (threshold, summary). */
     readonly earliestDeferredAt: Result<Option.Option<string>>;
     /**
@@ -1437,18 +1431,6 @@ const make = Effect.gen(function* () {
               RETURNING id`.pipe(Effect.map((rows) => rows.length)),
             (dropped) => dropped > 0,
           ),
-    runRaisedDecisionCard: ({ squireId, runId, threadId }) =>
-      read(
-        "runRaisedDecisionCard",
-        sql`SELECT count(*) AS n FROM squire_action_log AS log
-          JOIN squire_card AS card ON card.id = log.card_id
-          WHERE log.squire_id = ${squireId} AND log.kind = 'card.created'
-            AND log.run_id = ${runId} AND card.target_thread_id = ${threadId}
-            AND card.kind != 'fyi'`.pipe(
-          Effect.flatMap(decodeCount),
-          Effect.map((rows) => countOf(rows) > 0),
-        ),
-      ),
     earliestDeferredAt: read(
       "earliestDeferredAt",
       sql`SELECT min(not_before) AS not_before FROM squire_event

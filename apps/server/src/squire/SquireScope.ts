@@ -43,20 +43,36 @@ const containerCovers = (grant: Grant, target: ContainerTarget): boolean => {
   }
 };
 
+const grantCovers = (grant: Grant, target: ThreadTarget): boolean =>
+  (grant.kind === "thread" && grant.targetId === target.threadId) || containerCovers(grant, target);
+
 /** An exclusion on the thread beats every container grant. */
 const grantsCover = (grants: ReadonlyArray<Grant>, target: ThreadTarget): boolean => {
   if (grants.some((grant) => grant.kind === "exclusion" && grant.targetId === target.threadId)) {
     return false;
   }
-  return grants.some(
-    (grant) =>
-      (grant.kind === "thread" && grant.targetId === target.threadId) ||
-      containerCovers(grant, target),
+  return grants.some((grant) => grantCovers(grant, target));
+};
+
+const OWNERSHIP_RANK: Record<Exclude<SquireGrantKind, "exclusion">, number> = {
+  thread: 0,
+  staveSaga: 1,
+  staveSpace: 2,
+  project: 3,
+};
+
+/** How specifically the grants name the target, lower is closer; null when they do not cover it. */
+const ownershipRank = (grants: ReadonlyArray<Grant>, target: ThreadTarget): number | null => {
+  if (!grantsCover(grants, target)) return null;
+  const ranks = grants.flatMap((grant) =>
+    grant.kind !== "exclusion" && grantCovers(grant, target) ? [OWNERSHIP_RANK[grant.kind]] : [],
   );
+  return Math.min(...ranks);
 };
 
 interface IndexedSquire {
   readonly id: SquireId;
+  readonly active: boolean;
   readonly grants: ReadonlyArray<Grant>;
 }
 
@@ -77,6 +93,15 @@ export class SquireScope extends Context.Service<
       squireId: SquireId,
       threadId: ThreadId,
     ) => Effect.Effect<boolean, SquireScopeError>;
+    /**
+     * The one Squire a thread's events go to: the active tracker with the most specific grant
+     * (thread, then saga, space, project), oldest first on a tie. Other trackers keep reading the
+     * thread and acting when asked; they just are not woken by it. A paused owner hands over at
+     * the next event.
+     */
+    readonly ownerOf: (
+      threadId: ThreadId,
+    ) => Effect.Effect<Option.Option<SquireId>, SquireScopeError>;
     /**
      * Squires whose project, Stave space, or saga grant holds the project,
      * earliest-created first. Thread grants and exclusions name threads, not
@@ -126,9 +151,13 @@ const make = Effect.gen(function* () {
       .filter((row) => row.role === "squire" && row.lifecycle !== "deleting")
       .toSorted((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     const squires = yield* Effect.forEach(rows, (row) =>
-      repository
-        .listGrants(row.id)
-        .pipe(Effect.map((grants): IndexedSquire => ({ id: row.id, grants: toGrants(grants) }))),
+      repository.listGrants(row.id).pipe(
+        Effect.map((grants): IndexedSquire => ({
+          id: row.id,
+          active: row.status === "active",
+          grants: toGrants(grants),
+        })),
+      ),
     );
     const index: GrantIndex = { generation, squires };
     yield* Ref.set(cached, Option.some(index));
@@ -194,6 +223,29 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const ownerOf: SquireScope["Service"]["ownerOf"] = Effect.fn("SquireScope.ownerOf")(
+    function* (threadId) {
+      const shell = yield* trackableShell(threadId);
+      if (shell === null) return Option.none<SquireId>();
+      const { squires } = yield* loadIndex;
+      const target = yield* toTarget(
+        shell,
+        squires.some((squire) => usesStave(squire.grants)),
+      );
+      let owner = Option.none<SquireId>();
+      let closest = Number.POSITIVE_INFINITY;
+      // Creation order, so only a strictly closer grant displaces the oldest.
+      for (const squire of squires) {
+        if (!squire.active) continue;
+        const rank = ownershipRank(squire.grants, target);
+        if (rank === null || rank >= closest) continue;
+        closest = rank;
+        owner = Option.some(squire.id);
+      }
+      return owner;
+    },
+  );
+
   const projectCoverersOf: SquireScope["Service"]["projectCoverersOf"] = Effect.fn(
     "SquireScope.projectCoverersOf",
   )(function* (projectId) {
@@ -230,6 +282,7 @@ const make = Effect.gen(function* () {
   return SquireScope.of({
     trackersOf,
     isTracked,
+    ownerOf,
     projectCoverersOf,
     targetOf,
     ruleTargetInScope,

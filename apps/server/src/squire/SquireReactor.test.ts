@@ -685,6 +685,47 @@ describe("SquireReactor stops and scope", () => {
       ),
   );
 
+  it.effect("only the owner gets a row, and a toggle it turned off falls back to nobody", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        yield* setup([
+          squireRow(release, { events_json: '{"turnFinished":false}' }),
+          squireRow(billing),
+        ]);
+        const { drain } = yield* startReactor;
+        yield* finishRun(RunId.make("run:1"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.deepStrictEqual(yield* rows, []);
+      }),
+    ),
+  );
+
+  it.effect("a paused owner hands the next event to the next Squire", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup([squireRow(release), squireRow(billing)]);
+        const { drain } = yield* startReactor;
+        yield* finishRun(RunId.make("run:1"), "completed", yield* DateTime.now);
+        yield* drain;
+        yield* repository.updateSquire({
+          id: release,
+          patch: { status: "paused" },
+          updatedAt: "2026-11-01T00:00:00.000Z",
+        });
+        yield* finishRun(RunId.make("run:2"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.deepStrictEqual(
+          (yield* rows).map((row) => [row.squire_id, row.state_key]),
+          [
+            [release, "run:1"],
+            [billing, "run:2"],
+          ],
+        );
+      }),
+    ),
+  );
+
   it.effect("a Squire with turn-finished off and a paused Squire get no row", () =>
     runIn(() =>
       Effect.gen(function* () {

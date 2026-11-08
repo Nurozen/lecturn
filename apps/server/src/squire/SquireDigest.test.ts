@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
   isUnknownUnionMember,
+  RunId,
   SquireCardId,
   SquireEvent,
   SquireId,
@@ -244,6 +245,69 @@ describe("SquireDigest", () => {
         },
       ]);
       assert.deepStrictEqual(section?.budget.steers, { used: 1, limit: 10 });
+    }).pipe(Effect.provide(sweepLayer())),
+  );
+
+  it.effect("still reports a turn its Squire stayed quiet on, with no card behind it", () =>
+    Effect.gen(function* () {
+      yield* seed();
+      const repository = yield* SquireRepository.SquireRepository;
+      const thread = ThreadId.make("thread:quiet");
+      const runId = RunId.make("run:quiet");
+      yield* repository.insertEvent({
+        squire_id: release,
+        thread_id: thread,
+        kind: "turn-finished",
+        state_key: runId,
+        payload_json: JSON.stringify({
+          outcome: "finished",
+          runId,
+          pendingRequest: null,
+          pullRequest: null,
+        }),
+        status: "delivered",
+        defer_reason: null,
+        not_before: "2026-11-02T10:00:00.000Z",
+        batch_id: null,
+        created_at: "2026-11-02T10:00:00.000Z",
+      });
+      yield* repository.insertSummary({
+        thread_id: thread,
+        run_id: runId,
+        stage: "terminal",
+        status: "complete",
+        summary_json: JSON.stringify({
+          threadId: thread,
+          threadTitle: "Fix invoice rounding",
+          project: "billing",
+          provider: "codex",
+          turnId: runId,
+          outcome: "finished",
+          summaryStatus: "complete",
+          goal: "Round invoices",
+          completed: ["Shipped banker's rounding"],
+          remaining: [],
+          blocked: [],
+          pendingQuestion: null,
+          suggestedNextStep: null,
+          files: { entries: [], counts: { added: 0, modified: 0, deleted: 0 } },
+          commands: [],
+          pullRequest: null,
+        }),
+        payer_squire_id: null,
+        created_at: "2026-11-02T10:00:00.000Z",
+        updated_at: "2026-11-02T10:00:00.000Z",
+      });
+      assert.lengthOf(yield* repository.listCards({ squireId: release }), 0);
+
+      assert.isTrue(yield* dueAt("2026-11-02T13:00:00.000Z"));
+      const [row] = yield* repository.listEvents({ statuses: ["pending"], kinds: ["digest-due"] });
+      const event = decodeEvent(row?.payload_json ?? "");
+      const input =
+        !isUnknownUnionMember(event) && event.type === "digest-due" ? event.digest : undefined;
+      assert.deepStrictEqual(input?.squires[0]?.moved, [
+        { text: "Fix invoice rounding: Shipped banker's rounding", threadId: thread, cardId: null },
+      ]);
     }).pipe(Effect.provide(sweepLayer())),
   );
 });
