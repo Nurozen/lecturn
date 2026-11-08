@@ -17,6 +17,34 @@ function withRedesignLook() {
 }
 
 describe("ContextChip", () => {
+  it("keeps the Lecturn pill's label centered and tight, without a hover underline", async () => {
+    await using screen = await render(
+      <p className="w-[60ch] text-sm leading-relaxed">
+        Open the{" "}
+        <ContextChip kind="mention" render={<button type="button" />}>
+          <FileIcon />
+          <ContextChipLabel>src/Typography.tsx</ContextChipLabel>
+        </ContextChip>{" "}
+        file
+      </p>,
+    );
+    const chip = screen.container.querySelector<HTMLElement>('[data-slot="context-chip"]')!;
+    const label = screen.container.querySelector<HTMLElement>('[data-slot="context-chip-label"]')!;
+    const labelStyle = getComputedStyle(label);
+    const chipBox = chip.getBoundingClientRect();
+    const labelBox = label.getBoundingClientRect();
+
+    expect(Number.parseFloat(labelStyle.lineHeight)).toBeCloseTo(
+      Number.parseFloat(labelStyle.fontSize) * 1.25,
+      1,
+    );
+    expect(labelStyle.overflow).toBe("hidden");
+    expect(labelStyle.textDecorationLine).toBe("none");
+    expect(
+      Math.abs(labelBox.top + labelBox.height / 2 - (chipBox.top + chipBox.height / 2)),
+    ).toBeLessThanOrEqual(0.5);
+  });
+
   it("sets its label on the sentence baseline at the sentence size without growing the line", async () => {
     using _redesign = withRedesignLook();
     await using screen = await render(

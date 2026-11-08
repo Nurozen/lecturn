@@ -130,7 +130,9 @@ function ContextChipLabel({ className, ...props }: React.ComponentProps<"span">)
   return (
     <span
       className={cn(
-        "block min-w-0 self-baseline overflow-x-clip text-ellipsis whitespace-nowrap underline decoration-transparent decoration-1 underline-offset-[0.2em] transition-colors motion-reduce:transition-none [:is(button:enabled,a):hover>&]:decoration-current",
+        // The Lecturn pill centers a tight label; the new design sets it on the sentence baseline
+        // and underlines it on hover.
+        "block min-w-0 text-ellipsis whitespace-nowrap [:root:not([data-redesign])_&]:self-center [:root:not([data-redesign])_&]:overflow-hidden [:root:not([data-redesign])_&]:leading-tight redesign:self-baseline redesign:overflow-x-clip redesign:underline redesign:decoration-transparent redesign:decoration-1 redesign:underline-offset-[0.2em] redesign:transition-colors redesign:motion-reduce:transition-none redesign:[:is(button:enabled,a):hover>&]:decoration-current",
         className,
       )}
       data-slot="context-chip-label"

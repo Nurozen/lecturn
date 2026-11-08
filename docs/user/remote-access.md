@@ -317,7 +317,7 @@ page, or **Settings → Lecturn Connect** on mobile, and choose **Deregister**. 
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. When Lecturn Connect rejects a host's link, the host
 shows that it was removed from Lecturn Connect. To link it again, turn on
-**Lecturn Connect** in **Settings → Sharing & access** on a desktop host, or run
+**Lecturn Connect** in **Settings → Relay** on a desktop host, or run
 `lecturn connect link` on a command-line host and then restart Lecturn there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `lecturn connect unlink` on that host to keep it off.

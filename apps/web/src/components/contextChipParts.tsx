@@ -361,9 +361,11 @@ function FileChipContent(props: {
   suffix?: string | null;
   unresolved?: boolean;
 }) {
+  // The Lecturn look keeps the file's icon on an unresolved chip; its dashed border marks it.
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   return (
     <>
-      {props.unresolved ? (
+      {props.unresolved && redesign ? (
         <CircleDashedIcon />
       ) : props.isVideo ? (
         <FilmIcon />

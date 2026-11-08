@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off
 // Launches a packaged desktop app against a seeded Lecturn home, opens a thread, and checks its
-// messages render. Release jobs run it so a build whose backend or bundle cannot start fails
-// before it is published.
+// messages render. Run it by hand: release jobs will run it once a Lecturn fixture database
+// replaces the upstream one in scripts/fixtures/desktop-launch.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";

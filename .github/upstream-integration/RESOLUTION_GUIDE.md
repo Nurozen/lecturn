@@ -1411,7 +1411,7 @@ from upstream's side.
 - **Queue reordering (#25846, D6).** Taken as upstream: no drag reordering, a Send now row.
 - **Sweep misses.** model-manifest `t3CodeRange` becomes `lecturnRange`; effect-acp
   `_t3_unknown` becomes `_lecturn_unknown`; `EXPO_PUBLIC_T3_FLOATING_TABS` becomes
-  `EXPO_PUBLIC_LECTURN_FLOATING_TABS`; prompt-link tests keep owner `pingdotgg`.
+  `EXPO_PUBLIC_LECTURN_FLOATING_TABS`; prompt-link tests use the fork owner `Nurozen/lecturn`.
 - **Evals (#24635).** Cases use fork tool names (`lecturn_*`), `lecturn-thread://` links and
   `lecturn/` branches (map new cases per JSON line, URLs verbatim). `run.ts` advertises
   `mcp__lecturn__*` tools; captured template names (`mcp__t3-code__*`, `<t3_code_runtime>`)

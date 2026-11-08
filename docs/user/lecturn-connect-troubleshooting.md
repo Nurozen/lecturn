@@ -12,7 +12,7 @@ and select **Details**. The first part marked as failed is the cause. Find its
 section below.
 
 To see the host's side, run `lecturn connect status` on the host, or open
-**Settings > Sharing & access** on the host. Both check the host's Lecturn Connect
+**Settings > Relay** on the host. Both check the host's Lecturn Connect
 address from the host, and say why it fails. `lecturn connect` runs the same check
 when it finishes setup. This check cannot test another device's network. For a
 problem on one device, use **Details** on that device.
@@ -105,7 +105,7 @@ Lecturn Connect does not have an active link between your account and the host.
   account on this device and on the host. On the host, run `lecturn connect logout`,
   then `lecturn connect`.
 - **Lecturn Connect is off on the host, or the host only publishes agent activity.**
-  On the host, open **Settings > Sharing & access** and turn **Lecturn Connect** on, or
+  On the host, open **Settings > Relay** and turn **Lecturn Connect** on, or
   run `lecturn connect`.
 - **The host was linked, but the server did not apply the link yet.** Run
   `lecturn service restart` on the host, or restart `lecturn serve`.

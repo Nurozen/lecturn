@@ -167,6 +167,9 @@ usual cause.
 
 ## Mobile crashes and errors
 
+Off by default: none of this runs until it is enabled, see
+[Enabling mobile telemetry](#enabling-mobile-telemetry).
+
 The mobile app reports through [`expo-observe`](https://docs.expo.dev/eas/observe/). Its
 `endpointUrl` points at the relay (`/v1/mobile/observe`, set in `apps/mobile/app.config.ts` from
 `LECTURN_RELAY_URL`), because Observe cannot send auth headers and prefixes every path with the EAS

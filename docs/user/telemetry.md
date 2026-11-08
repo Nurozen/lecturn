@@ -28,6 +28,11 @@ sends startup timings, and every report carries a random ID for the install. Rep
 the Lecturn Connect relay to Axiom. They do not include your threads, prompts, or connection details,
 but an error message can quote a value the app was handling.
 
+Crash reporting is not switched on yet. Until maintainers enable it on the relay
+(`MOBILE_TELEMETRY_ENABLED`, see
+[Enabling mobile telemetry](../operations/relay-observability.md#enabling-mobile-telemetry)), the
+relay turns reports away unread and the app discards them, so nothing is stored.
+
 To stop sending them, turn off **Send crash reports** in **Settings > About Lecturn > Diagnostics**.
 
 ## Export diagnostics to your own receiver

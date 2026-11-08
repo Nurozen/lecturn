@@ -3254,7 +3254,7 @@ export default function ChatView(props: ChatViewProps) {
   const scrollToEndSummary =
     [
       childInputNow === null ? null : "Subagent waiting",
-      queuedRunCount === 0 ? null : `${queuedRunCount} queued`,
+      showQueuedTurns && queuedRunCount > 0 ? `${queuedRunCount} queued` : null,
     ]
       .filter((part) => part !== null)
       .join(" · ") || null;

@@ -1,4 +1,11 @@
+import { findPromptLinkProjects } from "@lecturn/client-runtime/prompt-links";
+import type {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@lecturn/client-runtime/state/shell";
 import type { PromptLinkRepository } from "@lecturn/shared/promptLinks";
+
+import { listedProjects } from "../../state/listed-entities";
 
 export const PROMPT_LINK_PARAM_KEYS = ["prompt", "repo", "pr", "provider", "model"] as const;
 
@@ -77,6 +84,30 @@ export function latestThreadEnvironmentIds<Id extends string>(
 
 export const promptLinkRepositoryName = (repository: PromptLinkRepository) =>
   `${repository.owner}/${repository.name}`;
+
+/**
+ * The Threads tab's projects checked out from the link's repository, most recently active first.
+ * App workspaces and archived Stave spaces are not offered by the picker, so a link never opens them.
+ */
+export function promptLinkProjects(
+  projects: ReadonlyArray<EnvironmentProject>,
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  repository: PromptLinkRepository,
+): EnvironmentProject[] {
+  const lastActivity = new Map<string, string>();
+  for (const thread of threads) {
+    const key = `${thread.environmentId}:${thread.projectId}`;
+    if (thread.updatedAt > (lastActivity.get(key) ?? "")) lastActivity.set(key, thread.updatedAt);
+  }
+  const activityOf = (project: EnvironmentProject) =>
+    lastActivity.get(`${project.environmentId}:${project.id}`) ?? "";
+  return findPromptLinkProjects(
+    [...listedProjects(projects)].sort((left, right) =>
+      activityOf(right).localeCompare(activityOf(left)),
+    ),
+    repository,
+  );
+}
 
 /**
  * Advances a parsed link at each navigation state; `resolve` is the link to apply. The first

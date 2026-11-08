@@ -7,7 +7,6 @@ import {
 } from "@react-navigation/native";
 import { availableScratchWorkspaceRoot } from "@lecturn/client-runtime/operations/projects";
 import {
-  findPromptLinkProjects,
   findPromptLinkPullRequestThread,
   resolvePromptLinkModelSelection,
 } from "@lecturn/client-runtime/prompt-links";
@@ -46,6 +45,7 @@ import { applyLinkedPromptToThreadDraft, showPromptLinkNotice } from "./prompt-l
 import {
   latestThreadEnvironmentIds,
   promptLinkNotice,
+  promptLinkProjects,
   promptLinkRepositoryName,
   promptLinkScratchEnvironmentId,
   promptLinkSearchFromParams,
@@ -387,17 +387,9 @@ function resolveLink(linkSearch: string) {
     void openScratchDraft(request);
     return;
   }
-  const lastActivity = new Map<string, string>();
-  for (const thread of threads) {
-    const key = `${thread.environmentId}:${thread.projectId}`;
-    if (thread.updatedAt > (lastActivity.get(key) ?? "")) lastActivity.set(key, thread.updatedAt);
-  }
-  const activityOf = (project: EnvironmentProject) =>
-    lastActivity.get(`${project.environmentId}:${project.id}`) ?? "";
-  const projects = findPromptLinkProjects(
-    [...appAtomRegistry.get(environmentProjects.projectsAtom)].sort((left, right) =>
-      activityOf(right).localeCompare(activityOf(left)),
-    ),
+  const projects = promptLinkProjects(
+    appAtomRegistry.get(environmentProjects.projectsAtom),
+    threads,
     repository,
   );
   const project = projects[0];
