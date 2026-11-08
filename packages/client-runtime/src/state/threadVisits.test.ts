@@ -1,10 +1,14 @@
 import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
-import { expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { VisitThreadInput } from "./threadCommands.ts";
 import { claimThreadOpen } from "./threadSearch.ts";
-import { createThreadVisitTracker, VISIT_DISPATCH_THROTTLE_MS } from "./threadVisits.ts";
+import {
+  createThreadVisitTracker,
+  threadUnreadBoundary,
+  VISIT_DISPATCH_THROTTLE_MS,
+} from "./threadVisits.ts";
 
 const environmentId = EnvironmentId.make("env-visits");
 
@@ -153,4 +157,40 @@ it("advances the watermark to a wake without waiting for the throttle", () => {
   vi.advanceTimersByTime(1_000);
   t.update({ updatedAt: at(16) });
   expect(t.visits).toHaveLength(2);
+});
+
+describe("threadUnreadBoundary", () => {
+  const msg = (id: string, seconds: number, role = "assistant", createdBy?: string) => ({
+    id,
+    role,
+    createdAt: at(seconds),
+    ...(createdBy === undefined ? {} : { createdBy }),
+  });
+  const window = (lastVisitedAt: string | null) => ({ lastVisitedAt, openedThrough: at(30) });
+
+  it("is the first message after the last visit, not the newest", () => {
+    expect(
+      threadUnreadBoundary([msg("old", 5), msg("first-new", 15), msg("newer", 20)], window(at(10))),
+    ).toBe("first-new");
+  });
+
+  it("anchors past the user's own messages but counts an agent's", () => {
+    expect(threadUnreadBoundary([msg("mine", 15, "user"), msg("reply", 20)], window(at(10)))).toBe(
+      "reply",
+    );
+    expect(threadUnreadBoundary([msg("steer", 15, "user", "agent")], window(at(10)))).toBe("steer");
+  });
+
+  it("freezes at the open: a message arriving later never moves or adds the divider", () => {
+    const opened = [msg("old", 5), msg("first-new", 15)];
+    expect(threadUnreadBoundary(opened, window(at(10)))).toBe("first-new");
+    expect(threadUnreadBoundary([...opened, msg("later", 35)], window(at(10)))).toBe("first-new");
+    expect(threadUnreadBoundary([msg("late", 35)], window(at(10)))).toBeNull();
+  });
+
+  it("shows nothing for a thread with no earlier visit or nothing new", () => {
+    expect(threadUnreadBoundary([msg("a", 15)], window(null))).toBeNull();
+    expect(threadUnreadBoundary([msg("a", 5)], window(at(10)))).toBeNull();
+    expect(threadUnreadBoundary([msg("a", 15)], null)).toBeNull();
+  });
 });

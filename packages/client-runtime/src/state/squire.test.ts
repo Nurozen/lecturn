@@ -79,6 +79,11 @@ import {
   squireRuleText,
   squireScopeLine,
   squireSettledLabel,
+  squireSidebarState,
+  squireApprovalEntries,
+  squireAllowRuleInput,
+  runSquireAlwaysAllow,
+  isSquireStayQuietTool,
   squireSnapshotGestures,
   squireStateLine,
   squireUndoOffer,
@@ -945,7 +950,8 @@ describe("queue cards", () => {
 
   it("names how a card ended, and what the user's own act did", () => {
     expect(squireSettledLabel({ status: "resolved", resolution: "answered" })).toBe("Answered");
-    expect(squireSettledLabel({ status: "outdated", resolution: "expired" })).toBe("Outdated");
+    expect(squireSettledLabel({ status: "outdated", resolution: "expired" })).toBe("Expired");
+    expect(squireSettledLabel({ status: "dismissed", resolution: "denied" })).toBe("Denied");
     expect(squireSettledLabel({ status: "dismissed" })).toBe("Dismissed");
     expect(squireActedLabel(row("question"), "accept")).toBe("Answered");
     expect(squireActedLabel(row("overlap"), "accept")).toBe("Reviewed");
@@ -1632,45 +1638,58 @@ describe("squireUpdateGroups", () => {
       (item) => item.kinds ?? [],
     );
 
-  it("folds older consecutive wakes with what their turns produced, never the newest", () => {
+  it("spans consecutive wakes with what their turns did, down to one wake", () => {
     expect(
       groups([
         { role: "user" },
         { role: "update" },
         { role: "wake", kinds: ["turn-completed"] },
         { role: "update" },
-        { role: "update" },
         { role: "wake", kinds: ["pr-failed", "turn-completed"] },
         { role: "update" },
         { role: "wake", kinds: ["message"] },
-        { role: "update" },
       ]),
-    ).toEqual([{ start: 2, end: 7, wakeCount: 2, eventKinds: ["turn-completed", "pr-failed"] }]);
+    ).toEqual([
+      {
+        start: 2,
+        end: 7,
+        wakeCount: 3,
+        eventKinds: ["turn-completed", "pr-failed", "message"],
+      },
+    ]);
+    expect(groups([{ role: "wake" }, { role: "update" }])).toEqual([
+      { start: 0, end: 2, wakeCount: 1, eventKinds: [] },
+    ]);
   });
 
-  it("leaves a lone wake alone, and splits at the user's own messages", () => {
+  it("splits at the user's own messages and leaves work outside a wake alone", () => {
     expect(
       groups([
         { role: "wake" },
         { role: "update" },
         { role: "user" },
-        { role: "wake" },
+        { role: "update" },
         { role: "wake" },
       ]),
-    ).toEqual([]);
+    ).toEqual([
+      { start: 0, end: 2, wakeCount: 1, eventKinds: [] },
+      { start: 4, end: 5, wakeCount: 1, eventKinds: [] },
+    ]);
   });
 
-  it("keeps a running turn or a waiting card outside the group", () => {
+  it("never spans a kept row, so a reply or a running turn stays in view", () => {
     expect(
       groups([
         { role: "wake" },
         { role: "update" },
-        { role: "wake" },
         { role: "keep" },
         { role: "update" },
         { role: "wake" },
       ]),
-    ).toEqual([{ start: 0, end: 3, wakeCount: 2, eventKinds: [] }]);
+    ).toEqual([
+      { start: 0, end: 2, wakeCount: 1, eventKinds: [] },
+      { start: 4, end: 5, wakeCount: 1, eventKinds: [] },
+    ]);
   });
 
   it("labels the count and the first few event kinds", () => {
@@ -1681,5 +1700,191 @@ describe("squireUpdateGroups", () => {
     expect(squireUpdateGroupLabel({ wakeCount: 4, eventKinds: ["a", "b", "c", "d"] })).toBe(
       "4 Squire updates · a, b, c, …",
     );
+  });
+});
+
+describe("squireApprovalEntries", () => {
+  const lead = "squire-lead" as SquireId;
+  const squire = "squire-a" as SquireId;
+  const card = (
+    id: string,
+    overrides: Partial<
+      Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution">
+    > = {},
+  ) => ({
+    id,
+    kind: "steer" as const,
+    status: "open" as const,
+    squireId: squire,
+    createdAt: at,
+    ...overrides,
+  });
+
+  it("orders a chat's rows oldest first, leaving FYIs and holds out", () => {
+    const entries = squireApprovalEntries(
+      [
+        card("newer", { createdAt: "2026-11-01T11:00:00.000Z" }),
+        card("fyi", { kind: "fyi" }),
+        card("held", { status: "held" }),
+        card("older", { createdAt: "2026-11-01T10:30:00.000Z" }),
+      ],
+      { squireId: squire, isLead: false, chatFirst: true },
+    );
+    expect(entries.map((entry) => entry.row.id)).toEqual(["older", "newer"]);
+  });
+
+  it("gives a closed row its outcome and marks an expired one", () => {
+    const [expired, denied] = squireApprovalEntries(
+      [
+        card("expired", { status: "outdated", resolution: "expired" }),
+        card("denied", {
+          status: "dismissed",
+          resolution: "denied",
+          createdAt: "2026-11-01T10:01:00.000Z",
+        }),
+      ],
+      { squireId: squire, isLead: false, chatFirst: true },
+    );
+    expect(expired).toMatchObject({ phase: "closed", outcome: "Expired", expired: true });
+    expect(denied).toMatchObject({ phase: "closed", outcome: "Denied", expired: false });
+  });
+
+  it("a row belongs to the chat of its raiser on a chat-first server", () => {
+    const rows = [card("lead-raised", { squireId: lead }), card("own")];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["own"]);
+    expect(
+      squireApprovalEntries(rows, { squireId: lead, isLead: true, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised"]);
+  });
+
+  it("an older server's Squire keeps its whole list; its Lead keeps what it raised", () => {
+    const rows = [card("lead-raised", { squireId: lead }), card("own")];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: false }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised", "own"]);
+    expect(
+      squireApprovalEntries(rows, { squireId: lead, isLead: true, chatFirst: false }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised"]);
+  });
+});
+
+describe("Always allow", () => {
+  const offer: SquireRuleOffer = {
+    effect: "allow",
+    actionClass: "steer",
+    targetKind: "thread",
+    targetId: "thread-1",
+    text: "Research may auto-send review-feedback steers",
+    capReached: false,
+  };
+  const row = (allowRuleOffer: SquireRuleOffer | null = offer) => ({
+    id: "card-1" as SquireCardId,
+    squireId: "squire-a" as SquireId,
+    ...(allowRuleOffer === null ? {} : { allowRuleOffer }),
+  });
+
+  it("offers a rule only where the server attached one that can be saved", () => {
+    expect(squireAllowRuleInput(row())).toMatchObject({
+      effect: "allow",
+      actionClass: "steer",
+      targetId: "thread-1",
+      fromCardId: "card-1",
+    });
+    expect(squireAllowRuleInput(row(null))).toBeNull();
+    expect(squireAllowRuleInput(row({ ...offer, capReached: true }))).toBeNull();
+    expect(squireAllowRuleInput(row({ ...offer, effect: "ask-first" }))).toBeNull();
+  });
+
+  it("saves the rule only after the accept goes through", async () => {
+    const saved: unknown[] = [];
+    const saveRule = async (input: unknown) => {
+      saved.push(input);
+      return { ok: true as const };
+    };
+    await expect(
+      runSquireAlwaysAllow(row(), {
+        accept: async () => ({ ok: true }),
+        saveRule,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(saved).toHaveLength(1);
+
+    await expect(
+      runSquireAlwaysAllow(row(), {
+        accept: async () => ({ ok: false, error: "Already handled" }),
+        saveRule,
+      }),
+    ).resolves.toEqual({ ok: false, error: "Already handled" });
+    expect(saved).toHaveLength(1);
+  });
+});
+
+describe("squireSidebarState", () => {
+  const shell = (patch: { lastVisitedAt?: string | null; status?: string } = {}) =>
+    ({
+      latestRun: patch.status === undefined ? null : { status: patch.status, runId: "run-1" },
+      lastVisitedAt: patch.lastVisitedAt,
+      session: patch.status === undefined ? null : { status: patch.status },
+    }) as never;
+  const entry = (patch: { openDecisionCount?: number; lastMessageAt?: string } = {}) => ({
+    ...snapshot("a", { openDecisionCount: patch.openDecisionCount ?? 0 }),
+    ...(patch.lastMessageAt === undefined ? {} : { lastMessageAt: patch.lastMessageAt }),
+  });
+
+  it("an open decision is needs-you, ahead of unread", () => {
+    expect(
+      squireSidebarState(
+        entry({ openDecisionCount: 1, lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("needs-you");
+  });
+
+  it("unread only when a message landed after the last visit", () => {
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("unread");
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T09:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("none");
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({
+          lastVisitedAt: null,
+        }),
+      ),
+    ).toBe("unread");
+  });
+
+  it("is quiet on an older server without lastMessageAt", () => {
+    expect(squireSidebarState(entry(), shell({ lastVisitedAt: null }))).toBe("none");
+  });
+});
+
+describe("isSquireStayQuietTool", () => {
+  it("matches the tool however the provider namespaces it", () => {
+    expect(isSquireStayQuietTool("squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("mcp__lecturn__squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("lecturn.squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("squire_notify")).toBe(false);
+    expect(isSquireStayQuietTool("mysquire_stay_quiet")).toBe(false);
+    expect(isSquireStayQuietTool(null)).toBe(false);
   });
 });

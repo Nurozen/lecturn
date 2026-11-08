@@ -852,13 +852,16 @@ const RESOLUTION_LABEL: Readonly<Partial<Record<SquireCardResolution, string>>> 
   undone: "Undone",
   executed: "Sent",
   outdated: "Outdated",
-  expired: "Outdated",
+  expired: "Expired",
+  denied: "Denied",
   failed: "Failed",
 };
 
 /** How a card that left the queue ended, for the one-line confirmation where it was. */
 export function squireSettledLabel(
-  card: Pick<SquireCardRow, "status"> & { readonly resolution?: SquireCardResolution | null },
+  card: Pick<SquireCardRow, "status"> & {
+    readonly resolution?: SquireCardResolution | null | undefined;
+  },
 ): string {
   const byResolution = card.resolution == null ? undefined : RESOLUTION_LABEL[card.resolution];
   if (byResolution !== undefined) return byResolution;
@@ -1795,6 +1798,128 @@ export function squireLeadShowsIntro(input: {
   );
 }
 
+// ── Approvals in a Squire's chat ──────────────────────────────
+
+export type SquireApprovalPhase = "open" | "sending" | "closed";
+
+const SQUIRE_APPROVAL_PHASE: Readonly<
+  Partial<Record<SquireCardRow["status"], SquireApprovalPhase>>
+> = {
+  open: "open",
+  accepting: "sending",
+  executing: "sending",
+  resolved: "closed",
+  executed: "closed",
+  dismissed: "closed",
+  outdated: "closed",
+};
+
+export interface SquireApprovalEntry<Row> {
+  readonly row: Row;
+  readonly createdAt: string;
+  readonly phase: SquireApprovalPhase;
+  /** A closed row's outcome: "Sent", "Denied", "Expired"; null until it closes. */
+  readonly outcome: string | null;
+  readonly expired: boolean;
+}
+
+/**
+ * The rows a Squire's chat shows inline, oldest first, at the time they were raised. Holds wait
+ * on nobody and keep their banner; FYIs no longer render. On a chat-first server a row belongs
+ * to the chat of the Squire that raised it. Older servers list the Lead's combined queue, so
+ * the Lead keeps only what it raised while a Squire keeps what its list already holds.
+ */
+export function squireApprovalEntries<
+  Row extends Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution">,
+>(
+  rows: ReadonlyArray<Row>,
+  chat: {
+    readonly squireId: SquireId;
+    readonly isLead: boolean;
+    readonly chatFirst: boolean;
+  },
+): ReadonlyArray<SquireApprovalEntry<Row>> {
+  const entries: Array<SquireApprovalEntry<Row>> = [];
+  for (const row of rows) {
+    if (row.kind === "fyi" || row.status === "held") continue;
+    const phase = SQUIRE_APPROVAL_PHASE[row.status];
+    if (phase === undefined) continue;
+    if ((chat.chatFirst || chat.isLead) && row.squireId !== chat.squireId) continue;
+    entries.push({
+      row,
+      createdAt: row.createdAt,
+      phase,
+      outcome: phase === "closed" ? squireSettledLabel(row) : null,
+      expired: row.resolution === "expired",
+    });
+  }
+  return [...entries].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+type SquireAllowRuleRow = Pick<SquireCardRow, "id" | "squireId" | "allowRuleOffer">;
+
+/**
+ * The rule "Always allow" and "Always allow next time" would save, or null where the row offers
+ * none: the server leaves `allowRuleOffer` off cards no rule could apply to, and a Squire at its
+ * rule cap cannot save another.
+ */
+export function squireAllowRuleInput(row: SquireAllowRuleRow) {
+  const offer = row.allowRuleOffer;
+  if (offer === undefined || offer.effect !== "allow" || offer.capReached) return null;
+  return squireOfferRuleInput(offer, "offer", row);
+}
+
+export type SquireApprovalResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * "Always allow": runs it, then saves the rule. A rule is saved only once the accept went
+ * through, so a refused or outdated approval never leaves a rule behind.
+ */
+export async function runSquireAlwaysAllow(
+  row: SquireAllowRuleRow,
+  deps: {
+    readonly accept: () => Promise<SquireApprovalResult>;
+    readonly saveRule: (
+      input: NonNullable<ReturnType<typeof squireAllowRuleInput>>,
+    ) => Promise<SquireApprovalResult>;
+  },
+): Promise<SquireApprovalResult> {
+  const input = squireAllowRuleInput(row);
+  if (input === null) return { ok: false, error: "This approval cannot become a rule." };
+  const accepted = await deps.accept();
+  if (!accepted.ok) return accepted;
+  return deps.saveRule(input);
+}
+
+// ── Sidebar state ─────────────────────────────────────────────
+
+export type SquireSidebarState = "needs-you" | "working" | "unread" | "none";
+
+/**
+ * One state per Squire. An open decision is the one thing that waits on the user, ahead of a
+ * working Squire, whose messages count as unread only once they settle.
+ */
+export function squireSidebarState(
+  entry: Pick<SquireSnapshot, "squire" | "openDecisionCount" | "held" | "lastMessageAt">,
+  homeShell: (HomeThreadShell & { readonly lastVisitedAt?: string | null | undefined }) | null,
+): SquireSidebarState {
+  if (entry.openDecisionCount > 0) return "needs-you";
+  if (squireEntryIndicator(entry, homeShell).state === "working") return "working";
+  const lastMessageAt = entry.lastMessageAt;
+  if (lastMessageAt === undefined || homeShell === null) return "none";
+  const lastVisitedAt = homeShell.lastVisitedAt;
+  // Older servers omit the watermark; they also never send `lastMessageAt`.
+  if (lastVisitedAt == null) return "unread";
+  return Date.parse(lastMessageAt) > Date.parse(lastVisitedAt) ? "unread" : "none";
+}
+
+/** Runs that called `squire_stay_quiet` keep their text out of the chat, however the provider names the tool. */
+export function isSquireStayQuietTool(toolName: string | null | undefined): boolean {
+  return toolName != null && /(^|[._:/\s-])squire_stay_quiet$/i.test(toolName.trim());
+}
+
 // ── Squire updates in a home thread ───────────────────────────
 
 /**
@@ -1815,42 +1940,32 @@ export interface SquireUpdateGroup {
   readonly eventKinds: ReadonlyArray<string>;
 }
 
-/** Updates fold together only from this many in a row; a lone one reads fine as it is. */
-const SQUIRE_UPDATE_GROUP_MIN = 2;
-
 /**
- * Consecutive Squire wakes in a home thread, with what each wake's turn produced, collapse
- * into one group: every wake is a row plus a fold plus a reply, which drowns the conversation.
- * The newest wake stays out of every group, so its reply is always in view.
+ * Spans of Squire wakes and what their turns did short of speaking. A home thread reads as its
+ * messages: such a span shows nothing, even one wake. Assistant text is a `keep` for the caller,
+ * so it ends a span and never hides inside one, and a text-free span has nothing to show.
  */
 export function squireUpdateGroups<T>(
   items: ReadonlyArray<T>,
   roleOf: (item: T) => SquireUpdateItemRole,
   eventKindsOf: (item: T) => ReadonlyArray<string>,
 ): ReadonlyArray<SquireUpdateGroup> {
-  const roles = items.map(roleOf);
-  const newestWake = roles.lastIndexOf("wake");
   const groups: SquireUpdateGroup[] = [];
   let wakes: number[] = [];
   const close = (end: number) => {
-    const folded = wakes.at(-1) === newestWake ? wakes.slice(0, -1) : wakes;
-    if (folded.length >= SQUIRE_UPDATE_GROUP_MIN) {
+    if (wakes.length > 0) {
       const eventKinds: string[] = [];
-      for (const index of folded) {
+      for (const index of wakes) {
         for (const kind of eventKindsOf(items[index]!)) {
           if (!eventKinds.includes(kind)) eventKinds.push(kind);
         }
       }
-      groups.push({
-        start: folded[0]!,
-        end: folded.length === wakes.length ? end : wakes.at(-1)!,
-        wakeCount: folded.length,
-        eventKinds,
-      });
+      groups.push({ start: wakes[0]!, end, wakeCount: wakes.length, eventKinds });
     }
     wakes = [];
   };
-  roles.forEach((role, index) => {
+  items.forEach((item, index) => {
+    const role = roleOf(item);
     if (role === "wake") wakes.push(index);
     else if (role !== "update") close(index);
   });
