@@ -12,6 +12,7 @@ import { withActiveAccount } from "../../cloud/withActiveAccount";
 import { openConnectSignIn } from "../../cloud/connectAuthCompatibility";
 import { isElectron } from "../../env";
 import { AuthSurfaceShell } from "../auth/AuthSurfaceShell";
+import { StandalonePageHeader } from "../ui/standalone-page";
 import { resolveClerkSignInProps } from "../clerk/authRedirect";
 import {
   useConnectAccountPicker,
@@ -19,28 +20,8 @@ import {
 } from "../clerk/ConnectAccountPicker";
 import { Button } from "../ui/button";
 
-function ConnectCliAuthMessage({
-  eyebrow,
-  title,
-  description,
-}: {
-  readonly eyebrow?: string;
-  readonly title: string;
-  readonly description: string;
-}) {
-  return (
-    <>
-      {eyebrow ? (
-        <p className="text-3xs font-semibold tracking-widest text-primary uppercase">{eyebrow}</p>
-      ) : null}
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
-    </>
-  );
-}
-
 const invalidLinkMessage = {
-  eyebrow: "Authorization request",
+  context: "Authorization request",
   title: "This connect link is incomplete",
   description:
     "The link is missing its authorization request. Re-run `lecturn connect` in your terminal and open the freshly printed URL.",
@@ -80,6 +61,7 @@ export function ConnectCliAuthorizeSurface() {
   };
   const openSignInOnLoad = useEffectEvent(openSignIn);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens Clerk sign-in or navigates the window to the authorize URL once Clerk has loaded
   useEffect(() => {
     if (!request || redirecting.current) {
       return;
@@ -114,15 +96,15 @@ export function ConnectCliAuthorizeSurface() {
   if (!request) {
     return (
       <AuthSurfaceShell>
-        <ConnectCliAuthMessage {...invalidLinkMessage} />
+        <StandalonePageHeader {...invalidLinkMessage} />
       </AuthSurfaceShell>
     );
   }
 
   return (
     <AuthSurfaceShell>
-      <ConnectCliAuthMessage
-        eyebrow="Browser authorization"
+      <StandalonePageHeader
+        context="Browser authorization"
         title="Connecting your terminal"
         description={
           stepTag === "choose"

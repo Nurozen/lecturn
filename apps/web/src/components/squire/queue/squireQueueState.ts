@@ -119,6 +119,7 @@ export function usePublishSquireShownHolds(
   const set = useAtomSet(shownHoldsAtom(JSON.stringify([environmentId, squireId])));
   // Joined so the effect runs only when the shown set changes, not on every render.
   const joined = cardIds === null ? null : cardIds.join("\n");
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- holds the shown card set in the shared atom while mounted and releases it on unmount
   useEffect(() => {
     set(joined === null ? null : new Set(joined === "" ? [] : joined.split("\n")));
     return () => set(null);
@@ -163,6 +164,7 @@ export function useSquireMarkOpened(
 ) {
   const canMark = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sends the server a mark-opened request the first time this session shows a card
   useEffect(() => {
     if (cardId === null || !canMark) return;
     if (!squireOpenedThisSession.take(environmentId, cardId, openedAt)) return;

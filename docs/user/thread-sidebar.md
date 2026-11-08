@@ -238,8 +238,11 @@ palette.
 
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request
-link when available, otherwise its thread ID. See [keybindings](./keybindings.md)
-for custom configuration.
+link when available, otherwise the thread itself, which pastes into a composer as
+a thread chip. To copy the thread even when it has a PR, choose **Copy → Thread**
+from its context menu, or **Copy thread** from its long-press menu on mobile.
+**Thread ID** copies the bare ID for scripts and the `lecturn` CLI. See
+[keybindings](./keybindings.md) for custom configuration.
 
 ## Inspect agent work
 
@@ -314,6 +317,13 @@ On web and desktop, image previews from agent activity stay visible in the conve
 the agent works and after the turn finishes. You do not need to expand the call or the
 "Worked for" section to see them. Select a preview to open the image viewer.
 
+On web and desktop, the thread details card lists the web servers that the
+thread's terminals or its Claude agent started, with their ports. A server the
+agent started stays listed after the agent's turn ends.
+Select a server to open it in the browser panel. **Stop** ends the server's job
+and keeps the agent, the terminal, and Lecturn running. Stop needs terminal
+access to the environment and is not available on Windows.
+
 ## Stave lifecycle notices
 
 Stave projects show archive reminders or cleanup refusals beside their project information.
@@ -331,6 +341,12 @@ When multiple Connect accounts are available, each account has its own section. 
 Use the account menu’s **Label and color** action to distinguish personal and work accounts. Labels and color choices follow the account across devices. The conversation and composer use that account’s tint; the sidebar keeps your chosen base theme.
 
 ## Snooze until later
+
+To change the choices in the snooze menu, open **Settings → Threads → Snooze options**.
+Each option is a duration, such as 3 hours, or a time on a day, such as 9:00 PM
+tomorrow. A weekday means the next one after today. Menus list the options soonest
+first and hide a today option after its time passes. Saved with **All environments**
+selected, the options apply to every connected environment, and the mobile app uses them too.
 
 Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your
 local time zone, or a duration in minutes, hours, or days. Durations start when

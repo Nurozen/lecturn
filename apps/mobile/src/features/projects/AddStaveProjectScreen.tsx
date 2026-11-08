@@ -176,6 +176,7 @@ function useStaveCreateOperation(environmentId: EnvironmentId | null) {
   };
 
   const result = state.status === "finished" ? state.result : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens the created project through the navigator once the operation stream reports it
   useEffect(() => {
     if (environmentId === null || openedRef.current) return;
     if (result?.kind !== "createSpace" && result?.kind !== "createSaga") return;
@@ -665,6 +666,7 @@ function ExistingStaveSpaces(props: {
   );
   const busy = task !== null;
   const { onBusyChange } = props;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- holds the parent's mode-switch lock while a task runs and releases it on unmount
   useEffect(() => {
     onBusyChange(busy);
     return () => onBusyChange(false);

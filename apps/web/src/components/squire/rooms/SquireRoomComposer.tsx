@@ -70,6 +70,7 @@ export function SquireRoomComposer(props: {
     pendingCaret.current = next.cursor;
   };
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- focuses the textarea DOM element and places the caret after a completion rewrites the text
   useLayoutEffect(() => {
     const caret = pendingCaret.current;
     const element = textareaRef.current;

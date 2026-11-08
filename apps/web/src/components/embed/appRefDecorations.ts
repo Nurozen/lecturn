@@ -75,6 +75,7 @@ export function useComposerAppReferences(editor: Editor | null): void {
   const refPrefixes = useAppReferences()?.refPrefixes ?? NO_PREFIXES;
   // Compared by content: the context hands out a new array whenever the app's status changes.
   const key = refPrefixes.join("\u0000");
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- dispatches the app's reference prefixes into the editor's decoration plugin through a ProseMirror transaction
   useEffect(() => {
     if (editor === null || editor.isDestroyed) return;
     const next = key === "" ? NO_PREFIXES : key.split("\u0000");

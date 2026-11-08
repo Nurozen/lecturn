@@ -48,6 +48,7 @@ export function ExtensionsFundingApprovalPage({
   const [revision, setRevision] = useState(0);
   const key = `${userId ?? ""}:${featureId}:${challengeId}:${legacy}:${revision}`;
   const currentKey = useRef(key);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed request key to a ref that async loads and actions check before applying results
   useLayoutEffect(() => {
     currentKey.current = key;
   }, [key]);
@@ -62,6 +63,7 @@ export function ExtensionsFundingApprovalPage({
     setState({ key });
     setRevision((value) => value + 1);
   };
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- fetches the funding approval request and aborts the fetch on cleanup
   useEffect(() => {
     if (!userId || !challengeId) return;
     const controller = new AbortController();

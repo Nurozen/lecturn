@@ -76,6 +76,7 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
     return { index, enabledKeys, availableKeys };
   });
   const { index, enabledKeys, availableKeys } = useAtomValue(indexAtom);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refresh saga status atoms for nested sidebar targets
   useEffect(
     () =>
       subscribeStaveMutation((environmentId) => {
@@ -92,6 +93,7 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
       }),
     [nest, targets, enabledKeys],
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls Stave and saga status atoms in the registry on a timer while nested targets are enabled
   useEffect(() => {
     if (!nest || enabledKeys.size === 0) return;
     const timer = setInterval(() => {

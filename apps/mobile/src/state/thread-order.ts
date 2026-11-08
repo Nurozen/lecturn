@@ -33,7 +33,7 @@ export const pendingThreadOrderAtom = Atom.make<PendingThreadOrder | null>(null)
  */
 export function usePendingThreadOrder(scopes?: ReadonlyMap<string, readonly string[]>) {
   const pending = useAtomValue(pendingThreadOrderAtom);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- Move scopes come from the rendered grouping, which no store holds.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- retires a held drag order once the rendered grouping, which no store holds, regroups its move scope
   useEffect(() => {
     if (scopes) retirePendingOrderOutsideScopes(scopes);
   }, [scopes]);
@@ -88,7 +88,7 @@ export function beginPendingThreadOrder(pending: PendingThreadOrder) {
     const current = appAtomRegistry.get(pendingThreadOrderAtom);
     if (current === null) return;
     const configs = appAtomRegistry.get(environmentServerConfigsAtom);
-    const threads = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
+    const threads = appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom);
     const scope = current.scopeProjectKeys ? new Set(current.scopeProjectKeys) : null;
     const eligible =
       scope === null
@@ -128,7 +128,7 @@ export function beginPendingThreadOrder(pending: PendingThreadOrder) {
   teardownPendingOrder = teardown;
   appAtomRegistry.set(pendingThreadOrderAtom, pending);
   unsubscribers.push(
-    appAtomRegistry.subscribe(environmentThreadShells.threadShellsAtom, refresh),
+    appAtomRegistry.subscribe(environmentThreadShells.navigationThreadShellsAtom, refresh),
     appAtomRegistry.subscribe(environmentServerConfigsAtom, refresh),
     appAtomRegistry.subscribe(queuedThreadKeysAtom, refresh),
     ...(pending.scopeProjectKeys
@@ -137,7 +137,10 @@ export function beginPendingThreadOrder(pending: PendingThreadOrder) {
     minuteTick.subscribe(refresh),
   );
   armWake(
-    nextSnoozeWakeAfter(appAtomRegistry.get(environmentThreadShells.threadShellsAtom), Date.now()),
+    nextSnoozeWakeAfter(
+      appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom),
+      Date.now(),
+    ),
   );
   return {
     isPending: () => {

@@ -186,7 +186,9 @@ layer("064_CanonicalizeThreadPullRequestLinks", (it) => {
         );
       }
 
-      // The merge still settles the thread once the sync reactor records it.
+      // The merge still settles the thread once the sync reactor records it. Settlement
+      // reads the waiting-link index a later migration adds.
+      yield* runMigrations();
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const [renamed] = yield* projections.getSettlementCandidates(ThreadId.make("renamed"));
       assert.isDefined(renamed);

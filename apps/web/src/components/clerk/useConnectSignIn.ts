@@ -106,6 +106,7 @@ export function useConnectSignIn() {
   const { openAuthPrompt, authPrompt } = useLecturnConnectAuthPrompt();
 
   // One listener while anything that can start a sign-in is mounted.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- shares one window unhandledrejection listener across mounted sign-in hosts
   useEffect(() => {
     if (!isElectron) return;
     pendingFlowReporters += 1;

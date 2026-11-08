@@ -25,6 +25,7 @@ export function SegmentedControl<Value extends number | string>(
     props.options.findIndex((option) => option.value === props.selected),
   );
   const position = useSharedValue(index);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- animates the Reanimated indicator to the selected index
   useEffect(() => {
     position.set(
       withTiming(index, {

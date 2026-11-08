@@ -251,6 +251,7 @@ export function SidebarDragScope(props: {
   // Search unmounts this scope while the Sidebar stays; its rows are gone, so a drag can never drop.
   const cancelDragOnUnmount = useEffectEvent(cancelDrag);
   const mounted = useRef(true);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- tracks mount for the drop's async pin writes and cancels an in-flight drag when search unmounts the scope
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -264,6 +265,7 @@ export function SidebarDragScope(props: {
       .map((thread) => [keyOf(thread), thread]),
   );
   const live = useRef({ props, configs, canAccess, canonical });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed props to a ref that drag handlers and the drop's async pin writes read
   useLayoutEffect(() => {
     live.current = { props, configs, canAccess, canonical };
   });
@@ -279,6 +281,7 @@ export function SidebarDragScope(props: {
       ? {}
       : { retainCurrentSettled: props.retainCurrentSettled }),
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- cancels the drag sensor's gesture once its row leaves the list or the scope is disabled
   useEffect(() => {
     if (
       drag &&
@@ -842,6 +845,7 @@ export function SidebarDragBoundary(props: {
 export function SidebarMotionList(props: { children: ReactNode; className?: string }) {
   const scope = useContext(DragScope);
   const scopeRef = useRef(scope);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed drag scope to a ref the list's ref callback reads when it attaches the motion controller
   useLayoutEffect(() => {
     scopeRef.current = scope;
   });
@@ -855,6 +859,7 @@ export function SidebarMotionList(props: { children: ReactNode; className?: stri
     if (controller.current) scopeRef.current?.suspend(controller.current, true);
   };
   const baseline = useRef(scope?.baselineKey);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- drives the list's DOM motion controller after each commit, suspending it when the drop baseline changes
   useLayoutEffect(() => {
     if (baseline.current !== scope?.baselineKey) controller.current?.suspend();
     baseline.current = scope?.baselineKey;

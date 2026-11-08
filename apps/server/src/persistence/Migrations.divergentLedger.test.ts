@@ -60,6 +60,9 @@ describe("connected-app migrations on a divergent ledger", () => {
           [85, "WebhookDedupe"],
           [86, "ShellStopRequestIndex"],
           [87, "ThreadMessageSearch"],
+          [88, "PeerLinks"],
+          [89, "PeerLinkFence"],
+          [90, "WaitingLinkRequestIndex"],
           [79, "AppRegistrations"],
           [80, "ProjectionProjectsAppBinding"],
         ]);
@@ -74,6 +77,9 @@ describe("connected-app migrations on a divergent ledger", () => {
           { migration_id: 85, name: "WebhookDedupe" },
           { migration_id: 86, name: "ShellStopRequestIndex" },
           { migration_id: 87, name: "ThreadMessageSearch" },
+          { migration_id: 88, name: "PeerLinks" },
+          { migration_id: 89, name: "PeerLinkFence" },
+          { migration_id: 90, name: "WaitingLinkRequestIndex" },
         ]);
         // Every later start repairs again; the SQL is idempotent, so that is a no-op.
         yield* runMigrations();
@@ -119,6 +125,9 @@ describe("connected-app migrations on a divergent ledger", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
         [79, "AppRegistrations"],
       ]);
       yield* assertAppSchema;

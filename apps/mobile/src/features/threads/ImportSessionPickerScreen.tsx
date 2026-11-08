@@ -197,6 +197,7 @@ export function ImportSessionPickerRouteScreen() {
     readonly merged: ReturnType<typeof mergeExternalSessionResults>;
   } | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- lists provider sessions from the server for the request key and drops superseded replies
   useEffect(() => {
     if (requestKey === null || environmentId === null || instanceIds === null) return;
     let cancelled = false;

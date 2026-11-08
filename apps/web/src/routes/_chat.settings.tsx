@@ -1,4 +1,5 @@
 import { AccountSurface } from "../components/AccountSurface";
+import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { ArrowLeftIcon, RotateCcwIcon } from "lucide-react";
@@ -111,6 +112,7 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
 }
 
 function SettingsContentLayout() {
+  const contentArea = workspaceAreaProps("settings", 1, "Settings content");
   const location = useLocation();
   const backToChat = useBackToChat();
   const { search, environment } = useSettingsScope();
@@ -129,7 +131,7 @@ function SettingsContentLayout() {
       <div ref={viewportRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <AccountSurface className="phone-settings-viewport lecturn-settings-surface lecturn-project-settings flex min-h-0 min-w-0 flex-1 text-foreground">
           <SettingsSidebarNav pathname={location.pathname} />
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div {...contentArea} className="flex min-h-0 min-w-0 flex-1 flex-col">
             <header className="flex min-h-12 shrink-0 items-center gap-2 border-b ps-2 pe-2 md:ps-5">
               <Button
                 variant="outline"

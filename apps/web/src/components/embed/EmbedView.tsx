@@ -44,11 +44,13 @@ function EmbedThreadReporter({
   const projection = useThreadProjection(threadRef)?.projection ?? null;
   const state = threadId === null ? null : deriveEmbedTurnState({ projection, shell });
   const loaded = threadId === null || projection !== null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports the shown thread and its turn state to the host page through the embed postMessage bridge
   useEffect(() => {
     const bridge = startEmbedBridge();
     bridge?.reportThread(threadId);
     if (threadId !== null && state !== null) bridge?.reportTurnState(threadId, state);
   }, [threadId, state]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- tells the host page through the embed bridge that the shown thread has loaded
   useEffect(() => {
     if (loaded) startEmbedBridge()?.reportReady(threadId);
   }, [threadId, loaded]);
@@ -136,6 +138,7 @@ export function EmbedView({
 
   const appContext = useAppEmbedContext(projectRef);
   // Only the first known origins count: the bridge decides once whether its parent may listen.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- authorizes the app's embed origins on the postMessage bridge once its context loads
   useEffect(() => {
     if (appContext !== null) startEmbedBridge()?.authorizeHost(appContext.embedOrigins);
   }, [appContext]);
@@ -198,6 +201,7 @@ export function EmbedView({
         }),
     });
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to host commands on the embed postMessage bridge until unmount
   useEffect(() => startEmbedBridge()?.subscribeHostCommands(onHostCommand), []);
 
   return (

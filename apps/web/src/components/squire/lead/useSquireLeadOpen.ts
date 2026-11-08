@@ -30,6 +30,7 @@ export function useSquireLeadOpen(environmentId: EnvironmentId, enabled: boolean
   const leadOpen = useAtomCommand(squireEnvironment.leadOpen, { reportFailure: false });
   // The route keys the view by Squire, so the ref lives exactly as long as one view open.
   const opened = useRef(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sends the server one lead-open request per view open once the view is enabled and allowed
   useEffect(() => {
     if (!enabled || !allowed || opened.current) return;
     opened.current = true;

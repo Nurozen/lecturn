@@ -143,6 +143,7 @@ export function useSquireMarkOpened(
 ) {
   const canMark = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- marks the expanded card opened on the server once per card per app session
   useEffect(() => {
     // Wait for the row or card, so a card some surface already opened is never re-sent.
     if (cardId === null || openedAt === undefined || !canMark) return;

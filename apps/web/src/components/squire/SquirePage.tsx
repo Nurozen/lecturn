@@ -114,6 +114,7 @@ function useMarkViewOpened(environmentId: EnvironmentId, ready: boolean) {
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
   // The route keys the page by Squire, so this holds once per view open.
   const marked = useRef(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sends the server one mark-opened request per view open once the view is ready and allowed
   useEffect(() => {
     if (!ready || !allowed || marked.current) return;
     marked.current = true;
@@ -245,6 +246,7 @@ function SquireConversation(props: {
   const focusOnExpand = useRef(false);
   // A send from the slim line opens on its new turn, not on the newest card.
   const [openedBySend, setOpenedBySend] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- dispatches the window event that focuses the expanded pane's composer after the slim line expands it
   useEffect(() => {
     if (!expanded || !focusOnExpand.current) return;
     focusOnExpand.current = false;

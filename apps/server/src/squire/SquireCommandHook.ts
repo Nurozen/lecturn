@@ -108,6 +108,11 @@ export const SQUIRE_COMMAND_RULES = {
   "thread.continued-in.set": "squire",
   "runtime-request.app-expire": "squire",
   "secret_request.record": "squire",
+  // Linked environments: a Squire credential reaches no `lecturn_*` tool, so none start here.
+  "delegated_task.remote.request": "squire",
+  "delegated_task.remote.complete": "squire",
+  "delegated_task.remote.stop": "squire",
+  "link_request.record": "squire",
   // Guest links never reach Squire threads: `GuestShareService` refuses to create one there.
   "thread.guest-share.open": "squire",
   "thread.guest-share.redeem": "squire",

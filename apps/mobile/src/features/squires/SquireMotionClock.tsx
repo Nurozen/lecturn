@@ -36,6 +36,7 @@ export function SquireMotionClock({ children }: { readonly children: ReactNode }
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [registered, setRegistered] = useState(0);
   const tick = useSharedValue(0);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState and reduce-motion changes to pause the shared clock
   useEffect(() => {
     const app = AppState.addEventListener("change", (state) => setForeground(state === "active"));
     const motion = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedMotion);
@@ -56,6 +57,7 @@ export function SquireMotionClock({ children }: { readonly children: ReactNode }
     false,
   );
   const active = squireClockActive({ registered, focused, foreground, reducedMotion });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- toggles the Reanimated frame callback with the motion state and stops it on unmount
   useEffect(() => {
     clock.setActive(active);
     // A paused clock rests every indicator on the static pose rather than mid-orbit.
@@ -78,6 +80,7 @@ export function useSquireMotionTick(animate: boolean) {
   const motion = useContext(SquireMotionContext);
   const still = useSharedValue(0);
   const live = animate && motion !== null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers this indicator with the shared motion clock until unmount
   useEffect(() => (live ? motion.register() : undefined), [live, motion]);
   return live ? motion.tick : still;
 }

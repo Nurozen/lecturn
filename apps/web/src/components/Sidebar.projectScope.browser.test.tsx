@@ -44,7 +44,7 @@ function setup() {
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
   });
-  stack.defer(() => useUiStateStore.getState().setSidebarProjectScopeKey(null));
+  stack.defer(() => useUiStateStore.getState().setSidebarProjectScopeKeys([]));
   return stack;
 }
 
@@ -85,7 +85,7 @@ it("keeps the thread open when a project scope is chosen and after a reload", as
     await expect.element(scopeLabel).toHaveTextContent("render");
     await expect.element(lastAnswer).toBeVisible();
   }
-  expect(useUiStateStore.getState().sidebarProjectScopeKey).not.toBeNull();
+  expect(useUiStateStore.getState().sidebarProjectScopeKeys).not.toEqual([]);
 
   // The scope persists, so the next launch mounts with it already chosen.
   await using _reloaded = await mountThread();

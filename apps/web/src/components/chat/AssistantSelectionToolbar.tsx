@@ -50,6 +50,7 @@ export function AssistantSelectionToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- measures the toolbar DOM node and clamps its position inside the window before paint
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
     if (!toolbar || !selection) return;
@@ -58,6 +59,7 @@ export function AssistantSelectionToolbar({
     toolbar.style.top = `${Math.max(8, Math.min(selection.position.y, window.innerHeight - rect.height - 8))}px`;
   }, [selection]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to document selectionchange and keydown to track text selections in the viewport
   useEffect(() => {
     if (!viewport) return;
     const clear = () => setSelection(null);
@@ -268,6 +270,7 @@ export function ThreadNoteSelectionEditor({
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- positions the note editor DOM next to the selection range before paint and focuses its input
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -279,6 +282,7 @@ export function ThreadNoteSelectionEditor({
     editor.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - bounds.height - 8))}px`;
     inputRef.current?.focus({ preventScroll: true });
   }, [selection]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes the selected source DOM and cancels the editor when it goes away
   useEffect(
     () =>
       observeAssistantCitationCommentSource({
@@ -288,6 +292,7 @@ export function ThreadNoteSelectionEditor({
       }),
     [selection, onCancel],
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- document pointerdown listener that cancels the editor on outside clicks
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!editorRef.current?.contains(event.target as Node)) onCancel();

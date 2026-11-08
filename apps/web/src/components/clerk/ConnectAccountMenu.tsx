@@ -114,6 +114,7 @@ export function ConnectAccountMenu() {
   const { customPages, portals } = useConnectProfilePages();
   const [open, setOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refreshes the account appearance from Clerk each time the menu opens
   useEffect(() => {
     if (open) void refreshAccountAppearance(clerk);
   }, [clerk, open]);
@@ -126,6 +127,7 @@ export function ConnectAccountMenu() {
     setSeenHash(hash);
     if (targeted) setOpen(true);
   }
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- focuses the trigger DOM button when the URL hash targets this menu
   useEffect(() => {
     if (targeted) triggerRef.current?.focus();
   }, [targeted]);

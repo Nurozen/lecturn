@@ -78,6 +78,7 @@ export function ActiveThreadBorder({
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [size, setSize] = useState({ width: 0, height: 0 });
   const progress = useSharedValue(0);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState and reduce-motion changes to pause the border motion
   useEffect(() => {
     const app = AppState.addEventListener("change", (state) => setForeground(state === "active"));
     const motion = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedMotion);
@@ -102,6 +103,7 @@ export function ActiveThreadBorder({
     ),
     false,
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- toggles the Reanimated frame callback with the motion state and stops it on unmount
   useEffect(() => {
     clock.setActive(animate);
     // Keep a real static sheen when motion is disabled or a recycled row leaves view.

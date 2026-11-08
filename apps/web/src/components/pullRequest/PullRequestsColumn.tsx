@@ -13,6 +13,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { PullRequestCompactFilterMenu } from "./PullRequestCompactFilterMenu";
 import type { PullRequestFilterOption } from "./PullRequestListFilters";
 import { INVOLVEMENT_TABS, STATE_TABS } from "./pullRequestListOptions";
@@ -36,6 +37,7 @@ function ExpandableSearch({
   onFocusWithin?: (focused: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- focuses the search input DOM node when the topbar search opens
   useEffect(() => {
     if (!open) return;
     containerRef.current?.querySelector("input")?.focus();
@@ -108,8 +110,10 @@ export function PullRequestsColumn({
   listBody: ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const contentArea = workspaceAreaProps("pull-requests", 1, "Pull requests");
   const markerRef = useRef<HTMLDivElement | null>(null);
   const [condensed, setCondensed] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- IntersectionObserver on the scroll marker condenses the topbar
   useEffect(() => {
     const marker = markerRef.current;
     if (!marker) return;
@@ -127,6 +131,7 @@ export function PullRequestsColumn({
   const [searchOpen, setSearchOpen] = useState(false);
   const topbarSearchRef = useRef<HTMLDivElement | null>(null);
   const searchExpanded = searchOpen || searchValue.length > 0;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window keydown listener focuses the visible search input on Cmd/Ctrl+F
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -143,6 +148,7 @@ export function PullRequestsColumn({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [condensed]);
   if (!condensed && searchOpen) setSearchOpen(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- moves DOM focus to the in-flow search when the topbar search it was typed in unmounts
   useEffect(() => {
     if (condensed) return;
     if (!topbarSearchFocusedRef.current) return;
@@ -155,6 +161,8 @@ export function PullRequestsColumn({
 
   return (
     <AccountSurface
+      {...contentArea}
+      inert={maximizedAway}
       className={cn(
         "@container/pr-list flex min-h-0 min-w-0 flex-col overflow-x-hidden lecturn-page-surface",
         maximizedAway ? "w-0 flex-none" : "flex-1",

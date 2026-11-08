@@ -25,6 +25,7 @@ export function LabsSettingsPanel() {
         <NewDesignRow />
         {/* Clerk is only mounted when this build has Lecturn Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
+        <LinkedEnvironmentsRow />
       </SettingsSection>
       <LegacyFeaturesSection />
     </SettingsPageContainer>
@@ -103,6 +104,38 @@ function GuestLinksRow() {
           checked={settings.guestSharingEnabled}
           onCheckedChange={(checked) => updateSettings({ guestSharingEnabled: Boolean(checked) })}
           aria-label="Guest links"
+        />
+      }
+    />
+  );
+}
+
+function LinkedEnvironmentsRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("linked-environments-beta")}
+      settingKeys={["linkedEnvironmentsEnabled"]}
+      description={
+        <>
+          Let agents here work on your other machines, and theirs here. Turn it on for each machine,
+          then link them in{" "}
+          <Link to="/settings/connections" className="underline underline-offset-2">
+            Connections
+          </Link>
+          . While it is off, nothing new starts over a link; tasks already running finish.
+        </>
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["linkedEnvironmentsEnabled"]}
+          checked={settings.linkedEnvironmentsEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ linkedEnvironmentsEnabled: Boolean(checked) })
+          }
+          aria-label="Linked environments"
         />
       }
     />

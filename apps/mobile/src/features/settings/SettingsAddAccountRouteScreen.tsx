@@ -13,6 +13,7 @@ import { AppText } from "../../components/ui/AppText";
 
 export function SettingsAddAccountRouteScreen(props: StaticScreenProps<{ accountId?: string }>) {
   const navigation = useNavigation();
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- pops this route through the navigator when cloud sign-in is not configured
   useEffect(() => {
     if (!hasCloudPublicConfig()) navigation.goBack();
   }, [navigation]);
@@ -45,6 +46,7 @@ export function SettingsAddAccountAuthContent({
     });
   }
   const settled = useRef(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- closes the route through the navigator and signs out an unexpected Clerk account once sign-in lands
   useEffect(() => {
     if (settled.current || entry === null) return;
     const added = accounts.find(

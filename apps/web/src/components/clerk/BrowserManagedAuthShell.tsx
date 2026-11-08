@@ -3,7 +3,8 @@ import { useEffect, type ComponentProps, type ReactNode } from "react";
 
 import { ManagedRelayAuthProvider } from "../../cloud/managedAuth";
 import { ClerkDefaultAvatar } from "./ClerkDefaultAvatar";
-import { clerkAppearance } from "./clerkAppearance";
+import { useClientSettings } from "../../hooks/useSettings";
+import { clerkAppearance, redesignClerkAppearance } from "./clerkAppearance";
 
 /**
  * The clerk-js and Clerk UI builds hosted web loads. Exact, because relay
@@ -24,6 +25,7 @@ function ClerkVersionCheck() {
   const clerk = useClerk();
   const { isLoaded } = useAuth();
   const version = isLoaded ? clerk.version : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- warns in the console once the loaded clerk-js reports a version other than the pinned one
   useEffect(() => {
     if (version !== undefined && version !== PINNED_CLERK_VERSIONS.clerkJS) {
       console.warn("[lecturn-connect] clerk-js is not the pinned version", {
@@ -43,9 +45,10 @@ export default function BrowserManagedAuthShell({
   readonly publishableKey: string;
   readonly children: ReactNode;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   return (
     <ClerkProvider
-      appearance={clerkAppearance}
+      appearance={redesign ? redesignClerkAppearance : clerkAppearance}
       publishableKey={publishableKey}
       {...pinnedClerkScripts}
     >

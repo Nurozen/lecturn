@@ -25,7 +25,7 @@ export function usePreviewPresentation(
   // can describe a different route. The preview belongs to this navigation route.
   const navigation = useNavigation();
   const close = useEffectEvent(onRequestClose);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- Navigation blur is an external event and the open state belongs to the caller.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- Navigation blur is an external event and the open state belongs to the caller.
   useEffect(() => {
     if (presentationKey === null) return;
     Keyboard.dismiss();

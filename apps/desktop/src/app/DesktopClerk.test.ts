@@ -175,6 +175,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/app-data/lecturn-dev",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ]);
       storageMock.mockClear();
@@ -192,6 +193,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/app-data/lecturn-v2",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ],
     },
@@ -204,6 +206,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/app-data/lecturn-v2",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ],
     },
@@ -216,6 +219,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/app-data/lecturn-v2",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ],
     },
@@ -228,6 +232,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/app-data/lecturn-dev",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ],
     },
@@ -241,6 +246,7 @@ describe("DesktopClerk", () => {
         "setPath:userData:/tmp/lecturn/userdata/electron",
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ],
     },
@@ -339,7 +345,7 @@ describe("DesktopClerk", () => {
     },
   );
 
-  it.effect("delivers queued startup links and later links once in arrival order", () => {
+  it.effect("delivers each queued startup link once, before later links", () => {
     storageMock.mockReturnValue(storageAdapter);
     createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
@@ -347,6 +353,7 @@ describe("DesktopClerk", () => {
     const first = "lecturn://new?prompt=first";
     const second = "lecturn://threads/env-1/thread-1";
     const later = "lecturn://new?prompt=later";
+    const launchPair = "lecturn://pair?pairingUrl=https%3A%2F%2Fvps.example.com%2F%23token%3Dabc";
     const delivered = Promise.withResolvers<void>();
     const electronApp = {
       on: (name: string, listener: (...args: unknown[]) => void) =>
@@ -359,13 +366,14 @@ describe("DesktopClerk", () => {
       const clerk = yield* DesktopClerk.DesktopClerk;
       listeners.get("second-instance")?.({}, ["lecturn", first]);
       listeners.get("second-instance")?.({}, ["lecturn", second]);
+      listeners.get("open-url")?.({ preventDefault: () => undefined }, launchPair);
       assert.deepEqual(received, []);
 
       yield* clerk.configure;
       listeners.get("second-instance")!({}, ["lecturn", later]);
       yield* Effect.promise(() => delivered.promise);
 
-      assert.deepEqual(received, [first, second, later]);
+      assert.deepEqual(received, [launchPair, first, second, later]);
     }).pipe(
       Effect.scoped,
       Effect.provide(layerDesktopClerk(true, [], { platform: "darwin", listeners })),
@@ -568,6 +576,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const received: Array<string> = [];
+    const pairLink = "lecturn://pair?pairingUrl=https%3A%2F%2Fvps.example.com%2F%23token%3Dabc";
     yield* Effect.gen(function* () {
       const clerk = yield* DesktopClerk.DesktopClerk;
       yield* clerk.configure;
@@ -582,6 +591,8 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("lecturn://threads/env-1/thread-1"), 1);
       assert.strictEqual(open("lecturn://apps/com.rocketwright.app"), 1);
       assert.strictEqual(open("lecturn://apps/com.rocketwright.app/threads/env-1/thread-1"), 1);
+      assert.strictEqual(open(pairLink), 1);
+      assert.strictEqual(open("lecturn://pair"), 0);
       assert.strictEqual(open("mailto:hello@example.com"), 0);
       assert.strictEqual(open("lecturn://somewhere-else"), 0);
       assert.strictEqual(open("lecturn://apps/Not-An-App"), 0);
@@ -593,6 +604,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
         "lecturn://threads/env-1/thread-1",
         "lecturn://apps/com.rocketwright.app",
         "lecturn://apps/com.rocketwright.app/threads/env-1/thread-1",
+        pairLink,
       ]);
     }).pipe(
       Effect.provide(layerDesktopClerk(true, [], { platform: "darwin", listeners })),

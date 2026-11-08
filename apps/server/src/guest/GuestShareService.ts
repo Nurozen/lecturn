@@ -27,6 +27,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -65,6 +66,7 @@ import {
   guestShareView,
   guestThreadModel,
   guestThreadProjection,
+  guestTurnItem,
 } from "./guestView.ts";
 import {
   classifyGuestUploads,
@@ -522,11 +524,14 @@ const make = Effect.gen(function* () {
     const live = orchestrator
       .streamStoredEventsFrom({ threadId: thread.id, afterSequence: snapshot.snapshotSequence })
       .pipe(
-        Stream.map((stored) => ({
-          kind: "event" as const,
-          sequence: stored.sequence,
-          event: guestDomainEvent(projectDomainEventForWire(stored.event)),
-        })),
+        Stream.map((stored) => {
+          const event = guestDomainEvent(projectDomainEventForWire(stored.event));
+          return event === null
+            ? null
+            : { kind: "event" as const, sequence: stored.sequence, event };
+        }),
+        // A withheld event leaves a gap in the sequence; the page only needs it to increase.
+        Stream.filter(Predicate.isNotNull),
         // Ending the source here flushes what the coalescer holds, so `ended` is not held back.
         Stream.takeUntil((item) => endsShare(item.event)),
         coalesceThreadLiveStream,
@@ -592,7 +597,8 @@ const make = Effect.gen(function* () {
     const item = yield* orchestrator
       .getTurnItem({ threadId: thread.id, itemId: TurnItemId.make(itemId) })
       .pipe(Effect.mapError(() => unavailable));
-    return item === null ? yield* unavailable : { thread, item };
+    const shared = item === null ? null : guestTurnItem(item);
+    return shared === null ? yield* unavailable : { thread, item: shared };
   });
 
   const render = Effect.fn("GuestShareService.render")(function* (session: string, itemId: string) {

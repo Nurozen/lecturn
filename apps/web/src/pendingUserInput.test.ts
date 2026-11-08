@@ -1,7 +1,8 @@
 import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { formatInlineContextReference } from "./lib/composerContextReferences";
-import { threadContextRecord, threadContextReference } from "./lib/composerContextRecords";
+import { threadContextReference } from "./lib/composerContextRecords";
+import { threadContextRecord } from "@lecturn/shared/composerContextReferences";
 
 import {
   buildPendingUserInputAnswers,

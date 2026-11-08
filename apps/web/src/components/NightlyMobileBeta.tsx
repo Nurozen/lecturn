@@ -54,6 +54,7 @@ function dismissNotice() {
 export function NightlyMobileBetaNotice() {
   const navigate = useNavigate();
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- shows the imperative nightly mobile beta toast once per client session
   useEffect(() => {
     if (!NIGHTLY_MOBILE_BETA_AVAILABLE || !IS_NIGHTLY_BUILD || noticeShown || isNoticeDismissed())
       return;

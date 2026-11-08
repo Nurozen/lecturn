@@ -33,7 +33,7 @@ import {
   type ThreadId,
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { makeQueuedMessageMetadata } from "../../lib/commandMetadata";
@@ -255,14 +255,8 @@ function PullRequestWatchControls({
   const recipient = watch ? selectMergeHandoffThread(watch, eligibleManagers) : null;
   const legacyAuthorization =
     watch?.authorization && !["merged", "needs-authorization"].includes(watch.authorization.status);
-  // Keep the current access and target available before dispatch.
-  const current = useRef({ canOperate, watch });
-  useEffect(() => {
-    current.current = { canOperate, watch };
-  }, [canOperate, current, watch]);
-
   const command = async (input: Omit<PullRequestWatchCommandInput, "requestId" | "watchId">) => {
-    if (!current.current.canOperate || !current.current.watch || busyRef.current) return;
+    if (!canOperate || !watch || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);

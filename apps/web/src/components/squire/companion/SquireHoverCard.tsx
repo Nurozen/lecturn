@@ -55,6 +55,7 @@ export function SquireHoverCard(props: {
     () => false,
   );
   // A row unmounted mid-hover must not reopen its card when it mounts again.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- clears this row's entry in the module-level open hover card store when the row unmounts
   useEffect(
     () => () => {
       if (openCard === cardKey) setOpenCard(null);

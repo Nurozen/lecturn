@@ -129,6 +129,7 @@ function SquireKnockCard(props: {
   const lead = useAtomValue(phase === "meeting" ? knockLeadAtom(environmentId) : NO_LEAD_ATOM);
 
   // In an effect because `now` moves on: a snooze that ends is seen on the next change here.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- claims this environment's knock in the session-wide knock registry once it becomes eligible
   useEffect(() => {
     if (offered || capabilities === undefined) return;
     const eligible = shouldSquireKnock({
@@ -144,10 +145,12 @@ function SquireKnockCard(props: {
   }, [capabilities, canWriteSettings, environmentId, knock, offered, runningThreadCount]);
 
   // Turned on elsewhere: the offer has nothing left to do.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- drops the session-wide offered-knock entry once squires are turned on elsewhere
   useEffect(() => {
     if (squiresOn && phase === "offer") offeredKnocks.delete(environmentId);
   }, [environmentId, phase, squiresOn]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens the Lead's squire through the navigator once the server reports it
   useEffect(() => {
     if (phase !== "meeting" || lead === null) return;
     // oxlint-disable-next-line react/set-state-in-effect -- The Lead arrived; the offer is spent.
@@ -155,6 +158,7 @@ function SquireKnockCard(props: {
     navigation.navigate("Squire", { environmentId, squireId: lead });
   }, [environmentId, lead, navigation, phase]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- starts the Lead wait timeout and clears it on cleanup
   useEffect(() => {
     if (phase !== "meeting") return;
     const timer = setTimeout(() => setPhase("gave-up"), LEAD_WAIT_MS);

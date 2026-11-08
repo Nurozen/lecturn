@@ -93,6 +93,7 @@ function Message(props: { readonly title: string; readonly detail: string }) {
 function useScreenShowing() {
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState so a post only counts as seen in the foreground
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) =>
       setForeground(next === "active"),
@@ -125,6 +126,7 @@ function SquireRoomView(props: {
   const markedRef = useRef<SquireRoomPostId | null>(null);
   const [earlierPages, setEarlierPages] = useState(0);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sets the room topic as the navigator header title
   useLayoutEffect(() => {
     navigation.setOptions({ title: row.topic });
   }, [navigation, row.topic]);
@@ -134,6 +136,7 @@ function SquireRoomView(props: {
   const lastPostAt = room?.lastPostAt ?? null;
   const showingNewest = showing && pinned && room !== null;
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- records the room as seen and marks it read on the server while the newest post is showing
   useEffect(() => {
     if (!showingNewest) return;
     registry.update(squireRoomSeenAtom, (seen) =>

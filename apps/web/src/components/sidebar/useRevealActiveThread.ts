@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 /** Route navigation keeps the selected thread above the footer and below sticky account bars. */
 export function useRevealActiveThread(row: HTMLElement | null, active: boolean) {
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- schedules a frame that scrolls the active thread's row element into view after the lists commit
   useEffect(() => {
     if (!row || !active) return;
     // Wait for the enclosing account and project lists to finish this commit.

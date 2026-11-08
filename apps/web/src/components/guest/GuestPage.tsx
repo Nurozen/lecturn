@@ -58,6 +58,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
   applyGuestStreamEvent,
+  createGuestRowFilter,
   formatGuestExpiry,
   guestAttachmentUrl,
   createGuestAttachmentUrls,
@@ -175,6 +176,7 @@ export function GuestPage() {
   // A browser that already joined this share goes straight back in, even from the spent link.
   // Sessions are per share, so one for another link never stands in for this one.
   const [access, setAccess] = useState<GuestAccess>(shareId === null ? "none" : "checking");
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- fetches whether this browser already has a guest session and ignores the answer after cleanup
   useEffect(() => {
     if (shareId === null) return;
     let live = true;
@@ -195,6 +197,7 @@ export function GuestPage() {
   }, [credential, shareId]);
   // Pasting another guest link into this tab changes only the hash, which does not reload the
   // page; reload so the new invite is read instead of the one already captured.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- hashchange listener reloads the page when another guest link is pasted into this tab
   useEffect(() => {
     const onHashChange = () => {
       if (window.location.hash !== "") window.location.reload();
@@ -233,15 +236,18 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
     ...initialGuestStreamState,
     awaitingRowIds: readAwaitingRowIds(),
   }));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- persists the awaiting row ids to sessionStorage so a reload keeps them
   useEffect(() => writeAwaitingRowIds(stream.awaitingRowIds), [stream.awaitingRowIds]);
   // EventSource closes for good only on a non-200 response, which the guest routes send for a
   // missing, invalid, or ended session. Network drops reconnect on their own.
   const [rejected, setRejected] = useState(false);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sets document.title to the shared thread's title
   useEffect(() => {
     if (stream.view) document.title = stream.view.title;
   }, [stream.view]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens the guest EventSource stream and closes it on cleanup
   useEffect(() => {
     const source = new EventSource(
       `${GUEST_ROUTE_PREFIX}/stream?${GUEST_SHARE_PARAM}=${encodeURIComponent(shareId)}`,
@@ -365,7 +371,10 @@ function GuestThread({
   const { resolvedTheme } = useTheme();
   // The rest is what ChatView derives from the same projection.
   const [projectQuestionHistory] = useState(() => createQuestionHistoryProjector());
-  const items = projectQuestionHistory(projection);
+  const [guestRows] = useState(() =>
+    createGuestRowFilter<OrchestrationV2ThreadProjection["visibleTurnItems"][number]>(),
+  );
+  const items = guestRows(projectQuestionHistory(projection));
   // Files load through the guest route.
   const [attachmentUrls] = useState(() => createGuestAttachmentUrls(shareId));
   // Expanded rows read detail and command output through the guest routes.
@@ -419,6 +428,7 @@ function GuestThread({
   const previousUnplacedKey = useRef(unplacedKey);
   const following = useRef(follow.timelineLiveFollowEnabled);
   const scrollToEnd = useStableCallback(follow.scrollToEnd);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- scrolls the timeline to the end after commit when new unplaced messages appear
   useEffect(() => {
     following.current = follow.timelineLiveFollowEnabled;
     const previous = new Set(previousUnplacedKey.current.split(","));
@@ -427,6 +437,7 @@ function GuestThread({
   }, [follow.timelineLiveFollowEnabled, unplacedKey, scrollToEnd, following, previousUnplacedKey]);
   const footerRef = useRef<HTMLOListElement>(null);
   const hasFooter = unplaced.length > 0;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- ResizeObserver on the footer keeps it scrolled into view while following
   useEffect(() => {
     const footer = footerRef.current;
     if (!hasFooter || footer === null) return;

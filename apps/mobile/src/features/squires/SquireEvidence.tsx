@@ -37,6 +37,7 @@ export function useSquireAgeClock(): number {
   const focused = useIsFocused();
   const [appActive, setAppActive] = useState(() => AppState.currentState === "active");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState to stop the age clock in the background
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setAppActive(state === "active"),
@@ -44,6 +45,7 @@ export function useSquireAgeClock(): number {
     return () => subscription.remove();
   }, []);
   const ticking = focused && appActive;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the age clock interval while the screen is showing and clears it on cleanup
   useEffect(() => {
     if (!ticking) return;
     // oxlint-disable-next-line react/set-state-in-effect -- Resuming reads the clock that stood still.

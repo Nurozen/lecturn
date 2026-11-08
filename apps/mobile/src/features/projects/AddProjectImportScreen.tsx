@@ -117,6 +117,7 @@ function useExternalSessionListing(environmentId: EnvironmentId | null, cwd: str
     readonly merged: ReturnType<typeof mergeExternalSessionResults>;
   } | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- lists provider sessions from the server for the request key and drops superseded replies
   useEffect(() => {
     if (requestKey === null || environmentId === null) return;
     let cancelled = false;
@@ -580,6 +581,7 @@ export function AddProjectImportSessionsScreen(props: {
   // put until it settles; the finishing navigation waits for the guard to lift.
   const [finishThreadParams, setFinishThreadParams] = useState<object | null>(null);
   usePreventRemove(importing, () => undefined);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- replaces the new-task flow through the navigator a frame after the import's remove guard lifts
   useEffect(() => {
     if (importing || finishThreadParams === null) return;
     const frame = requestAnimationFrame(() => {

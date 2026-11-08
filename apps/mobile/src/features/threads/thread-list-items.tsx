@@ -49,6 +49,7 @@ export function ThreadHierarchyChevron({
 }) {
   const target = expanded ? (direction === "right" ? 90 : 180) : 0;
   const angle = useSharedValue(target);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- animates the Reanimated chevron rotation and cancels it on cleanup
   useEffect(() => {
     angle.set(
       withTiming(target, {

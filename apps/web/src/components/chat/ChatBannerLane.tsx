@@ -19,6 +19,7 @@ import { dismissThreadErrorBannerForSession, ThreadErrorBanner } from "./ThreadE
  */
 export function ChatBannerLaneFrame({ children }: { readonly children: ReactNode }) {
   const laneRef = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes the lane's DOM size and publishes its height as a CSS variable on the canvas
   useLayoutEffect(() => {
     const lane = laneRef.current;
     const canvas = lane?.parentElement;
