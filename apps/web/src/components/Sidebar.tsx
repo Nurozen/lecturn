@@ -245,6 +245,7 @@ import {
 import { useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
+import { SidebarProjectsHeading } from "./sidebar/SidebarProjectsHeading";
 import { partitionShelfRows } from "./sidebar/sidebarShelfRows";
 import { SidebarScopeTrigger } from "./sidebar/SidebarScopeRow";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
@@ -3380,49 +3381,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           onNavigateToDraft={navigateToDraft}
                           onDraftContextMenu={handleDraftContextMenu}
                         />
-                        <li
-                          data-thread-selection-safe
-                          className="lecturn-projects-heading flex list-none items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
-                        >
-                          <span className="mr-auto font-medium">Projects</span>
-                          {workingThreads.length ? (
-                            <button
-                              type="button"
-                              data-lecturn-hover
-                              aria-expanded={workingShelfExpanded}
-                              onClick={toggleWorkingShelf}
-                              data-testid="sidebar-working-shelf-toggle"
-                              className="flex items-center gap-1"
-                            >
-                              <ChevronDownIcon
-                                aria-hidden
-                                className={cn(
-                                  "lecturn-hierarchy-chevron size-3",
-                                  !workingShelfExpanded && "-rotate-90",
-                                )}
-                              />
-                              Working ({workingThreads.length})
-                            </button>
-                          ) : null}
-                          {snoozedThreads.length ? (
-                            <button
-                              type="button"
-                              data-lecturn-hover
-                              aria-expanded={snoozedShelfExpanded}
-                              onClick={toggleSnoozedShelf}
-                              className="flex items-center gap-1"
-                            >
-                              <ChevronDownIcon
-                                aria-hidden
-                                className={cn(
-                                  "lecturn-hierarchy-chevron size-3",
-                                  !snoozedShelfExpanded && "-rotate-90",
-                                )}
-                              />
-                              Snoozed ({snoozedThreads.length})
-                            </button>
-                          ) : null}
-                        </li>
+                        <SidebarProjectsHeading
+                          working={{
+                            count: workingThreads.length,
+                            expanded: workingShelfExpanded,
+                            onToggle: toggleWorkingShelf,
+                          }}
+                          snoozed={{
+                            count: snoozedThreads.length,
+                            expanded: snoozedShelfExpanded,
+                            onToggle: toggleSnoozedShelf,
+                          }}
+                        />
                         <li className="list-none">
                           <ul>{scopedSagaTree.map((node) => renderNode(node))}</ul>
                         </li>
