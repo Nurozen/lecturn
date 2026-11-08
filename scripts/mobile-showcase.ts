@@ -1072,6 +1072,14 @@ export function showcaseStallText(accessibilityTree: string): string | null {
   return SHOWCASE_STALL_TEXTS.find((text) => accessibilityTree.includes(text)) ?? null;
 }
 
+async function iosStallText(udid: string, scene: ShowcaseScene): Promise<string | null> {
+  // The lock screen is not the app, and an accessibility query there can
+  // disturb the lit, locked state the capture needs.
+  if (scene === "agent-activity") return null;
+  const ui = await commandOutput(iosAxe(), ["describe-ui", "--udid", udid]).catch(() => "");
+  return showcaseStallText(ui);
+}
+
 export function screenshotsMatch(first: Uint8Array, second: Uint8Array): boolean {
   const a = PNG.sync.read(Buffer.from(first));
   const b = PNG.sync.read(Buffer.from(second));
@@ -1334,23 +1342,27 @@ async function captureIos(
     } else {
       // A request that times out while the host is starved leaves the scene on a
       // sticky error (for example "Could not check terminal access"), which the
-      // app's render signal rightly never reports. Leaving and re-entering the
-      // scene mounts it again and retries.
+      // app's render signal rightly never reports, or on a stall screen it does
+      // report. Leaving and re-entering the scene mounts it again and retries.
+      // The agent-activity scene stages a Live Activity, so it only waits.
       let reentries = 0;
-      while (
-        !(await waitForScene(120_000).then(
+      while (true) {
+        const ready = await waitForScene(scene === "agent-activity" ? 300_000 : 120_000).then(
           () => true,
           () => false,
-        ))
-      ) {
+        );
+        const stall = ready ? await iosStallText(simulator.udid, scene) : null;
+        if (ready && stall === null) break;
         if (reentries === 2 || scene === "agent-activity") {
           throw new Error(
-            `iOS showcase scene '${scene}' did not render after ${reentries} re-entries.`,
+            stall === null
+              ? `iOS showcase scene '${scene}' did not render after ${reentries} re-entries.`
+              : `iOS showcase scene '${scene}' shows a stall screen ("${stall}").`,
           );
         }
         reentries += 1;
         NodeProcess.stdout.write(
-          `Re-entering ${capture.device.id} ${scene} (not drawn after 120s).\n`,
+          `Re-entering ${capture.device.id} ${scene} (${stall === null ? "not drawn after 120s" : `shows "${stall}"`}).\n`,
         );
         const away = scene === "threads" ? "environments" : "threads";
         await NodeFSP.rm(readyPath, { force: true });
@@ -1362,16 +1374,7 @@ async function captureIos(
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
-    // The lock screen is not the app, and an accessibility query there can
-    // disturb the lit, locked state the capture needs.
-    const stall =
-      scene === "agent-activity"
-        ? null
-        : showcaseStallText(
-            await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(
-              () => "",
-            ),
-          );
+    const stall = await iosStallText(simulator.udid, scene);
     if (stall !== null) {
       throw new Error(`iOS showcase scene '${scene}' shows a stall screen ("${stall}").`);
     }

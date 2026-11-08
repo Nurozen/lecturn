@@ -78,7 +78,9 @@ export function refreshSessionStateIfFailed(
   registry: AtomRegistry.AtomRegistry,
   atom: Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>,
 ): void {
-  if (AsyncResult.isFailure(registry.get(atom))) registry.refresh(atom);
+  const result = registry.get(atom);
+  // A failure that is already refetching would only be cancelled and restarted.
+  if (AsyncResult.isFailure(result) && !result.waiting) registry.refresh(atom);
 }
 
 function makeEnvironmentSessionAtoms<R, E>(

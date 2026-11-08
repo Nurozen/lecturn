@@ -675,3 +675,22 @@ it("refetches a session status that failed while another view held it", () => {
   expect(requests).toBe(3);
   otherView();
 });
+
+it("does not restart a session status refetch that is already in flight", () => {
+  const registry = AtomRegistry.make({
+    scheduleTask: (task) => {
+      task();
+      return () => {};
+    },
+  });
+  let requests = 0;
+  const sessionState = Atom.make(
+    Effect.suspend(() => (++requests <= 2 ? Effect.fail("timed out after 6000ms") : Effect.never)),
+  ).pipe(Atom.swr({ staleTime: 30_000, revalidateOnMount: true }));
+  const otherView = registry.mount(sessionState);
+
+  refreshSessionStateIfFailed(registry, sessionState);
+  refreshSessionStateIfFailed(registry, sessionState);
+  expect(requests).toBe(3);
+  otherView();
+});

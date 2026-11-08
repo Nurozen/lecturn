@@ -2,12 +2,12 @@ import {
   createFilesystemEnvironmentAtoms,
   resolveFilesystemReadAccess,
 } from "@lecturn/client-runtime/state/filesystem";
+import { RegistryContext } from "@effect/atom-react";
 import { refreshSessionStateIfFailed } from "@lecturn/client-runtime/state/session";
 import type { EnvironmentId } from "@lecturn/contracts";
-import { useEffect } from "react";
+import { useContext, useEffect } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironmentPresentation } from "./presentation";
 import { useEnvironmentQuery } from "./query";
 import { environmentSession } from "./session";
@@ -18,13 +18,6 @@ export function useFilesystemReadAccess(environmentId: EnvironmentId | null) {
   const session = useEnvironmentQuery(
     environmentId === null ? null : environmentSession.sessionStateAtom(environmentId),
   );
-  useEffect(() => {
-    if (environmentId === null) return;
-    refreshSessionStateIfFailed(
-      appAtomRegistry,
-      environmentSession.sessionStateAtom(environmentId),
-    );
-  }, [environmentId]);
   const environment = useEnvironmentPresentation(environmentId);
   return resolveFilesystemReadAccess({
     isCatalogReady: environment.isReady,
@@ -32,4 +25,17 @@ export function useFilesystemReadAccess(environmentId: EnvironmentId | null) {
     session: session.data,
     sessionError: session.error,
   });
+}
+
+/**
+ * Refetches a failed session status when a file-access view mounts. The status
+ * atom stays mounted by other views, so a cached failure would not otherwise
+ * revalidate. Call it from views, not per-row helpers.
+ */
+export function useRefreshFailedSessionState(environmentId: EnvironmentId | null): void {
+  const registry = useContext(RegistryContext);
+  useEffect(() => {
+    if (environmentId === null) return;
+    refreshSessionStateIfFailed(registry, environmentSession.sessionStateAtom(environmentId));
+  }, [environmentId, registry]);
 }
