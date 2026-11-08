@@ -918,13 +918,13 @@ const make = Effect.gen(function* () {
           const events = yield* deleted(sql`DELETE FROM squire_event
             WHERE status IN ('delivered', 'dropped') AND created_at < ${cutoffs.eventsBefore}
               AND kind != 'pull-request-changed'`);
-          // Dismissed overlaps and findings, resolved overlaps, and denials still
-          // in force are what stops them being raised again, so they stay.
+          // Dismissed overlaps, dismissed or lapsed findings, resolved overlaps, and
+          // denials still in force are what stops them being raised again, so they stay.
           const cards = yield* deleted(sql`DELETE FROM squire_card
             WHERE status IN ('resolved', 'executed', 'dismissed', 'outdated')
               AND updated_at < ${cutoffs.cardsBefore}
               AND NOT (kind = 'overlap' AND status IN ('dismissed', 'resolved'))
-              AND NOT (status = 'dismissed' AND finding_key IS NOT NULL)
+              AND NOT (status IN ('dismissed', 'outdated') AND finding_key IS NOT NULL)
               AND NOT (resolution IS 'denied' AND expires_at IS NULL)`);
           // After the cards: a live card keeps its log rows, and the newest two
           // branch rows per thread still mark the overlap change boundary.

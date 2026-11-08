@@ -127,6 +127,8 @@ const leadRow = Effect.flatMap(SquireRepository.SquireRepository, (repository) =
   Effect.map(repository.getSquire(lead), Option.getOrThrow),
 );
 
+const isoFar = "2999-01-01T00:00:00.000Z";
+
 const findWork = Effect.flatMap(SquireSweep.SquireSweep, (sweep) =>
   sweep.request({ requestId: requestId() }),
 );
@@ -310,6 +312,26 @@ describe("SquireSweep", () => {
       });
       const again = yield* admit(idle);
       assert.strictEqual(!again.ok && again.reason, "finding-outdated");
+      // Not offered again either, so it costs no Lead turn and frees its slot.
+      yield* findWork;
+      assert.notInclude(
+        candidatesOf((yield* sweepEvents).at(-1)).map(
+          (candidate) => (candidate as { threadId: string }).threadId,
+        ),
+        idle,
+      );
+
+      // The 30-day purge keeps it, or it would become raisable again.
+      yield* repository.pruneHistory({
+        eventsBefore: isoFar,
+        cardsBefore: isoFar,
+        actionLogBefore: isoFar,
+        budgetUsageBefore: isoFar,
+        closedRoomPostsBefore: isoFar,
+      });
+      assert.isTrue(
+        Option.isSome(yield* repository.getCard(SquireCardId.make("card:finding-lapsed"))),
+      );
     }).pipe(Effect.provide(sweepLayer())),
   );
 

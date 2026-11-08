@@ -1931,4 +1931,5 @@ export const SQUIRE_SPEAKING_TOOLS: ReadonlySet<string> = new Set([
   "squire_resume",
   "squire_rescope",
   "squire_forward_item",
+  "squire_publish_showcase",
 ]);
