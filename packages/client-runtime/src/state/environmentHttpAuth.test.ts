@@ -13,9 +13,12 @@ import {
   type OrchestrationV2ThreadHistoryPage,
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { Atom, AtomRegistry } from "effect/reactivity";
+import * as TestClock from "effect/testing/TestClock";
 import type { HttpClient } from "effect/http";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
@@ -30,7 +33,7 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import { type RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import * as RpcHttp from "../rpc/http.ts";
 import * as PullRequestDiffLoader from "./pullRequestDiffHttp.ts";
-import { fetchEnvironmentSessionState } from "./session.ts";
+import { fetchEnvironmentSessionState, refreshSessionStateIfFailed } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
 import { fetchEnvironmentThreadTranscript } from "./threadTranscriptHttp.ts";
@@ -548,6 +551,22 @@ describe("authenticated environment HTTP requests", () => {
     }),
   );
 
+  it.effect("retries a session request that timed out instead of caching the timeout", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness((requestNumber) =>
+        requestNumber === 1 ? new Promise<Response>(() => {}) : Response.json(SESSION),
+      );
+      const fiber = yield* fetchEnvironmentSessionState(harness.input).pipe(
+        Effect.provide(harness.httpLayer),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("7 seconds");
+
+      expect(yield* Fiber.join(fiber)).toEqual(SESSION);
+      expect(harness.calls).toHaveLength(2);
+    }),
+  );
+
   it.effect("reports persistent session rejection instead of showing missing permissions", () =>
     Effect.gen(function* () {
       const harness = makeHarness(() => Response.json(UNAUTHENTICATED_SESSION));
@@ -630,4 +649,29 @@ describe("authenticated environment HTTP requests", () => {
       expect(harness.calls).toEqual([]);
     }),
   );
+});
+
+it("refetches a session status that failed while another view held it", () => {
+  const registry = AtomRegistry.make({
+    scheduleTask: (task) => {
+      task();
+      return () => {};
+    },
+  });
+  let requests = 0;
+  const sessionState = Atom.make(
+    Effect.suspend(() =>
+      ++requests <= 2 ? Effect.fail("timed out after 6000ms") : Effect.succeed(SESSION),
+    ),
+  ).pipe(Atom.swr({ staleTime: 30_000, revalidateOnMount: true }));
+  // The mount revalidates once; the host is still too slow for that request.
+  const otherView = registry.mount(sessionState);
+  expect(registry.get(sessionState)._tag).toBe("Failure");
+  expect(requests).toBe(2);
+
+  refreshSessionStateIfFailed(registry, sessionState);
+  expect(registry.get(sessionState)._tag).toBe("Success");
+  refreshSessionStateIfFailed(registry, sessionState);
+  expect(requests).toBe(3);
+  otherView();
 });

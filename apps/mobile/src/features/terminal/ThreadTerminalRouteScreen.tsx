@@ -53,6 +53,7 @@ import {
   TERMINAL_FONT_SIZE_STEP,
   stepTerminalFontSize,
 } from "../../lib/appearancePreferences";
+import { useRefreshFailedSessionState } from "../../state/useRefreshFailedSessionState";
 import { useShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
@@ -279,6 +280,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const terminalSession = useEnvironmentQuery(
     routeEnvironmentId === null ? null : environmentSession.sessionStateAtom(routeEnvironmentId),
   );
+  useRefreshFailedSessionState(routeEnvironmentId);
   const isAuthenticated =
     terminalSession.error === null && terminalSession.data?.authenticated === true;
   const canOperateTerminal =
