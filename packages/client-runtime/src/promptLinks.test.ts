@@ -39,6 +39,19 @@ describe("findPromptLinkProjects", () => {
     expect(ids("me", "lecturn")).toEqual(["fork"]);
     expect(ids("gitlab", "x")).toEqual([]);
   });
+
+  it("matches a checkout of the repository's GitCafe mirror", () => {
+    const projects = [
+      { id: "gitcafe", repositoryIdentity: identity("git.cafe/Nurozen/lecturn") },
+      { id: "staging", repositoryIdentity: identity("staging.git.cafe/Nurozen/lecturn") },
+      { id: "gitlab", repositoryIdentity: identity("gitlab.com/Nurozen/lecturn") },
+    ];
+    expect(
+      findPromptLinkProjects(projects, { owner: "nurozen", name: "lecturn" }).map(
+        (project) => project.id,
+      ),
+    ).toEqual(["gitcafe", "staging"]);
+  });
 });
 
 describe("pickPromptLinkPullRequestThread", () => {

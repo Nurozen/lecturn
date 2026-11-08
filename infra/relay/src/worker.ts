@@ -26,8 +26,8 @@ import {
 } from "./environments/ManagedGatewayHttpClient.ts";
 import * as HttpClient from "effect/http/HttpClient";
 import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Drizzle from "alchemy/Drizzle/Postgres";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Drizzle from "@alchemy.run/drizzle/Postgres";
 import * as Config from "effect/Config";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -118,6 +118,7 @@ import * as HookForwarder from "./hooks/HookForwarder.ts";
 import * as HeldHooks from "./hooks/HeldHooks.ts";
 import * as HookInbox from "./hooks/HookInbox.ts";
 import * as HookInboxObject from "./hooks/HookInboxObject.ts";
+import * as MobileTelemetry from "./mobileTelemetry/MobileTelemetry.ts";
 
 const layerWebcrypto = Layer.succeed(
   Crypto.Crypto,
@@ -394,8 +395,8 @@ export const layer = Api.make(
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
     // Named statements collide behind Hyperdrive transaction pooling (Effect-TS/effect#8320); use unnamed statements.
-    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, undefined, {
-      prepare: false,
+    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, {
+      client: { prepare: false },
     });
 
     const managedEndpointTunnelBinding = yield* Cloudflare.Tunnel.ReadWriteTunnel();
@@ -426,6 +427,28 @@ export const layer = Api.make(
       },
     });
     const hookInboxes = yield* HookInboxObject.HookInboxObject;
+    // Bound only with MOBILE_TELEMETRY_ENABLED; off, the route answers 404 (see observability.ts).
+    const mobileTelemetryResources = observability.mobileTelemetry;
+    const mobileTelemetryBindings =
+      mobileTelemetryResources === undefined
+        ? undefined
+        : {
+            rateLimit: yield* Cloudflare.RateLimit("MOBILE_TELEMETRY_RATE_LIMIT", {
+              namespaceId: 1003,
+              simple: {
+                limit: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.limit,
+                period: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.periodSeconds,
+              },
+            }),
+            sourceMaps: yield* Cloudflare.R2.ReadBucket(mobileTelemetryResources.mobileSourceMaps),
+            token: yield* mobileTelemetryResources.mobileTelemetryIngestToken.token,
+            tracesUrl: yield* observability.traces.otelTracesEndpoint,
+            tracesDataset: yield* observability.traces.name,
+            logsUrl: yield* mobileTelemetryResources.mobileLogs.otelLogsEndpoint,
+            logsDataset: yield* mobileTelemetryResources.mobileLogs.name,
+            metricsUrl: yield* mobileTelemetryResources.mobileMetrics.otelMetricsEndpoint,
+            metricsDataset: yield* mobileTelemetryResources.mobileMetrics.name,
+          };
 
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
 
@@ -786,18 +809,19 @@ export const layer = Api.make(
       )
       .pipe(Layer.provideMerge(layerWebcrypto));
 
-    // Fails open: a limiter outage must not drop webhooks the environment would accept.
+    // Fails open: a limiter outage must not drop webhooks or app telemetry.
     const allowWith =
-      (limiter: typeof hookRateLimit) =>
+      (
+        limiter: typeof hookRateLimit,
+        failedOpenAttribute = "relay.hook.rate_limiter_failed_open",
+      ) =>
       (key: string): Effect.Effect<boolean> =>
         limiter.limit({ key }).pipe(
           Effect.map((result) => result.success),
           Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
           Effect.catch((error) =>
-            Effect.logWarning("Hook rate limiter unavailable", { error: error.message }).pipe(
-              Effect.andThen(
-                Effect.annotateCurrentSpan({ "relay.hook.rate_limiter_failed_open": true }),
-              ),
+            Effect.logWarning("Rate limiter unavailable", { error: error.message }).pipe(
+              Effect.andThen(Effect.annotateCurrentSpan({ [failedOpenAttribute]: true })),
               Effect.as(true),
             ),
           ),
@@ -813,6 +837,74 @@ export const layer = Api.make(
       Effect.service(ManagedGatewayHttpClient),
     ).pipe(Layer.provide(gatewayHttpClientLayer));
 
+    const layerMobileTelemetryApi =
+      mobileTelemetryBindings === undefined
+        ? MobileTelemetry.layerApiDisabled
+        : yield* Effect.gen(function* () {
+            // `fetch` rebuilds its layers per request; the source map cache must outlive one.
+            const mobileSourceMapLookups = yield* MobileTelemetry.SourceMaps.pipe(
+              Effect.provide(MobileTelemetry.layerSourceMaps),
+              Effect.provideService(MobileTelemetry.SourceMapObjects, {
+                get: (key) =>
+                  mobileTelemetryBindings.sourceMaps.get(key).pipe(
+                    Effect.map((object) =>
+                      object === null
+                        ? undefined
+                        : {
+                            size: object.size,
+                            text: object.text().pipe(
+                              Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                              Effect.mapError(
+                                (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                              ),
+                            ),
+                          },
+                    ),
+                    Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                    Effect.mapError(
+                      (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                    ),
+                  ),
+              }),
+            );
+            const layerMobileTelemetry = MobileTelemetry.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.effect(
+                    MobileTelemetry.MobileTelemetrySettings,
+                    Effect.gen(function* () {
+                      return MobileTelemetry.MobileTelemetrySettings.of({
+                        axiomToken: yield* mobileTelemetryBindings.token,
+                        destinations: {
+                          traces: {
+                            url: yield* mobileTelemetryBindings.tracesUrl,
+                            dataset: yield* mobileTelemetryBindings.tracesDataset,
+                          },
+                          logs: {
+                            url: yield* mobileTelemetryBindings.logsUrl,
+                            dataset: yield* mobileTelemetryBindings.logsDataset,
+                          },
+                          metrics: {
+                            url: yield* mobileTelemetryBindings.metricsUrl,
+                            dataset: yield* mobileTelemetryBindings.metricsDataset,
+                          },
+                        },
+                      });
+                    }),
+                  ),
+                  Layer.succeed(MobileTelemetry.MobileTelemetryRateLimiter, {
+                    allow: allowWith(
+                      mobileTelemetryBindings.rateLimit,
+                      "relay.mobile_telemetry.rate_limiter_failed_open",
+                    ),
+                  }),
+                  Layer.succeed(MobileTelemetry.SourceMaps, mobileSourceMapLookups),
+                ),
+              ),
+            );
+            return MobileTelemetry.layerApi.pipe(Layer.provide(layerMobileTelemetry));
+          });
+
     const layerApp = Layer.mergeAll(
       layerRelayApi,
       HookForwarder.layerApi.pipe(
@@ -827,6 +919,7 @@ export const layer = Api.make(
         appOrigin: billingConfig.appOrigin,
         additionalAppOrigins: billingConfig.additionalAppOrigins ?? [],
       }),
+      layerMobileTelemetryApi,
     ).pipe(
       Layer.provideMerge(RelayHttpApi.layerClientAuth),
       Layer.provideMerge(RelayHttpApi.layerDpopClientAuth),
@@ -1168,6 +1261,7 @@ export const layer = Api.make(
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
         Layer.provideMerge(Cloudflare.Workers.RateLimitBinding),
+        Layer.provideMerge(Cloudflare.R2.ReadBucketBinding),
         Layer.provideMerge(HookInboxObject.layer),
         Layer.provideMerge(ManagedGatewayLive),
       ),

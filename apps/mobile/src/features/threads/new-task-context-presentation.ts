@@ -152,3 +152,85 @@ export function filterNewTaskBranches<T extends { readonly name: string }>(
     ? branches
     : branches.filter((branch) => branch.name.toLowerCase().includes(query));
 }
+
+/**
+ * A worktree with no chosen base starts from the default branch, and a local
+ * selection the user just switched to follows the current checkout until refs
+ * load. Both are derived, never written back, so a late ref list or lecturn.json
+ * default still wins.
+ */
+export function fillNewTaskWorkspaceBranch(input: {
+  readonly selection: ComposerDraftWorkspaceSelection;
+  readonly branches: ReadonlyArray<{
+    readonly name: string;
+    readonly current: boolean;
+    readonly isDefault: boolean;
+    readonly isRemote?: boolean;
+    readonly worktreePath?: string | null;
+  }>;
+  readonly projectCwd: string | null;
+  readonly worktreeDefaultSettled: boolean;
+  readonly staveProject?: boolean;
+}): ComposerDraftWorkspaceSelection {
+  const { selection } = input;
+  if (selection.branch !== null) return selection;
+  if (selection.mode === "worktree") {
+    // The default may only exist as origin/<default>, so search remote refs too.
+    const base =
+      input.branches.find((branch) => branch.isDefault) ??
+      input.branches.find((branch) => !branch.isRemote && branch.current) ??
+      null;
+    return input.worktreeDefaultSettled && base
+      ? { ...selection, branch: base.name, worktreePath: null }
+      : selection;
+  }
+  if (!selection.followsCurrentCheckout || input.projectCwd === null) return selection;
+  const local = resolveNewTaskLocalWorkspaceSelection({
+    branches: input.branches.filter((branch) => !branch.isRemote),
+    projectCwd: input.projectCwd,
+    ...(input.staveProject !== undefined ? { staveProject: input.staveProject } : {}),
+  });
+  return local.awaitsCurrentBranch
+    ? selection
+    : { ...selection, branch: local.branch, worktreePath: local.worktreePath };
+}
+
+/**
+ * The workspace a new-task draft starts in: its own selection, else the
+ * project's default mode, with the branch filled in as above. The new-task
+ * flow, its send path and the home pending-drafts list all resolve through
+ * this, so what each shows is what is sent.
+ */
+export function resolveNewTaskDraftWorkspace(input: {
+  readonly selection: ComposerDraftWorkspaceSelection | undefined;
+  readonly canChooseWorkspace: boolean;
+  readonly defaultMode: WorkspaceMode;
+  readonly defaultModeSettled: boolean;
+  readonly isGitRepo: boolean;
+  readonly branches: Parameters<typeof fillNewTaskWorkspaceBranch>[0]["branches"];
+  readonly projectCwd: string | null;
+  /** A Stave space's mode, which beats a stale explicit pick left in the draft. */
+  readonly forcedMode?: WorkspaceMode;
+  /** A Stave thread never has a worktree, whatever an older draft recorded. */
+  readonly staveProject?: boolean;
+}): ComposerDraftWorkspaceSelection {
+  const chosen = input.canChooseWorkspace ? input.selection : undefined;
+  const selection =
+    chosen !== undefined && input.forcedMode !== undefined && chosen.mode !== input.forcedMode
+      ? { ...chosen, mode: input.forcedMode }
+      : chosen;
+  const resolved = fillNewTaskWorkspaceBranch({
+    selection: resolveNewTaskWorkspaceSelection({
+      selection,
+      fallback: { mode: input.defaultMode, branch: null, worktreePath: null },
+      isGitRepo: input.isGitRepo,
+    }),
+    branches: input.branches,
+    projectCwd: input.projectCwd,
+    worktreeDefaultSettled: selection?.mode !== undefined || input.defaultModeSettled,
+    ...(input.staveProject !== undefined ? { staveProject: input.staveProject } : {}),
+  });
+  return input.staveProject === true && resolved.worktreePath !== null
+    ? { ...resolved, worktreePath: null }
+    : resolved;
+}

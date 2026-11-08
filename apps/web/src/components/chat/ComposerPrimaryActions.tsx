@@ -408,13 +408,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           }
         >
           <Minimize2Icon aria-hidden="true" />
-          {/* The new design keeps the token count in the tooltip so the permission label keeps its room. */}
           {redesign ? (
-            keepFullHistory ? (
-              "Keep full"
-            ) : (
-              "Compact next"
-            )
+            <>
+              {keepFullHistory ? "Keep" : "Compact"}
+              <span className="text-muted-foreground">{compactTokens}</span>
+            </>
           ) : (
             <>
               {keepFullHistory ? "Full" : "Compact"}

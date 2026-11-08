@@ -29,6 +29,17 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 const decodeGithubCopilotSettings = Schema.decodeUnknownSync(GithubCopilotSettings);
 
+describe("new design setting", () => {
+  it("stays off until the Beta toggle turns it on, and a saved choice survives", () => {
+    expect(decodeClientSettings({}).redesignEnabled).toBe(false);
+    expect(decodeClientSettings({ redesignEnabled: true }).redesignEnabled).toBe(true);
+    expect(decodeClientSettingsPatch({ redesignEnabled: true })).toEqual({ redesignEnabled: true });
+    expect(encodeClientSettings(decodeClientSettings({ redesignEnabled: true }))).toMatchObject({
+      redesignEnabled: true,
+    });
+  });
+});
+
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();

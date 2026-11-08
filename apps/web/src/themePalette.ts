@@ -22,6 +22,11 @@ import {
   type ThemeDefinition,
   type ThemeVariants,
 } from "@lecturn/shared/themePalettes";
+import {
+  CONTEXT_CHIP_ACCENTS,
+  contextChipColorVariable,
+  type ContextChipAccentKind,
+} from "./lib/contextChipAccents";
 
 import { appAtomRegistry, subscribeAtomChanges } from "./rpc/atomRegistry";
 import { primaryServerEnvironmentThemesAtom } from "./state/server";
@@ -395,6 +400,26 @@ export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors
   return (standardLightThemeColors ??= decodeThemeColors(STANDARD_LIGHT_THEME_COLORS));
 }
 
+// The Lecturn look paints the shared palette as is. The new design (Beta) repaints the dark
+// canvas true black and lifts its surfaces in neutral tones.
+const REDESIGN_DARK_PAINTED_COLORS: Partial<ThemeColors> = {
+  canvas: "#000000",
+  surface: "#111111",
+  surfaceRaised: "#111111",
+  messageSurface: "#1e1e1e",
+};
+
+/** The standard theme as index.css paints it, for solves that measure the page. */
+export function getStandardPaintedThemeColors(
+  appearance: ThemeAppearance,
+  redesign = false,
+): ThemeColors {
+  return {
+    ...getStandardThemeColors(appearance),
+    ...(redesign && appearance === "dark" ? REDESIGN_DARK_PAINTED_COLORS : {}),
+  };
+}
+
 type ThemeRgbColor = {
   r: number;
   g: number;
@@ -541,9 +566,10 @@ function srgbChannelToLinear(channel: number): number {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
-function linearChannelToSrgb(channel: number): number {
+function linearChannelToSrgb(channel: number, round = true): number {
   const c = channel <= 0.0031308 ? channel * 12.92 : 1.055 * channel ** (1 / 2.4) - 0.055;
-  return Math.round(Math.min(1, Math.max(0, c)) * 255);
+  const srgb = Math.min(1, Math.max(0, c)) * 255;
+  return round ? Math.round(srgb) : srgb;
 }
 
 function themeRgbToOklch(color: ThemeRgbColor): ThemeOklch {
@@ -597,12 +623,12 @@ function mapThemeOklchToSrgbGamut(color: ThemeOklch): ThemeOklch {
   return { ...color, C: low };
 }
 
-function themeOklchToRgb(color: ThemeOklch): ThemeRgbColor {
+function themeOklchToRgb(color: ThemeOklch, round = true): ThemeRgbColor {
   const linear = oklchToRgbUnclamped(mapThemeOklchToSrgbGamut(color));
   return {
-    r: linearChannelToSrgb(linear.r),
-    g: linearChannelToSrgb(linear.g),
-    b: linearChannelToSrgb(linear.b),
+    r: linearChannelToSrgb(linear.r, round),
+    g: linearChannelToSrgb(linear.g, round),
+    b: linearChannelToSrgb(linear.b, round),
   };
 }
 
@@ -612,19 +638,20 @@ function themeOklchToThemeColor(color: ThemeOklch): string {
 
 function solveOklchLightness(
   base: ThemeOklch,
-  against: ThemeRgbColor,
+  against: ReadonlyArray<ThemeRgbColor>,
   minContrast: number,
   direction: "lighter" | "darker",
 ): ThemeOklch {
+  const contrastOf = (color: ThemeOklch) =>
+    Math.min(...against.map((surface) => themeContrastRatio(themeOklchToRgb(color), surface)));
   let low = direction === "lighter" ? base.L : 0;
   let high = direction === "lighter" ? 1 : base.L;
   let candidate = { ...base };
-  if (themeContrastRatio(themeOklchToRgb(candidate), against) >= minContrast) return candidate;
+  if (contrastOf(candidate) >= minContrast) return candidate;
   for (let step = 0; step < 18; step += 1) {
     const mid = (low + high) / 2;
     candidate = { ...base, L: mid };
-    const contrast = themeContrastRatio(themeOklchToRgb(candidate), against);
-    if (contrast >= minContrast) {
+    if (contrastOf(candidate) >= minContrast) {
       if (direction === "lighter") high = mid;
       else low = mid;
     } else {
@@ -648,10 +675,61 @@ export function readableThemeColorOn(color: string, surface: string, minContrast
     return color;
   }
   const direction = themeRelativeLuminance(surfaceRgb) < 0.179 ? "lighter" : "darker";
-  const solved = solveOklchLightness(parsedColor.color, surfaceRgb, minContrast, direction);
+  const solved = solveOklchLightness(parsedColor.color, [surfaceRgb], minContrast, direction);
   // Return the 8-bit color the solver measured: the unrounded OKLCH can round
   // to a neighbor just under the target once it is stored and read back.
   return themeRgbToHexColor(themeOklchToRgb(solved));
+}
+
+const CONTEXT_CHIP_CONTRAST = 5;
+const CONTEXT_CHIP_MESSAGE_VARIABLE = "--context-chip-message";
+const CONTEXT_CHIP_INVALID_VARIABLE = "--context-chip-invalid";
+
+export function contextChipVariables(colors: ThemeColors): Readonly<Record<string, string>> {
+  // CSS paints surfaces from their unrounded OKLCH, so measure them unrounded.
+  const parsedCanvas = parseThemeColor(colors.canvas);
+  const canvas = parsedCanvas ? themeOklchToRgb(parsedCanvas.color, false) : THEME_WHITE_FOREGROUND;
+  const onCanvas = (value: string) => {
+    const parsed = parseThemeColor(value);
+    return parsed
+      ? mixThemeRgbColors(canvas, themeOklchToRgb(parsed.color, false), parsed.alpha)
+      : canvas;
+  };
+  const isDark = (color: ThemeRgbColor) => themeRelativeLuminance(color) < 0.179;
+  const messageMatchesCanvas = isDark(onCanvas(colors.messageSurface)) === isDark(canvas);
+  const surfaces = [canvas, onCanvas(colors.surface), onCanvas(colors.surfaceRaised)];
+  if (messageMatchesCanvas) surfaces.push(onCanvas(colors.messageSurface));
+  const contrastOnSurfaces = (color: ThemeRgbColor) =>
+    Math.min(...surfaces.map((surface) => themeContrastRatio(color, surface)));
+  const blackContrast = contrastOnSurfaces(THEME_BLACK_FOREGROUND);
+  const whiteContrast = contrastOnSurfaces(THEME_WHITE_FOREGROUND);
+  const direction = blackContrast >= whiteContrast ? "darker" : "lighter";
+  const minContrast = Math.min(CONTEXT_CHIP_CONTRAST, Math.max(blackContrast, whiteContrast));
+  const accents: Array<[string, string]> = [
+    ...(Object.entries(CONTEXT_CHIP_ACCENTS) as Array<[ContextChipAccentKind, string]>).map(
+      ([kind, accent]): [string, string] => [contextChipColorVariable(kind), accent],
+    ),
+    [CONTEXT_CHIP_INVALID_VARIABLE, colors.errorForeground],
+  ];
+  const variables: Record<string, string> = Object.fromEntries(
+    accents.flatMap(([variable, accent]) => {
+      const parsed = parseThemeColor(accent);
+      if (!parsed) return [];
+      const solved = solveOklchLightness(parsed.color, surfaces, minContrast, direction);
+      return [[variable, themeRgbToHexColor(themeOklchToRgb(solved))]];
+    }),
+  );
+  if (!messageMatchesCanvas) variables[CONTEXT_CHIP_MESSAGE_VARIABLE] = colors.messageForeground;
+  return variables;
+}
+
+function applyContextChipVariables(root: HTMLElement, colors: ThemeColors): void {
+  const variables = contextChipVariables(colors);
+  root.style.removeProperty(CONTEXT_CHIP_MESSAGE_VARIABLE);
+  root.style.removeProperty(CONTEXT_CHIP_INVALID_VARIABLE);
+  for (const [variable, value] of Object.entries(variables)) {
+    root.style.setProperty(variable, value);
+  }
 }
 
 const STANDARD_STATUS_COLORS = {
@@ -686,7 +764,7 @@ function standardStatusColors(canvas: ThemeRgbColor): {
     themeOklchToThemeColor(
       solveOklchLightness(
         themeRgbToOklch(parseThemeRgbColor(foreground, canvas)),
-        surface,
+        [surface],
         4.6,
         appearance === "dark" ? "lighter" : "darker",
       ),
@@ -734,7 +812,7 @@ export function createVividThemeColors(
     C: Math.min(0.035, accent.C * 0.25),
     h: hue,
   };
-  const text = solveOklchLightness(textBase, canvasRgb, 7, dark ? "lighter" : "darker");
+  const text = solveOklchLightness(textBase, [canvasRgb], 7, dark ? "lighter" : "darker");
   const textRgb = themeOklchToRgb(text);
   const textMutedRgb = standardMutedThemeText(canvasRgb, textRgb);
 
@@ -768,7 +846,7 @@ export function createVividThemeColors(
 
   const foregroundOn = (surfaceRgb: ThemeRgbColor): string =>
     themeOklchToThemeColor(
-      solveOklchLightness(textBase, surfaceRgb, 4.6, dark ? "lighter" : "darker"),
+      solveOklchLightness(textBase, [surfaceRgb], 4.6, dark ? "lighter" : "darker"),
     );
   const mutedForeground = themeRgbToThemeColor(readableThemeText(mutedRgb, textRgb, 1, 4.6));
   const placeholder = themeRgbToThemeColor(readableThemeText(surfaceRaisedRgb, textRgb, 1, 4.6));
@@ -930,7 +1008,7 @@ export function updateThemeColorFamily(
     themeOklchToThemeColor(
       solveOklchLightness(
         parsedSelected.color,
-        background,
+        [background],
         4.6,
         themeRelativeLuminance(background) < 0.179 ? "lighter" : "darker",
       ),
@@ -1562,6 +1640,7 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
       ]),
     ) as unknown as ThemeColors,
   );
+  applyContextChipVariables(root, colors);
   setThemePreviewAppearance(appearance);
 }
 
@@ -1582,6 +1661,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
     publishAppliedThemeColors(colors);
+    applyContextChipVariables(root, colors);
     return;
   }
 
@@ -1589,9 +1669,10 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }
-  publishAppliedThemeColors(
-    getStandardThemeColors(appearance ?? (root.classList.contains("dark") ? "dark" : "light")),
-  );
+  const standardAppearance = appearance ?? (root.classList.contains("dark") ? "dark" : "light");
+  publishAppliedThemeColors(getStandardThemeColors(standardAppearance));
+  // Only the new design paints chip ink, so solve it on that look's surfaces.
+  applyContextChipVariables(root, getStandardPaintedThemeColors(standardAppearance, true));
 }
 
 export function resolveThemeAppearance(

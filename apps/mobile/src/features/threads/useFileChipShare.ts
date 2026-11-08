@@ -2,7 +2,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { resolveAssetUrl } from "@lecturn/client-runtime/state/assets";
 import type { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
 import { assetEnvironment } from "../../state/assets";
@@ -21,52 +21,47 @@ export function useFileChipShare(
     refresh: true,
     reportFailure: false,
   });
-  const connectionRef = useRef({ environmentId, threadId, httpBaseUrl });
   const requestRef = useRef<AbortController | null>(null);
-  useLayoutEffect(() => {
-    connectionRef.current = { environmentId, threadId, httpBaseUrl };
-    return () => {
+  useEffect(
+    () => () => {
       requestRef.current?.abort();
       requestRef.current = null;
-    };
-  }, [environmentId, httpBaseUrl, threadId]);
-
-  const share = useCallback(
-    (target: FileChipTarget) => {
-      const source = fileChipShareSource(target, threadId);
-      if (!source || requestRef.current) return;
-      const request = new AbortController();
-      requestRef.current = request;
-      const httpBaseUrl = connectionRef.current.httpBaseUrl;
-      void (async () => {
-        if (httpBaseUrl === null) throw new Error("Reconnect to the environment and try again.");
-        const result = await createUrl({ environmentId, input: { resource: source.resource } });
-        if (request.signal.aborted) return;
-        const url =
-          result._tag === "Success" ? resolveAssetUrl(httpBaseUrl, result.value.relativeUrl) : null;
-        if (url === null) throw new Error("The file could not be loaded. Reconnect and try again.");
-        await downloadAndShareAttachment({
-          url,
-          attachment: source,
-          signal: request.signal,
-          sourceIdentifier,
-        });
-      })()
-        .catch((error: unknown) => {
-          if (!request.signal.aborted) {
-            Dialog.alert(
-              "Could not share file",
-              error instanceof Error ? error.message : "Try again.",
-            );
-          }
-        })
-        .finally(() => {
-          if (requestRef.current === request) {
-            requestRef.current = null;
-          }
-        });
     },
-    [createUrl, environmentId, sourceIdentifier, threadId],
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A share started for another thread or connection is aborted on the switch.
+    [environmentId, httpBaseUrl, threadId],
   );
-  return share;
+
+  return (target: FileChipTarget) => {
+    const source = fileChipShareSource(target, threadId);
+    if (!source || requestRef.current) return;
+    const request = new AbortController();
+    requestRef.current = request;
+    void (async () => {
+      if (httpBaseUrl === null) throw new Error("Reconnect to the environment and try again.");
+      const result = await createUrl({ environmentId, input: { resource: source.resource } });
+      if (request.signal.aborted) return;
+      const url =
+        result._tag === "Success" ? resolveAssetUrl(httpBaseUrl, result.value.relativeUrl) : null;
+      if (url === null) throw new Error("The file could not be loaded. Reconnect and try again.");
+      await downloadAndShareAttachment({
+        url,
+        attachment: source,
+        signal: request.signal,
+        sourceIdentifier,
+      });
+    })()
+      .catch((error: unknown) => {
+        if (!request.signal.aborted) {
+          Dialog.alert(
+            "Could not share file",
+            error instanceof Error ? error.message : "Try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (requestRef.current === request) {
+          requestRef.current = null;
+        }
+      });
+  };
 }

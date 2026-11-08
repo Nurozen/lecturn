@@ -81,7 +81,7 @@ it("opens Connections and Providers without adding history, then Chat and Back r
     await router.navigate({ to: "/settings/general", hash: "about" });
   });
   const index = history.location.state.__TSR_index;
-  await choose("Connections");
+  await choose("Environments");
   expect(history.location.pathname).toBe("/settings/connections");
   expect(history.location.hash).toBe("");
   expect(history.location.state.__TSR_index).toBe(index);
@@ -102,7 +102,7 @@ it("returns a direct Settings visit to chat landing without leaving a settings h
   await using view = await fixture(["/earlier", "/settings/general"]);
   const { history, router, choose, back } = view;
   await choose("Providers");
-  await choose("Connections");
+  await choose("Environments");
   await back();
   expect(history.location.pathname).toBe("/");
   await act(async () => {

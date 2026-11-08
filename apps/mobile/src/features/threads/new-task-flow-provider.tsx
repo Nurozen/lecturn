@@ -1,14 +1,10 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import * as Dialog from "../../components/ui/Dialog";
-import { resolveFilesystemReadAccess } from "@lecturn/client-runtime/state/filesystem";
-import { useEnvironmentPresentation } from "../../state/presentation";
-import { environmentSession } from "../../state/session";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 
 import type {
   EnvironmentId,
   ModelSelection,
-  ProjectReadFileResult,
   ProviderInteractionMode,
   ProviderOptionSelection,
   RuntimeMode,
@@ -17,21 +13,15 @@ import type {
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
-  DEFAULT_SERVER_SETTINGS,
   MessageId,
-  LECTURN_PROJECT_FILE_NAME,
   repositoryGroupingKeyOf,
   ThreadId,
 } from "@lecturn/contracts";
 import { threadContextsOutsideEnvironment } from "@lecturn/shared/composerContextReferences";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@lecturn/shared/projectSettings";
-import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
 import {
-  useEnvironmentServerConfig,
   useListedProjects,
   useListedThreadShells,
   useNewThreadTargetProjects,
@@ -48,6 +38,7 @@ import {
   resolveSelectableModelSelection,
 } from "../../lib/modelOptions";
 import { scopedProjectKey } from "../../lib/scopedEntities";
+import { useAtomValue } from "@effect/atom-react";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
@@ -55,59 +46,38 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import {
   appendComposerDraftAttachments,
   type ComposerDraftInsertion,
-  clearComposerDraft,
-  composerDraftsAtom,
+  type ComposerDraftWorkspaceSelection,
+  composerDraftsLoadedAtom,
   createNewTaskDraft,
   getComposerDraftSnapshot,
-  isComposerDraftEmpty,
   isNewTaskDraftKey,
   removeComposerDraftAttachment,
   replaceComposerDraftAttachments,
   retargetNewTaskDraft,
-  scheduleUnusedComposerAttachmentCleanup,
   setComposerDraftText,
-  setComposerDraftContext,
   setStickyComposerModelSelection,
   updateComposerDraftSettings,
   useComposerDraft,
   useStickyComposerModelSelection,
 } from "../../state/use-composer-drafts";
 import {
-  capturePendingTaskEditorWriteBaseline,
-  flushPendingTaskEditorWrite,
-} from "../../state/pending-task-editor-writes";
-import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
 import { useBranches, usePaginatedBranches } from "../../state/queries";
 import { vcsEnvironment } from "../../state/vcs";
-import {
-  flattenQueuedThreadMessages,
-  threadOutboxManager,
-  type QueuedThreadMessage,
-} from "../../state/thread-outbox";
-import {
-  holdEditingQueuedMessage,
-  releaseEditingQueuedMessage,
-  useThreadOutboxMessages,
-} from "../../state/use-thread-outbox";
+import { type QueuedThreadMessage } from "../../state/thread-outbox";
 import {
   setPendingConnectionError,
   useRemoteConnectionStatus,
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
 import { availableScratchWorkspaceRoot } from "@lecturn/client-runtime/operations/projects";
-import {
-  isStaveProject,
-  resolveProjectGitCwd,
-  staveForcedEnvMode,
-} from "@lecturn/client-runtime/state/projectGit";
+import { isStaveProject, resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
-import { isScratchProject } from "@lecturn/client-runtime/state/projects";
 import { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { type VcsRef } from "@lecturn/client-runtime/state/vcs";
 import {
@@ -122,33 +92,31 @@ import {
 } from "../../state/legacy-plan-mode";
 import { useLegacyPlanModeState } from "./use-legacy-plan-mode-enabled";
 import {
+  resolveNewTaskDraftWorkspace,
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskGitCwd,
   resolveNewTaskLocalWorkspaceSelection,
-  resolveNewTaskWorkspaceSelection,
 } from "./new-task-context-presentation";
 import {
   resolveEnvironmentProjectMatch,
   resolveNewTaskDraftProject,
 } from "./new-task-project-selection";
+import { useNewTaskProjectDefaults } from "./use-new-task-project-defaults";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
-import { useOlderSettledCount } from "../../state/olderSettledShelf";
+import {
+  INACTIVE_FLOW_KEY,
+  type NewTaskFlowState,
+  newTaskFlowStateAtom,
+  readNewTaskFlowState,
+  resolveRouteDraft,
+  type RouteDraftResolution,
+  stampedEnvironmentProjectsLoading,
+  updateNewTaskFlowState,
+} from "./new-task-flow-state";
+import { useEnvironmentShellReadiness } from "../../state/shell";
+import { useConnectionsReady, useWorkspaceEnvironments } from "../../state/workspace";
 
 type WorkspaceMode = "local" | "worktree";
-
-function pendingTaskDraftKey(messageId: string): string {
-  return `pending-task:${messageId}`;
-}
-
-// Track ownership across providers so old unmount flushes cannot drop newer drafts or drain locks.
-let activeEditingMessageId: string | null = null;
-
-function findQueuedPendingTask(messageId: string): QueuedThreadMessage | null {
-  const message = flattenQueuedThreadMessages(
-    appAtomRegistry.get(threadOutboxManager.queuedMessagesByThreadKeyAtom),
-  ).find((candidate) => candidate.messageId === messageId);
-  return message?.creation !== undefined ? message : null;
-}
 
 export function branchBadgeLabel(input: {
   readonly branch: VcsRef;
@@ -187,10 +155,12 @@ type NewTaskFlowContextValue = {
   readonly canChooseWorkspace: boolean;
   readonly selectedBranchName: string | null;
   readonly selectedWorktreePath: string | null;
+  readonly resolveWorkspaceSelection: (
+    selection: ComposerDraftWorkspaceSelection | undefined,
+  ) => ComposerDraftWorkspaceSelection;
   readonly startFromOrigin: boolean;
   readonly pullRequestReference: string | undefined;
   readonly draftKey: string | null;
-  readonly editingPendingTask: QueuedThreadMessage | null;
   readonly prompt: string;
   readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly submitting: boolean;
@@ -212,10 +182,15 @@ type NewTaskFlowContextValue = {
   readonly selectedModelOption: ModelOption | null;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
-  readonly reset: () => void;
   readonly setProject: (project: EnvironmentProject) => void;
-  /** Returns false if the existing draft is gone, allowing fallback to a fresh draft. */
-  readonly openDraft: (draftKey: string) => boolean;
+  /** The flow's project, read when a continuation resumes after an await. */
+  readonly getSelectedProjectKey: () => string | null;
+  /**
+   * The draft id of the route this flow serves when that draft, or its
+   * project, is gone. Only the topmost draft route is served, so a screen
+   * compares this with its own draft id.
+   */
+  readonly missingRouteDraftId: string | null;
   readonly selectEnvironment: (environmentId: EnvironmentId) => void;
   readonly switchEnvironment: (environmentId: EnvironmentId) => Promise<boolean>;
   readonly switchingToEnvironmentId: EnvironmentId | null;
@@ -226,9 +201,6 @@ type NewTaskFlowContextValue = {
   readonly setWorkspaceMode: (mode: WorkspaceMode) => void;
   readonly selectBranch: (branch: VcsRef) => void;
   readonly setStartFromOrigin: (value: boolean) => void;
-  readonly beginEditingPendingTask: (messageId: string) => boolean;
-  readonly finishEditingPendingTask: () => void;
-  readonly cancelEditingPendingTask: () => void;
   readonly buildPendingTaskMessage: (
     metadata: TurnCommandMetadata,
     options?: {
@@ -259,8 +231,9 @@ const NewTaskFlowContext = React.createContext<NewTaskFlowContextValue | null>(n
 export function NewTaskFlowProvider(
   props: React.PropsWithChildren<{
     active?: boolean;
+    /** Identifies the draft route this flow serves; a new key starts a fresh flow. */
+    flowKey?: string;
     routeDraftId?: string;
-    routePendingTaskId?: string;
   }>,
 ) {
   const projects = useListedProjects();
@@ -269,8 +242,7 @@ export function NewTaskFlowProvider(
   const threads = useListedThreadShells();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const groupingSettings = useMobileProjectGroupingSettings();
-  const { enabled: legacyPlanModeEnabled, loaded: planModePreferenceLoaded } =
-    useLegacyPlanModeState();
+  const { enabled: legacyPlanModeEnabled } = useLegacyPlanModeState();
 
   const projectScopes = sortHomeProjectScopes({
     scopes: buildHomeProjectScopes({
@@ -283,95 +255,107 @@ export function NewTaskFlowProvider(
     projectSortOrder: "updated_at",
   });
 
-  const [selectedEnvironmentIdOverride, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    null,
+  const flowKey = props.flowKey ?? INACTIVE_FLOW_KEY;
+  const storedFlowState = useAtomValue(newTaskFlowStateAtom(flowKey));
+  const draftsLoaded = useAtomValue(composerDraftsLoadedAtom);
+  // A draft route opened from a list row, a deep link, or restored state binds
+  // its draft here until the flow's first write stores the binding.
+  const routeDraft = useComposerDraft(
+    storedFlowState.draftKey === null ? (props.routeDraftId ?? null) : null,
   );
+  // Readiness of the environment the route's draft is stamped to; another
+  // environment's projects loading first says nothing about it.
+  const stampedEnvironmentId = routeDraft.project?.environmentId ?? null;
+  const connectionsReady = useConnectionsReady();
+  const stampedEnvironmentConnection =
+    useWorkspaceEnvironments().find(
+      (environment) => environment.environmentId === stampedEnvironmentId,
+    )?.connectionState ?? null;
+  const stampedEnvironmentShell = useEnvironmentShellReadiness(stampedEnvironmentId);
+  // A known machine that is offline also keeps its draft waiting: the draft never
+  // falls back to the picker or another account's project while its own reconnects.
+  const stampedEnvironmentLoading =
+    (stampedEnvironmentConnection !== null && stampedEnvironmentConnection !== "connected") ||
+    stampedEnvironmentProjectsLoading({
+      connectionsReady,
+      connectionState: stampedEnvironmentConnection,
+      shellCacheRead: stampedEnvironmentShell.cacheRead,
+      shellStatus: stampedEnvironmentShell.status,
+      shellHasError: stampedEnvironmentShell.hasError,
+    });
+  const resolveRoute = (
+    flow: NewTaskFlowState,
+    loaded: boolean,
+    stamp: Parameters<typeof resolveRouteDraft>[0]["stamp"],
+  ): RouteDraftResolution =>
+    resolveRouteDraft({
+      flow,
+      routeDraftId: props.routeDraftId,
+      draftsLoaded: loaded,
+      stamp,
+      projects: targetProjects,
+      stampedEnvironmentLoading,
+    });
+  const routeDraftResolution = resolveRoute(storedFlowState, draftsLoaded, routeDraft.project);
+  const flowState =
+    routeDraftResolution.kind === "open" ? routeDraftResolution.flow : storedFlowState;
+  const {
+    environmentId: selectedEnvironmentIdOverride,
+    projectKey: selectedProjectKey,
+    draftKey: activeDraftKey,
+    submitting,
+    expandedProvider,
+  } = flowState;
+  // Continuations read the flow at use time, with the route's draft applied.
+  const readFlow = (): NewTaskFlowState => {
+    const stored = readNewTaskFlowState(flowKey);
+    const resolution = resolveRoute(
+      stored,
+      appAtomRegistry.get(composerDraftsLoadedAtom),
+      props.routeDraftId === undefined
+        ? undefined
+        : getComposerDraftSnapshot(props.routeDraftId).project,
+    );
+    return resolution.kind === "open" ? resolution.flow : stored;
+  };
+  // Every flow write stores the route's draft binding along with it, so the
+  // binding outlives the draft's project stamp (submit clears it).
+  const updateFlow = (patch: Partial<NewTaskFlowState>) =>
+    updateNewTaskFlowState(flowKey, { ...readFlow(), ...patch });
   const selectedEnvironmentId =
     selectedEnvironmentIdOverride !== null &&
     targetProjects.some((project) => project.environmentId === selectedEnvironmentIdOverride)
       ? selectedEnvironmentIdOverride
       : (projects[0]?.environmentId ?? null);
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
-  const [activeDraftKey, setActiveDraftKey] = useState<string | null>(null);
-  const activeDraft = useComposerDraft(activeDraftKey);
-  const [submitting, setSubmitting] = useState(false);
-  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
-  const [editingPendingTask, setEditingPendingTask] = useState<QueuedThreadMessage | null>(null);
-  const pendingLocalBranchSyncDraftKeysRef = useRef(new Set<string>());
-  // Mirror edit state synchronously so unmount flush cannot save a session ended this render.
-  const editingPendingTaskRef = useRef<QueuedThreadMessage | null>(null);
-  const editingRevisionRef = useRef(Promise.resolve(0));
-
-  const reset = useCallback(() => {
-    setSelectedEnvironmentId(null);
-    setSelectedProjectKey(null);
-    setActiveDraftKey(null);
-    setSubmitting(false);
-    setExpandedProvider(null);
-    pendingLocalBranchSyncDraftKeysRef.current.clear();
-    const editing = editingPendingTaskRef.current;
-    editingPendingTaskRef.current = null;
-    setEditingPendingTask(null);
-    if (editing) {
-      if (activeEditingMessageId === editing.messageId) {
-        activeEditingMessageId = null;
-      }
-      releaseEditingQueuedMessage(editing.messageId);
-    }
-  }, []);
-
   const projectsForEnvironment = pipe(
     projects,
     Arr.filter((project) => project.environmentId === selectedEnvironmentId),
   );
 
-  const editingPendingProject = ((): EnvironmentProject | null => {
-    const creation = editingPendingTask?.creation;
-    if (!editingPendingTask || !creation) {
-      return null;
-    }
-    return {
-      environmentId: editingPendingTask.environmentId,
-      id: creation.projectId,
-      title: creation.projectTitle ?? "Unknown project",
-      workspaceRoot: creation.projectCwd ?? "",
-      repositoryIdentity: null,
-      defaultModelSelection: editingPendingTask.modelSelection ?? null,
-      scripts: [],
-      createdAt: editingPendingTask.createdAt,
-      updatedAt: editingPendingTask.createdAt,
-    };
-  })();
-
+  const activeDraft = useComposerDraft(activeDraftKey);
+  // A route draft still waiting for its environment has no project yet: the
+  // fallback would show, and could send to, another environment's project. A
+  // draft's stamped project stays authoritative when it goes offline.
   const selectedProject =
-    activeDraft.project && !editingPendingTask
-      ? resolveNewTaskDraftProject(targetProjects, activeDraft.project)
-      : (targetProjects.find(
-          (project) =>
-            project.environmentId === selectedEnvironmentId &&
-            scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
-        ) ??
-        // While editing a queued task whose project shell is absent, keep the task
-        // pinned to its own project — falling through to an arbitrary first
-        // project would silently retarget it (and its reused turn identifiers).
-        (editingPendingProject !== null &&
-        selectedProjectKey ===
-          scopedProjectKey(editingPendingProject.environmentId, editingPendingProject.id)
-          ? editingPendingProject
-          : (projectsForEnvironment[0] ?? null)));
+    routeDraftResolution.kind === "pending"
+      ? null
+      : activeDraft.project
+        ? resolveNewTaskDraftProject(targetProjects, activeDraft.project)
+        : (targetProjects.find(
+            (project) =>
+              project.environmentId === selectedEnvironmentId &&
+              scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
+          ) ??
+          projectsForEnvironment[0] ??
+          null);
   // A Stave space is not a repository: branch lists and status come from its
-  // primary repo, threads always run in the space root (never a worktree),
-  // and the worktree mode is not offered.
+  // primary repo, and threads always run in the space root (never a worktree).
   const selectedProjectIsStave = isStaveProject(selectedProject);
   const selectedProjectGitCwd = resolveNewTaskGitCwd(selectedProject);
-  const forcedWorkspaceMode = staveForcedEnvMode(selectedProject);
 
-  const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
-    selectedProject?.environmentId ?? null,
-  );
-  const isScratchDraft =
-    selectedProject !== null &&
-    isScratchProject(selectedProject, selectedEnvironmentServerConfig?.scratchWorkspaceRoot);
+  const projectDefaults = useNewTaskProjectDefaults(selectedProject);
+  const selectedEnvironmentServerConfig = projectDefaults.serverConfig;
+  const isScratchDraft = projectDefaults.isScratch;
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const scratchEnvironments = connectedEnvironments.filter(
@@ -435,23 +419,17 @@ export function NewTaskFlowProvider(
     return result;
   })();
 
-  const selectedProjectDraftKey = editingPendingTask
-    ? pendingTaskDraftKey(editingPendingTask.messageId)
-    : selectedProject
-      ? activeDraftKey
-      : null;
+  const selectedProjectDraftKey = selectedProject ? activeDraftKey : null;
+  // The inferred first project stays draft-free: a draft is created when a project is
+  // explicitly bound (setProject: the route's project, a picker choice or a share).
   const activePendingKey =
     props.active === false
       ? null
-      : props.routePendingTaskId
-        ? `pending-task:${props.routePendingTaskId}`
-        : props.routeDraftId
-          ? `draft-task:${props.routeDraftId}`
-          : editingPendingTask
-            ? `pending-task:${editingPendingTask.messageId}`
-            : selectedProjectDraftKey
-              ? `draft-task:${selectedProjectDraftKey}`
-              : null;
+      : props.routeDraftId
+        ? `draft-task:${props.routeDraftId}`
+        : selectedProjectDraftKey
+          ? `draft-task:${selectedProjectDraftKey}`
+          : null;
   const activeNewTask = React.useMemo(
     () => (props.active === false ? null : { pendingKey: activePendingKey }),
     [props.active, activePendingKey],
@@ -477,96 +455,44 @@ export function NewTaskFlowProvider(
   });
   const knownIsGitRepo = projectGitStatus.data?.isRepo ?? projectBranches.data?.isRepo ?? null;
   const isGitRepo = knownIsGitRepo ?? true;
-  const fileAccessSession = useEnvironmentQuery(
-    selectedProject !== null && selectedProject.workspaceRoot !== ""
-      ? environmentSession.sessionStateAtom(selectedProject.environmentId)
-      : null,
-  );
-  const fileEnvironment = useEnvironmentPresentation(selectedProject?.environmentId ?? null);
-  const fileAccess = resolveFilesystemReadAccess({
-    isCatalogReady: fileEnvironment.isReady,
-    connection: fileEnvironment.presentation?.connection ?? null,
-    session: fileAccessSession.data,
-    sessionError: fileAccessSession.error,
-  });
-  const { canReadFiles } = fileAccess;
-  const fileAccessPending =
-    selectedProject !== null && selectedProject.workspaceRoot !== "" && fileAccess.isPending;
-  const lecturnProjectFileQuery = useEnvironmentQuery(
-    canReadFiles &&
-      selectedProject !== null &&
-      selectedProject.workspaceRoot !== "" &&
-      forcedWorkspaceMode === undefined
-      ? projectEnvironment.readFile({
-          environmentId: selectedProject.environmentId,
-          input: {
-            cwd: selectedProject.workspaceRoot,
-            relativePath: LECTURN_PROJECT_FILE_NAME,
-            allowMissing: true,
-          },
-        })
-      : null,
-  );
-  const lecturnProjectFileData = lecturnProjectFileQuery.data as ProjectReadFileResult | null;
-  const lecturnProjectFile =
-    lecturnProjectFileData === null ||
-    lecturnProjectFileData.exists === false ||
-    lecturnProjectFileData.truncated
-      ? null
-      : parseLecturnProjectFile(lecturnProjectFileData.contents);
-  const projectSettings = resolveProjectSettings(
-    selectedEnvironmentServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-    selectedProject?.id ?? null,
-    selectedProject,
-    lecturnProjectFile,
-  );
+  const projectSettings = projectDefaults.projectSettings;
   const canChooseWorkspace = !isScratchDraft;
-  const selectedProjectOlderSettledCount = useOlderSettledCount(selectedProject);
-  const selectedProjectHasThreads =
-    selectedProject !== null &&
-    (selectedProjectOlderSettledCount > 0 ||
-      threads.some(
-        (thread) =>
-          thread.environmentId === selectedProject.environmentId &&
-          thread.projectId === selectedProject.id,
-      ));
-  // A forced mode (Stave) outranks every settings tier and the file.
-  const defaultWorkspaceMode: WorkspaceMode =
-    forcedWorkspaceMode ??
-    (canChooseWorkspace
-      ? resolveNewThreadEnvMode({
-          projectSettings,
-          workspaceRoot: selectedProject?.workspaceRoot ?? null,
-          newProjectsRoot: selectedEnvironmentServerConfig?.newProjectsRoot,
-          projectHasThreads: selectedProjectHasThreads,
-        })
-      : "local");
-  // Do not persist the provisional workspace default while lecturn.json is loading; it would override
-  // the file's eventual default.
-  const defaultWorkspaceModeSettled =
-    selectedProjectDraft.workspaceSelection?.mode !== undefined ||
-    forcedWorkspaceMode !== undefined ||
-    projectSettings.sources.defaultThreadEnvMode !== "environment" ||
-    (!lecturnProjectFileQuery.isPending && !fileAccessPending);
-  const workspaceSelection = resolveNewTaskWorkspaceSelection({
-    selection: canChooseWorkspace ? selectedProjectDraft.workspaceSelection : undefined,
-    fallback: { mode: defaultWorkspaceMode, branch: null, worktreePath: null },
-    isGitRepo,
+  const defaultWorkspaceMode: WorkspaceMode = projectDefaults.defaultWorkspaceMode;
+  const branchState = usePaginatedBranches({
+    environmentId: selectedProject?.environmentId ?? null,
+    // Git cwd (primary repo for Stave); null for the stand-in project.
+    cwd: selectedProjectGitCwd,
   });
-  // The forced mode also beats a stale explicit pick left in the draft.
-  const workspaceMode = forcedWorkspaceMode ?? workspaceSelection.mode;
+  const branchesLoading = branchState.isPending && branchState.data === null;
+  const allBranchRefs = branchState.refs;
+  const availableBranches = pipe(
+    allBranchRefs,
+    Arr.filter((branch) => !branch.isRemote),
+  );
+
+  const resolveWorkspaceSelection = (selection: ComposerDraftWorkspaceSelection | undefined) =>
+    resolveNewTaskDraftWorkspace({
+      selection,
+      canChooseWorkspace,
+      defaultMode: defaultWorkspaceMode,
+      defaultModeSettled: projectDefaults.defaultWorkspaceModeSettled,
+      isGitRepo,
+      branches: allBranchRefs,
+      projectCwd: selectedProjectGitCwd,
+      forcedMode: projectDefaults.forcedWorkspaceMode,
+      staveProject: selectedProjectIsStave,
+    });
+  const workspaceSelection = resolveWorkspaceSelection(selectedProjectDraft.workspaceSelection);
+  const workspaceMode = workspaceSelection.mode;
   const selectedBranchName = workspaceSelection.branch;
-  // A Stave thread never has a worktree, whatever an older draft recorded.
-  const selectedWorktreePath = selectedProjectIsStave ? null : workspaceSelection.worktreePath;
+  const selectedWorktreePath = workspaceSelection.worktreePath;
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
   const draftStartFromOrigin = selectedProjectDraft.workspaceSelection?.startFromOrigin;
   const startFromOrigin =
     isGitRepo && (draftStartFromOrigin ?? projectSettings.settings.newWorktreesStartFromOrigin);
-  const defaultRuntimeMode = editingPendingTask
-    ? (editingPendingTask.runtimeMode ?? DEFAULT_RUNTIME_MODE)
-    : projectSettings.settings.defaultRuntimeMode;
+  const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
   const runtimeMode = selectedProjectDraft.runtimeMode ?? defaultRuntimeMode;
 
   // Antigravity keeps unavailable selections so sign-out or a catalog change
@@ -699,47 +625,23 @@ export function NewTaskFlowProvider(
     }
     replaceComposerDraftAttachments(selectedProjectDraftKey, []);
   };
-  const branchState = usePaginatedBranches({
-    environmentId: selectedProject?.environmentId ?? null,
-    // Git cwd (primary repo for Stave); null for the stand-in project.
-    cwd: selectedProjectGitCwd,
-  });
-  const branchesLoading = branchState.isPending && branchState.data === null;
-  const allBranchRefs = branchState.refs;
-  const availableBranches = pipe(
-    allBranchRefs,
-    Arr.filter((branch) => !branch.isRemote),
-  );
 
-  const carryDraftContentTo = (project: EnvironmentProject) => {
+  const carryDraftContentTo = (project: EnvironmentProject): string => {
     const target = { environmentId: project.environmentId, projectId: project.id };
-    if (activeDraftKey !== null && isNewTaskDraftKey(activeDraftKey)) {
-      retargetNewTaskDraft(activeDraftKey, target);
-    } else if (!editingPendingTaskRef.current) {
-      setActiveDraftKey(createNewTaskDraft(target));
+    const current = readFlow().draftKey;
+    if (current !== null && isNewTaskDraftKey(current)) {
+      retargetNewTaskDraft(current, target);
+      return current;
     }
+    return createNewTaskDraft(target);
   };
 
   const setProject = (project: EnvironmentProject) => {
-    carryDraftContentTo(project);
-    setSelectedEnvironmentId(project.environmentId);
-    setSelectedProjectKey(scopedProjectKey(project.environmentId, project.id));
-  };
-
-  const openDraft = (draftKey: string): boolean => {
-    const draft = appAtomRegistry.get(composerDraftsAtom)[draftKey];
-    const stamp = draft?.project;
-    if (!isNewTaskDraftKey(draftKey) || !stamp) {
-      return false;
-    }
-    // Keep resumption pending until the stamped project arrives.
-    if (resolveNewTaskDraftProject(targetProjects, stamp) === null) {
-      return false;
-    }
-    setActiveDraftKey(draftKey);
-    setSelectedEnvironmentId(stamp.environmentId);
-    setSelectedProjectKey(scopedProjectKey(stamp.environmentId, stamp.projectId));
-    return true;
+    updateFlow({
+      draftKey: carryDraftContentTo(project),
+      environmentId: project.environmentId,
+      projectKey: scopedProjectKey(project.environmentId, project.id),
+    });
   };
 
   const selectEnvironment = (environmentId: EnvironmentId) => {
@@ -747,11 +649,11 @@ export function NewTaskFlowProvider(
       projects.filter((project) => project.environmentId === environmentId),
       selectedProject,
     );
-    if (match) {
-      carryDraftContentTo(match);
-    }
-    setSelectedEnvironmentId(environmentId);
-    setSelectedProjectKey(match ? scopedProjectKey(match.environmentId, match.id) : null);
+    updateFlow({
+      draftKey: match ? carryDraftContentTo(match) : readFlow().draftKey,
+      environmentId,
+      projectKey: match ? scopedProjectKey(match.environmentId, match.id) : null,
+    });
   };
 
   const openScratch = useAtomCommand(projectEnvironment.openScratch, { reportFailure: false });
@@ -807,63 +709,24 @@ export function NewTaskFlowProvider(
       projectCwd: selectedProjectGitCwd ?? selectedProject.workspaceRoot,
       staveProject: selectedProjectIsStave,
     });
-    if (mode === "local" && localSelection.awaitsCurrentBranch) {
-      pendingLocalBranchSyncDraftKeysRef.current.add(selectedProjectDraftKey);
-    } else {
-      pendingLocalBranchSyncDraftKeysRef.current.delete(selectedProjectDraftKey);
-    }
     updateComposerDraftSettings(selectedProjectDraftKey, {
       workspaceSelection: {
         mode,
         branch: mode === "local" ? localSelection.branch : selectedBranchName,
         worktreePath: mode === "local" ? localSelection.worktreePath : selectedWorktreePath,
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
+        // Refs have not named the current branch yet; the selection follows it.
+        ...(mode === "local" && localSelection.awaitsCurrentBranch
+          ? { followsCurrentCheckout: true }
+          : {}),
       },
     });
   };
-
-  useEffect(() => {
-    if (
-      workspaceMode !== "local" ||
-      !selectedProject ||
-      !selectedProjectDraftKey ||
-      !pendingLocalBranchSyncDraftKeysRef.current.has(selectedProjectDraftKey)
-    ) {
-      return;
-    }
-    const localSelection = resolveNewTaskLocalWorkspaceSelection({
-      branches: availableBranches,
-      projectCwd: selectedProjectGitCwd ?? selectedProject.workspaceRoot,
-      staveProject: selectedProjectIsStave,
-    });
-    if (localSelection.awaitsCurrentBranch) {
-      return;
-    }
-
-    pendingLocalBranchSyncDraftKeysRef.current.delete(selectedProjectDraftKey);
-    updateComposerDraftSettings(selectedProjectDraftKey, {
-      workspaceSelection: {
-        mode: "local",
-        branch: localSelection.branch,
-        worktreePath: localSelection.worktreePath,
-        ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
-      },
-    });
-  }, [
-    availableBranches,
-    draftStartFromOrigin,
-    selectedProject,
-    selectedProjectDraftKey,
-    selectedProjectGitCwd,
-    selectedProjectIsStave,
-    workspaceMode,
-  ]);
 
   const selectBranch = (branch: VcsRef) => {
     if (!selectedProject || !selectedProjectDraftKey) {
       return;
     }
-    pendingLocalBranchSyncDraftKeysRef.current.delete(selectedProjectDraftKey);
     updateComposerDraftSettings(selectedProjectDraftKey, {
       workspaceSelection: {
         mode: workspaceMode,
@@ -889,6 +752,9 @@ export function NewTaskFlowProvider(
         branch: selectedBranchName,
         worktreePath: selectedWorktreePath,
         startFromOrigin: value,
+        ...(selectedBranchName === null && workspaceSelection.followsCurrentCheckout
+          ? { followsCurrentCheckout: true }
+          : {}),
       },
     });
   };
@@ -902,46 +768,6 @@ export function NewTaskFlowProvider(
     refreshBranches();
   };
 
-  useEffect(() => {
-    if (
-      !selectedProjectDraftKey ||
-      !defaultWorkspaceModeSettled ||
-      workspaceMode !== "worktree" ||
-      selectedBranchName !== null
-    ) {
-      return;
-    }
-    // A child effect may have applied a checkout preset since this render.
-    if (
-      getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection !==
-      selectedProjectDraft.workspaceSelection
-    ) {
-      return;
-    }
-    // Re-read before replacing: the draft screen can update workspace selection in this same commit.
-    const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
-    if (live && (live.mode !== "worktree" || live.branch !== null)) {
-      return;
-    }
-    // Search unfiltered refs: the default may exist only as origin/<default>, excluded by availableBranches.
-    const preferredBranch =
-      allBranchRefs.find((branch) => branch.isDefault) ??
-      availableBranches.find((branch) => branch.current) ??
-      null;
-    if (preferredBranch) {
-      selectBranch(preferredBranch);
-    }
-  }, [
-    allBranchRefs,
-    availableBranches,
-    defaultWorkspaceModeSettled,
-    selectBranch,
-    selectedBranchName,
-    selectedProjectDraft.workspaceSelection,
-    selectedProjectDraftKey,
-    workspaceMode,
-  ]);
-
   const setRuntimeMode = (value: RuntimeMode) => {
     if (selectedProjectDraftKey) {
       updateComposerDraftSettings(selectedProjectDraftKey, { runtimeMode: value });
@@ -953,40 +779,6 @@ export function NewTaskFlowProvider(
         interactionMode: resolveProviderInteractionMode(selectedProviderStatus, value),
       });
     }
-  };
-
-  const beginEditingPendingTask = (messageId: string): boolean => {
-    const message = findQueuedPendingTask(messageId);
-    if (!message?.creation) {
-      return false;
-    }
-    const draftKey = pendingTaskDraftKey(message.messageId);
-    if (isComposerDraftEmpty(getComposerDraftSnapshot(draftKey))) {
-      setComposerDraftText(draftKey, message.text);
-      setComposerDraftContext(draftKey, message.context);
-      replaceComposerDraftAttachments(draftKey, message.attachments);
-      updateComposerDraftSettings(draftKey, {
-        ...(message.creation.contextual ? { contextual: message.creation.contextual } : {}),
-        modelSelection: message.modelSelection,
-        runtimeMode: message.runtimeMode,
-        interactionMode: message.interactionMode,
-        workspaceSelection: {
-          mode: message.creation.workspaceMode,
-          branch: message.creation.branch,
-          worktreePath: message.creation.worktreePath,
-          startFromOrigin: message.creation.startFromOrigin ?? false,
-          pullRequestReference: message.creation.pullRequestReference,
-        },
-      });
-    }
-    setSelectedEnvironmentId(message.environmentId);
-    setSelectedProjectKey(scopedProjectKey(message.environmentId, message.creation.projectId));
-    activeEditingMessageId = message.messageId;
-    editingPendingTaskRef.current = message;
-    editingRevisionRef.current = capturePendingTaskEditorWriteBaseline(message.messageId);
-    setEditingPendingTask(message);
-    holdEditingQueuedMessage(message.messageId);
-    return true;
   };
 
   const buildPendingTaskMessage = (
@@ -1016,23 +808,8 @@ export function NewTaskFlowProvider(
     ) {
       return null;
     }
-    const workspaceSelection = resolveNewTaskWorkspaceSelection({
-      selection: canChooseWorkspace ? draft.workspaceSelection : undefined,
-      fallback: { mode: workspaceMode, branch: null, worktreePath: null },
-      isGitRepo,
-    });
-    const mode = forcedWorkspaceMode ?? workspaceSelection.mode;
-    // When the selection is the stand-in built from the queued snapshot,
-    // persist the original (possibly absent) snapshot values — the
-    // stand-in's placeholder title/workspaceRoot must never be written back
-    // as if they were real project metadata.
-    const usingPendingSnapshot = selectedProject === editingPendingProject;
-    const projectTitle = usingPendingSnapshot
-      ? editingPendingTask?.creation?.projectTitle
-      : selectedProject.title;
-    const projectCwd = usingPendingSnapshot
-      ? editingPendingTask?.creation?.projectCwd
-      : selectedProject.workspaceRoot;
+    const workspaceSelection = resolveWorkspaceSelection(draft.workspaceSelection);
+    const mode = workspaceSelection.mode;
     return {
       environmentId: selectedProject.environmentId,
       threadId: ThreadId.make(metadata.threadId),
@@ -1044,10 +821,8 @@ export function NewTaskFlowProvider(
       modelSelection: draftModelSelection,
       runtimeMode: draft.runtimeMode ?? defaultRuntimeMode,
       interactionMode: resolvePendingTaskInteractionMode({
-        preferenceLoaded: planModePreferenceLoaded,
         planModeEnabled: legacyPlanModeEnabled,
         draftInteractionMode: draft.interactionMode,
-        queuedInteractionMode: editingPendingTask?.interactionMode,
         provider: selectedEnvironmentServerConfig?.providers.find(
           (candidate) => candidate.instanceId === draftModelSelection.instanceId,
         ),
@@ -1055,8 +830,8 @@ export function NewTaskFlowProvider(
       creation: {
         ...(draft.contextual ? { contextual: draft.contextual } : {}),
         projectId: selectedProject.id,
-        ...(projectTitle !== undefined ? { projectTitle } : {}),
-        ...(projectCwd !== undefined ? { projectCwd } : {}),
+        projectTitle: selectedProject.title,
+        projectCwd: selectedProject.workspaceRoot,
         workspaceMode: mode,
         ...(mode === "worktree" && workspaceSelection?.pullRequestReference
           ? { pullRequestReference: workspaceSelection.pullRequestReference }
@@ -1067,10 +842,7 @@ export function NewTaskFlowProvider(
           selectedBranch: workspaceSelection?.branch ?? null,
           currentCheckoutBranch: options?.currentCheckoutBranch ?? null,
         }),
-        worktreePath:
-          mode === "worktree" || selectedProjectIsStave
-            ? null
-            : (workspaceSelection?.worktreePath ?? null),
+        worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
         ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
           ? { startFromOrigin: true }
           : {}),
@@ -1078,93 +850,6 @@ export function NewTaskFlowProvider(
       createdAt: metadata.createdAt,
     };
   };
-
-  const finishEditingPendingTask = () => {
-    const editing = editingPendingTaskRef.current;
-    editingPendingTaskRef.current = null;
-    if (editing) {
-      if (activeEditingMessageId === editing.messageId) {
-        activeEditingMessageId = null;
-      }
-      clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-      releaseEditingQueuedMessage(editing.messageId);
-      scheduleUnusedComposerAttachmentCleanup(editing.attachments);
-    }
-    setEditingPendingTask(null);
-  };
-
-  // End editing without saving if the queued task disappears; a later flush must not resurrect it.
-  const queuedMessagesByThreadKey = useThreadOutboxMessages();
-  useEffect(() => {
-    const editing = editingPendingTaskRef.current;
-    if (!editing) {
-      return;
-    }
-    const stillQueued = flattenQueuedThreadMessages(queuedMessagesByThreadKey).some(
-      (candidate) => candidate.messageId === editing.messageId,
-    );
-    if (!stillQueued) {
-      finishEditingPendingTask();
-    }
-  }, [finishEditingPendingTask, queuedMessagesByThreadKey]);
-
-  const editingFlushRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    editingFlushRef.current = () => {
-      const editing = editingPendingTaskRef.current;
-      if (!editing) {
-        return;
-      }
-      editingPendingTaskRef.current = null;
-      setEditingPendingTask(null);
-      if (activeEditingMessageId === editing.messageId) {
-        activeEditingMessageId = null;
-      }
-
-      const message = buildPendingTaskMessage({
-        threadId: editing.threadId,
-        commandId: editing.commandId,
-        messageId: editing.messageId,
-        createdAt: editing.createdAt,
-      });
-
-      if (!message) {
-        // Keep unsendable edits and the drain lock so removed content cannot auto-send from a stale payload.
-        return;
-      }
-
-      // Hand off pending saves to reopened editors; CAS still rejects unrelated edits, deletes and deliveries.
-      void flushPendingTaskEditorWrite({
-        message,
-        baseline: editingRevisionRef.current,
-        draftKey: pendingTaskDraftKey(editing.messageId),
-      })
-        .then((savedDraftStillCurrent) => {
-          if (activeEditingMessageId === editing.messageId) {
-            return;
-          }
-          if (!savedDraftStillCurrent) {
-            return;
-          }
-          clearComposerDraft(pendingTaskDraftKey(editing.messageId));
-          releaseEditingQueuedMessage(editing.messageId);
-          scheduleUnusedComposerAttachmentCleanup(editing.attachments);
-        })
-        .catch((error) => {
-          // Keep the draft and drain lock on failure so stale payloads cannot discard edits; reopening retries.
-          console.warn("[new-task] failed to save edited pending task", error);
-        });
-    };
-  }, [buildPendingTaskMessage]);
-  const cancelEditingPendingTask = () => {
-    editingFlushRef.current?.();
-  };
-  useEffect(
-    () => () => {
-      editingFlushRef.current?.();
-    },
-    [],
-  );
 
   const value = {
     activeNewTask,
@@ -1178,10 +863,10 @@ export function NewTaskFlowProvider(
     canChooseWorkspace,
     selectedBranchName,
     selectedWorktreePath,
+    resolveWorkspaceSelection,
     startFromOrigin,
     draftKey: selectedProjectDraftKey,
     pullRequestReference: selectedProjectDraft.workspaceSelection?.pullRequestReference,
-    editingPendingTask,
     prompt,
     attachments,
     submitting,
@@ -1200,9 +885,10 @@ export function NewTaskFlowProvider(
     selectedModelOption,
     selectedProviderStatus,
     providerGroups,
-    reset,
     setProject,
-    openDraft,
+    getSelectedProjectKey: () => readFlow().projectKey,
+    missingRouteDraftId:
+      routeDraftResolution.kind === "missing" ? (props.routeDraftId ?? null) : null,
     selectEnvironment,
     switchEnvironment,
     switchingToEnvironmentId,
@@ -1210,21 +896,18 @@ export function NewTaskFlowProvider(
     setWorkspaceMode,
     selectBranch,
     setStartFromOrigin,
-    beginEditingPendingTask,
-    finishEditingPendingTask,
-    cancelEditingPendingTask,
     buildPendingTaskMessage,
     setPrompt,
     replaceAttachments,
     appendAttachments,
     removeAttachment,
     clearAttachments,
-    setSubmitting,
+    setSubmitting: (value: boolean) => updateFlow({ submitting: value }),
     loadBranches,
     setRuntimeMode,
     setInteractionMode,
     setSelectedModelOptions,
-    setExpandedProvider,
+    setExpandedProvider: (value: string | null) => updateFlow({ expandedProvider: value }),
   } satisfies NewTaskFlowContextValue;
 
   return (

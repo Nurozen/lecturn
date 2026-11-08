@@ -1,4 +1,11 @@
+import { findPromptLinkProjects } from "@lecturn/client-runtime/prompt-links";
+import type {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@lecturn/client-runtime/state/shell";
 import type { PromptLinkRepository } from "@lecturn/shared/promptLinks";
+
+import { listedProjects } from "../../state/listed-entities";
 
 export const PROMPT_LINK_PARAM_KEYS = ["prompt", "repo", "pr", "provider", "model"] as const;
 
@@ -17,8 +24,12 @@ export function promptLinkSearchFromParams(
   return search.size > 0 ? search.toString() : null;
 }
 
-export function clearedPromptLinkParams(keys: ReadonlyArray<string> = PROMPT_LINK_PARAM_KEYS) {
-  return Object.fromEntries(keys.map((key) => [key, undefined]));
+export function withoutPromptLinkParams(params: object | undefined): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params ?? {}).filter(
+      ([key]) => !(PROMPT_LINK_PARAM_KEYS as ReadonlyArray<string>).includes(key),
+    ),
+  );
 }
 
 export function promptLinkNotice(input: {
@@ -73,3 +84,41 @@ export function latestThreadEnvironmentIds<Id extends string>(
 
 export const promptLinkRepositoryName = (repository: PromptLinkRepository) =>
   `${repository.owner}/${repository.name}`;
+
+/**
+ * The Threads tab's projects checked out from the link's repository, most recently active first.
+ * App workspaces and archived Stave spaces are not offered by the picker, so a link never opens them.
+ */
+export function promptLinkProjects(
+  projects: ReadonlyArray<EnvironmentProject>,
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  repository: PromptLinkRepository,
+): EnvironmentProject[] {
+  const lastActivity = new Map<string, string>();
+  for (const thread of threads) {
+    const key = `${thread.environmentId}:${thread.projectId}`;
+    if (thread.updatedAt > (lastActivity.get(key) ?? "")) lastActivity.set(key, thread.updatedAt);
+  }
+  const activityOf = (project: EnvironmentProject) =>
+    lastActivity.get(`${project.environmentId}:${project.id}`) ?? "";
+  return findPromptLinkProjects(
+    [...listedProjects(projects)].sort((left, right) =>
+      activityOf(right).localeCompare(activityOf(left)),
+    ),
+    repository,
+  );
+}
+
+/**
+ * Advances a parsed link at each navigation state; `resolve` is the link to apply. The first
+ * state after the parse must hold the link's screen. A link that never lands there, or whose
+ * screen is left before its target is ready, is dropped so it cannot apply on a later visit.
+ */
+export function stepPendingPromptLink<Link>(
+  link: Link,
+  input: { readonly screenOnStack: boolean; readonly ready: boolean },
+): { readonly pending: Link | null; readonly resolve: Link | null } {
+  if (!input.screenOnStack) return { pending: null, resolve: null };
+  if (input.ready) return { pending: null, resolve: link };
+  return { pending: link, resolve: null };
+}

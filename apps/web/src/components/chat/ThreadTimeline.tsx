@@ -25,8 +25,6 @@ export function ThreadTimeline({
   activeThreadKey,
   syncing,
   detailLoading,
-  readyMarkdownCwd,
-  readyWorkspaceRoot,
   composerCardApprovals,
   androidChatScope,
   androidChatThread,
@@ -40,8 +38,6 @@ export function ThreadTimeline({
   activeThreadKey: string | null;
   syncing: boolean;
   detailLoading: boolean;
-  readyMarkdownCwd: string | null;
-  readyWorkspaceRoot: string | null;
   /** Approvals the composer card asks, whose timeline rows leave so nothing is asked twice. */
   composerCardApprovals: ReadonlyArray<PendingApproval>;
   androidChatScope: string;
@@ -54,7 +50,7 @@ export function ThreadTimeline({
     visibleTurnItems,
   });
   const entries = draftEntries ?? serverEntries;
-  const displayed = resolveThreadSwitchTimeline({
+  const displayedEntries = resolveThreadSwitchTimeline({
     loading: entries.length === 0 && syncing,
     activeThreadKey,
     nextEntries: entries,
@@ -64,13 +60,8 @@ export function ThreadTimeline({
     if (detailLoading || entries.length === 0 || timelineHasEphemeralPreviewUrls(entries)) {
       return;
     }
-    rememberReadyThreadTimeline({
-      threadKey: activeThreadKey,
-      entries,
-      markdownCwd: readyMarkdownCwd,
-      workspaceRoot: readyWorkspaceRoot,
-    });
-  }, [activeThreadKey, detailLoading, entries, readyMarkdownCwd, readyWorkspaceRoot]);
+    rememberReadyThreadTimeline({ threadKey: activeThreadKey, entries });
+  }, [activeThreadKey, detailLoading, entries]);
   useAndroidChatPublisher({
     scope: androidChatScope,
     // Only the Android host reads the messages; nothing else pays for them per text delta.
@@ -82,7 +73,7 @@ export function ThreadTimeline({
             messages: entries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
           },
   });
-  const shownEntries = useComposerCardTimelineEntries(displayed.entries, composerCardApprovals);
+  const shownEntries = useComposerCardTimelineEntries(displayedEntries, composerCardApprovals);
   return (
     <MessagesTimeline
       {...timelineProps}

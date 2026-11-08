@@ -10,6 +10,11 @@ The relay Alchemy stack owns a shared Axiom trace setup:
 - `lecturn-mobile-otel-ingest-prod`, the dataset-scoped mobile ingest token
 - `lecturn-relay-client-otel-ingest-prod`, the dataset-scoped first-party relay-client ingest token
 - `lecturn-relay-recent-spans-prod`, a view of recent request and endpoint spans
+- `lecturn-mobile-logs-prod` and `lecturn-mobile-metrics-prod`, the mobile app's crash, error, and
+  startup data from `expo-observe` (see [Mobile crashes and errors](#mobile-crashes-and-errors))
+- `lecturn-mobile-telemetry-ingest-prod`, the ingest token the Worker forwards that data with
+- `lecturn-mobile-sourcemaps-prod`, the R2 bucket of mobile JavaScript source maps, and
+  `lecturn-mobile-sourcemaps-upload-prod`, a Cloudflare token that can only write objects to it
 
 Alchemy stages append their sanitized stage name to isolate resources, for example
 `lecturn-relay-traces-dev-example` for a personal stage.
@@ -159,3 +164,113 @@ see [Managed tunnel cleanup rollout](release.md#managed-tunnel-cleanup-rollout).
 **Links degraded / database slow.** Warnings for slow degradation. Link failures above 20% over six
 hours have so far meant provisioning running into the 9 s deadline, with Postgres latency as the
 usual cause.
+
+## Mobile crashes and errors
+
+Off by default: none of this runs until it is enabled, see
+[Enabling mobile telemetry](#enabling-mobile-telemetry).
+
+The mobile app reports through [`expo-observe`](https://docs.expo.dev/eas/observe/). Its
+`endpointUrl` points at the relay (`/v1/mobile/observe`, set in `apps/mobile/app.config.ts` from
+`LECTURN_RELAY_URL`), because Observe cannot send auth headers and prefixes every path with the EAS
+project id. The relay forwards each request to Axiom with its own token: logs (JavaScript errors,
+native crashes, log events) to `lecturn-mobile-logs-*`, metrics to `lecturn-mobile-metrics-*`, and
+spans to the shared traces dataset. Expo's Observe dashboard receives nothing. The endpoint URL is
+compiled into the native app, so pointing it elsewhere takes a store build.
+
+Hermes stacks from release builds are minified bytecode offsets. On the way through, the relay
+rewrites each JavaScript exception's `exception.stacktrace` with the bundle's source map from R2
+and records the outcome on the log record:
+
+- `relay.symbolication.status`: `symbolicated`, or why not. `no_bundle_id` is a development or
+  local build. `source_map_missing` means no map was uploaded for the bundle;
+  `source_map_too_large`, `source_map_invalid` and `source_map_unavailable` (R2 unreadable, retried
+  shortly) mean one was. `source_map_limit` is a request naming more bundles than the relay decodes
+  at once, and `no_bundle_frames` a stack with no frames from the bundle.
+- `relay.symbolication.source_map`: the R2 key used
+- `relay.symbolication.raw_stacktrace`: the original stack, when it was rewritten
+
+iOS frames lose their install path (`/private/var/containers/Bundle/Application/<uuid>/...`), which
+differs per install, so `exception.stacktrace` groups across users.
+
+A fatal JavaScript error ends in a native abort, which Observe reports as a second crash with a
+generic React Native stack. The relay marks that one `relay.crash.js_fatal` when both arrive in one
+request, as they do on the next launch. Leave it out to count real native crashes:
+
+```apl
+['lecturn-mobile-logs-prod']
+| where ['attributes.expo.error.source'] == 'nativeCrash'
+| where isnull(['attributes.relay.crash.js_fatal'])
+| summarize count() by ['attributes.exception.type'], ['attributes.exception.message']
+```
+
+Native crash stacks (`expo.error.source == 'nativeCrash'`) are not symbolicated. On iOS, app frames
+read like `main (Lecturn + 19476)`: the offset into the app binary. The build hook uploads that
+build's dSYMs to `ios/dsym/<easBuildId>.zip`; download it with an account R2 token, then:
+
+```sh
+unzip <easBuildId>.zip
+atos -arch arm64 -o Lecturn.app.dSYM/Contents/Resources/DWARF/Lecturn -l 0x100000000 \
+  $(printf '0x%x' $((0x100000000 + 19476)))
+```
+
+Maps are keyed by the bundle that crashed: `<platform>/ota/<updateId>.map` for OTA updates and
+`<platform>/build/<easBuildId>.map` for the bundle embedded in a store build. The production
+mobile workflow uploads OTA maps after `eas update`, and the `eas-build-on-success` hook in
+`apps/mobile/package.json` uploads a build's map, both with `apps/mobile/scripts/upload-sourcemaps.mts`.
+They need the `MOBILE_SOURCEMAPS_R2` secret, a JSON value the stack outputs as
+`mobileSourceMapsUploadCredentials` from a token that can only write to the bucket. Creating that
+token needs **Account API Tokens: Edit** on the deploy token. Deploy output shows it redacted; read
+it from state, where it is under `__redacted__`:
+
+```sh
+cd infra/relay && vp exec alchemy state read LecturnRelay/prod/output
+```
+
+Set it as a GitHub Actions secret, for OTA updates, and as an EAS environment variable with
+`secret` visibility in the `production` environment only, for builds. Keep it out of `preview`:
+PR preview builds run the PR's code in that environment. In CI only the upload step gets it, not
+`eas update` and the dependencies it runs. If the deploy replaces the token, update both.
+
+The `lecturn-mobile-health` dashboard is the place to look every few days: crash and handled
+error counts, top crashes with the installs and app versions they hit, crashes by version, whether
+stacks are symbolicated, and whether reports reach the relay at all. A crash counts once: the
+native abort after a JS crash (`relay.crash.js_fatal`) is left out. Startup times are metrics, so
+they are not on it; query `lecturn-mobile-metrics-*` with MPL. Prod and PR previews get the
+dashboard, and deployments with `RELAY_ALERT_NOTIFIER_ID` get these monitors
+([`infra/relay/src/mobileTelemetry/monitoring.ts`](../../infra/relay/src/mobileTelemetry/monitoring.ts)):
+
+- **crash spike** (pages): crashes per 15 min well above the same time over the last 7 days. Until
+  a week of data exists it has no baseline. A spike right after a release usually means a bad OTA
+  update; roll it back in EAS.
+- **one crash hitting many installs** (pages): a single crash on 25 installs within an hour.
+- **reports stopped** (warning): no startup metrics forwarded for an hour, so crashes are not
+  arriving either.
+- **crash stacks not symbolicated** (warning): over half of release JS stacks stayed minified for
+  6 h. `relay.symbolication.status` names the cause.
+
+Thresholds are starting points, not measured baselines; revisit them after two weeks of
+production data.
+
+Without it, uploads are skipped with a warning and stacks stay minified. Each ingest request is one
+`relay.mobile_telemetry.ingest` span; `relay.mobile_telemetry.outcome` is `forwarded`,
+`rate_limited`, `body_too_large`, `upstream_unavailable`, or `upstream_timeout`.
+
+### Enabling mobile telemetry
+
+The relay side is off until the GitHub Actions variable `MOBILE_TELEMETRY_ENABLED` is `true`.
+Off, the deploy creates none of the above (mobile datasets, ingest token, dashboard and monitors,
+the R2 bucket, its upload token and the rate limit binding), and `/v1/mobile/observe` answers 404,
+which Observe treats as final: the app drops the batch without retrying or showing anything. The
+404 still gets the normal relay HTTP request span (its URL includes the project id; the body is not
+read). To turn it on:
+
+1. In the Cloudflare dashboard, confirm R2 is enabled on the account and the token behind the
+   `CLOUDFLARE_API_TOKEN` secret has **Workers R2 Storage: Edit** and **Account API Tokens: Edit**.
+2. Confirm the Axiom plan allows `otel:logs:v1` and `otel:metrics:v1` datasets.
+3. Set `MOBILE_TELEMETRY_ENABLED=true` (repository or `production` environment variable), then
+   run Deploy Lecturn Connect relay and check its log shows only creates for the new resources.
+4. Set `MOBILE_SOURCEMAPS_R2` from the deploy's state, as described above.
+
+Setting it back to `false` makes the next deploy delete those resources. Empty the prod source
+maps bucket first: R2 will not delete a non-empty bucket, and that would fail the deploy.

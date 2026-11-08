@@ -12,10 +12,7 @@ import { currentWorkspaceSelections } from "../workspace/workspace-selection-sto
 import { rememberedSettingsPage } from "../workspace/workspace-tab-navigation";
 import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
-import {
-  ScreenScrollView as ScrollView,
-  ScreenScrollViewBottomInset,
-} from "../../components/ui/ScreenScrollView";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -23,15 +20,14 @@ import { useNavigation, useNavigationState, type NavigationProp } from "@react-n
 import { Fragment, use, useMemo, type ComponentProps, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
-import { useDeviceType } from "../../native/native-layout-metrics";
-import { useCompactWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { deriveProjectGroupLabel } from "@lecturn/client-runtime/state/project-grouping";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TeamSelector } from "../cloud/TeamSelector";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { ContextualButton } from "../contextual/ContextualControls";
-import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
 import { useEnvironments } from "../../state/environments";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectAccountsSettings } from "./ConnectAccountsSettings";
@@ -50,10 +46,6 @@ import { filterSettingsSections } from "./settings-search";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 
 export function SettingsRouteScreen() {
-  const surface = useWorkspaceSurface();
-  const deviceType = useDeviceType();
-  const compactTabs = useCompactWorkspaceTabs();
-  const workspace = useWorkspaceTabs();
   const { layout } = useAdaptiveWorkspaceLayout();
   const inSidebar = use(NativePrimaryColumnContext) !== null && layout.usesSplitView;
   // The page open beside the list: the route right above the Settings tab's route. While
@@ -65,6 +57,17 @@ export function SettingsRouteScreen() {
       ? rememberedSettingsPage(currentWorkspaceSelections())
       : (state.routes[list + 1]?.name ?? null);
   });
+  return <SettingsListScreen sidebar={inSidebar} selected={selected} />;
+}
+
+export function SettingsListScreen(props: {
+  readonly sidebar: boolean;
+  readonly selected: string | null;
+}) {
+  const surface = useWorkspaceSurface();
+  const workspace = useWorkspaceTabs();
+  const inSidebar = props.sidebar;
+  const selected = props.selected;
   const sidebar = useMemo(() => (inSidebar ? { selected } : null), [inSidebar, selected]);
   const content = hasCloudPublicConfig() ? (
     <ConfiguredSettingsRouteScreen />
@@ -76,28 +79,27 @@ export function SettingsRouteScreen() {
     <SettingsSidebarContext value={sidebar}>
       <View className={`flex-1 ${inSidebar ? surface.className : "bg-screen"}`}>
         <SettingsEnvironmentFilterHeader />
-        <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
-          {Platform.OS === "android" ? (
-            <SettingsScreen
-              title="Settings"
-              trailing={<AndroidSettingsEnvironmentFilter />}
-              search={
-                workspace
-                  ? {
-                      value: workspace.state.tabs.settings.query,
-                      onChangeText: (query) =>
-                        workspace.dispatch({ type: "query", tab: "settings", query }),
-                      placeholder: "Search settings",
-                    }
-                  : undefined
-              }
-            >
-              {content}
-            </SettingsScreen>
-          ) : (
-            content
-          )}
-        </ScreenScrollViewBottomInset>
+        {Platform.OS === "android" ? (
+          <SettingsScreen
+            title="Settings"
+            workspaceRoot={inSidebar}
+            trailing={<AndroidSettingsEnvironmentFilter />}
+            search={
+              workspace
+                ? {
+                    value: workspace.state.tabs.settings.query,
+                    onChangeText: (query) =>
+                      workspace.dispatch({ type: "query", tab: "settings", query }),
+                    placeholder: "Search settings",
+                  }
+                : undefined
+            }
+          >
+            {content}
+          </SettingsScreen>
+        ) : (
+          content
+        )}
       </View>
     </SettingsSidebarContext>
   );
@@ -165,6 +167,8 @@ function SettingsList(props: {
   readonly connections: readonly SettingsListRow[];
 }) {
   const insets = useSafeAreaInsets();
+  // UIKit insets the scroll view by its column's safe area, which this context can report as 0.
+  const bottomSafeArea = useNativeColumnLayoutMetrics()?.safeArea.bottom ?? insets.bottom;
   const workspace = useWorkspaceTabs();
   const query = workspace?.state.tabs.settings.query ?? "";
   const overflowRows = useOverflowRows();
@@ -196,16 +200,17 @@ function SettingsList(props: {
         contentContainerClassName="gap-4 px-5 pt-4"
         contentContainerStyle={{
           // The workspace's clearance keeps the last row above its search field and keyboard.
-          paddingBottom: Math.max(
-            Math.max(insets.bottom, 18) + 18,
-            workspace?.bottomClearance ?? 0,
-          ),
+          paddingBottom:
+            Platform.OS === "ios"
+              ? Math.max(Math.max(bottomSafeArea, 18) + 18, workspace?.bottomClearance ?? 0) -
+                bottomSafeArea
+              : Math.max(Math.max(insets.bottom, 18) + 18, workspace?.bottomClearance ?? 0),
         }}
       >
         {sections.length || showAccounts ? (
           <>
             {sections.map((section, index) => (
-              <Fragment key={section.title ?? "tabs"}>
+              <Fragment key={section.title ?? `untitled-${index}`}>
                 {index === accountsIndex ? props.accounts : null}
                 <SettingsSection title={section.title}>
                   {section.render
@@ -254,11 +259,13 @@ function useSettingsIndexSections(): SettingsListSection[] {
   ): SettingsListRow => ({ id: target, icon, label, target, ...extra });
   const serverPage = (target: SettingsPageTarget, icon: SettingsListRow["icon"], label: string) =>
     page(target, icon, label, { disabled: noServerTargets });
+  // The same pages and groups as Settings on web, minus what mobile has no setting for.
   return [
     {
-      title: "Interface",
       rows: [
+        page("SettingsOrganization", "gearshape", "General"),
         page("SettingsAppearance", "paintbrush", "Appearance"),
+        page("SettingsFollowUp", "bubble.left.and.bubble.right", "Chat"),
         ...(navigationCustomizationAvailable()
           ? [page("SettingsNavigation", "line.3.horizontal", "Navigation tabs")]
           : []),
@@ -271,35 +278,34 @@ function useSettingsIndexSections(): SettingsListSection[] {
       ],
     },
     {
-      title: "Automations",
-      rows: [page("SettingsScheduledTasks", "clock", "Scheduled tasks")],
-    },
-    {
-      title: "Projects & threads",
+      title: "Agents",
       rows: [
-        ...(selectedProjectKey !== null
-          ? [page("SettingsProjectOverview", "folder", "Overview", { value: projectLabel })]
-          : []),
-        page("SettingsOrganization", "folder", "Organization"),
-        page("SettingsThreads", "text.bubble", "Thread behavior"),
-        page("SettingsFollowUp", "arrow.turn.left.up", "Follow-ups"),
-        page("SettingsArchive", "archivebox", "Archived Threads"),
+        serverPage("SettingsProviderAccounts", "person.crop.circle", "Providers"),
+        serverPage("SettingsThreads", "text.bubble", "Threads"),
+        page("SettingsScheduledTasks", "clock", "Scheduled tasks"),
       ],
     },
     contextual,
     {
-      title: "Server settings",
+      title: "Code",
       rows: [
-        serverPage("SettingsProviderAccounts", "person.crop.circle", "Provider accounts"),
-        serverPage("SettingsEnvironmentNewThreads", "text.bubble", "New threads"),
+        page(
+          "SettingsProjectOverview",
+          "folder",
+          "Projects",
+          selectedProjectKey !== null ? { value: projectLabel } : undefined,
+        ),
         serverPage("SettingsEnvironmentSourceControl", "arrow.triangle.branch", "Source control"),
-        serverPage("SettingsEnvironmentAgentBehavior", "text.alignleft", "Agent behavior"),
-        serverPage("SettingsEnvironmentMaintenance", "arrow.clockwise", "Maintenance"),
+        serverPage("SettingsWorktrees", "square.on.square", "Worktrees"),
       ],
     },
     {
-      title: "App",
-      rows: [page("SettingsAbout", "info.circle", "About Lecturn")],
+      rows: [
+        serverPage("SettingsEnvironmentMaintenance", "arrow.clockwise", "Maintenance"),
+        page("SettingsLabs", "sparkles", "Labs"),
+        page("SettingsAbout", "info.circle", "About"),
+        page("SettingsArchive", "archivebox", "Archive"),
+      ],
     },
   ];
 }

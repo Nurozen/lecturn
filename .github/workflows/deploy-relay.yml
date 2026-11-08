@@ -5,12 +5,11 @@ on:
     branches:
       - main
   # Redeploys main after a variable or secret change. Alchemy redeploys the
-  # Worker when a value it reads changes, so force is rarely needed, and it
-  # replaces the Postgres runtime role (alchemy-run/alchemy#1832).
+  # Worker when a value it reads changes, so force is rarely needed.
   workflow_dispatch:
     inputs:
       force:
-        description: Redeploy every resource, including ones with no detected changes. Replaces the Postgres runtime role.
+        description: Redeploy every resource, including ones with no detected changes.
         type: boolean
         default: false
 
@@ -52,6 +51,8 @@ jobs:
       ALCHEMY_TELEMETRY_DISABLED: "1"
       # Flags default off; production rollout requires reviewed configuration.
       TEAMS_ENABLED: ${{ vars.TEAMS_ENABLED || 'false' }}
+      # Mobile crash telemetry: R2 bucket, upload token and Axiom datasets. See relay-observability.md.
+      MOBILE_TELEMETRY_ENABLED: ${{ vars.MOBILE_TELEMETRY_ENABLED || 'false' }}
       STRIPE_TEAM_MONTHLY_PRICE_ID: ${{ vars.STRIPE_TEAM_MONTHLY_PRICE_ID }}
       STRIPE_TEAM_ANNUAL_PRICE_ID: ${{ vars.STRIPE_TEAM_ANNUAL_PRICE_ID }}
       STRIPE_TEAM_PORTAL_CONFIGURATION_ID: ${{ vars.STRIPE_TEAM_PORTAL_CONFIGURATION_ID }}

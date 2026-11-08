@@ -2627,6 +2627,7 @@ it.layer(
               "claudeAgent",
               "codex",
               "cursor",
+              "fx",
               "githubCopilot",
               "grok",
               "muse",

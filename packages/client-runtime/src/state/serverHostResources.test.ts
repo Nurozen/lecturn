@@ -48,6 +48,7 @@ it.effect("cancels unmounted host resource reads and only requests again on remo
         subscribeServerConfig: () => Stream.never,
         ready: Effect.void,
         probe: Effect.void,
+        inboundFrames: Effect.succeed(0),
         closed: Effect.never,
       };
       const environmentId = EnvironmentId.make("host-resources-environment");

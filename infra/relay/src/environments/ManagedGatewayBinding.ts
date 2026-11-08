@@ -1,6 +1,6 @@
 import * as Alchemy from "alchemy";
 import type { HttpEffect } from "alchemy/Http";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import { Effect, Redacted } from "effect";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";

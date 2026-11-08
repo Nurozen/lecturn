@@ -72,7 +72,9 @@ export function SettledThreadMetadata(props: {
       entry.slug === props.modelSelection.model ||
       entry.aliases?.includes(props.modelSelection.model),
   );
-  const modelLabel = model ? getTriggerDisplayModelName(model) : props.modelSelection.model;
+  const modelLabel = model
+    ? getTriggerDisplayModelName(model, provider?.driver)
+    : props.modelSelection.model;
   const descriptors = getProviderOptionDescriptors({
     caps: model?.capabilities ?? { optionDescriptors: [] },
     selections: props.modelSelection.options,

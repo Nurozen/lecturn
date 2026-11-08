@@ -30,7 +30,6 @@ import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-searc
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, type Atom } from "effect/reactivity";
-import { useFocusEffect } from "@react-navigation/native";
 import { use, useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   Platform,
@@ -71,6 +70,7 @@ import { useThreadSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { useThreadListSearchMatches } from "../threads/useThreadListSearchMatches";
 import { useThreadListV2 } from "../threads/useThreadListV2";
+import { useThreadListNow } from "../threads/use-thread-list-now";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom, threadListEnvironmentsAtom } from "../../state/server";
@@ -584,17 +584,7 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  // Keep time in state; the compiler would cache a render-time new Date().
-  const [now, setNow] = useState(() => new Date().toISOString());
-  const nowMinute = now.slice(0, 16);
-  // Capture the wake timestamp so section membership and move planning
-  // refresh at the same boundary, before the next minute tick.
-  const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(() => Date.now());
-  useFocusEffect(() => {
-    setNow(new Date().toISOString());
-    const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
-    return () => clearInterval(id);
-  });
+  const now = useThreadListNow(props.threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
     providersByEnvironmentId,
@@ -624,7 +614,7 @@ export function HomeScreen(props: HomeScreenProps) {
     sagaIndex,
   );
   const allThreadShells = useThreadShells();
-  const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick, moveScopes);
+  const pendingOrder = usePendingThreadOrder(moveScopes);
   const onMoveThread = props.onMoveThread;
   const handleMoveThread = (thread: EnvironmentThreadShell, direction: ThreadMoveDestination) => {
     const scope = moveScopes.get(scopedProjectKey(thread.environmentId, thread.projectId));
@@ -662,19 +652,6 @@ export function HomeScreen(props: HomeScreenProps) {
     settledShelfExpanded: true,
     selectedThreadKey,
   });
-  const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;
-  useEffect(() => {
-    if (nextSnoozeWakeAt === null) return;
-    const wakeAtMs = Date.parse(nextSnoozeWakeAt);
-    if (Number.isNaN(wakeAtMs)) return;
-    const delayMs = Math.min(Math.max(0, wakeAtMs - Date.now()) + 50, 2_147_483_647);
-    const id = setTimeout(() => {
-      setNow(new Date().toISOString());
-      bumpSnoozeWakeTick(Date.now());
-    }, delayMs);
-    return () => clearTimeout(id);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
-  }, [nextSnoozeWakeAt, snoozeWakeTick]);
   // Lecturn: the Squires section above the project tree.
   const squireItems = useSquireHomeItems({
     environments: props.environments,

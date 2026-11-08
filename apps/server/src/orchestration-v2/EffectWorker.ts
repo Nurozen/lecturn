@@ -598,6 +598,29 @@ export const layerExecutor: Layer.Layer<
   }),
 );
 
+// A running effect blocks later work on its thread and its lease is never reclaimed in-process,
+// so a stop that hangs must give up and fall through to the normal retry/fail path.
+const DELEGATED_TASKS_STOP_TIMEOUT = Duration.seconds(30);
+
+const boundExecution =
+  (effect: EffectOutbox.OrchestrationEffectV2) =>
+  <A>(execution: Effect.Effect<A, OrchestrationEffectExecutionError>) =>
+    effect.request.type === "delegated-tasks.stop"
+      ? execution.pipe(
+          Effect.timeoutOrElse({
+            duration: DELEGATED_TASKS_STOP_TIMEOUT,
+            orElse: () =>
+              Effect.fail(
+                new OrchestrationEffectExecutionError({
+                  effectId: effect.id,
+                  effectType: effect.request.type,
+                  cause: `Timed out after ${Duration.format(DELEGATED_TASKS_STOP_TIMEOUT)}.`,
+                }),
+              ),
+          }),
+        )
+      : execution;
+
 export class OrchestrationEffectWorkerError extends Schema.TaggedError<OrchestrationEffectWorkerError>()(
   "OrchestrationEffectWorkerError",
   {
@@ -784,6 +807,7 @@ export const layerWithOptions = (
           const execution = executor
             .execute(effect, { willRetry: effect.attemptCount < maxAttempts })
             .pipe(
+              boundExecution(effect),
               Effect.map((outcome) =>
                 EffectOutbox.isOrchestrationEffectDeferral(outcome)
                   ? outcome

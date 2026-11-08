@@ -2,14 +2,18 @@ import { environmentProjects } from "./projects";
 import { listedThreadShells } from "./listed-entities";
 import { scopedProjectKey } from "../lib/scopedEntities";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect } from "react";
+import { deadlineStore, minuteTick } from "@lecturn/client-runtime/clock";
 import { Atom } from "effect/reactivity";
+import { useEffect } from "react";
 
 import {
   reconcilePendingThreadOrder,
   type PendingThreadOrder,
 } from "../features/threads/threadOrder";
-import { getThreadListV2OrderedSection } from "../features/threads/threadListV2";
+import {
+  getThreadListV2OrderedSection,
+  nextSnoozeWakeAfter,
+} from "../features/threads/threadListV2";
 import { appAtomRegistry } from "./atom-registry";
 import { environmentServerConfigsAtom } from "./server";
 import { environmentThreadShells } from "./threads";
@@ -23,62 +27,81 @@ export const pendingThreadOrderAtom = Atom.make<PendingThreadOrder | null>(null)
   Atom.keepAlive,
 );
 
-export function usePendingThreadOrder(
-  nowMinute: string,
-  snoozeWakeTick: number,
-  scopes?: ReadonlyMap<string, readonly string[]>,
-) {
+/**
+ * `scopes` maps each project key to the project keys of its move scope, as the list groups them
+ * now. A scoped hold whose scope regrouped since it began is retired.
+ */
+export function usePendingThreadOrder(scopes?: ReadonlyMap<string, readonly string[]>) {
   const pending = useAtomValue(pendingThreadOrderAtom);
-  // Clock-driven wakes can change membership without shell events; retire order holds and re-enable moves then.
+  // oxlint-disable-next-line lecturn/react-effect-budget -- Move scopes come from the rendered grouping, which no store holds.
   useEffect(() => {
-    const current = getPendingThreadOrder(
-      new Date(Math.max(Date.parse(`${nowMinute}:00.000Z`), snoozeWakeTick)).toISOString(),
-    );
-    if (current?.scopeProjectKeys && scopes) {
-      const expected = JSON.stringify(current.scopeProjectKeys);
-      if (current.scopeProjectKeys.some((key) => JSON.stringify(scopes.get(key)) !== expected)) {
-        cancelPendingOrder?.();
-      }
-    }
-  }, [nowMinute, snoozeWakeTick, scopes]);
+    if (scopes) retirePendingOrderOutsideScopes(scopes);
+  }, [scopes]);
   return pending;
 }
 
+let refreshPendingOrder: (() => void) | undefined;
 let cancelPendingOrder: (() => void) | undefined;
-let refreshPendingOrder: ((now?: string) => void) | undefined;
+// Only one hold is live at a time; starting another tears down the previous
+// hold's subscriptions so its clocks and listeners do not outlive it.
+let teardownPendingOrder: (() => void) | undefined;
 
-export function getPendingThreadOrder(now?: string): PendingThreadOrder | null {
-  refreshPendingOrder?.(now);
+export function getPendingThreadOrder(): PendingThreadOrder | null {
+  refreshPendingOrder?.();
   return appAtomRegistry.get(pendingThreadOrderAtom);
+}
+
+function retirePendingOrderOutsideScopes(scopes: ReadonlyMap<string, readonly string[]>): void {
+  const current = getPendingThreadOrder();
+  if (!current?.scopeProjectKeys) return;
+  const expected = JSON.stringify(current.scopeProjectKeys);
+  if (current.scopeProjectKeys.some((key) => JSON.stringify(scopes.get(key)) !== expected)) {
+    cancelPendingOrder?.();
+  }
 }
 
 export function beginPendingThreadOrder(pending: PendingThreadOrder) {
   const unsubscribers: (() => void)[] = [];
+  // A timed wake can change section membership without a shell event, so the
+  // hold also re-checks on each minute and at the next snooze expiry.
+  let wake: { readonly atMs: number | null; readonly unsubscribe: () => void } | null = null;
+  const armWake = (atMs: number | null) => {
+    if (wake?.atMs === atMs) return;
+    wake?.unsubscribe();
+    wake = { atMs, unsubscribe: deadlineStore(atMs).subscribe(refresh) };
+  };
+  const teardown = () => {
+    for (const unsubscribe of unsubscribers.splice(0)) unsubscribe();
+    wake?.unsubscribe();
+    wake = null;
+  };
   const cancel = () => {
     if (refreshPendingOrder !== refresh) return;
     refreshPendingOrder = undefined;
     cancelPendingOrder = undefined;
-    for (const unsubscribe of unsubscribers) unsubscribe();
+    teardownPendingOrder = undefined;
+    teardown();
     appAtomRegistry.set(pendingThreadOrderAtom, null);
   };
-  const refresh = (now = new Date().toISOString()) => {
+  const refresh = () => {
     if (refreshPendingOrder !== refresh) return;
     const current = appAtomRegistry.get(pendingThreadOrderAtom);
     if (current === null) return;
     const configs = appAtomRegistry.get(environmentServerConfigsAtom);
-    const shells = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
+    const threads = appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
     const scope = current.scopeProjectKeys ? new Set(current.scopeProjectKeys) : null;
     const eligible =
       scope === null
-        ? shells
-        : listedThreadShells(appAtomRegistry.get(environmentProjects.projectsAtom), shells).filter(
+        ? threads
+        : listedThreadShells(appAtomRegistry.get(environmentProjects.projectsAtom), threads).filter(
             (row) => scope.has(scopedProjectKey(row.environmentId, row.projectId)),
           );
+    const nowMs = Date.now();
     const ordered = getThreadListV2OrderedSection({
       threads: eligible,
       section: current.section,
       listingCapabilities: appAtomRegistry.get(environmentThreadShells.listingCapabilitiesAtom),
-      now,
+      now: new Date(nowMs).toISOString(),
       queuedThreadKeys: appAtomRegistry.get(queuedThreadKeysAtom),
       settlementEnvironmentIds: new Set(
         [...configs].flatMap(([id, config]) =>
@@ -92,19 +115,29 @@ export function beginPendingThreadOrder(pending: PendingThreadOrder) {
       ),
     });
     const next = reconcilePendingThreadOrder(current, ordered);
-    if (next === null) cancel();
-    else if (next !== current) appAtomRegistry.set(pendingThreadOrderAtom, next);
+    if (next === null) {
+      cancel();
+      return;
+    }
+    if (next !== current) appAtomRegistry.set(pendingThreadOrderAtom, next);
+    armWake(nextSnoozeWakeAfter(threads, nowMs));
   };
+  teardownPendingOrder?.();
   refreshPendingOrder = refresh;
   cancelPendingOrder = cancel;
+  teardownPendingOrder = teardown;
   appAtomRegistry.set(pendingThreadOrderAtom, pending);
   unsubscribers.push(
-    appAtomRegistry.subscribe(environmentThreadShells.threadShellsAtom, () => refresh()),
-    appAtomRegistry.subscribe(environmentServerConfigsAtom, () => refresh()),
-    appAtomRegistry.subscribe(queuedThreadKeysAtom, () => refresh()),
+    appAtomRegistry.subscribe(environmentThreadShells.threadShellsAtom, refresh),
+    appAtomRegistry.subscribe(environmentServerConfigsAtom, refresh),
+    appAtomRegistry.subscribe(queuedThreadKeysAtom, refresh),
     ...(pending.scopeProjectKeys
-      ? [appAtomRegistry.subscribe(environmentProjects.projectsAtom, () => refresh())]
+      ? [appAtomRegistry.subscribe(environmentProjects.projectsAtom, refresh)]
       : []),
+    minuteTick.subscribe(refresh),
+  );
+  armWake(
+    nextSnoozeWakeAfter(appAtomRegistry.get(environmentThreadShells.threadShellsAtom), Date.now()),
   );
   return {
     isPending: () => {

@@ -293,7 +293,9 @@ function WatchCard({
                     iconClassName="size-3.5"
                   />
                   <span className="max-w-56 truncate">
-                    {model ? getTriggerDisplayModelName(model) : manager?.modelSelection.model}
+                    {model
+                      ? getTriggerDisplayModelName(model, provider.driver)
+                      : manager?.modelSelection.model}
                   </span>
                 </TooltipTrigger>
                 <TooltipPopup>{provider.displayName ?? provider.instanceId}</TooltipPopup>
