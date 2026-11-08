@@ -49,4 +49,6 @@ export const clerkAppearance = {
 export const redesignClerkAppearance = {
   ...clerkAppearance,
   cssLayerName: "clerk",
+  options: { shimmer: false },
+  variables: { ...clerkAppearance.variables, borderRadius: "0.5rem" },
 } satisfies NonNullable<ClerkProviderProps["appearance"]>;

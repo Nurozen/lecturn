@@ -53,7 +53,14 @@ const builtInThemeModes = [
 describe("clerkAppearance", () => {
   it("puts Clerk's styles in the clerk layer only under the new design", () => {
     expect(clerkAppearance).not.toHaveProperty("cssLayerName");
-    expect(redesignClerkAppearance).toEqual({ ...clerkAppearance, cssLayerName: "clerk" });
+    expect(clerkAppearance).not.toHaveProperty("options");
+    expect(clerkAppearance.variables).not.toHaveProperty("borderRadius");
+    expect(redesignClerkAppearance).toEqual({
+      ...clerkAppearance,
+      cssLayerName: "clerk",
+      options: { shimmer: false },
+      variables: { ...clerkAppearance.variables, borderRadius: "0.5rem" },
+    });
   });
 
   it.each(builtInThemeModes)("keeps Clerk text readable across a built-in palette", (colors) => {

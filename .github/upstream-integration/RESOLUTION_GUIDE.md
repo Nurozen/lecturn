@@ -1460,9 +1460,11 @@ from upstream's side.
   page and prompt-link errors, `tone="pairing"` on pairing), masthead and eyebrow. Fork
   `auth/AuthSurfaceShell.tsx` stays and wraps ConnectAgentSurface, ConnectCliAuthSurface and
   DecisionFundingApprovalPage; `StageBackdropArt` stays exported. Clerk element classes sit
-  behind `redesign:`, and only `redesignClerkAppearance` sets `cssLayerName: "clerk"`: a layer
-  would let the fork's unlayered CSS (global scrollbars) override classic Clerk. #26158 (machine icon only) and #26155 (`min-h-[calc(2lh+--spacing(2))]`)
-  apply under the new design; the classic `min-h-19.5` already holds three lines.
+  behind `redesign:`, and only `redesignClerkAppearance` takes upstream's `cssLayerName:
+  "clerk"`, `shimmer: false` and `borderRadius: "0.5rem"`; classic Clerk stays main's, since a
+  layer would let the fork's unlayered CSS (global scrollbars) override it. #26158 (machine
+  icon only) and #26155 (`min-h-[calc(2lh+--spacing(2))]`) apply under the new design; the
+  classic `min-h-19.5` already holds three lines.
 - **Sidebar (#25284, #25877).** `setSidebarProjectScopeKeys` takes multi-project scope; keep
   `projectScopeKey` a joined string for `useSidebarSegments`. The keyboard tree root is the fork
   `SidebarSegments` (`attachThreadTreeRef`, role tree); fork shelf toggles carry the treeitem

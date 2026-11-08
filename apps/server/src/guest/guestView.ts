@@ -117,7 +117,7 @@ export function guestTurnItem<
 }
 
 /** A subagent record as a guest receives it. */
-export function guestSubagent(subagent: OrchestrationV2Subagent): OrchestrationV2Subagent {
+function guestSubagent(subagent: OrchestrationV2Subagent): OrchestrationV2Subagent {
   return withoutRemoteChild(subagent);
 }
 
