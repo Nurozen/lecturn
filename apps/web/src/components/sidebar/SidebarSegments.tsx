@@ -104,6 +104,7 @@ function SegmentedLists<Node>(
   // The bars are opaque and mark the viewport's edges themselves, and the
   // viewport's fade would fade them, so it is off while segments render.
   const rootRef = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- turns off the enclosing scroll viewport's fade through its DOM dataset while segments render
   useLayoutEffect(() => {
     const viewport = rootRef.current?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (!viewport) return;

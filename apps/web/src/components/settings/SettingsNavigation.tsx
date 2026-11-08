@@ -24,6 +24,7 @@ export function SettingsNavigationProvider({ children }: { children: ReactNode }
     }),
   });
   const chatReturn = useRef({ pathname: "/", index: historyIndex, remembered: false });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- remembers the last chat history entry and closes the mobile sidebar whenever the router location changes
   useEffect(() => {
     if (isChat) chatReturn.current = { pathname, index: historyIndex, remembered: true };
     setOpenMobile(false);
@@ -47,6 +48,7 @@ export function SettingsNavigationProvider({ children }: { children: ReactNode }
       void navigate({ to: destination.pathname, replace: true });
     }
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window listener for the native back gesture that returns from settings to chat
   useEffect(() => {
     if (pathname !== "/settings" && !pathname.startsWith("/settings/")) return;
     const nativeBack = (event: Event) => {

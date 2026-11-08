@@ -1291,11 +1291,12 @@ from upstream's side.
   `observability.mobileTelemetry` is defined. Off, the Worker serves
   `MobileTelemetry.layerApiDisabled` (404, body unread). Keep new upstream mobile telemetry
   resources and bindings behind those gates; enabling is in `docs/operations/relay-observability.md`.
-- **Effect budget (#24964).** `scripts/effect-budget.json` holds each fork file at its effect
-  count, keys repo-relative and sorted. When a file exceeds upstream's budget, check first
-  whether the merge kept an effect upstream moved into a store (#24970-#25079); port the fork
-  behavior into the new form instead of raising the budget. New fork effects state their reason
-  (`oxlint-disable-next-line lecturn/react-effect-budget -- <why>`).
+- **Effect reasons (#26161, #26181, D9; replaced the #24964 effect budget).** Every React
+  effect carries `// oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- <what it
+  syncs with and why>` on the line above. A fork effect that only copies state is rewritten as
+  derivation or a handler when that is small and safe; otherwise it states an honest reason.
+  `scripts/effect-budget.json` and `lecturn/react-effect-budget` are gone; delete either if a
+  merge brings it back.
 - **#24865 New design.** The Beta toggle stays off and the Lecturn look is the default.
   Upstream's unconditional visual tweaks go behind `redesign:` / `[data-redesign]` (old value
   first, new under the variant); SVGs with `stroke-width="2"` take the `lucide` class so the
@@ -1381,8 +1382,7 @@ from upstream's side.
 - **Effect lint (#25099).** Fork relay services reuse the file's span prefix
   (`ManagedGateway.*`); disabled stubs share one module-level `Effect.fn`; pure forwarders use
   `Effect.fnUntraced`. Mocks typed `Effect<X | undefined>` hoist one suppressed
-  `succeedUndefined` per test file. `scripts/effect-budget.json` keeps upstream's value for
-  upstream files unless the fork has more effects there.
+  `succeedUndefined` per test file.
 - **Deps.** A lock regenerated from the fork stage resolves new transitive deps fresh: align
   them to upstream's versions where the fork has no reason to differ (`@napi-rs/canvas`
   1.0.13), then verify with `--frozen-lockfile`.
@@ -1432,6 +1432,53 @@ from upstream's side.
   `scripts/fixtures/desktop-launch` holds a Lecturn-ledger DB (upstream's fails the fork
   migrator at `70_OrchestrationV2`); #25929's web boot check runs in `ci.yml` and `release.yml`.
   OTA source maps upload with the optional secret `MOBILE_SOURCEMAPS_R2`.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 3b2f9586).**
+
+- **Linked environments (#16653-#17130, #26201, #26202, #26239; D8).** A Labs beta, off by
+  default, with `lecturn_*` tool names and the `Lecturn-Mode-Limit` header. Fork gates:
+  `PeerForwarding.callerLimits` refuses linked callers and connected-app callers (every
+  forwarded tool, remote `delegate_task`, `lecturn_environment_links`); the mode-limit header
+  only narrows; `SquireMcpGate` runs before interceptors, so Squire credentials reach no
+  `lecturn_*` tool; `SquireCommandHook` classifies `delegated_task.remote.*` and
+  `link_request.record` as `squire`; `peerLinks.*` RPCs need access scopes and are in no
+  `APP_RPC_RULES` row; guests never reach `/mcp` or `/ws`, and `GUEST_THREAD_FIELDS` withholds
+  `linkOrigin` and `delegatedFrom`. The Claude `--settings` launch arg
+  (#22864) is dropped for Squire homes and probes; OpenCode permission updates carry
+  `gatedToolPrefix`. Composer `@` offers machines only where `branch-toolbar` is allowed (never
+  on a Squire home); `matchComposerThreadItems` hides Squire threads by each thread's own
+  environment listing.
+- **Server migrations (D10).** Upstream 70 (`PeerLinks`), 71 (`PeerLinkFence`) and 72
+  (`WaitingLinkRequestIndex`) run as fork ids 88, 89 and 90; 89 and 90 have compatibility
+  wrappers like 83 and 85. Files keep upstream's numbers.
+- **Relay (D11).** Upstream's `20261027210820_delivery_attempts_retention` runs as
+  `20261108000000_delivery_attempts_retention`, its snapshot rechained onto the fork's
+  `20261106` snapshot (SQL byte-identical). `ManagedEndpointReaper` keeps delete concurrency 4
+  for the fork's 20 Hyperdrive connections; upstream's attempt limit 250 is taken.
+- **Auth surfaces (#25281, D1).** `StandalonePage`/`StandalonePageHeader` branch on
+  `redesignEnabled`: the classic look keeps tone backdrops (`tone="error"` on the root error
+  page and prompt-link errors, `tone="pairing"` on pairing), masthead and eyebrow. Fork
+  `auth/AuthSurfaceShell.tsx` stays and wraps ConnectAgentSurface, ConnectCliAuthSurface and
+  DecisionFundingApprovalPage; `StageBackdropArt` stays exported. Clerk element classes sit
+  behind `redesign:`, and only `redesignClerkAppearance` takes upstream's `cssLayerName:
+  "clerk"`, `shimmer: false` and `borderRadius: "0.5rem"`; classic Clerk stays main's, since a
+  layer would let the fork's unlayered CSS (global scrollbars) override it. #26158 (machine
+  icon only) and #26155 (`min-h-[calc(2lh+--spacing(2))]`) apply under the new design; the
+  classic `min-h-19.5` already holds three lines.
+- **Sidebar (#25284, #25877).** `setSidebarProjectScopeKeys` takes multi-project scope; keep
+  `projectScopeKey` a joined string for `useSidebarSegments`. The keyboard tree root is the fork
+  `SidebarSegments` (`attachThreadTreeRef`, role tree); fork shelf toggles carry the treeitem
+  attributes upstream puts in `SidebarListMarkers`. `filterSidebarV2VisibleThreads` and
+  `sortSidebarV2ProjectGroups` take the fork listing after upstream's `delegatedUnderParent`.
+  `AppShell` holds `DevReplayHost` (console hook `window.lecturnDev`) and the
+  `localEnvironmentDisabled` gate on `DesktopWebLinkCoordinator`.
+- **Mobile.** Navigation shells skip archived, unlisted (Squire) and delegated-under-parent
+  threads; fork per-scope drag order reads `navigationThreadShellsAtom`. The thread subtitle
+  shows one origin, nearest first: fork, delegated parent ("Subagent of"), link origin, import.
+- **Sweep misses.** The translator mapped `visibleT3Tools` to `visibleNurozen` (now
+  `visibleLecturnTools`) and renamed the external `fork/t3-mobile` branch and `t3-fork.json`
+  in `apps/mobile/deps/README.md`; the Triage hosted label is `lecturn.cloudgatherer.net`.
+  `agentContextBudget.json` grows with upstream's link tools and prompt text.
 
 ## Recurring mechanical conflicts
 

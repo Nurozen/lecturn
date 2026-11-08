@@ -22,6 +22,7 @@ export function useFileChipShare(
     reportFailure: false,
   });
   const requestRef = useRef<AbortController | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- aborts the in-flight share download on unmount or when the thread or connection changes
   useEffect(
     () => () => {
       requestRef.current?.abort();

@@ -212,17 +212,20 @@ function SquireKnockEnvironment(props: {
     })
       ? `${knock.dismissed}:${knock.snoozedUntil}`
       : null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- shows the imperative knock toast once the saved knock settings make it eligible
   useEffect(() => {
     if (candidate !== null) knockOnce();
   }, [candidate]);
 
   // Squires came on from anywhere: the offer is moot.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- closes the imperative knock toast once Squires are enabled from anywhere
   useEffect(() => {
     if (!capable || shownToast.current === null) return;
     toastManager.close(shownToast.current);
     shownToast.current = null;
   }, [capable]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- closes the waking toast and navigates the router to the Lead once it appears in the snapshot
   useEffect(() => {
     if (meetingToast === null || lead == null || navigated.current === meetingToast) return;
     // The waiting state is left set: the knock is spent for this session, and the sidebar

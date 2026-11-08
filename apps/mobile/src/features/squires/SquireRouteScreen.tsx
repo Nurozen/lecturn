@@ -125,7 +125,7 @@ function SquireReady(props: {
   });
   const replaceWithThread = useEffectEvent(useReplaceWithThread());
   const chatThreadId = destination.kind === "chat" ? destination.threadId : null;
-  // oxlint-disable-next-line lecturn/react-effect-budget -- navigation runs after commit, before paint, so the blank route never shows.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- navigation runs after commit, before paint, so the blank route never shows.
   useLayoutEffect(() => {
     if (chatThreadId !== null) replaceWithThread({ environmentId, threadId: chatThreadId });
   }, [environmentId, chatThreadId]);
@@ -145,6 +145,7 @@ function SquireDetails(props: {
   const navigation = useNavigation();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollViewport = useSquireScrollViewport(scrollRef);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sets the squire name as the navigator header title
   useLayoutEffect(() => {
     navigation.setOptions({ title: squire.name });
   }, [navigation, squire.name]);

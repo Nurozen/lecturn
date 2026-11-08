@@ -108,6 +108,7 @@ function StaveStatusRow() {
     (operation.status === "idle" ||
       operation.status === "running" ||
       operation.status === "disconnected");
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refreshes the Stave status atom in the registry once the streamed setup operation finishes
   useEffect(() => {
     if (operation.status === "finished" && setupEnvironmentId !== null) {
       appAtomRegistry.refresh(staveStatus({ environmentId: setupEnvironmentId, input: {} }));

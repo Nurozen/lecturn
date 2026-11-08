@@ -368,6 +368,7 @@ export function AssistantCitationSource({
   children: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes this message's DOM for a citation reveal request and scrolls the LegendList to it
   useEffect(() => {
     const root = rootRef.current;
     const list = listRef.current;
@@ -375,6 +376,7 @@ export function AssistantCitationSource({
     return observeAssistantCitationSource({ root, itemKey, request, list });
   }, [itemKey, listRef, messageId, request]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers this source's DOM node and notes in the note highlight registry until unmount
   useEffect(() => {
     const source = rootRef.current;
     if (!source || !viewport || !notes?.length) return;

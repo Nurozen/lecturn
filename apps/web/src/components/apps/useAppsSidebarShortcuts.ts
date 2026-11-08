@@ -43,6 +43,7 @@ export const useAppsNewThreadTarget = create<AppsNewThreadTargetState>(() => ({ 
 export function usePublishAppsNewThreadTarget(workspace: AppsSidebarWorkspace | null): void {
   const environmentId = workspace?.project.environmentId ?? null;
   const projectId = workspace?.project.id ?? null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the Apps-mode workspace project to the store read by the global new-thread shortcut
   useEffect(() => {
     useAppsNewThreadTarget.setState({
       target:
@@ -80,6 +81,7 @@ export function useAppsSidebarThreadJumps(input: {
   );
   const threadKeys = [...threadRefByKey.keys()];
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window keydown listener for Apps-mode thread jump and traversal shortcuts
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {

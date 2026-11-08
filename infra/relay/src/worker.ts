@@ -985,6 +985,11 @@ export const layer = Api.make(
                 Effect.flatMap((relinks) => relinks.drain()),
               ),
             ),
+            Effect.andThen(
+              DeliveryAttempts.DeliveryAttempts.pipe(
+                Effect.flatMap((attempts) => attempts.pruneExpired),
+              ),
+            ),
             Effect.catchCause((cause) =>
               Cause.hasInterrupts(cause)
                 ? Effect.interrupt

@@ -141,7 +141,7 @@ export function useSquireMarkOpened(
   const canMark = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
   const windowFocused = useWindowFocused();
-  // oxlint-disable-next-line lecturn/react-effect-budget -- tells the server a card reached the screen.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- tells the server a card reached the screen.
   useEffect(() => {
     if (cardId === null || !canMark || !windowFocused) return;
     if (!squireOpenedThisSession.take(environmentId, cardId, openedAt)) return;

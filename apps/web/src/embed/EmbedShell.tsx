@@ -28,6 +28,7 @@ export function EmbedShell({
   readonly panel: EmbedPanel | null;
 }) {
   const presentation = { projectRef: scopeProjectRef(environmentId, projectId) };
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- starts the embed host bridge and installs its theme and composer placeholder listeners until unmount
   useEffect(() => {
     const bridge = startEmbedBridge();
     const uninstallTheme = installEmbedTheme(bridge);

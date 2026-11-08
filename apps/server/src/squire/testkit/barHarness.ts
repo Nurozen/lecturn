@@ -48,8 +48,13 @@ import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
+import * as PeerForwarding from "../../peer/PeerForwarding.ts";
+import * as PeerLinkRequests from "../../peer/PeerLinkRequests.ts";
+import * as PeerLinks from "../../peer/PeerLinks.ts";
+import * as RemoteDelegation from "../../peer/RemoteDelegation.ts";
 import * as OrchestrationEventStore from "../../persistence/OrchestrationEventStore.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as PortScanner from "../../preview/PortScanner.ts";
 import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
@@ -106,7 +111,9 @@ const liveOptions = (options: BarHarnessOptions) => {
     throw new Error(`The ${provider} bar harness needs a ${provider} provider home.`);
   }
   return {
-    extraAdapters: liveBarAdapters(home, options.recorder ?? makeBarProviderRecorder()),
+    extraAdapters: liveBarAdapters(home, options.recorder ?? makeBarProviderRecorder()).pipe(
+      Effect.provide(PortScanner.layerTest),
+    ),
     instanceModels: { [barInstanceId(provider)]: barModel(provider, options.model) },
   };
 };
@@ -138,6 +145,10 @@ const layerRouteStubs = Layer.mergeAll(
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
+  Layer.mock(PeerForwarding.PeerForwarding)({}),
+  Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
+  Layer.mock(PeerLinks.PeerLinks)({}),
+  Layer.mock(RemoteDelegation.RemoteDelegation)({}),
   Layer.mock(PreviewBrowser.PreviewBrowser)({ installed: Effect.succeedNone }),
 );
 

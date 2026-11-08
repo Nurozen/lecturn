@@ -34,7 +34,7 @@ export function useFilesystemReadAccess(environmentId: EnvironmentId | null) {
  */
 export function useRefreshFailedSessionState(environmentId: EnvironmentId | null): void {
   const registry = useContext(RegistryContext);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- refetches a cached failed session status in the atom registry on mount.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refetches a cached failed session status atom in the registry when the view mounts
   useEffect(() => {
     if (environmentId === null) return;
     refreshSessionStateIfFailed(registry, environmentSession.sessionStateAtom(environmentId));

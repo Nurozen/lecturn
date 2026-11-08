@@ -27,6 +27,7 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarProjectScopeKey?: string | null;
+  sidebarProjectScopeKeys?: string[];
   sidebarMode?: string;
   sidebarAppScopeKey?: string | null;
   sidebarAppCollapsedByKey?: Record<string, boolean>;
@@ -41,7 +42,7 @@ export type SidebarMode = "projects" | "apps";
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
-  sidebarProjectScopeKey: string | null;
+  sidebarProjectScopeKeys: string[];
   sidebarMode: SidebarMode;
   /** The selected app's id in Apps mode; null lists every app. */
   sidebarAppScopeKey: string | null;
@@ -70,7 +71,7 @@ export interface UiState
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
-  sidebarProjectScopeKey: null,
+  sidebarProjectScopeKeys: [],
   sidebarMode: "projects",
   sidebarAppScopeKey: null,
   sidebarAppCollapsedByKey: {},
@@ -171,7 +172,9 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
-    sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarProjectScopeKeys: sanitizeStringArray(
+      parsed.sidebarProjectScopeKeys ?? [parsed.sidebarProjectScopeKey],
+    ),
     sidebarMode: sanitizeSidebarMode(parsed.sidebarMode),
     sidebarAppScopeKey: sanitizeOptionalKey(parsed.sidebarAppScopeKey),
     sidebarAppCollapsedByKey: sanitizeBooleanRecord(parsed.sidebarAppCollapsedByKey),
@@ -249,7 +252,12 @@ export function persistState(state: UiState): void {
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
-        sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarProjectScopeKeys: state.sidebarProjectScopeKeys,
+        // Older clients read only this field.
+        sidebarProjectScopeKey:
+          state.sidebarProjectScopeKeys.length === 1
+            ? (state.sidebarProjectScopeKeys[0] ?? null)
+            : null,
         sidebarMode: state.sidebarMode,
         sidebarAppScopeKey: state.sidebarAppScopeKey,
         sidebarAppCollapsedByKey: state.sidebarAppCollapsedByKey,
@@ -352,14 +360,20 @@ function setDefaultAdvertisedEndpointKey(state: UiState, key: string | null): Ui
   };
 }
 
-export function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
-  const nextKey = sanitizeOptionalKey(projectKey);
-  if (state.sidebarProjectScopeKey === nextKey) {
+export function setSidebarProjectScopeKeys(
+  state: UiState,
+  projectKeys: readonly string[],
+): UiState {
+  const nextKeys = sanitizeStringArray(projectKeys);
+  if (
+    nextKeys.length === state.sidebarProjectScopeKeys.length &&
+    nextKeys.every((key, index) => key === state.sidebarProjectScopeKeys[index])
+  ) {
     return state;
   }
   return {
     ...state,
-    sidebarProjectScopeKey: nextKey,
+    sidebarProjectScopeKeys: nextKeys,
   };
 }
 
@@ -480,7 +494,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
-  setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setSidebarProjectScopeKeys: (projectKeys: readonly string[]) => void;
   setSidebarMode: (mode: SidebarMode) => void;
   setSidebarAppScopeKey: (appKey: string | null) => void;
   setSidebarAppCollapsed: (key: string, collapsed: boolean) => void;
@@ -504,8 +518,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
-  setSidebarProjectScopeKey: (projectKey) =>
-    set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setSidebarProjectScopeKeys: (projectKeys) =>
+    set((state) => setSidebarProjectScopeKeys(state, projectKeys)),
   setSidebarMode: (mode) => set((state) => setSidebarMode(state, mode)),
   setSidebarAppScopeKey: (appKey) => set((state) => setSidebarAppScopeKey(state, appKey)),
   setSidebarAppCollapsed: (key, collapsed) =>

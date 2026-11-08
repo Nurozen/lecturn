@@ -216,6 +216,7 @@ export function SagaWorkbenchCard({
 function GoldThreadBorder() {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes the border's visibility and page visibility so the gold thread animates only while seen
   useEffect(() => {
     let intersects = false;
     const update = () => setVisible(intersects && document.visibilityState === "visible");

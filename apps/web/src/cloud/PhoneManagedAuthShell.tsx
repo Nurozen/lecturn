@@ -155,6 +155,7 @@ export default function PhoneManagedAuthShell({
   readonly children: ReactNode;
   readonly publishableKey?: string;
 }) {
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the phone's native Connect account status and applies sign-in changes until unmount
   useEffect(() => bindPhoneConnectAccount(), []);
   return children;
 }

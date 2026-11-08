@@ -607,14 +607,17 @@ function Funding({
   const active = useRef(true);
   const pendingId = useRef(pending?.challengeId);
   const pendingChallengeId = pending?.challengeId;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- keeps the latest pending challenge id for funding requests that resume after await
   useEffect(() => {
     pendingId.current = pendingChallengeId;
   }, [pendingChallengeId]);
   const locked = useRef(false);
   const allowed = useRef(canFund);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- keeps the latest funding permission for funding requests that resume after await
   useEffect(() => {
     allowed.current = canFund;
   }, [canFund]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- restores the stored funding challenge from SecureStore and drops the read after unmount
   useEffect(() => {
     active.current = true;
     void (async () => {
@@ -641,6 +644,7 @@ function Funding({
     };
   }, [storageKey, environmentId, featureId]);
   const refresh = funding.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- deletes the SecureStore challenge once the funding query shows the host already funded
   useEffect(() => {
     if (!pending || funding.error || !fundingSupersedesChallenge(pending, funding.data)) return;
     pendingId.current = undefined;
@@ -714,6 +718,7 @@ function Funding({
         if (active.current) setBusy(false);
       });
   };
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls funding approval on a timer and resumes polling through an AppState listener
   useEffect(() => {
     let canceled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

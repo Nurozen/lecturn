@@ -67,6 +67,7 @@ export function AccountSurface({
     project: projectKey,
     account: accountId,
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed account selection to a ref read by the document click listener
   useLayoutEffect(() => {
     selection.current = {
       multiAccount,
@@ -75,6 +76,7 @@ export function AccountSurface({
     };
   }, [multiAccount, projectKey, accountId]);
   const [reveal, setReveal] = useState<Reveal | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- document click and key listeners that start the account reveal animation and its timers
   useEffect(() => {
     if (!animate) return;
     let sequence = 0;
@@ -177,6 +179,7 @@ function AccountWave({ reveal, accent }: { reveal: Reveal; accent: string }) {
   const glowRef = useRef<SVGPathElement>(null);
   const ribbonRef = useRef<SVGPathElement>(null);
   const washRef = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- drives the account wave animation on the SVG DOM through animation frames, cancelling on cleanup
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;

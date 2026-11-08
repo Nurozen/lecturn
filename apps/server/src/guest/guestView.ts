@@ -3,7 +3,9 @@ import type {
   GuestThreadModel,
   OrchestrationV2AppThread,
   OrchestrationV2DomainEvent,
+  OrchestrationV2Subagent,
   OrchestrationV2ThreadProjection,
+  OrchestrationV2TurnItem,
   ServerProvider,
 } from "@lecturn/contracts";
 
@@ -63,10 +65,81 @@ export function guestThread(thread: OrchestrationV2AppThread): OrchestrationV2Ap
   return allowed as OrchestrationV2AppThread;
 }
 
+/**
+ * Lecturn: the turn item types a guest receives; typecheck fails until a new one is decided.
+ * A link request names the owner's other machines and their addresses, so it stays with the
+ * owner, as `linkOrigin` and `delegatedFrom` do. A type missing here is withheld.
+ */
+const GUEST_TURN_ITEM_TYPES: Record<OrchestrationV2TurnItem["type"], boolean> = {
+  notification: true,
+  user_message: true,
+  assistant_message: true,
+  reasoning: true,
+  proposed_plan: true,
+  todo_list: true,
+  user_input_request: true,
+  file_change: true,
+  command_execution: true,
+  file_search: true,
+  web_search: true,
+  approval_request: true,
+  checkpoint: true,
+  run_interrupt_request: true,
+  run_interrupt_result: true,
+  system_notice: true,
+  error: true,
+  compaction: true,
+  handoff: true,
+  fork: true,
+  thread_created: true,
+  secret_request: true,
+  link_request: false,
+  subagent: true,
+  dynamic_tool: true,
+};
+
+/** Drops `remoteChild`: where a task runs on a linked machine names that machine. */
+function withoutRemoteChild<Value extends { readonly remoteChild?: unknown }>(
+  record: Value,
+): Value {
+  if (!Object.hasOwn(record, "remoteChild")) return record;
+  const { remoteChild: _remoteChild, ...rest } = record;
+  return rest as Value;
+}
+
+/** A turn item as a guest receives it, or null when it is withheld. */
+export function guestTurnItem<
+  Item extends { readonly type: string; readonly remoteChild?: unknown },
+>(item: Item): Item | null {
+  if (!Object.hasOwn(GUEST_TURN_ITEM_TYPES, item.type)) return null;
+  if (!GUEST_TURN_ITEM_TYPES[item.type as OrchestrationV2TurnItem["type"]]) return null;
+  return item.type === "subagent" ? withoutRemoteChild(item) : item;
+}
+
+/** A subagent record as a guest receives it. */
+function guestSubagent(subagent: OrchestrationV2Subagent): OrchestrationV2Subagent {
+  return withoutRemoteChild(subagent);
+}
+
 export function guestThreadProjection<Projection extends OrchestrationV2ThreadProjection>(
   projection: Projection,
 ): Projection {
-  return { ...projection, thread: guestThread(projection.thread) };
+  // One result per item, so a visible row and its turn item stay the same object.
+  const shared = new Map<OrchestrationV2TurnItem, OrchestrationV2TurnItem | null>();
+  const share = (item: OrchestrationV2TurnItem) => {
+    if (!shared.has(item)) shared.set(item, guestTurnItem(item));
+    return shared.get(item) ?? null;
+  };
+  return {
+    ...projection,
+    thread: guestThread(projection.thread),
+    subagents: projection.subagents.map(guestSubagent),
+    turnItems: projection.turnItems.flatMap((item) => share(item) ?? []),
+    visibleTurnItems: projection.visibleTurnItems.flatMap((row) => {
+      const item = share(row.item);
+      return item === null ? [] : [item === row.item ? row : { ...row, item }];
+    }),
+  };
 }
 
 type ThreadRecordEvent = Extract<
@@ -104,9 +177,23 @@ const THREAD_RECORD_EVENTS: Record<ThreadRecordEvent["type"], true> = {
 const isThreadRecordEvent = (event: OrchestrationV2DomainEvent): event is ThreadRecordEvent =>
   Object.hasOwn(THREAD_RECORD_EVENTS, event.type);
 
-/** A wire event as a guest receives it: a thread record payload goes through `guestThread`. */
-export function guestDomainEvent(event: OrchestrationV2DomainEvent): OrchestrationV2DomainEvent {
-  return isThreadRecordEvent(event) ? { ...event, payload: guestThread(event.payload) } : event;
+/**
+ * A wire event as a guest receives it, or null when it is withheld: a thread record goes through
+ * `guestThread`, a turn item through `guestTurnItem`, a subagent through `guestSubagent`.
+ */
+export function guestDomainEvent(
+  event: OrchestrationV2DomainEvent,
+): OrchestrationV2DomainEvent | null {
+  if (isThreadRecordEvent(event)) return { ...event, payload: guestThread(event.payload) };
+  if (event.type === "turn-item.updated") {
+    const item = guestTurnItem(event.payload);
+    return item === null ? null : item === event.payload ? event : { ...event, payload: item };
+  }
+  if (event.type === "subagent.updated") {
+    const subagent = guestSubagent(event.payload);
+    return subagent === event.payload ? event : { ...event, payload: subagent };
+  }
+  return event;
 }
 
 /** The thread's model as the owner's composer labels it, from the configured providers. */

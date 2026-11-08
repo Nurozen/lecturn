@@ -7,6 +7,7 @@ export function DesktopActivityToggle() {
   const [enabled, setEnabled] = useState(false);
   const [pending, setPending] = useState(false);
   const activity = typeof window === "undefined" ? undefined : window.desktopBridge?.activity;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reads and subscribes to the desktop activity panel's enabled flag through the desktop bridge
   useEffect(() => {
     let mounted = true;
     void activity?.getEnabled().then((value) => {

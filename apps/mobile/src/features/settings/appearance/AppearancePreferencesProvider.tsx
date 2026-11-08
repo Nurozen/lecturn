@@ -200,6 +200,7 @@ export function installAppearanceRuntime(): () => void {
 
 export function AppearancePreferencesProvider(props: { readonly children: ReactNode }) {
   const opaqueGlass = useGlassAccessibility();
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- writes the opaque-glass theme variables into Uniwind before paint
   useLayoutEffect(() => {
     for (const update of glassAccessibilityThemeUpdates(opaqueGlass, Platform.OS)) {
       Uniwind.updateCSSVariables(update.themeName, update.variables);

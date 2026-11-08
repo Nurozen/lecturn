@@ -92,9 +92,7 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
 
 /** Lecturn: the composer's send button face, glass or the dev and nightly stage art. */
 function ComposerSendButton({ children, ...props }: ComponentProps<"button">) {
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    useEnvironmentIdentificationMode() === "artwork",
-  );
+  const stageBackdropVariant = useSidebarStageBackdropVariant(useEnvironmentIdentificationMode());
   return (
     <button
       {...props}

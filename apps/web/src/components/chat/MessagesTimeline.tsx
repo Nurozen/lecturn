@@ -203,7 +203,7 @@ function TimelineListFooter({
   readonly children?: ReactNode;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- reports growth of the footer's content, which the list does not follow
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports growth of the footer's content, which the list does not follow
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content || !onGrow) return;
@@ -290,9 +290,12 @@ interface MessagesTimelineProps {
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   renderHtmlRender?: TimelineRowSharedState["renderHtmlRender"];
   turnItemSource?: TimelineRowSharedState["turnItemSource"];
+  /** The thread this one is a subagent of; `open` is absent when it cannot be opened from here. */
   parentThreadLink?: {
-    readonly threadId: ThreadId;
     readonly title: string;
+    /** Where it runs, when that is another environment. */
+    readonly environmentLabel?: string;
+    readonly open?: () => void;
   } | null;
   workflowOpening?: WorkflowOpening | null;
   onForkFromRun?: (input: {
@@ -621,6 +624,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   }
   const lastNoteCitationRef = useRef<string | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- activates the note matching a citation request in the thread note UI store
   useEffect(() => {
     if (!citationThreadRef || !threadNotes.available) return;
     const key = citationRequest?.key ?? null;
@@ -643,6 +647,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     lastNoteCitationRef.current = key;
     setActiveThreadNote(citationThreadRef, note.id);
   }, [citationRequest, citationThreadRef, threadNotes.available, threadNotes.notes]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- keeps the note highlight registry's enabled flag and active note in step with this timeline
   useEffect(() => {
     const registry = getThreadNoteHighlightRegistry();
     registry.setEnabled(notesEnabled);
@@ -654,6 +659,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         : null,
     );
   }, [activeNote, citationThreadRef, showNoteHighlights, notesEnabled]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- document Escape listener that clears the active note, and clears it on unmount
   useEffect(() => {
     if (!citationThreadRef || typeof document === "undefined") return;
     const clear = () => {
@@ -990,6 +996,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // must land before paint, after LegendList's own layout effects applied the
   // new data. A citation request that arrives mid-restore takes over.
   const { findOpenAtOpening } = identityChanged ? { findOpenAtOpening: findOpen } : listState;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- restores LegendList's scroll position for the shown thread before paint, after the list's own layout
   useLayoutEffect(() => {
     const list = listRef.current;
     const viewport = viewportRef.current;
@@ -1017,6 +1024,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- fades out the timeline viewport DOM before React removes this keyed thread
   useLayoutEffect(() => {
     if (!timelineViewportElement) return;
     // Cleanup runs before React removes this keyed thread's DOM.
@@ -1048,6 +1056,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // LegendList never reports load without rows, so a mounted list holding only
   // its header (a closed app's banner on an empty thread) has nothing to wait for.
   const layoutReady = initialLayoutReady || (rows.length === 0 && timelineViewportElement !== null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- schedules an animation frame to reveal the timeline after the list's initial layout settles
   useEffect(() => {
     if (hasRevealed || !layoutReady || detailLoading) return;
     // The load callback can precede the container's visibility commit. Give it
@@ -1055,6 +1064,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     const frame = requestAnimationFrame(() => setHasRevealed(true));
     return () => cancelAnimationFrame(frame);
   }, [layoutReady, detailLoading, hasRevealed]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reveals the timeline viewport DOM before paint once the reveal frame fires
   useLayoutEffect(() => {
     if (hasRevealed && timelineViewportElement) revealTimeline(timelineViewportElement);
   }, [hasRevealed, timelineViewportElement]);
@@ -1418,10 +1428,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <div className="chat-content-lane pt-1 sm:pt-2">
           <TimelineSystemDivider
             label="Subagent of"
-            detail={parentThreadLink.title}
+            detail={
+              parentThreadLink.environmentLabel === undefined
+                ? parentThreadLink.title
+                : `${parentThreadLink.title} on ${parentThreadLink.environmentLabel}`
+            }
             icon={BotIcon}
-            actionLabel="Open parent thread"
-            onAction={() => onOpenThread(parentThreadLink.threadId)}
+            {...(parentThreadLink.open === undefined
+              ? {}
+              : { actionLabel: "Open parent thread", onAction: parentThreadLink.open })}
           />
         </div>
       </div>

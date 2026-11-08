@@ -174,6 +174,7 @@ export function useThreadNotes(ref: ScopedThreadRef | null) {
   const pending = useThreadNoteUI((state) => state.pending);
   const saved = query.data?.notes ?? EMPTY_NOTES;
   const notes = overlayThreadNotes(saved, pending, environmentId, projectId);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- releases pending note holds in the thread note UI store once the refetched list acknowledges them
   useEffect(() => {
     if (!environmentId || !projectId || query.error || query.isPending || !query.data) return;
     const acknowledged = acknowledgedThreadNoteWrites(pending, saved, environmentId, projectId);
@@ -186,6 +187,7 @@ export function useThreadNotes(ref: ScopedThreadRef | null) {
       item.release?.();
     }
   }, [pending, saved, environmentId, projectId, query.error, query.isPending, query.data]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window focus listener that refreshes the thread notes atom at most every 30 seconds
   useEffect(() => {
     if (!atom) return;
     let lastRefresh = 0;

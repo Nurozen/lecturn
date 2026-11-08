@@ -76,6 +76,7 @@ export function useSagaRepositoryIndex(projects: readonly RepositoryScopeProject
       })),
   );
   const entries = useAtomValue(sagaRepositoryIndex(key));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refresh saga status atoms for the indexed sagas
   useEffect(
     () =>
       subscribeStaveMutation((environmentId) => {
@@ -106,6 +107,7 @@ export function useStaveSagaStatus(
     enabled ? staveSagaStatus({ environmentId, input: { sagaRoot } }) : null,
   );
   const refresh = query.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch this saga's status when its environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {
@@ -113,6 +115,7 @@ export function useStaveSagaStatus(
       }),
     [enabled, environmentId, refresh],
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls this saga's status on a timer while enabled
   useEffect(() => {
     if (!enabled) return;
     const timer = setInterval(refresh, 15_000);
@@ -209,6 +212,7 @@ export function useStaveStatus(environmentId: EnvironmentId | null): StaveStatus
     stave === undefined ? null : `${stave.enabled}\0${stave.binaryPath}\0${stave.configPath}`;
   const lastSettingsKey = useRef(settingsKey);
   const refresh = query.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refetches the Stave status atom when the server's Stave settings change
   useEffect(() => {
     if (lastSettingsKey.current === settingsKey) return;
     lastSettingsKey.current = settingsKey;
@@ -265,6 +269,7 @@ export function useStaveSpaceStatus(target: {
       : EMPTY_SPACE_STATUS_ATOM;
   const result = useAtomValue(atom);
   const refresh = useAtomRefresh(atom);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch this space's status when its environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {
@@ -272,6 +277,7 @@ export function useStaveSpaceStatus(target: {
       }),
     [target.enabled, target.environmentId, refresh],
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls this space's status atom on a timer while a target is set
   useEffect(() => {
     if (atom === EMPTY_SPACE_STATUS_ATOM) return;
     const timer = setInterval(refresh, 15_000);

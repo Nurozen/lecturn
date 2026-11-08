@@ -112,6 +112,7 @@ export function SquireCompanion(props: {
 
   // Created imperatively so React never reconciles the shadow-DOM element; swapping presence
   // replaces it.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- creates the companion custom element imperatively in the host node and removes it on cleanup
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -129,6 +130,7 @@ export function SquireCompanion(props: {
     };
   }, [tag]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- writes changed attributes onto the imperatively created companion custom element
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;

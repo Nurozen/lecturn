@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
-import Migration0088 from "./088_SquireChatFirst.ts";
+import Migration0091 from "./091_SquireChatFirst.ts";
 
 const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 
@@ -61,11 +61,11 @@ const closed = [
   "steer-sweep",
 ];
 
-layer("088_SquireChatFirst", (it) => {
+layer("091_SquireChatFirst", (it) => {
   it.effect("closes the backlog once, without waking the Lead", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 87 });
+      yield* runMigrations({ toMigrationInclusive: 90 });
       for (const [index, seed] of seeds.entries()) {
         yield* sql`
           INSERT INTO squire_card (
@@ -115,7 +115,7 @@ layer("088_SquireChatFirst", (it) => {
 
       assert.deepStrictEqual(yield* sql`SELECT id FROM squire_event`, []);
 
-      yield* Migration0088;
+      yield* Migration0091;
       assert.deepStrictEqual(yield* read(), first);
     }),
   );
@@ -124,7 +124,7 @@ layer("088_SquireChatFirst", (it) => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`ALTER TABLE squire_card RENAME TO squire_card_kept`;
-      yield* Migration0088;
+      yield* Migration0091;
       assert.deepStrictEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'squire_card'`,
         [],

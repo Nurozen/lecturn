@@ -3,7 +3,12 @@ import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../compone
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useQuietThreadShells, useThreadListingCapabilities } from "../state/entities";
+import {
+  useDelegatedUnderParent,
+  useProjects,
+  useQuietThreadShells,
+  useThreadListingCapabilities,
+} from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
@@ -15,6 +20,7 @@ export function useSidebarProjectGroups() {
   const threads = useQuietThreadShells().filter(
     (thread) => !isHiddenSquireThread(thread, listing.get(thread.environmentId)),
   );
+  const delegatedUnderParent = useDelegatedUnderParent();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -39,5 +45,5 @@ export function useSidebarProjectGroups() {
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
   });
-  return sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder);
+  return sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent);
 }

@@ -127,6 +127,7 @@ export function StaveConfirmDialog({
   const readStatus = useAtomCommand(staveSpaceStatusRead, { reportFailure: false });
   const notified = useRef<string | null>(null);
   const mounted = useRef(true);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- tracks mount so a run settling after the dialog unmounts still notifies the Stave mutation bus
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -134,6 +135,7 @@ export function StaveConfirmDialog({
     };
   }, []);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the Stave dry-run RPC for the current operation and ignores replies for a stale request
   useEffect(() => {
     let stale = false;
     if (started) return;
@@ -158,6 +160,7 @@ export function StaveConfirmDialog({
     };
   }, [environmentId, operation, key, dryRun, started, unavailableReason]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- notifies the Stave mutation bus and the dialog's owner once the streamed operation reaches a terminal state
   useEffect(() => {
     if (
       (state.status === "finished" || state.status === "failed") &&
@@ -186,6 +189,7 @@ export function StaveConfirmDialog({
   // dropped leaves the operation running on the server; its refresh still lands.
   const busy = started && state.status === "running";
   const refusal = started ? state.error?.code : currentPreview?.code;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reads the workspace's saga membership over RPC when a destroy is refused for saga membership
   useEffect(() => {
     let stale = false;
     const workspaceRoot =

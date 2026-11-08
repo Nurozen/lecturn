@@ -32,6 +32,7 @@ export function PullRequestWatchAccountGuard(props: {
     accounts,
   });
   const owner = decision.kind === "ready" ? decision.accountId : null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- expands the owning account's home section in persisted preferences once the link resolves
   useEffect(() => {
     if (owner) expandMobileAccountSection(owner);
   }, [owner]);

@@ -75,6 +75,7 @@ import * as ProjectStore from "../../../orchestration-v2/ProjectStore.ts";
 import * as RuntimePolicy from "../../../orchestration-v2/RuntimePolicy.ts";
 import * as ProviderInstanceRegistry from "../../../provider/ProviderInstanceRegistry.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -410,7 +411,9 @@ const withStack = <A, E>(body: (stack: Stack) => Effect.Effect<A, E>) =>
           probe: McpToolAccess.reads(() => Effect.succeed({ ok: true })),
         }),
       ).pipe(
-        Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provideMerge(
+          McpHttpServer.layerMcpTransport.pipe(Layer.provide(ServerSettings.layerTest())),
+        ),
         Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, registry)),
         Layer.provide(Layer.succeedContext(apps)),
       );

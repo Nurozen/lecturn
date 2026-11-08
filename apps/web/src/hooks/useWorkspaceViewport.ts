@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from "react";
 /** Keep the mobile workspace above the IME, including WebViews whose svh/dvh stay stale. */
 export function useWorkspaceViewport(enabled: boolean) {
   const ref = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- listens to window and visual viewport resizes to size the workspace element above the IME before paint
   useLayoutEffect(() => {
     const element = ref.current;
     if (!enabled || !element) return;

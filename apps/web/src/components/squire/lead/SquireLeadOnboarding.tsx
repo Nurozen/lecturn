@@ -102,6 +102,7 @@ export function SquireLeadOnboarding(props: {
   const homeShell = useSquireHomeShell(environmentId, lead);
   const introSupported = useSquireLeadIntroSupported(environmentId);
   // Re-runs when a run is queued, since the Lead may already be working by then.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- feeds the Lead's working state to the module-level onboarding run tracker while a run is queued
   useEffect(() => {
     if (run === null) return;
     squireLeadOnboardingRuns.observe(environmentId, working);
@@ -122,6 +123,7 @@ export function SquireLeadOnboarding(props: {
   const shownKey = phase === "proposals" ? shown.map((proposal) => proposal.card.id).join() : "";
   // Greet when the cards first appear, on whichever figure is mounted. Child effects run
   // first, so the onboarding's own figure already listens.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- asks the mounted Lead figure to greet through the gesture registry when new proposals first appear
   useEffect(() => {
     if (shownKey === "" || !squireLeadGreets.claim(leadId, shownKey.split(","))) return;
     requestSquireGesture(leadId, "greet");

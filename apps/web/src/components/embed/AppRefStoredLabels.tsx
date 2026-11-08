@@ -20,6 +20,7 @@ export function AppRefStoredLabels({
   const scope = scopedThreadKey(threadRef);
   const items = useThreadVisibleTurnItems(threadRef);
   const remember = useAppRefLabelStore((state) => state.remember);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- writes this thread's app reference labels into the label store read by app reference chips
   useEffect(() => remember(scope, storedAppRefLabels(items)), [remember, scope, items]);
   return null;
 }

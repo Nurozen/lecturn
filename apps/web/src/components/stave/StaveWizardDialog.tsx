@@ -163,6 +163,7 @@ function SpaceWizard(props: {
   const running = operationState.status === "running" || operationState.status === "disconnected";
   const terminal = operationState.status === "finished" || operationState.status === "failed";
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports the running operation or picker task to the wizard's close guard and clears it on unmount
   useEffect(() => {
     onBusyChange(running || pickerBusy);
     return () => onBusyChange(false);
@@ -211,6 +212,7 @@ function SpaceWizard(props: {
   // Open the project the server created, once, then dismiss the wizard.
   const openedRef = useRef(false);
   const result = operationState.status === "finished" ? operationState.result : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- notifies the Stave mutation bus and navigates the router to the created project once the operation finishes
   useEffect(() => {
     if (result === undefined || result.kind !== "createSpace" || openedRef.current) return;
     openedRef.current = true;

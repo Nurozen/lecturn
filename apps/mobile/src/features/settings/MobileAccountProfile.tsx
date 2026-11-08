@@ -24,6 +24,7 @@ export function MobileAccountProfile({
     readonly accountId: string;
     readonly error: string | null;
   } | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- switches Clerk's active session to this account before the native profile view shows it
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;

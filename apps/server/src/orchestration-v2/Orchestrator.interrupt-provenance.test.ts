@@ -23,6 +23,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { StaveOrchestration } from "../stave/StaveOrchestration.ts";
 import * as StaveOrchestrationLive from "../stave/StaveOrchestrationLive.ts";
@@ -78,6 +79,7 @@ const layerTest = Layer.mergeAll(
         ProviderAdapterRegistry.layerFromAdapters([adapter]),
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       ),
     ),

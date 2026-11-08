@@ -13,6 +13,7 @@ export function AnimatedWidth({
   const contentRef = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState<number | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes the content element's width before paint to animate width
   useLayoutEffect(() => {
     const element = contentRef.current;
     if (!element) return;

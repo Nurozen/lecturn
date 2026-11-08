@@ -270,6 +270,11 @@ describe("root reopen shortcut", () => {
     setup();
     await using _view = await renderShortcut();
     expect(state.setShortcuts).toHaveBeenLastCalledWith([
+      // F6 and mod+F6 (with Shift for previous) move focus out of the browser too.
+      expect.objectContaining({ command: "workspace.focusNext" }),
+      expect.objectContaining({ command: "workspace.focusNext" }),
+      expect.objectContaining({ command: "workspace.focusPrevious" }),
+      expect.objectContaining({ command: "workspace.focusPrevious" }),
       expect.objectContaining({ command: "sidebar.toggle" }),
       expect.objectContaining({ command: "sidebar.toggleApps" }),
       expect.objectContaining({ command: "rightPanel.toggle" }),

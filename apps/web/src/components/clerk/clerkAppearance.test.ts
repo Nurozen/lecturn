@@ -9,7 +9,7 @@ import {
   themeColorToHex,
   type ThemeColors,
 } from "../../themePalette";
-import { clerkAppearance } from "./clerkAppearance";
+import { clerkAppearance, redesignClerkAppearance } from "./clerkAppearance";
 
 function contrastRatio(first: string, second: string): number {
   const toRgb = (value: string) => {
@@ -51,6 +51,18 @@ const builtInThemeModes = [
 );
 
 describe("clerkAppearance", () => {
+  it("puts Clerk's styles in the clerk layer only under the new design", () => {
+    expect(clerkAppearance).not.toHaveProperty("cssLayerName");
+    expect(clerkAppearance).not.toHaveProperty("options");
+    expect(clerkAppearance.variables).not.toHaveProperty("borderRadius");
+    expect(redesignClerkAppearance).toEqual({
+      ...clerkAppearance,
+      cssLayerName: "clerk",
+      options: { shimmer: false },
+      variables: { ...clerkAppearance.variables, borderRadius: "0.5rem" },
+    });
+  });
+
   it.each(builtInThemeModes)("keeps Clerk text readable across a built-in palette", (colors) => {
     expect(clerkAppearance.variables).toMatchObject({
       colorForeground: "var(--contrast-foreground)",

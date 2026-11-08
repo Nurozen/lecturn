@@ -116,6 +116,7 @@ function SquireRoomView(props: {
   const lastPostAt = room?.lastPostAt ?? null;
 
   // The newest page is on screen once loaded, since the log opens pinned to its end.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- records the room as seen locally and sends the server a read marker once the newest page is on screen
   useEffect(() => {
     if (newestPostId === null) return;
     markSquireRoomSeen(environmentId, row.id, lastPostAt);
@@ -127,6 +128,7 @@ function SquireRoomView(props: {
     });
   }, [environmentId, row.id, newestPostId, lastPostAt, canMarkRead, markRead]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- scrolls the log DOM element to its end when a new post arrives while pinned
   useEffect(() => {
     const element = scrollRef.current;
     if (element === null || newestPostId === null || !pinnedRef.current) return;

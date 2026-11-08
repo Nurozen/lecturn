@@ -18,9 +18,11 @@ export function ConnectAccountCommandsHost() {
     knownAccountCount: known.accountIds.length,
   });
   const latest = useRef({ signIn, signOut });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed sign-in and sign-out hooks to a ref read by the registered account commands
   useEffect(() => {
     latest.current = { signIn, signOut };
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers the account commands in the app atom registry while mounted and clears them on unmount
   useEffect(() => {
     appAtomRegistry.set(connectAccountCommandsAtom, {
       addAccountBlockedReason: blocked,

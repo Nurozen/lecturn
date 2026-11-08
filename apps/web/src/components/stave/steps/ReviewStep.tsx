@@ -33,6 +33,7 @@ function useDryRun(environmentId: EnvironmentId, operation: StaveCreateSpaceOper
     readonly result: DryRunResult;
   } | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the Stave dry-run RPC for the current operation and attempt and ignores replies for a stale request
   useEffect(() => {
     let stale = false;
     void dryRun({ environmentId, input: { operation } }).then((result) => {
@@ -67,6 +68,7 @@ export function ReviewStep(props: {
   const { environmentId, operation, onDryRunPendingChange } = props;
   const { view, retry } = useDryRun(environmentId, operation);
   const pending = view.status === "pending";
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports the dry run's pending state to the wizard, which owns the create button the dry run gates
   useEffect(() => {
     onDryRunPendingChange(pending);
   }, [onDryRunPendingChange, pending]);

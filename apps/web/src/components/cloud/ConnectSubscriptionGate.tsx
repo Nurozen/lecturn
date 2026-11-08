@@ -27,6 +27,7 @@ export function ConnectSubscriptionGate({
   const [refreshing, setRefreshing] = useState(false);
   const billingUrl = new URL("/account/billing", configuredHostedAppUrl()).href;
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window focus listener that rechecks access after the user returns from billing
   useEffect(() => {
     const refresh = () => {
       setActionError(null);

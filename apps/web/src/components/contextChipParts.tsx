@@ -310,6 +310,7 @@ function SvgFileChip(props: ComponentProps<typeof FileChip>) {
         }
       : null,
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- creates an object URL for the local SVG file and revokes it on cleanup
   useEffect(() => {
     const file = preview?.file;
     if (!file) return;

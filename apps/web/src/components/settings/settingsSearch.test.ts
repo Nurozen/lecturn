@@ -146,6 +146,7 @@ describe("searchSettings", () => {
       "stave-status",
       "stave-binary-path",
       "stave-config-path",
+      "linked-environments",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });
@@ -210,6 +211,33 @@ describe("searchSettings", () => {
       "stave-pending-cleanups",
       "stave-nest-sagas",
     ]);
+  });
+
+  it("finds linked environments on a remote host without local maintenance access", () => {
+    const availability = {
+      hasCloudPublicConfig: false,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: true,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      localEnvironmentDisabled: true,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasStave: false,
+    };
+    const results = (hasPeerLinkHost: boolean) =>
+      searchSettings(
+        "linked environments",
+        filterAvailableSettingsSearchItems({ ...availability, hasPeerLinkHost }),
+      );
+    expect(results(false).map((item) => item.id)).not.toContain("linked-environments");
+    expect(results(true)).toContainEqual(
+      expect.objectContaining({
+        id: "linked-environments",
+        to: "/settings/connections",
+        targetId: "linked-environments",
+      }),
+    );
   });
 
   it("finds keybinding commands by label, command id, and default key", () => {

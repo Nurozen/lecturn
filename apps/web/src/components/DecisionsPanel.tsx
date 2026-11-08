@@ -1,7 +1,7 @@
 import { DecisionRelationSuggestions } from "./contextual/DecisionRelationSuggestions";
 import { ContextualDecisionGroupCard } from "./contextual/ContextualDecisionGroupCard";
 import { DecisionAttributionChip } from "./DecisionAttributionChip";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { downloadTextFile } from "../lib/downloadTextFile";
@@ -113,24 +113,24 @@ function AvailableDecisionsPanel({
       input: { projectId, ...(threadId ? { threadId } : {}) },
     }),
   );
-  const [view, setView] = useState<{ visible: readonly ThreadDecision[]; newCount: number }>({
-    visible: EMPTY,
-    newCount: 0,
-  });
-  const { visible, newCount } = view;
-  const shownKey = useRef(""),
-    seenInitial = useRef(false);
   const filterKey = decisionFilterKey(input);
-  useEffect(() => {
-    if (!list.data) return;
-    if (shownKey.current !== filterKey || !seenInitial.current) {
-      shownKey.current = filterKey;
-      seenInitial.current = true;
-      setView({ visible: list.data.decisions, newCount: 0 });
-      return;
-    }
-    setView((previous) => reconcileVisibleDecisions(previous.visible, list.data!.decisions));
-  }, [list.data, filterKey]);
+  const [view, setView] = useState<{
+    source: object | null;
+    filterKey: string | null;
+    visible: readonly ThreadDecision[];
+    newCount: number;
+  }>({ source: null, filterKey: null, visible: EMPTY, newCount: 0 });
+  // A filter's first answer shows whole; later answers keep visible cards and count new ones.
+  if (list.data && (view.source !== list.data || view.filterKey !== filterKey)) {
+    setView({
+      source: list.data,
+      filterKey,
+      ...(view.filterKey === filterKey
+        ? reconcileVisibleDecisions(view.visible, list.data.decisions)
+        : { visible: list.data.decisions, newCount: 0 }),
+    });
+  }
+  const { visible, newCount } = view;
   const [relationshipReview, setRelationshipReview] = useState<{
     action: "accept-replacement" | "reject-replacement" | "undo-replacement";
     relation: DecisionRelationship;
@@ -511,7 +511,11 @@ function AvailableDecisionsPanel({
             size="xs"
             variant="outline"
             onClick={() => {
-              setView({ visible: list.data?.decisions ?? EMPTY, newCount: 0 });
+              setView((current) => ({
+                ...current,
+                visible: list.data?.decisions ?? EMPTY,
+                newCount: 0,
+              }));
             }}
           >
             Show {newCount} new decisions

@@ -113,7 +113,12 @@ import Migration0085 from "./Migrations/067_WebhookDedupe.ts";
 // so they run here as 86 and 87.
 import Migration0086 from "./Migrations/068_ShellStopRequestIndex.ts";
 import Migration0087 from "./Migrations/069_ThreadMessageSearch.ts";
-import Migration0088 from "./Migrations/088_SquireChatFirst.ts";
+// Upstream published these as 70 to 72, which Lecturn's ledger already used
+// (OrchestrationV2 through ScheduledTaskWebhooks), so they run here as 88 to 90.
+import Migration0088 from "./Migrations/070_PeerLinks.ts";
+import Migration0089 from "./Migrations/071_PeerLinkFence.ts";
+import Migration0090 from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0091 from "./Migrations/091_SquireChatFirst.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -195,6 +200,27 @@ const ThreadMessageSearchCompatibility = Effect.gen(function* () {
   `;
   if (tables.length > 0) return;
   yield* Migration0087;
+});
+
+// Upstream 71 adds a column without IF NOT EXISTS. A database that already ran
+// it under upstream's id keeps that column, so only add it when missing.
+const PeerLinkFenceCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(peer_environment_links)`;
+  if (columns.some((column) => column.name === "fenced")) return;
+  yield* Migration0089;
+});
+
+// Upstream 72 creates its index without IF NOT EXISTS. A database that already
+// ran it under upstream's id keeps that index, so only create it when missing.
+const WaitingLinkRequestIndexCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const indexes = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'index' AND name = 'orchestration_v2_projection_turn_items_waiting_link_idx'
+  `;
+  if (indexes.length > 0) return;
+  yield* Migration0090;
 });
 
 /**
@@ -320,7 +346,11 @@ const migrationEntries = [
   [86, "ShellStopRequestIndex", ShellStopRequestIndexCompatibility],
   // Upstream 69.
   [87, "ThreadMessageSearch", ThreadMessageSearchCompatibility],
-  [88, "SquireChatFirst", Migration0088],
+  // Upstream 70 to 72. PeerLinks creates its table only if missing.
+  [88, "PeerLinks", Migration0088],
+  [89, "PeerLinkFence", PeerLinkFenceCompatibility],
+  [90, "WaitingLinkRequestIndex", WaitingLinkRequestIndexCompatibility],
+  [91, "SquireChatFirst", Migration0091],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

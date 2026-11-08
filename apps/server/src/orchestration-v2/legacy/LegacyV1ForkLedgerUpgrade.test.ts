@@ -281,6 +281,9 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [85, "WebhookDedupe"],
           [86, "ShellStopRequestIndex"],
           [87, "ThreadMessageSearch"],
+          [88, "PeerLinks"],
+          [89, "PeerLinkFence"],
+          [90, "WaitingLinkRequestIndex"],
         ]);
         for (const table of [
           "orchestration_v2_events",

@@ -75,6 +75,7 @@ export function useMobileSagaIndex(projects: ReadonlyArray<EnvironmentProject>, 
     [projects, enabled],
   );
   const entries = useAtomValue(sagaIndex(key));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refreshes saga status atoms on a 15-second interval while sagas are mounted
   useEffect(() => {
     const targets = JSON.parse(key) as Array<{ environmentId: string; sagaRoot: string }>;
     if (targets.length === 0) return;

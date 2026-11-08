@@ -45,6 +45,7 @@ export function useStaveWizardData(environmentId: EnvironmentId | null): StaveWi
 
   const refreshSpaces = spaces.refresh;
   const refreshSagas = sagas.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch spaces and sagas when this environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {

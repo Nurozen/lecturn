@@ -51,6 +51,7 @@ export function useExternalSessionList(input: {
     readonly merged: MergedExternalSessions;
   } | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- lists external provider sessions over RPC for the current request key and drops replies for a stale key
   useEffect(() => {
     if (requestKey === null || environmentId === null) return;
     let cancelled = false;
