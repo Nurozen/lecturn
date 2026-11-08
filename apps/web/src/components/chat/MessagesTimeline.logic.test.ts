@@ -4002,6 +4002,36 @@ describe("Squire home thread event rows", () => {
     expect(grouped([batch!, quietCall(1), reply!]).map((row) => row.id)).toEqual([]);
   });
 
+  it("keeps the text of a run that also raised something", () => {
+    const [batch, reply] = wake(1, []);
+    const notify = {
+      ...quietCall(1),
+      id: "notify-1",
+      entry: {
+        ...quietCall(1).entry,
+        id: "notify-1",
+        structuredPayload: {
+          type: "dynamic_tool",
+          toolName: "mcp__lecturn__squire_notify",
+        } as never,
+      },
+    };
+    expect(grouped([batch!, quietCall(1), notify, reply!]).map((row) => row.id)).toContain(
+      "reply-1",
+    );
+  });
+
+  it("never folds away a message the user wrote in a run that stayed quiet", () => {
+    const [batch, reply] = wake(1, []);
+    const mine = {
+      ...userMessage(1, "user"),
+      message: { ...userMessage(1, "user").message, runId: RunId.make("wake-1") },
+    };
+    const ids = grouped([batch!, mine, quietCall(1), reply!]).map((row) => row.id);
+    expect(ids).toContain("user-1");
+    expect(ids).toContain("reply-1");
+  });
+
   it("keeps a failure in view", () => {
     const [batch] = wake(1, []);
     const failed = {

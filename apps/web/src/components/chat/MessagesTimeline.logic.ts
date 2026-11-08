@@ -8,7 +8,7 @@ import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setu
 export { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
 import {
-  isSquireStayQuietTool,
+  squireQuietRunIds,
   squireUpdateGroups,
   type SquireApprovalEntry,
   type SquireUpdateItemRole,
@@ -265,13 +265,10 @@ function squireUpdateEntryRole(
 ): SquireUpdateItemRole {
   switch (entry.kind) {
     case "message":
+      if (isUserWrittenMessage(entry.message)) return "user";
       if (entry.message.runId != null && quietRunIds.has(entry.message.runId)) return "update";
       if (runIsActive(entry.message.runId)) return "keep";
-      if (entry.message.role === "assistant") return "keep";
-      // Older messages carry no author; they read as the user's own.
-      return entry.message.role === "user" && (entry.message.createdBy ?? "user") === "user"
-        ? "user"
-        : "update";
+      return entry.message.role === "assistant" ? "keep" : "update";
     case "work": {
       if (runIsActive(entry.entry.runId)) return "keep";
       if (entry.entry.questionAnswer !== undefined) return "keep";
@@ -292,16 +289,23 @@ function squireUpdateEntryRole(
   }
 }
 
+/** Older messages carry no author; they read as the user's own. */
+function isUserWrittenMessage(message: Pick<ChatMessage, "role" | "createdBy">): boolean {
+  return message.role === "user" && (message.createdBy ?? "user") === "user";
+}
+
 const NO_EVENT_KINDS: ReadonlyArray<string> = [];
 const noSquireEventKinds = () => NO_EVENT_KINDS;
 
-function squireQuietRunIds(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<RunId> {
-  const quiet = new Set<RunId>();
-  for (const entry of entries) {
-    if (entry.kind !== "work" || entry.entry.runId == null) continue;
-    if (isSquireStayQuietTool(workEntryToolName(entry.entry))) quiet.add(entry.entry.runId);
-  }
-  return quiet;
+function squireRunIdsToHideText(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<RunId> {
+  return squireQuietRunIds(entries, (entry) => {
+    if (entry.kind === "message") {
+      return { runId: entry.message.runId, userMessage: isUserWrittenMessage(entry.message) };
+    }
+    return entry.kind === "work"
+      ? { runId: entry.entry.runId, toolName: workEntryToolName(entry.entry) }
+      : null;
+  });
 }
 
 export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
@@ -1711,7 +1715,7 @@ export function deriveMessagesTimelineRows(input: {
   // called `squire_stay_quiet` shows no text.
   const hiddenSquireIndexes = new Set<number>();
   if (input.compactSquireEvents) {
-    const quietRunIds = squireQuietRunIds(timelineEntries);
+    const quietRunIds = squireRunIdsToHideText(timelineEntries);
     const groups = squireUpdateGroups(
       timelineEntries,
       (entry) => squireUpdateEntryRole(entry, runIdIsActiveResponse, quietRunIds),

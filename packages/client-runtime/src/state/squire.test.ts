@@ -78,6 +78,7 @@ import {
   squireAllowRuleInput,
   runSquireAlwaysAllow,
   isSquireStayQuietTool,
+  squireQuietRunIds,
   squireSnapshotGestures,
   squireStateLine,
   squireUndoOffer,
@@ -1707,6 +1708,61 @@ describe("squireSidebarState", () => {
 
   it("is quiet on an older server without lastMessageAt", () => {
     expect(squireSidebarState(entry(), shell({ lastVisitedAt: null }))).toBe("none");
+  });
+});
+
+describe("squireQuietRunIds", () => {
+  type Item = { readonly run: string | null; readonly tool?: string; readonly user?: boolean };
+  const quiet = (items: ReadonlyArray<Item>) => [
+    ...squireQuietRunIds(items, (item) => ({
+      runId: item.run,
+      toolName: item.tool ?? null,
+      userMessage: item.user === true,
+    })),
+  ];
+  const stay = "mcp__lecturn__squire_stay_quiet";
+
+  it("marks a run that only stayed quiet", () => {
+    expect(
+      quiet([
+        { run: "a", tool: "squire_get_summary" },
+        { run: "a", tool: stay },
+      ]),
+    ).toEqual(["a"]);
+  });
+
+  it("leaves a batch that also spoke about another thread", () => {
+    expect(
+      quiet([
+        { run: "a", tool: stay },
+        { run: "a", tool: "mcp__lecturn__squire_notify" },
+      ]),
+    ).toEqual([]);
+    expect(
+      quiet([
+        { run: "a", tool: "squire_recommend_steer" },
+        { run: "a", tool: stay },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("never silences a run the user started", () => {
+    expect(
+      quiet([
+        { run: "a", user: true },
+        { run: "a", tool: stay },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not count another Squire's message or a read as speaking", () => {
+    expect(
+      quiet([
+        { run: "a", tool: "squire_send_message" },
+        { run: "a", tool: stay },
+        { run: null, tool: stay },
+      ]),
+    ).toEqual(["a"]);
   });
 });
 

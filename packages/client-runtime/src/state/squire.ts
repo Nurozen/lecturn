@@ -1710,9 +1710,62 @@ export function squireSidebarState(
   return Date.parse(lastMessageAt) > Date.parse(lastVisitedAt) ? "unread" : "none";
 }
 
-/** Runs that called `squire_stay_quiet` keep their text out of the chat, however the provider names the tool. */
+/** A Squire tool's bare name, however the provider namespaces it. */
+function squireToolName(toolName: string | null | undefined): string | null {
+  if (toolName == null) return null;
+  return /(?:^|[._:/\s-])(squire_[a-z_]+)$/i.exec(toolName.trim())?.[1]?.toLowerCase() ?? null;
+}
+
 export function isSquireStayQuietTool(toolName: string | null | undefined): boolean {
-  return toolName != null && /(^|[._:/\s-])squire_stay_quiet$/i.test(toolName.trim());
+  return squireToolName(toolName) === "squire_stay_quiet";
+}
+
+/** Tools that put something in front of the user, so the run has something to say. */
+const SQUIRE_SPEAKING_TOOLS: ReadonlySet<string> = new Set([
+  "squire_notify",
+  "squire_recommend_steer",
+  "squire_send_steer",
+  "squire_propose_thread",
+  "squire_create_thread",
+  "squire_propose_room",
+  "squire_open_room",
+  "squire_propose_squire",
+  "squire_raise_overlap",
+  "squire_pause",
+  "squire_resume",
+  "squire_rescope",
+  "squire_forward_item",
+]);
+
+/** One timeline item as the quiet rule reads it; null for anything else. */
+export interface SquireQuietRunSignal {
+  readonly runId: string | null | undefined;
+  readonly toolName?: string | null | undefined;
+  /** A message the user wrote themselves. */
+  readonly userMessage?: boolean;
+}
+
+/**
+ * Runs whose text stays out of the chat. One batch can cover many events, so stay-quiet on one
+ * thread does not silence a notify on another: a run is quiet only if it called stay-quiet, raised
+ * nothing, and the user did not start it.
+ */
+export function squireQuietRunIds<T, RunId extends string>(
+  items: ReadonlyArray<T>,
+  read: (item: T) => (SquireQuietRunSignal & { readonly runId: RunId | null | undefined }) | null,
+): ReadonlySet<RunId> {
+  const quiet = new Set<RunId>();
+  const spoke = new Set<RunId>();
+  for (const item of items) {
+    const signal = read(item);
+    if (signal === null || signal.runId == null) continue;
+    if (signal.userMessage === true) spoke.add(signal.runId);
+    const name = squireToolName(signal.toolName);
+    if (name === "squire_stay_quiet") quiet.add(signal.runId);
+    else if (name !== null && SQUIRE_SPEAKING_TOOLS.has(name)) spoke.add(signal.runId);
+  }
+  for (const runId of spoke) quiet.delete(runId);
+  return quiet;
 }
 
 // ── Squire updates in a home thread ───────────────────────────
