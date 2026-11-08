@@ -64,6 +64,7 @@ import {
   projectWorkspaceStack,
   partitionStackPresentations,
   reconcileStackScreens,
+  workspaceDockHidden,
   type CollapsedSplitColumn,
 } from "../../native/workspace-stack-projection";
 import {
@@ -521,13 +522,11 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
     options: { headerShown: false },
     render: () => (
       <WorkspaceNativeTabs
-        hidden={
-          !workspacePage &&
-          projection.detail.length > 0 &&
-          !primaryVisible &&
-          !layout.usesSplitView &&
-          (metrics?.verticalBarEdge ?? "none") === "none"
-        }
+        hidden={workspaceDockHidden(projection, {
+          rootVisible: primaryVisible,
+          usesSplitView: layout.usesSplitView,
+          verticalBarEdge: metrics?.verticalBarEdge ?? "none",
+        })}
       >
         {props.nativeColumns && !workspacePage ? (
           <WorkspaceColumns

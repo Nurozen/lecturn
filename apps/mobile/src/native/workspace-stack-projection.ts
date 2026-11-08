@@ -21,6 +21,23 @@ export function projectWorkspaceStack(
   return { primary, detail, overlays };
 }
 
+/** On a phone the dock belongs to the root page, whichever tab is selected, so a pushed page hides it. */
+export function workspaceDockHidden(
+  projection: { readonly detail: readonly Route[] },
+  layout: {
+    readonly rootVisible: boolean;
+    readonly usesSplitView: boolean;
+    readonly verticalBarEdge: "none" | "left" | "right";
+  },
+) {
+  return (
+    projection.detail.length > 0 &&
+    !layout.rootVisible &&
+    !layout.usesSplitView &&
+    layout.verticalBarEdge === "none"
+  );
+}
+
 /** Native callbacks can arrive after a JS pop or replace; those must not pop the next screen. */
 export function nativeWorkspacePopCount(
   state: Pick<NavigationState, "index" | "routes">,
