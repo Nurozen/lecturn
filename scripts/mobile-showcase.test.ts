@@ -12,6 +12,7 @@ import {
   planShowcaseCaptures,
   readPngMetadata,
   screenshotsMatch,
+  showcaseStallText,
 } from "./mobile-showcase.ts";
 
 const appleSpec: ShowcaseStoreAssetSpec = {
@@ -129,4 +130,26 @@ it("treats a capture that still shows the previous scene as a match", () => {
   assert.equal(screenshotsMatch(thread, sameThreadAfterStatusBarTick), true);
   assert.equal(screenshotsMatch(thread, terminal), false);
   assert.equal(screenshotsMatch(thread, normalizeStorePng(thread)), true);
+});
+
+it("refuses scenes that settled on a stall or error screen", () => {
+  assert.equal(
+    showcaseStallText('{"AXLabel":"Reconnecting to Moonbase Terminal..."}'),
+    "Reconnecting",
+  );
+  assert.equal(
+    showcaseStallText('{"AXLabel":"Could not check terminal access"}'),
+    "Could not check terminal access",
+  );
+  assert.equal(showcaseStallText('{"AXLabel":"Review unavailable"}'), "Review unavailable");
+  assert.equal(
+    showcaseStallText(
+      '{"AXLabel":"Remote environment endpoint http://127.0.0.1:1/api/auth/session timed out after 6000ms."}',
+    ),
+    "timed out after",
+  );
+  assert.equal(
+    showcaseStallText('{"AXLabel":"Sends on reconnect"},{"AXLabel":"Changes vs main"}'),
+    null,
+  );
 });

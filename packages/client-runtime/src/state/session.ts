@@ -2,10 +2,11 @@ import type { AuthSessionState, EnvironmentId, ServerConfig } from "@lecturn/con
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/http";
-import { AsyncResult, Atom } from "effect/reactivity";
+import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
@@ -56,8 +57,31 @@ export const fetchEnvironmentSessionState = Effect.fn(
     request: ({ client, headers }) => client.session({ headers }),
     // This endpoint returns 200 with authenticated:false for expired credentials.
     isUnauthorizedResponse: (response) => !response.authenticated,
-  });
+  }).pipe(
+    // Screens gate on this status and cache its result, so one slow response
+    // from a busy host must not become the answer they keep showing.
+    Effect.retry({
+      times: 2,
+      schedule: Schedule.exponential("1 second"),
+      while: (error) => error._tag === "RemoteEnvironmentAuthTimeoutError",
+    }),
+  );
 });
+
+/**
+ * The session status is one long-lived atom per environment, held by many
+ * views. Its stale-while-revalidate wrapper only revalidates when the atom
+ * itself mounts, so a failure cached while another view held it would outlive
+ * reopening the view that shows it. Call this when such a view opens.
+ */
+export function refreshSessionStateIfFailed(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>,
+): void {
+  const result = registry.get(atom);
+  // A failure that is already refetching would only be cancelled and restarted.
+  if (AsyncResult.isFailure(result) && !result.waiting) registry.refresh(atom);
+}
 
 function makeEnvironmentSessionAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, E>,
