@@ -29,7 +29,7 @@ import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import { useEffect, useRef, useState } from "react";
 import { useCodeViewFileReveal } from "./diffs/useCodeViewFileReveal";
-import { useFilesystemReadAccess } from "~/state/filesystem";
+import { useFilesystemReadAccess, useRefreshFailedSessionState } from "~/state/filesystem";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useFileContextMenuHandler } from "../fileContextMenu";
 import { type DraftId } from "../composerDraftStore";
@@ -239,6 +239,7 @@ export default function DiffPanel({
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useQuietThreadShell(routeThreadRef);
   const fileAccess = useFilesystemReadAccess(activeThread?.environmentId ?? null);
+  useRefreshFailedSessionState(activeThread?.environmentId ?? null);
   const { canReadFiles } = fileAccess;
   const activeProjectId = activeThread?.projectId ?? null;
   const loadedProject = useProject(

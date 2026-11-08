@@ -2,7 +2,10 @@ import {
   createFilesystemEnvironmentAtoms,
   resolveFilesystemReadAccess,
 } from "@lecturn/client-runtime/state/filesystem";
+import { RegistryContext } from "@effect/atom-react";
+import { refreshSessionStateIfFailed } from "@lecturn/client-runtime/state/session";
 import type { EnvironmentId } from "@lecturn/contracts";
+import { useContext, useEffect } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentPresentation } from "./presentation";
@@ -22,4 +25,18 @@ export function useFilesystemReadAccess(environmentId: EnvironmentId | null) {
     session: session.data,
     sessionError: session.error,
   });
+}
+
+/**
+ * Refetches a failed session status when a file-access view mounts. The status
+ * atom stays mounted by other views, so a cached failure would not otherwise
+ * revalidate. Call it from views, not per-row helpers.
+ */
+export function useRefreshFailedSessionState(environmentId: EnvironmentId | null): void {
+  const registry = useContext(RegistryContext);
+  // oxlint-disable-next-line lecturn/react-effect-budget -- refetches a cached failed session status in the atom registry on mount.
+  useEffect(() => {
+    if (environmentId === null) return;
+    refreshSessionStateIfFailed(registry, environmentSession.sessionStateAtom(environmentId));
+  }, [environmentId, registry]);
 }

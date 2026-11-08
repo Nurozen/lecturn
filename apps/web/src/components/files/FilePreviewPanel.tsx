@@ -32,7 +32,7 @@ import {
 import type { WorkerPoolManager } from "@pierre/diffs/worker";
 import { EditProvider, File, Virtualizer, useWorkerPool } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
-import { useFilesystemReadAccess } from "~/state/filesystem";
+import { useFilesystemReadAccess, useRefreshFailedSessionState } from "~/state/filesystem";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -1015,6 +1015,7 @@ export default function FilePreviewPanel({
   const isHostFile =
     attachment !== undefined || (relativePath !== null && isHostPath(relativePath));
   const fileAccess = useFilesystemReadAccess(environmentId);
+  useRefreshFailedSessionState(environmentId);
   const { canReadFiles } = fileAccess;
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
   const file = useProjectFileQuery(

@@ -210,6 +210,7 @@ import {
   resolveMarkdownFontSizes,
   resolveNativeMarkdownTypography,
 } from "../../lib/appearancePreferences";
+import { useShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { markdownFileIconSource } from "../../lib/markdownFileIcons";
 import { markdownWithAppReferences } from "../../lib/markdownDocument";
@@ -2292,7 +2293,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
     },
     [navigation, props.environmentId, props.threadId],
   );
-  const { themeAppearance } = useAppearancePreferences();
+  const { themeAppearance, themeId } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -2947,7 +2948,8 @@ function ThreadFeedView(props: ThreadFeedProps) {
     (entry) => entry.type === "message" && entry.message.role === "user",
   );
   // Empty/filled remounts reset imperative insets; seed the overlay first. Android uses a declarative inset floor.
-  const listMountKey = `${feedThreadKey}:${presentedFeed.some((entry) => entry.type !== "thinking") ? "filled" : "empty"}`;
+  const hasFeedContent = presentedFeed.some((entry) => entry.type !== "thinking");
+  const listMountKey = `${feedThreadKey}:${hasFeedContent ? "filled" : "empty"}`;
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const [hasRevealed, setHasRevealed] = useState(false);
   const revealOpacity = useSharedValue(0);
@@ -2968,6 +2970,7 @@ function ThreadFeedView(props: ThreadFeedProps) {
   }, [hasRevealed, listMountKey, loadedListKey, props.contentPresentation.kind, revealOpacity]);
   // oxlint-disable-next-line lecturn/react-effect-budget -- stops a running reveal fade on unmount.
   useEffect(() => () => cancelAnimation(revealOpacity), [revealOpacity]);
+  useShowcaseSceneRendered("thread", themeId, hasRevealed && hasFeedContent);
   useLayoutEffect(() => {
     const bottom = props.contentInsetEndAdjustment.get();
     if (bottom > 0) {

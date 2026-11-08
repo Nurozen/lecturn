@@ -653,6 +653,8 @@ export interface ShowcaseEnvironment {
   readonly environmentId: string;
   readonly label: string;
   readonly port: number;
+  /** Restarts the seeded server on the same port and base dir. */
+  readonly start: () => NodeChildProcess.ChildProcess;
 }
 
 /** Boot one seeded fixture server per showcase environment; `track` receives every spawned server. */
@@ -685,14 +687,9 @@ export async function startShowcaseEnvironments(
     await seedShowcaseEnvironment({ baseDir, projectIds: environment.projectIds });
     // Legacy fixture threads are imported into V2 during server startup.
     await stopProcess(server);
-    const seededServer = startShowcaseServer(
-      baseDir,
-      workspaceRoot,
-      port,
-      shellPath,
-      labelProbeDirectory,
-    );
-    track(seededServer);
+    const start = () =>
+      startShowcaseServer(baseDir, workspaceRoot, port, shellPath, labelProbeDirectory);
+    track(start());
     await waitForPort(port, `${environment.label} seeded server`);
     // The server begins listening before the ServerEnvironment layer
     // persists the environment id, so poll rather than read once.
@@ -700,7 +697,7 @@ export async function startShowcaseEnvironments(
       NodePath.join(baseDir, "userdata", "environment-id"),
       `${environment.label} environment id`,
     );
-    started.push({ baseDir, environmentId, label: environment.label, port });
+    started.push({ baseDir, environmentId, label: environment.label, port, start });
   }
   return started;
 }
@@ -1121,6 +1118,26 @@ async function collectIosDiagnostics(udid: string, label: string): Promise<void>
   await record("host.txt", commandOutput("ps", ["-axo", "pid,pcpu,rss,command", "-r"]));
 }
 
+// Error states a scene can settle on when a request timed out on a starved host.
+const SHOWCASE_STALL_TEXTS = [
+  "Reconnecting",
+  "Could not check terminal access",
+  "Review unavailable",
+  "timed out after",
+] as const;
+
+export function showcaseStallText(accessibilityTree: string): string | null {
+  return SHOWCASE_STALL_TEXTS.find((text) => accessibilityTree.includes(text)) ?? null;
+}
+
+async function iosStallText(udid: string, scene: ShowcaseScene): Promise<string | null> {
+  // The lock screen is not the app, and an accessibility query there can
+  // disturb the lit, locked state the capture needs.
+  if (scene === "agent-activity") return null;
+  const ui = await commandOutput(iosAxe(), ["describe-ui", "--udid", udid]).catch(() => "");
+  return showcaseStallText(ui);
+}
+
 export function screenshotsMatch(first: Uint8Array, second: Uint8Array): boolean {
   const a = PNG.sync.read(Buffer.from(first));
   const b = PNG.sync.read(Buffer.from(second));
@@ -1182,40 +1199,55 @@ async function allowIosNotificationsUntilReady(udid: string, ready: Promise<void
 }
 
 async function presentIosLockScreen(udid: string): Promise<void> {
-  await runAxe(udid, ["button", "lock"]);
-  const deadline = Date.now() + 15_000;
-  while (!(await iosSimulatorLocked(udid))) {
-    if (Date.now() > deadline) throw new Error(`Simulator ${udid} did not lock.`);
-    await delay(500);
+  // A wake press that lands after the display already lit unlocks the device
+  // instead (hosted run 42429542509 captured the thread list), so verify the
+  // device is still locked and present the lock screen again once if not.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await runAxe(udid, ["button", "lock"]);
+    const deadline = Date.now() + 15_000;
+    while (!(await iosSimulatorLocked(udid))) {
+      if (Date.now() > deadline) throw new Error(`Simulator ${udid} did not lock.`);
+      await delay(500);
+    }
+    const alert = showcaseAgentAlert();
+    await new Promise<void>((resolve, reject) => {
+      const child = NodeChildProcess.execFile(
+        "xcrun",
+        ["simctl", "push", udid, ANDROID_PACKAGE, "-"],
+        { cwd: REPO_ROOT },
+        (error) => (error ? reject(error) : resolve()),
+      );
+      child.stdin?.end(
+        JSON.stringify({
+          aps: { alert: { title: alert.title, body: alert.body }, sound: "default" },
+        }),
+      );
+    });
+    await wakeIosLockScreen(udid);
+    // The first Live Activity on the lock screen asks to keep allowing them.
+    await delay(2_000);
+    await runAxe(udid, ["tap", "--label", "Allow"]).catch(() => undefined);
+    if (await iosSimulatorLocked(udid)) return;
   }
-  const alert = showcaseAgentAlert();
-  await new Promise<void>((resolve, reject) => {
-    const child = NodeChildProcess.execFile(
-      "xcrun",
-      ["simctl", "push", udid, ANDROID_PACKAGE, "-"],
-      { cwd: REPO_ROOT },
-      (error) => (error ? reject(error) : resolve()),
-    );
-    child.stdin?.end(
-      JSON.stringify({
-        aps: { alert: { title: alert.title, body: alert.body }, sound: "default" },
-      }),
-    );
-  });
-  await wakeIosLockScreen(udid);
-  // The first Live Activity on the lock screen asks to keep allowing them.
-  await delay(2_000);
-  await runAxe(udid, ["tap", "--label", "Allow"]).catch(() => undefined);
+  throw new Error(`Simulator ${udid} unlocked while presenting the lock screen.`);
 }
 
-/** Press home only if a screenshot proves the lock screen is dark; a lit display would unlock instead. */
+/**
+ * Press home only if screenshots prove the lock screen stayed dark; a lit
+ * display would unlock instead. On a loaded host it can take seconds to light.
+ */
 async function wakeIosLockScreen(udid: string): Promise<void> {
   const probe = NodePath.join(NodeOS.tmpdir(), `lecturn-showcase-wake-${udid}.png`);
+  const lit = async () => {
+    await runCommand("xcrun", ["simctl", "io", udid, "screenshot", probe]);
+    return !pngIsBlack(await NodeFSP.readFile(probe));
+  };
   try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await delay(2_000);
-      await runCommand("xcrun", ["simctl", "io", udid, "screenshot", probe]);
-      if (!pngIsBlack(await NodeFSP.readFile(probe))) return;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      for (let check = 0; check < 4; check += 1) {
+        await delay(2_000);
+        if (await lit()) return;
+      }
       await runAxe(udid, ["button", "home"]);
     }
     throw new Error(`Simulator ${udid} lock screen stayed dark.`);
@@ -1366,10 +1398,41 @@ async function captureIos(
         }
       }
     } else {
-      await waitForScene();
+      // A starved host can leave a scene undrawn or on a stall screen; re-entering
+      // remounts it and retries. agent-activity stages a Live Activity, so it only waits.
+      let reentries = 0;
+      while (true) {
+        const ready = await waitForScene(scene === "agent-activity" ? 300_000 : 120_000).then(
+          () => true,
+          () => false,
+        );
+        const stall = ready ? await iosStallText(simulator.udid, scene) : null;
+        if (ready && stall === null) break;
+        if (reentries === 2 || scene === "agent-activity") {
+          throw new Error(
+            stall === null
+              ? `iOS showcase scene '${scene}' did not render after ${reentries} re-entries.`
+              : `iOS showcase scene '${scene}' shows a stall screen ("${stall}").`,
+          );
+        }
+        reentries += 1;
+        NodeProcess.stdout.write(
+          `Re-entering ${capture.device.id} ${scene} (${stall === null ? "not drawn after 120s" : `shows "${stall}"`}).\n`,
+        );
+        const away = scene === "threads" ? "environments" : "threads";
+        await NodeFSP.rm(readyPath, { force: true });
+        await NodeFSP.writeFile(scenePath, away);
+        await waitForIosShowcaseScene(simulator.udid, away, 120_000);
+        await NodeFSP.rm(readyPath, { force: true });
+        await NodeFSP.writeFile(scenePath, scene);
+      }
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
+    const stall = await iosStallText(simulator.udid, scene);
+    if (stall !== null) {
+      throw new Error(`iOS showcase scene '${scene}' shows a stall screen ("${stall}").`);
+    }
     const destination = NodePath.join(
       showcaseCaptureDirectory(outputDirectory, capture),
       `${scene}.png`,
@@ -1771,7 +1834,17 @@ async function main(): Promise<void> {
       ]);
     }
 
-    for (const capture of captures) {
+    for (const [captureIndex, capture] of captures.entries()) {
+      // A showcase server that served earlier devices can stop answering late in
+      // a long hosted run (iPad /api/auth/session timeouts in runs 42420789069
+      // and 42425290074). Each device starts against freshly started servers.
+      if (captureIndex > 0) {
+        await Promise.all(showcaseServers.splice(0).map((server) => stopProcess(server)));
+        for (const environment of showcaseEnvironments) {
+          showcaseServers.push(environment.start());
+          await waitForPort(environment.port, `${environment.label} server`);
+        }
+      }
       const pairingHost = capture.device.platform === "ios" ? "127.0.0.1" : "10.0.2.2";
       const issuePairingUrls = () =>
         Promise.all(
