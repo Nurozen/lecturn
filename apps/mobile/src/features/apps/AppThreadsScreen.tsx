@@ -60,7 +60,7 @@ function AppThreadSectionLabel(props: { readonly label: AppSectionLabel }) {
 
 function useMinuteClock(): string {
   const [now, setNow] = useState(() => new Date().toISOString());
-  // oxlint-disable-next-line lecturn/react-effect-budget -- a timer is an external system.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- ticks a one-minute interval timer for relative ages and clears it on unmount
   useEffect(() => {
     const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
     return () => clearInterval(id);

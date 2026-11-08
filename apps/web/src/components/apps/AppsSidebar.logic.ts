@@ -34,6 +34,9 @@ import {
 
 type AppStatusChipVariant = "success" | "warning" | "error" | "outline";
 
+// App threads list on their own app's environment; linked-environment tasks are not app rows.
+const NO_DELEGATED_TASKS: ReadonlySet<string> = new Set();
+
 const CHIP_VARIANT = {
   success: "success",
   warning: "warning",
@@ -165,7 +168,12 @@ export function buildAppsSidebarApps(input: {
   const groupsByApp = new Map(
     appGroups({
       projects: input.projects,
-      threads: filterSidebarV2VisibleThreads(input.threads, null, input.listing),
+      threads: filterSidebarV2VisibleThreads(
+        input.threads,
+        null,
+        NO_DELEGATED_TASKS,
+        input.listing,
+      ),
       environmentLabels: input.environmentLabels,
     }).map((group) => [group.appId, group] as const),
   );

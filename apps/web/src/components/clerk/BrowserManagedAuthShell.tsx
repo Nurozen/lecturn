@@ -24,6 +24,7 @@ function ClerkVersionCheck() {
   const clerk = useClerk();
   const { isLoaded } = useAuth();
   const version = isLoaded ? clerk.version : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- warns in the console once the loaded clerk-js reports a version other than the pinned one
   useEffect(() => {
     if (version !== undefined && version !== PINNED_CLERK_VERSIONS.clerkJS) {
       console.warn("[lecturn-connect] clerk-js is not the pinned version", {

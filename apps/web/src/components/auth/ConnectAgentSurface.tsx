@@ -22,9 +22,10 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { Spinner } from "../ui/spinner";
+import { StandalonePageHeader } from "../ui/standalone-page";
 import { AuthSurfaceShell } from "./AuthSurfaceShell";
 
-const accessConfig: Record<
+export const accessConfig: Record<
   AuthMcpClientAccess,
   { readonly label: string; readonly description: string; readonly icon: LucideIcon }
 > = {
@@ -93,6 +94,7 @@ export function ConnectAgentSurface() {
   const [errorMessage, setErrorMessage] = useState("");
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- fetches the MCP OAuth approval and redirects the window or stores details, ignoring stale answers
   useEffect(() => {
     let cancelled = false;
     void runApproval((client) => client.mcpOAuth.approval({ payload: authorization })).then(
@@ -270,13 +272,7 @@ function ConnectAgentHeading({
   readonly title: string;
   readonly description: ReactNode;
 }) {
-  return (
-    <>
-      <p className="text-3xs font-semibold tracking-widest text-primary uppercase">Agent sign-in</p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
-    </>
-  );
+  return <StandalonePageHeader context="Agent sign-in" title={title} description={description} />;
 }
 
 function AccessOption({

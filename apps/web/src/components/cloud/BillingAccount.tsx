@@ -97,6 +97,7 @@ function SignedBillingAccount({
   const statusLoader = useRef<ReturnType<typeof createBillingStatusLoader> | null>(null);
   const client = createAccountBillingClient(userId);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- loads billing status, refreshes it on window focus, and disposes the loader on unmount
   useEffect(() => {
     mounted.current = true;
     const loader = createBillingStatusLoader(client, {

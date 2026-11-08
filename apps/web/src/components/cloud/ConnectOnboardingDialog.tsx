@@ -106,6 +106,7 @@ function ConfiguredConnectOnboardingDialog() {
   // Only an account new to this client requests the wizard (it has no devices); switches,
   // re-sign-ins and cold-load restores do not. Requests queue so accounts added together
   // each get a turn; one that never becomes active lapses instead of opening later.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- queues onboarding requests for accounts newly added to the known-accounts store, stamped with the current time
   useEffect(() => {
     const previous = observedKnownAccountsRef.current;
     observedKnownAccountsRef.current = knownAccounts;
@@ -135,6 +136,7 @@ function ConfiguredConnectOnboardingDialog() {
   // becomes available.
   const publishStepDecided = !canManageRelay || controller.linkState.target !== null;
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens the wizard for a queued request once Clerk, session scopes and the publish target are ready, reading the clock to lapse old requests
   useEffect(() => {
     if (openForAccount !== null || !isLoaded) return;
     // The wizard acts on the active account, which Clerk makes the new one.

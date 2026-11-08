@@ -71,6 +71,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
   const cleanupFailuresRef = useRef(0);
   const cleanupToastRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refreshes account profile appearance from Clerk when the window regains focus or visibility
   useEffect(() => {
     if (!isLoaded || signedInSessionKey === undefined) return;
     const refresh = () => {
@@ -89,6 +90,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
   }, [clerk, isLoaded, signedInSessionKey]);
 
   // ClerkProvider owns the Clerk instance, so this binding lasts as long as the provider is mounted.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- binds the Clerk instance to the token and active-account readers for the provider's lifetime
   useEffect(() => {
     bindAccountTokenClerk(clerk);
     bindActiveAccountClerk(clerk);
@@ -100,6 +102,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     };
   }, [clerk]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reconciles Clerk's signed-in sessions with relay sessions and runs async cleanup for accounts that left
   useEffect(() => {
     if (!isLoaded || signedInSessionKey === undefined) {
       return;
@@ -239,6 +242,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
     userId,
   ]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the atom registry so an account removal re-runs the session reconciliation
   useEffect(
     () =>
       appAtomRegistry.subscribe(knownAccountRemovalsAtom, () =>
@@ -246,6 +250,7 @@ export function ManagedRelayAuthProvider({ children }: { readonly children: Reac
       ),
     [],
   );
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the multi-account marker heartbeat timer while the provider is mounted
   useEffect(startMultiAccountMarkerHeartbeat, []);
 
   // This provider sits above the app's atom registry, which the dialog reads.

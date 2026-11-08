@@ -64,6 +64,7 @@ export function MultiAccountCloudAuthBridge({ children }: { readonly children: R
   const first = useRef(true);
   const previousActive = useRef<string | null>(null);
   const queue = useRef(Promise.resolve());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- binds Clerk to the account token readers and releases relay sessions and push providers on unmount
   useEffect(() => {
     bindAccountTokenClerk(clerk);
     return () => {
@@ -73,6 +74,7 @@ export function MultiAccountCloudAuthBridge({ children }: { readonly children: R
       syncManagedRelaySessions(appAtomRegistry, []);
     };
   }, [clerk]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reconciles Clerk's session set with stored accounts, relay sessions, and push providers in a serialized queue
   useEffect(() => {
     if (!isLoaded || key === undefined || !catalog.isReady) return;
     let cancelled = false;

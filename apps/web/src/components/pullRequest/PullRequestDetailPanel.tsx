@@ -24,7 +24,6 @@ import {
   type PullRequestListEntry,
   type PullRequestUpdateMethod,
   type PullRequestRef,
-  type PullRequestState,
   type PullRequestReviewGuideStop,
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
@@ -256,7 +255,6 @@ export function PullRequestDetailPanel({
   tabOnPage = false,
   onActed,
   onClose,
-  onStateChange,
   context = "page",
   composerDraftTarget,
   onBack,
@@ -280,13 +278,6 @@ export function PullRequestDetailPanel({
   tabOnPage?: boolean;
   onActed?: (action?: PullRequestAction, phase?: "sent" | "done" | "failed") => void;
   onClose?: () => void;
-  /** Keeps surrounding inferred thread state in step with refreshed host state. */
-  onStateChange?: (status: {
-    repository: string;
-    host?: string | undefined;
-    number: number;
-    state: PullRequestState;
-  }) => void;
   context?: "page" | "thread";
   composerDraftTarget?: ScopedThreadRef | DraftId;
   onBack?: (() => void) | undefined;
@@ -368,7 +359,6 @@ export function PullRequestDetailPanel({
     detailQuery,
     activityQuery,
     activity,
-    resolvedCoreDetail,
     sharedSummary,
     coreDetail,
     detail,
@@ -457,6 +447,7 @@ export function PullRequestDetailPanel({
     scroller: HTMLDivElement;
     target: number;
   } | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- restores the scroller's scrollTop before paint after the header condenses
   useLayoutEffect(() => {
     const compensation = compensationRef.current;
     if (compensation === null) return;
@@ -510,6 +501,7 @@ export function PullRequestDetailPanel({
     event.stopPropagation();
     if (!event.repeat) copyReference(`#${reference.number}`, `${terminology.shortLabel} number`);
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window keydown capture listener for the copy-number shortcut
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => copyFromShortcut(event);
     window.addEventListener("keydown", onKeyDown, true);
@@ -609,18 +601,10 @@ export function PullRequestDetailPanel({
     }
   }
   const revalidateActivity = useEffectEvent(() => activityQuery.refresh());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refreshes the activity query after commit when render counts a new detail revision
   useEffect(() => {
     if (activityRevalidations > 0) revalidateActivity();
   }, [activityRevalidations]);
-  useLayoutEffect(() => {
-    if (!resolvedCoreDetail) return;
-    onStateChange?.({
-      repository: resolvedCoreDetail.repository,
-      ...(resolvedCoreDetail.host ? { host: resolvedCoreDetail.host } : {}),
-      number: resolvedCoreDetail.number,
-      state: resolvedCoreDetail.state,
-    });
-  }, [onStateChange, resolvedCoreDetail]);
   useLiveRefresh(
     () => {
       detailQuery.refresh();
@@ -640,6 +624,7 @@ export function PullRequestDetailPanel({
   };
   const refreshFromHostOnRequest = useEffectEvent(() => void refreshFromHost());
   const appliedForcedToken = useRef(forcedRefreshToken);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- a new forced refresh token invalidates the host cache and refetches
   useEffect(() => {
     if (appliedForcedToken.current === forcedRefreshToken) return;
     appliedForcedToken.current = forcedRefreshToken;

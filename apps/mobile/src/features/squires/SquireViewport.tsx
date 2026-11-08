@@ -43,6 +43,7 @@ export function useSquireViewportScroll() {
 export function useSquireInView(ref: RefObject<Measurable | null>, working: boolean) {
   const viewport = useContext(SquireViewportContext);
   const [visible, setVisible] = useState<boolean | undefined>(undefined);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- measures the native view against the scroll viewport and re-measures on its scroll notifications
   useEffect(() => {
     if (!working || viewport === null) return;
     const check = () => {

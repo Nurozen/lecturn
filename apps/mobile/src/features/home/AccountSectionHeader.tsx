@@ -22,6 +22,7 @@ export function AccountSectionHeader({
 }) {
   const { accent, dark } = useGlassPalette();
   const angle = useSharedValue(item.collapsed ? 0 : 90);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- animates the Reanimated chevron rotation to the collapsed state
   useEffect(() => {
     angle.set(
       withTiming(item.collapsed ? 0 : 90, {

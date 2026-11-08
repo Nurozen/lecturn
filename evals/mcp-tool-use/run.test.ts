@@ -1,4 +1,6 @@
 import { assert, expect, it } from "@effect/vitest";
+import { ComposerContextId, EnvironmentId, ThreadId } from "@lecturn/contracts";
+import { projectComposerContextForProvider } from "@lecturn/shared/composerContextReferences";
 
 import {
   buildBase,
@@ -17,7 +19,7 @@ import {
   shellRequest,
   lecturnSystemAppend,
 } from "./run.ts";
-import { taskPrompt } from "../../apps/server/src/mcp/OrchestratorMcpService.ts";
+import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
 
 it("grades Codex shell and subagent calls with the shared rules", () => {
   const calls = [
@@ -262,6 +264,48 @@ it("rebuilds the template from this checkout and sends a child Lecturn's task pr
   const prompt = buildMessages(makeSample(childCase, base)).at(-1)?.content.at(-1);
   assert.equal(prompt?.text, taskPrompt({ task: childCase.prompt, role: "implementation" }));
   assert.notEqual(prompt?.text, childCase.prompt);
+});
+
+it("lists link tools only while a case turns the beta on, and sends chips as Lecturn projects them", () => {
+  const off = buildBase(template, { model: "claude-sonnet-5-5", keepUserInstructions: false });
+  const on = buildBase(template, {
+    model: "claude-sonnet-5-5",
+    keepUserInstructions: false,
+    links: true,
+  });
+  assert.notInclude(
+    off.lecturn.map((tool) => tool.name),
+    "mcp__lecturn__lecturn_environment_link",
+  );
+  assert.include(
+    on.lecturn.map((tool) => tool.name),
+    "mcp__lecturn__lecturn_environment_link",
+  );
+
+  const testCase: McpToolUseCase = {
+    ...childCase,
+    setup: { role: "top", linkedEnvironments: true },
+    prompt: "Continue [Deploy](t3-context://v1/thread/thread_deploy)",
+    promptContext: {
+      records: [
+        {
+          version: 1,
+          kind: "thread",
+          contextId: ComposerContextId.make("thread_deploy"),
+          label: "Deploy",
+          environmentId: EnvironmentId.make("environment-vps"),
+          threadId: ThreadId.make("thread-deploy"),
+          title: "Deploy",
+        },
+      ],
+    },
+  };
+  const prompt = buildMessages(makeSample(testCase, on)).at(-1)?.content.at(-1);
+  assert.equal(
+    prompt?.text,
+    projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext! }),
+  );
+  assert.include(prompt?.text, "environmentId: environment-vps");
 });
 
 it("replays earlier capability results with the model under test as the caller", () => {

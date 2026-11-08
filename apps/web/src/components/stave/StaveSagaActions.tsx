@@ -54,6 +54,7 @@ export function StaveSagaActions({
     staveSpaces({ environmentId, input: { includeArchived: true } }),
   );
   const refreshSpaces = spaces.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch spaces when this environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {
@@ -558,6 +559,7 @@ export function StaveSpaceMembership({
     staveSpaces({ environmentId, input: { includeArchived: true } }),
   );
   const refreshSpaces = spaces.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch spaces when this environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {

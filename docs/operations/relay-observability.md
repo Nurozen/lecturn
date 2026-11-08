@@ -147,7 +147,7 @@ error messages. An expired APNs key or FCM service account fails every job.
 
 **Cloudflare API rate limited / near its limit.** The warning fires on sustained 429s; the page fires
 when they are frequent enough to stall provisioning. Compare the call volume on the dashboard with the
-account limit.
+Cloudflare account's API rate limit.
 
 **Traffic dropped.** The Worker is down, a deploy broke it, or spans stopped reaching Axiom. Check
 `https://relay.cloudgatherer.net/health` first.

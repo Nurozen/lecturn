@@ -40,6 +40,7 @@ function ChatRouteForkShortcut() {
   const forkRouteThread = useEffectEvent((threadRef: ScopedThreadRef) => {
     void forkThreadAtLatestTurn(threadRef);
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers the fork command handler with the command registry until unmount
   useEffect(
     () =>
       registerCommands(

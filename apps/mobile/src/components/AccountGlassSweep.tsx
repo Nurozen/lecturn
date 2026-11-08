@@ -24,6 +24,7 @@ export function AccountGlassSweep({
 }) {
   const previous = useRef(identity);
   const progress = useSharedValue(1);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the Reanimated sweep when the account identity changes and cancels it on cleanup
   useEffect(() => {
     if (previous.current === identity) {
       cancelAnimation(progress);

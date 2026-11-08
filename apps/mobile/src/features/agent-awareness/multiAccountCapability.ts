@@ -52,6 +52,7 @@ export function useMultiAccountPushSupported(): boolean {
       listeners.delete(listener);
     };
   }, getMultiAccountPushSupported);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- probes the relay for multi-account push support on mount; the module store publishes the result
   useEffect(() => {
     void refreshMultiAccountPushCapability();
   }, []);

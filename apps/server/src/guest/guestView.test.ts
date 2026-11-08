@@ -9,14 +9,18 @@ import {
 } from "./guestView.ts";
 
 // Lecturn: what the fork adds to the thread record. Sharing one more needs a decision here.
+// Upstream's link fields name the owner's other machines and link sessions, so guests
+// do not get them either.
 const FORK_THREAD_FIELDS = [
   "appData",
   "appOrigin",
   "appSubtitle",
   "continuedIn",
   "copiedFrom",
+  "delegatedFrom",
   "forkOrigin",
   "importedFrom",
+  "linkOrigin",
   "opens",
   "squire",
 ];

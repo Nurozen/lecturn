@@ -47,6 +47,7 @@ function AccountFunding({ accountId }: { accountId: string }) {
     setPending(false);
   };
   const loadOnMount = useEffectEvent(() => void load());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- loads funded hosts after a microtask and aborts in-flight requests on unmount
   useEffect(() => {
     active.current = true;
     // Defer the external request so Strict Mode cleanup can cancel its first mount.

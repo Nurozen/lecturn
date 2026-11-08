@@ -22,6 +22,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
@@ -218,6 +219,7 @@ const orchestratorLayer = OrchestratorMcpService.layer.pipe(
       Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
       Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(RemoteDelegation.RemoteDelegation)({}),
       Layer.mock(ScheduledTaskService.ScheduledTaskService)({
         list: () => Effect.succeed({ tasks: [] }) as never,
       }),

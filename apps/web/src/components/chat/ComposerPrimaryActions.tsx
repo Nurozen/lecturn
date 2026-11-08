@@ -95,9 +95,7 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
  * the Squire view's one-line composer, so its send matches the full composer's it stands in for.
  */
 export function ComposerSendButton({ children, ...props }: ComponentProps<"button">) {
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    useEnvironmentIdentificationMode() === "artwork",
-  );
+  const stageBackdropVariant = useSidebarStageBackdropVariant(useEnvironmentIdentificationMode());
   return (
     <button
       {...props}

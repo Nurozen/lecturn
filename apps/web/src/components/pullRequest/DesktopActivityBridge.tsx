@@ -280,6 +280,7 @@ function EnabledActivityBridge() {
     ].slice(0, 64),
   );
   const [iconImages, setIconImages] = useState<ReadonlyMap<string, string>>(new Map());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- loads project icon images for the activity rows and drops results once the requested icon set changes
   useEffect(() => {
     let disposed = false;
     void Promise.all(
@@ -521,6 +522,7 @@ function EnabledActivityBridge() {
         });
       });
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to actions the desktop activity panel sends back through the desktop bridge
   useEffect(() => window.desktopBridge?.activity?.onAction((action) => void onAction(action)), []);
   const [publication] = useState(
     () => new CoalescedActivityPublication<ReturnType<typeof boundedActivitySnapshot>>(),
@@ -534,6 +536,7 @@ function EnabledActivityBridge() {
       });
     });
   });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- offers the current activity snapshot to the coalesced publisher that pushes it to the desktop activity panel
   useEffect(() => {
     publication.offer(
       {
@@ -558,6 +561,7 @@ function EnabledActivityBridge() {
       (snapshot) => publish(snapshot),
     );
   }, [publication, publishedRowsAt, readyEnvironmentIds, viewedThread, accountMarks]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- disposes the publisher and tells the desktop activity panel it is disconnected when the bridge unmounts
   useEffect(
     () => () => {
       publication.dispose();
@@ -576,10 +580,12 @@ export function DesktopActivityBridge() {
   const routeThread = useParams({ strict: false, select: resolveThreadRouteRef });
   const routeKey = routeThread ? scopedThreadKey(routeThread) : null;
   const visit = useActivityRecentStore((state) => state.visit);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- records a visit in the persisted activity recency store whenever the router lands on a thread
   useEffect(() => {
     if (routeKey) visit(routeKey, new Date().toISOString());
   }, [routeKey, visit]);
   const [enabled, setEnabled] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reads and subscribes to the desktop activity panel's enabled flag from the bridge and the in-page toggle event
   useEffect(() => {
     let mounted = true;
     void window.desktopBridge?.activity?.getEnabled().then((value) => {

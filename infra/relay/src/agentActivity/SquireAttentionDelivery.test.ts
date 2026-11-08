@@ -225,6 +225,7 @@ function harness(options: { readonly concurrent: boolean }) {
     record: () => Effect.void,
     claimSourceJob: () => Effect.succeed("claimed"),
     completeSourceJob: () => Effect.void,
+    pruneExpired: Effect.succeed(0),
   });
 
   const ok = { ok: true, status: 200, apnsId: "apns-id" } as const;

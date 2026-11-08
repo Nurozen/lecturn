@@ -95,6 +95,7 @@ export function useComposerSelection(input: ComposerSelectionInput) {
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
   const runtimeModeRequest = useRef(0);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- invalidates the in-flight runtime-mode request counter when the draft target changes or unmounts
   useEffect(
     () => () => {
       runtimeModeRequest.current++;

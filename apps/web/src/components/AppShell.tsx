@@ -2,10 +2,11 @@ import { scopedProjectKey, scopeProjectRef } from "@lecturn/client-runtime/envir
 import { type ServerLifecycleWelcomePayload } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isElectron } from "../env";
 import { useClientSettings } from "../hooks/useSettings";
+import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -19,6 +20,7 @@ import { CommandPalette } from "./CommandPalette";
 import { ConfirmDialogHost } from "./ConfirmDialogHost";
 import { AddProjectToMachineDialogHost } from "./AddProjectToMachineDialog";
 import { CustomSnoozeDialogHost } from "./CustomSnoozeDialog";
+import { DevReplayHost } from "./DevReplayHost";
 import { ImportFolderSessionsDialog } from "./ImportFolderSessionsDialog";
 import { NightlyMobileBetaNotice } from "./NightlyMobileBeta";
 import { ProjectCloneToastCoordinator } from "./ProjectCloneToastCoordinator";
@@ -55,6 +57,8 @@ export default function AppShell({
   readonly returningFromWelcome: boolean;
 }) {
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+  // A sync IPC read; the setting only changes across a relaunch.
+  const [localEnvironmentDisabled] = useState(isLocalEnvironmentDisabled);
 
   if (pathname === "/welcome") {
     return (
@@ -86,7 +90,9 @@ export default function AppShell({
         hostedStatic={authGateState.status === "hosted-static"}
       >
         {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-        {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
+        {primaryEnvironmentAuthenticated || localEnvironmentDisabled ? (
+          <DesktopWebLinkCoordinator />
+        ) : null}
         {isElectron ? <RunningThreadKeepAlive /> : null}
         <RelayClientInstallDialog />
         <ConnectOnboardingDialog />
@@ -104,6 +110,7 @@ export default function AppShell({
         <GuestShareDialogHost />
         <ProjectCloneToastCoordinator />
         <AddProjectToMachineDialogHost />
+        {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
         {primaryEnvironmentAuthenticated ? (
           <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
         ) : null}
@@ -178,6 +185,7 @@ function EventRouter({
     })().catch(() => undefined);
   });
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- expands the bootstrap project and navigates the router to the bootstrap thread when the server welcome arrives
   useEffect(() => {
     handleWelcome(serverWelcome);
   }, [serverWelcome]);

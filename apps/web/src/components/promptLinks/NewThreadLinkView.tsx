@@ -328,6 +328,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
     }
   });
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs each launch decision once: navigates to the thread or opens a draft
   useEffect(() => {
     if (launch === null || launchedRef.current === launch) return;
     launchedRef.current = launch;
@@ -397,6 +398,7 @@ function PullRequestLinkCheckout({
     },
   });
   const warnedRef = useRef(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- shows the hidden-characters warning toast once per linked prompt
   useEffect(() => {
     if (warnedRef.current || link.prompt === null) return;
     warnedRef.current = true;

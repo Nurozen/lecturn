@@ -25,6 +25,7 @@ export function StavePendingCleanups() {
     operation: StaveLifecycleActionOperation;
   } | null>(null);
   const refresh = status.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls pending Stave cleanups on a timer and refetches when the Stave mutation bus reports this environment
   useEffect(() => {
     if (environmentId === null) return;
     refresh();

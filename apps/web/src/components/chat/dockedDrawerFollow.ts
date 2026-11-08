@@ -42,6 +42,7 @@ export function useFollowEndWhenDrawerDocks(input: {
     if (follow) input.scrollToEnd();
   });
   const { inset } = input;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- measures the drawer's DOM height before paint when the docked inset changes so the timeline can follow the end
   useLayoutEffect(() => {
     if (inset > 0) measure();
   }, [inset]);

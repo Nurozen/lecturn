@@ -6,7 +6,13 @@ import { GitForkIcon } from "lucide-react";
 import { InlineAudioPreview } from "../files/InlineAudioPreview";
 import { filePreviewKind } from "@lecturn/shared/filePreview";
 import { findRevealRef } from "./markdownFindContext";
-import { type MessageId, type ServerProviderSkill, ThreadId } from "@lecturn/contracts";
+import {
+  type EnvironmentId,
+  type MessageId,
+  type ScheduledTaskId,
+  type ServerProviderSkill,
+  ThreadId,
+} from "@lecturn/contracts";
 import { resolveUserMessagePresentation } from "@lecturn/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { useQuietThreadShell } from "../../state/entities";
@@ -148,16 +154,10 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const [expanded, setExpanded] = useState(false);
   const revealRef = findRevealRef(() => setExpanded(true));
   const { text, scheduledTaskId } = resolveUserMessagePresentation(row.message);
-  const tasksQuery = useEnvironmentQuery(
-    scheduledTaskId
-      ? serverEnvironment.scheduledTasksLive({
-          environmentId: ctx.activeThreadEnvironmentId,
-          input: {},
-        })
-      : null,
-  );
-  const taskTitle = tasksQuery.data?.tasks.find((task) => task.id === scheduledTaskId)?.title;
-  const summary = taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "";
+  const summary =
+    useScheduledTaskTitle(ctx.activeThreadEnvironmentId, scheduledTaskId) ??
+    text.trim().split(/\r?\n/, 1)[0] ??
+    "";
 
   const revertTurnCount = row.revertTurnCount;
   const promptLink = promptLinkFor(text);
@@ -237,7 +237,17 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   );
 }
 
-function FoldedMessageHeader(props: {
+export function useScheduledTaskTitle(
+  environmentId: EnvironmentId,
+  scheduledTaskId: ScheduledTaskId | undefined,
+): string | undefined {
+  const tasksQuery = useEnvironmentQuery(
+    scheduledTaskId ? serverEnvironment.scheduledTasksLive({ environmentId, input: {} }) : null,
+  );
+  return tasksQuery.data?.tasks.find((task) => task.id === scheduledTaskId)?.title;
+}
+
+export function FoldedMessageHeader(props: {
   icon: LucideIcon;
   label: string;
   summary: string;

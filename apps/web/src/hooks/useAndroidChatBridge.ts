@@ -31,10 +31,12 @@ export function useAndroidChatPublisher({
     }
     publisher.current.client.update(thread ? androidChatSnapshot(thread) : null);
   };
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the current thread snapshot to the Android host chat bridge when the thread changes
   useEffect(() => {
     current.current = { scope, thread };
     publishCurrent();
   }, [scope, thread, publishCurrent]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window listeners that close, reopen and refresh the Android chat publisher across page visibility
   useEffect(() => {
     const clear = () => {
       publisher.current?.client.close();
@@ -72,6 +74,7 @@ export function useAndroidChatCompose({
   focusComposer: () => void;
 }) {
   const [composeScope, setComposeScope] = useState<string | null>(null);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window listener for the Android host's compose request that schedules a composer focus frame
   useEffect(() => {
     if (!ready) return;
     let frame: number | undefined;

@@ -3,6 +3,8 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
+import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
+import * as PeerLinks from "./peer/PeerLinks.ts";
 
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -247,6 +249,7 @@ import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1535,6 +1538,8 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const storageCleanup = yield* StorageCleanup.StorageCleanup;
   const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const peerLinks = yield* PeerLinks.PeerLinks;
+  const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
   const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -1565,6 +1570,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
   const sessions = yield* SessionStore.SessionStore;
   const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
+  const triage = yield* TriageService.TriageService;
   const hostResources = yield* HostResources.HostResources;
   const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
   const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
@@ -2863,6 +2869,14 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
     [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
     [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
+    [WS_METHODS.peerLinksList]: (_input) => peerLinks.list.pipe(Effect.map((links) => ({ links }))),
+    [WS_METHODS.peerLinksLink]: (input) => peerLinks.link(input),
+    [WS_METHODS.peerLinksUnlink]: ({ environmentId }) =>
+      peerLinks.unlink(environmentId).pipe(Effect.map((removed) => ({ removed }))),
+    [WS_METHODS.peerLinksAnswerRequest]: (input) =>
+      Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+        Effect.andThen(peerLinkRequests.answer(input)),
+      ),
     [WS_METHODS.serverGetSettings]: (_input) =>
       serverSettings.getSettings.pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
     [WS_METHODS.serverUpdateSettings]:
@@ -2892,6 +2906,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.serverRefreshUsageRates]: (_input) => usage.refreshRates,
     [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
     [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
+    [WS_METHODS.serverPrepareTriage]: (input) => triage.prepare(input),
     [WS_METHODS.serverSignalProcess]: (input) => processDiagnostics.signal(input),
     [WS_METHODS.serverReportClientActivity]: (input, metadata) =>
       Ref.update(rpcClientIds, (clientIds) => {
@@ -3430,6 +3445,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
     [WS_METHODS.deviceAction]: (input) => deviceService.action(input),
     [WS_METHODS.subscribeDeviceState]: (_input) => DeviceService.stateStream(deviceService),
+    [WS_METHODS.previewStopLocalServer]: (input) => portDiscovery.stopServer(input),
     [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
       Stream.callback<DiscoveredLocalServerList>((queue) =>
         Effect.gen(function* () {
@@ -3788,6 +3804,8 @@ export const layer = Layer.unwrap(
     const pullRequestWatches = yield* PullRequestWatchService;
     const staveOperations = yield* StaveOperations.StaveOperations;
     const sagaWorkbench = yield* SagaWorkbenchService;
+    const peerLinks = yield* PeerLinks.PeerLinks;
+    const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     // Lecturn server-lifetime services shared by every connection (one provide
     // keeps the per-connection layer within the type checker's budget). Stave
     // operations outlive the socket that started them, so every connection
@@ -3810,6 +3828,8 @@ export const layer = Layer.unwrap(
         Context.add(ContextualSettings, contextualSettings),
         Context.add(StaveOperations.StaveOperations, staveOperations),
         Context.add(SagaWorkbenchService, sagaWorkbench),
+        Context.add(PeerLinks.PeerLinks, peerLinks),
+        Context.add(PeerLinkRequests.PeerLinkRequests, peerLinkRequests),
       ),
     );
     const sql = yield* SqlClient.SqlClient;

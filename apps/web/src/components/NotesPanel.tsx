@@ -134,6 +134,7 @@ function SavedNotesPanel({
   const groups = groupThreadNotes(data.notes, threadRef.threadId, scope, filter, messageOrder);
   const rows = groups.flatMap((group) => group.notes);
   const activeId = active?.key === threadNoteScopeKey(threadRef) ? active.id : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- scrolls the active note's DOM row into view when the active note changes
   useEffect(() => {
     if (activeId)
       container.current

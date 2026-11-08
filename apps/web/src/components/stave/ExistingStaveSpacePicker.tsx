@@ -123,6 +123,7 @@ export function ExistingStaveSpacePicker(props: {
     staveSpaces({ environmentId, input: { includeArchived: true } }),
   );
   const refreshSpaces = spaces.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the Stave mutation bus to refetch spaces when this environment changes
   useEffect(
     () =>
       subscribeStaveMutation((changed) => {
@@ -149,6 +150,7 @@ export function ExistingStaveSpacePicker(props: {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const running = task?.status === "running";
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports the running archive task to the owning dialog's close guard and clears it on unmount
   useEffect(() => {
     onBusyChange(running);
     return () => onBusyChange(false);

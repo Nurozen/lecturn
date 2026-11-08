@@ -121,6 +121,7 @@ function SquireReady(props: {
   const [teamFilter, setTeamFilter] = useState<SquireId | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollViewport = useSquireScrollViewport(scrollRef);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- sets the squire name as the navigator header title
   useLayoutEffect(() => {
     navigation.setOptions({ title: squire.name });
   }, [navigation, squire.name]);

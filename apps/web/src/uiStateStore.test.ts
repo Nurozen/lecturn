@@ -16,7 +16,7 @@ import {
   setSidebarSquireCollapsed,
   setSidebarAppScopeKey,
   setSidebarMode,
-  setSidebarProjectScopeKey,
+  setSidebarProjectScopeKeys,
   type UiState,
 } from "./uiStateStore";
 
@@ -24,7 +24,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
-    sidebarProjectScopeKey: null,
+    sidebarProjectScopeKeys: [],
     sidebarMode: "projects",
     sidebarAppScopeKey: null,
     sidebarAppCollapsedByKey: {},
@@ -103,7 +103,7 @@ describe("uiStateStore pure functions", () => {
   });
 
   it("switches the sidebar mode and keeps each mode's scope", () => {
-    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/nurozen/lecturn");
+    const scoped = setSidebarProjectScopeKeys(makeUiState(), ["github.com/nurozen/lecturn"]);
     const apps = setSidebarAppScopeKey(setSidebarMode(scoped, "apps"), "dev.lecturn.example");
 
     expect(apps.sidebarMode).toBe("apps");
@@ -111,7 +111,7 @@ describe("uiStateStore pure functions", () => {
     expect(setSidebarMode(apps, "apps")).toBe(apps);
     expect(setSidebarMode(apps, "projects")).toMatchObject({
       sidebarMode: "projects",
-      sidebarProjectScopeKey: "github.com/nurozen/lecturn",
+      sidebarProjectScopeKeys: ["github.com/nurozen/lecturn"],
       sidebarAppScopeKey: "dev.lecturn.example",
     });
     expect(setSidebarAppScopeKey(apps, "").sidebarAppScopeKey).toBeNull();
@@ -165,7 +165,7 @@ describe("parsePersistedState", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarMode: "projects",
       sidebarAppScopeKey: null,
       sidebarAppCollapsedByKey: {},
@@ -274,6 +274,7 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKeys: [],
       sidebarProjectScopeKey: null,
       sidebarMode: "projects",
       sidebarAppScopeKey: null,
@@ -294,15 +295,31 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/nurozen/lecturn" }));
+    const keys = ["github.com/nurozen/lecturn", "github.com/pingdotgg/uploadthing"];
+    persistState(makeUiState({ sidebarProjectScopeKeys: keys }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
-    expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/nurozen/lecturn",
-    );
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(keys);
+  });
+
+  it("keeps a single-project scope readable by older clients", () => {
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["github.com/nurozen/lecturn"] }));
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(persisted.sidebarProjectScopeKey).toBe("github.com/nurozen/lecturn");
+  });
+
+  it("restores a single-project scope saved before multi-project filtering", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "github.com/nurozen/lecturn" })
+        .sidebarProjectScopeKeys,
+    ).toEqual(["github.com/nurozen/lecturn"]);
   });
 
   it("restores Apps mode, its scope and fold choices, and drops unknown modes", () => {

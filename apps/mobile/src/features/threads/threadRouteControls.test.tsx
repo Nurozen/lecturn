@@ -172,6 +172,7 @@ const stubs: Record<string, unknown> = {
     isContextCompactionActivityGroup: () => false,
     isContextHandoffActivityGroup: () => false,
     isSecretRequestActivityGroup: () => false,
+    isLinkRequestActivityGroup: () => false,
   },
   "./ThreadMarkdownImage": { MarkdownImageAvailableWidthContext: Nothing },
   "../../components/ui/Menu": { Menu: Passthrough },

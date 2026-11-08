@@ -8,6 +8,9 @@ import { migrationManifest, runMigrations } from "./Migrations.ts";
 import UpstreamWebhookDedupe from "./Migrations/067_WebhookDedupe.ts";
 import UpstreamShellStopRequestIndex from "./Migrations/068_ShellStopRequestIndex.ts";
 import UpstreamThreadMessageSearch from "./Migrations/069_ThreadMessageSearch.ts";
+import UpstreamPeerLinks from "./Migrations/070_PeerLinks.ts";
+import UpstreamPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
+import UpstreamWaitingLinkRequestIndex from "./Migrations/072_WaitingLinkRequestIndex.ts";
 import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
@@ -195,6 +198,9 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -219,6 +225,9 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
       ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
@@ -236,6 +245,9 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
       ]);
       yield* insertSearchMessage("after-upgrade");
 
@@ -262,9 +274,29 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
       ]);
 
       assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the peer link schema a database built under upstream's ids", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 87 });
+      // Upstream published these as migrations 70 to 72.
+      yield* UpstreamPeerLinks;
+      yield* UpstreamPeerLinkFence;
+      yield* UpstreamWaitingLinkRequestIndex;
+
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
+      ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -300,6 +332,9 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "PeerLinks"],
+        [89, "PeerLinkFence"],
+        [90, "WaitingLinkRequestIndex"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

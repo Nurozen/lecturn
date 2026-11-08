@@ -47,6 +47,7 @@ export function onSidebarRevealRequest(listener: () => void): () => void {
  */
 export function useSidebarModeSearchLink(): void {
   const search = useLocation({ select: (location) => location.searchStr });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- applies the route's apps sidebar search params to the sidebar mode store when the URL query changes
   useEffect(() => {
     const target = parseAppsSidebarSearch(search);
     if (target !== null) showSidebarMode(target);

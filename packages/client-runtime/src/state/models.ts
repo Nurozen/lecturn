@@ -157,6 +157,9 @@ export interface EnvironmentThreadShell {
   readonly historyOrigin?: OrchestrationV2ThreadShell["historyOrigin"];
   /** Lecturn: server-set on Squire home and probe threads; see `isListedThread`. */
   readonly squire?: OrchestrationV2ThreadShell["squire"];
+  readonly linkOrigin: OrchestrationV2ThreadShell["linkOrigin"] | null;
+  /** The thread in a linked environment that delegated this one, if one did. */
+  readonly delegatedFrom: OrchestrationV2ThreadShell["delegatedFrom"] | null;
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
   readonly runtime: ThreadRuntimeSummary | null;
@@ -312,6 +315,8 @@ export function presentThreadShell(
     importedFrom: thread.importedFrom ?? null,
     ...(thread.historyOrigin === undefined ? {} : { historyOrigin: thread.historyOrigin }),
     ...(thread.squire === undefined ? {} : { squire: thread.squire }),
+    linkOrigin: thread.linkOrigin ?? null,
+    delegatedFrom: thread.delegatedFrom ?? null,
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,
     runtime,

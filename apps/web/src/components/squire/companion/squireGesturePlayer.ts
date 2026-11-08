@@ -45,6 +45,7 @@ export function useSquireGesturePlayer(
   firstOpenGreet = true,
 ) {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- queues gestures from new Squire activity onto the companion element's imperative play handle
   useEffect(() => {
     for (const name of takeSquireGestures(squireId, recentActivity, firstOpenGreet)) {
       queue.current = queue.current.then(() => target.current?.play(name)).catch(() => undefined);

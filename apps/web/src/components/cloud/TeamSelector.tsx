@@ -37,6 +37,7 @@ export function TeamSelector({
     organizations: readonly RelayTeamOrganization[];
   } | null>(null);
   const [error, setError] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- loads the account's teams from the relay client and restores the saved team from localStorage, ignoring stale answers
   useEffect(() => {
     let disposed = false;
     // oxlint-disable-next-line react/set-state-in-effect -- A new account or client clears the last load's failure as its teams request starts.

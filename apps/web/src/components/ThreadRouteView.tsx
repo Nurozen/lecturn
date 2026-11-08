@@ -112,6 +112,7 @@ export function ThreadRouteView({
   });
   const environmentHasAnyThreads = environmentThreadRefs.length > 0 || environmentHasDraftThreads;
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- clears pending file drops and navigates the router home once a server thread is confirmed missing
   useEffect(() => {
     if (target.kind !== "server" || !bootstrapComplete) {
       return;
@@ -128,6 +129,7 @@ export function ThreadRouteView({
   // Lecturn: replace, so Back skips the thread route that only redirects.
   const squireViewEnvironmentId = squireView?.environmentId ?? null;
   const squireViewSquireId = squireView?.squireId ?? null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- replaces the router location with the squire route when this thread belongs to a squire
   useEffect(() => {
     if (background || squireViewEnvironmentId === null || squireViewSquireId === null) return;
     void navigate({
@@ -139,6 +141,7 @@ export function ThreadRouteView({
 
   // Settings opens over this thread, so its account pickers default to it.
   const openEnvironmentId = routeThreadRef?.environmentId ?? null;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- writes the open thread's environment into the app atom registry for settings account pickers
   useEffect(() => {
     if (openEnvironmentId !== null) {
       appAtomRegistry.set(openThreadEnvironmentIdAtom, openEnvironmentId);

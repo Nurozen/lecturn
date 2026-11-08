@@ -74,6 +74,7 @@ export function SagaCreateForm(props: {
   const opened = useRef(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const result = operation.status === "finished" ? operation.result : undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- notifies the Stave mutation bus and navigates the router to the created saga once the operation finishes
   useEffect(() => {
     if (result?.kind !== "createSaga" || opened.current) return;
     opened.current = true;
@@ -93,6 +94,7 @@ export function SagaCreateForm(props: {
     });
   }, [environmentId, result, navigate, handleNewThread]);
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- reports the running operation or picker task to the wizard's close guard and clears it on unmount
   useEffect(() => {
     onBusyChange(running || pickerBusy);
     return () => onBusyChange(false);

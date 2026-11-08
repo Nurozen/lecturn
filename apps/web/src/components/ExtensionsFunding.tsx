@@ -146,9 +146,11 @@ function FundingControls({
   const [checkingStopped, setCheckingStopped] = useState(false);
   const mounted = useRef(true);
   const changed = useRef(onChange);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the latest onChange to a ref called by the async funding observer
   useEffect(() => {
     changed.current = onChange;
   }, [onChange]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- tracks mount so async funding actions skip state updates after unmount
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -168,6 +170,7 @@ function FundingControls({
     setCheckingStopped(false);
   }
 
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls the host for the pending funding challenge on a timer and redeems it once approved
   useEffect(() => {
     if (!challenge || !waiting || !canFund || busy) return;
     let canceled = false;

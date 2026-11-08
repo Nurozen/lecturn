@@ -23,6 +23,7 @@ import * as NetAddress from "effect/net/NetAddress";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -138,7 +139,9 @@ const serveMcp = (fake: FakeApp) =>
         ),
       }),
     ).pipe(
-      Layer.provideMerge(McpHttpServer.layerMcpTransport),
+      Layer.provideMerge(
+        McpHttpServer.layerMcpTransport.pipe(Layer.provide(ServerSettings.layerTest())),
+      ),
       Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, registry)),
       Layer.provide(Layer.succeed(AppToolInterceptor.AppToolSource, fakeAppSource(fake))),
     );

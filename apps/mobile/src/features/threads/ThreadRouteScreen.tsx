@@ -51,6 +51,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { buildThreadImportLabel } from "../../lib/threadActivity";
+import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
 import {
@@ -63,7 +64,7 @@ import { uuidv4 } from "../../lib/uuid";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
-import { useThreadShells } from "../../state/entities";
+import { useThreadShell, useThreadShells } from "../../state/entities";
 import { useForkThread } from "../home/useThreadListActions";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import { resolveThreadForkAvailability } from "./thread-fork-menu";
@@ -241,7 +242,7 @@ function UnavailableThreadDraftRedirect(props: { readonly environmentId: Environ
       }),
     );
   });
-  // oxlint-disable-next-line lecturn/react-effect-budget -- replaces this route in the navigator
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- replaces this route with a new draft thread route for the environment's project on mount
   useEffect(() => {
     openDraft();
   }, []);
@@ -285,7 +286,7 @@ function AccountScopedThreadRouteScreen(props: ThreadRouteScreenProps) {
     accounts,
   });
   const owner = decision.kind === "ready" ? decision.accountId : null;
-  // oxlint-disable-next-line lecturn/react-effect-budget -- Home's account sections live in a store outside this route.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- expands the owning account in Home's section store, which lives outside this route, once the route resolves its account
   useEffect(() => {
     if (owner) expandMobileAccountSection(owner);
   }, [owner]);
@@ -529,6 +530,7 @@ function ThreadRouteContent(
           : chosenInspectorMode;
     return mode === "files" && selectedThreadCwd === null ? null : mode;
   })();
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- closes the workspace navigator's auxiliary pane when the thread has no cwd for the file inspector
   useEffect(() => {
     if (
       props.inspectorPresentation === undefined &&
@@ -549,6 +551,7 @@ function ThreadRouteContent(
   ]);
 
   const revealPreview = useEffectEvent(() => showAuxiliaryPane("inspector"));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- opens the workspace navigator's inspector pane when route params bring a preview target
   useEffect(() => {
     if (previewTarget) revealPreview();
   }, [previewTarget]);
@@ -597,10 +600,21 @@ function ThreadRouteContent(
     );
     return parent !== undefined ? `Forked from ${parent.title}` : "Forked from another thread";
   })();
-  // A fork of an imported thread keeps both origins; the fork is the nearer
-  // one, so it is the one the subtitle names.
+  const delegatedFrom = selectedThread?.delegatedFrom ?? null;
+  const delegatedFromRef =
+    delegatedFrom === null
+      ? null
+      : scopeThreadRef(delegatedFrom.environmentId, delegatedFrom.threadId);
+  // The title it had at delegation, until this client sees the parent itself.
+  const delegatedFromThread = useThreadShell(delegatedFromRef);
+  // One origin shows, nearest first: a fork, a linked environment's delegated task
+  // (its parent) or other linked work, then an imported session.
   const originLabel =
     forkedFromLabel ??
+    (delegatedFrom !== null
+      ? `Subagent of ${delegatedFromThread?.title ?? delegatedFrom.title}`
+      : null) ??
+    (selectedThread?.linkOrigin ? `From ${selectedThread.linkOrigin.label}` : null) ??
     (selectedThread?.importedFrom != null
       ? buildThreadImportLabel(selectedThread.importedFrom)
       : null);

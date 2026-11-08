@@ -3,10 +3,7 @@ import {
   type PendingSubagentRequest,
   presentThreadShell,
 } from "@lecturn/client-runtime/state/models";
-import {
-  isListedThread,
-  pendingSubagentRequestsByThread,
-} from "@lecturn/client-runtime/state/threads";
+import { isListedThread, isShownUnderParent } from "@lecturn/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
 import type {
   AppBinding,
@@ -226,13 +223,26 @@ export function startThreadNotifications(
   ) => {
     const previous = entry.previous;
     const next = new Map<ThreadId, NotificationState>();
-    const subagentRequests = pendingSubagentRequestsByThread(threads);
+    // A parent here also hears of what its tasks on linked environments ask.
+    const subagentRequests = registry.get(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+    );
+    const delegatedUnderParent = registry.get(environmentThreadShells.delegatedUnderParentAtom);
     const listingCapabilities = registry.get(
       environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
     );
     const changed: Array<[NotificationState | undefined, NotificationState]> = [];
     for (const rawThread of threads) {
       if (!isListedThread(rawThread, listingCapabilities)) continue;
+      if (
+        isShownUnderParent(
+          { environmentId, threadId: rawThread.id },
+          rawThread.lineage,
+          delegatedUnderParent,
+        )
+      ) {
+        continue;
+      }
       const prior = previous.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
       if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
@@ -301,16 +311,28 @@ export function startThreadNotifications(
       },
       { immediate: true },
     );
-    // Which threads alert depends on the server's listing capabilities.
+    // Which threads alert depends on the server's listing capabilities, the
+    // requests of tasks on linked environments, and which tasks list under a parent.
+    const reobserve = () => {
+      if (entry.threads !== null) observeThreads(environmentId, entry, entry.threads);
+    };
     const unsubscribeListing = registry.subscribe(
       environmentThreadShells.environmentListingCapabilitiesAtom(environmentId),
-      () => {
-        if (entry.threads !== null) observeThreads(environmentId, entry, entry.threads);
-      },
+      reobserve,
+    );
+    const unsubscribeRequests = registry.subscribe(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+      reobserve,
+    );
+    const unsubscribeDelegated = registry.subscribe(
+      environmentThreadShells.delegatedUnderParentAtom,
+      reobserve,
     );
     entry.unsubscribe = () => {
       unsubscribeShell();
       unsubscribeListing();
+      unsubscribeRequests();
+      unsubscribeDelegated();
       entry.gate.clear();
     };
     return entry;

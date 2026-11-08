@@ -67,6 +67,7 @@ function HostedTeamsAccount({
   const organizationId = useSelectedTeam(accountId);
   const context = `${userId}:${organizationId}`;
   const currentContext = useRef(context);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed team context to a ref that async actions check before applying results
   useLayoutEffect(() => {
     currentContext.current = context;
   }, [context]);
@@ -81,6 +82,7 @@ function HostedTeamsAccount({
   const [preview, setPreview] = useState<TeamSeatPreview | null>(null);
   const [providers, setProviders] = useState<readonly string[] | null>(null);
   const [publish, setPublish] = useState(true);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- loads the selected team's detail from the relay client, ignoring answers for a stale team
   useEffect(() => {
     let disposed = false;
     // oxlint-disable-next-line react/set-state-in-effect -- A new team or reload clears the last load's failure and seat preview as its request starts.

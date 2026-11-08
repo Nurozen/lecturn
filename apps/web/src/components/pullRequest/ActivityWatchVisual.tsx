@@ -13,6 +13,7 @@ const stateColor = (state: ActivityVisualState) =>
 export function ActivityWatchFrame(props: { state: ActivityVisualState; children: ReactNode }) {
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [moving, setMoving] = useState(false);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- observes the frame's visibility, page visibility and reduced-motion preference to run the watch motion only while seen
   useEffect(() => {
     // Inactive frames never subscribe; the active subscription's cleanup
     // stops the motion when the state or element changes.

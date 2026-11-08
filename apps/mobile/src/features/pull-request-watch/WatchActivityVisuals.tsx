@@ -24,6 +24,7 @@ export function WatchActivityFrame(props: {
   const reducedMotion = useReducedMotion();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [opacity] = useState(() => new Animated.Value(1));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState to pause the pulse in the background
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state === "active"),
@@ -32,6 +33,7 @@ export function WatchActivityFrame(props: {
   }, []);
   const pulse =
     props.state === "attention" && props.visible && focused && foreground && !reducedMotion;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the looping Animated opacity pulse and stops it on cleanup
   useEffect(() => {
     if (!pulse) {
       opacity.setValue(1);

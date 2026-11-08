@@ -107,6 +107,7 @@ export function useAppRefLabel(ref: string, enabled = true): string {
     scope === null ? undefined : state.described[scope]?.[ref],
   );
   const unknown = stored === undefined && described === undefined;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- queues a label request on the app's describe channel for a reference the label store does not know yet
   useEffect(() => {
     if (scope !== null && describe !== null && unknown) requestAppRefLabel(scope, ref, describe);
   }, [scope, ref, describe, unknown]);

@@ -21,6 +21,7 @@ export function useSquireGestureRequests(
   squireId: SquireId,
   target: RefObject<{ play(name: CompanionGesture): Promise<GestureResult> } | null>,
 ) {
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers this figure's play handle in the module-level gesture listener registry until unmount
   useEffect(() => {
     const listener: Listener = (gesture) => {
       void target.current?.play(gesture);

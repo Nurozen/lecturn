@@ -19,6 +19,7 @@ import { ThreadContextDivider } from "./thread-context-divider";
 import { ThreadHandoffDivider, ThreadHandoffRow } from "./thread-handoff-row";
 import { GuestBubbleTint, GuestMessageName } from "./guestMessageStyle";
 import { ThreadGuestPendingMessage, useThreadGuestShare } from "./ThreadGuestShareBar";
+import { LinkRequestCard } from "./LinkRequestCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import {
@@ -222,6 +223,7 @@ import {
   threadFeedRunIsUnsettled,
   isContextCompactionActivityGroup,
   isContextHandoffActivityGroup,
+  isLinkRequestActivityGroup,
   isSecretRequestActivityGroup,
   threadWorkGroupDetailsId,
   type ThreadFeedEntry,
@@ -1536,6 +1538,16 @@ function renderFeedEntry(
     );
   }
 
+  if (entry.type === "activity-group" && isLinkRequestActivityGroup(entry)) {
+    return (
+      <LinkRequestCard
+        environmentId={props.environmentId}
+        projectedItem={entry.activities[0]!.projectedItem}
+        iconColor={iconSubtleColor}
+      />
+    );
+  }
+
   if (entry.type === "activity-group" && isContextCompactionActivityGroup(entry)) {
     const label = entry.activities[0]!.summary;
     const item = entry.activities[0]!.projectedItem.item;
@@ -2359,7 +2371,7 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     props.threadId,
     props.contentPresentation.kind,
   ]);
-  // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A scope change (thread or presentation) aborts the pending link lookup opened from the old scope.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies, lecturn/no-unreasoned-state-sync -- A scope change (thread or presentation) aborts the pending link lookup opened from the old scope.
   useLayoutEffect(() => () => markdownLinkRequest.current?.abort(), [markdownLinkScope]);
   const [preview, setPreview] = useState<{
     readonly scope: string;
@@ -2931,7 +2943,7 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     guestShare,
   );
   const presentedFeedRef = useRef(presentedFeed);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- refs take the feed after commit, never in render.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- keeps the latest presented feed for disclosure callbacks that run outside render
   useLayoutEffect(() => {
     presentedFeedRef.current = presentedFeed;
   }, [presentedFeed]);
@@ -2967,13 +2979,13 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   }
   const revealOpacity = useSharedValue(0);
   const revealStyle = useAnimatedStyle(() => ({ opacity: revealOpacity.value }));
-  // oxlint-disable-next-line lecturn/react-effect-budget -- the fade starts once the reveal commits.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the Reanimated reveal fade once the first content commits
   useEffect(() => {
     if (hasRevealed) {
       revealOpacity.set(withTiming(1, { duration: 140, reduceMotion: ReduceMotion.System }));
     }
   }, [hasRevealed, revealOpacity]);
-  // oxlint-disable-next-line lecturn/react-effect-budget -- stops a running reveal fade on unmount.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- cancels the Reanimated reveal fade on unmount
   useEffect(() => () => cancelAnimation(revealOpacity), [revealOpacity]);
   useShowcaseSceneRendered("thread", themeId, hasRevealed && hasFeedContent);
   const { contentInsetEndAdjustment } = props;
@@ -2996,6 +3008,7 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   // Z: a native list scroll after the commit that rendered its target row. The
   // row is often already measured, so no LegendList callback fires for that
   // commit, and setEndFollow notifies the parent, so it can't run during render.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- scrolls the native list to the jump target after the commit that rendered its row
   useEffect(() => {
     if (jumpIndex !== null) landJump(jumpIndex);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Jumping to a different message whose row index is unchanged must still land the jump.
@@ -3131,6 +3144,7 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   }
 
   // Timers and frames the feed schedules die with it.
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- clears the feed's scroll, reflow and copy timers and disclosure animation frames on unmount
   useEffect(
     () => () => {
       if (userScrollSettleTimerRef.current !== null) clearTimeout(userScrollSettleTimerRef.current);
@@ -3332,6 +3346,7 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   const { textSizeKey } = workRowSizing;
   const hasHtmlRenders = presentedFeed.some((entry) => entry.type === "html-render");
   const previousRowGeometry = useRef({ textSizeKey, contentWidth });
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- clears LegendList size caches and starts a reflow after the commit that brings new row geometry
   useLayoutEffect(() => {
     const previous = previousRowGeometry.current;
     if (previous.textSizeKey === textSizeKey && previous.contentWidth === contentWidth) return;

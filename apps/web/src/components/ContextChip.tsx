@@ -44,6 +44,8 @@ const contextChipVariants = cva(
           "[--context-chip-accent:oklch(0.62_0.16_322)] redesign:[--context-chip-accent:var(--context-chip-skill)]",
         thread:
           "[--context-chip-accent:oklch(0.62_0.12_190)] redesign:[--context-chip-accent:var(--context-chip-thread)]",
+        environment:
+          "[--context-chip-accent:oklch(0.62_0.11_145)] redesign:[--context-chip-accent:var(--context-chip-environment)]",
         citation:
           "[--context-chip-accent:oklch(0.62_0.16_259)] redesign:[--context-chip-accent:var(--context-chip-citation)]",
         "doc-pdf":

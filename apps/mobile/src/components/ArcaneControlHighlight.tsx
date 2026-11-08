@@ -15,6 +15,7 @@ export function ArcaneControlHighlight({
   const reduceMotion = useReducedMotion();
   const { accent, edge, opaque } = useGlassPalette();
   const [opacity] = useState(() => new Animated.Value(0));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the Animated opacity fade for the active state and stops it on cleanup
   useEffect(() => {
     const animation = Animated.timing(opacity, {
       toValue: active ? 1 : 0,

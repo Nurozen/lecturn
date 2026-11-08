@@ -97,6 +97,7 @@ export function useCloudLinkController(
   const primaryCloudLinkState = usePrimaryCloudLinkState();
   const accountRef = useRef(userId);
   const companyPublishingAllowed = useRef(true);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- publishes the committed account to a ref that async link operations check, clearing it on unmount
   useEffect(() => {
     accountRef.current = userId;
     return () => {

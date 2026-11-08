@@ -94,6 +94,7 @@ export function SagaWorkbenchPage({
   const refresh = query.refresh;
   const refreshEvidence = evidence.refresh;
   const refreshActivity = activity.refresh;
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- refetches the saga workbench queries when the environment connection comes back
   useEffect(() => {
     if (!disconnected) {
       refresh();
@@ -101,6 +102,7 @@ export function SagaWorkbenchPage({
       refreshActivity();
     }
   }, [disconnected, refresh, refreshEvidence, refreshActivity]);
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- polls the saga workbench queries on a timer and refetches on Stave mutations, reconnects and window focus
   useEffect(() => {
     const update = () => {
       refresh();
