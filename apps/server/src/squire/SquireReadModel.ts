@@ -29,6 +29,7 @@ import {
   SquireTurnSummary,
   type SquireVocabularyResult,
   type ThreadId,
+  SQUIRE_SPEAKING_TOOLS,
 } from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -55,7 +56,6 @@ import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
 import { toRule } from "./SquireTools.ts";
-import { SQUIRE_SPEAKING_TOOL_NAMES } from "./squireToolNames.ts";
 
 /**
  * Reads never write. The always-on stream carries compact snapshots only; evidence, card bodies, and logs are fetched
@@ -499,8 +499,7 @@ const make = Effect.gen(function* () {
     );
     for (const row of logged) {
       const tool = row.kind === "tool.called" ? logData(row).tool : undefined;
-      if (typeof tool === "string" && SQUIRE_SPEAKING_TOOL_NAMES.has(tool))
-        quiet.delete(row.run_id);
+      if (typeof tool === "string" && SQUIRE_SPEAKING_TOOLS.has(tool)) quiet.delete(row.run_id);
     }
     const candidates = runIds.filter((runId) => quiet.has(runId));
     if (candidates.length === 0) return quiet;

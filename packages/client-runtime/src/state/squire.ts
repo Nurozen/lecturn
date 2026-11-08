@@ -25,6 +25,7 @@ import {
   type SquireSnapshot,
   type SquireSteerKind,
   type SquireSubscribeEvent,
+  SQUIRE_SPEAKING_TOOLS,
 } from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -1754,23 +1755,6 @@ function squireToolName(toolName: string | null | undefined): string | null {
 export function isSquireStayQuietTool(toolName: string | null | undefined): boolean {
   return squireToolName(toolName) === "squire_stay_quiet";
 }
-
-/** Tools that put something in front of the user, so the run has something to say. */
-const SQUIRE_SPEAKING_TOOLS: ReadonlySet<string> = new Set([
-  "squire_notify",
-  "squire_recommend_steer",
-  "squire_send_steer",
-  "squire_propose_thread",
-  "squire_create_thread",
-  "squire_propose_room",
-  "squire_open_room",
-  "squire_propose_squire",
-  "squire_raise_overlap",
-  "squire_pause",
-  "squire_resume",
-  "squire_rescope",
-  "squire_forward_item",
-]);
 
 /** One timeline item as the quiet rule reads it; null for anything else. */
 export interface SquireQuietRunSignal {

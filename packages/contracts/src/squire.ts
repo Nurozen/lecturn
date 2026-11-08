@@ -1915,3 +1915,20 @@ export const SquireRoomMarkReadInput = Schema.Struct({
   throughPostId: SquireRoomPostId,
 });
 export const SquireRoomMarkReadResult = Schema.Struct({});
+
+/** Tools that put something in front of the user, so a run that calls one is not quiet. */
+export const SQUIRE_SPEAKING_TOOLS: ReadonlySet<string> = new Set([
+  "squire_notify",
+  "squire_recommend_steer",
+  "squire_send_steer",
+  "squire_propose_thread",
+  "squire_create_thread",
+  "squire_propose_room",
+  "squire_open_room",
+  "squire_propose_squire",
+  "squire_raise_overlap",
+  "squire_pause",
+  "squire_resume",
+  "squire_rescope",
+  "squire_forward_item",
+]);
