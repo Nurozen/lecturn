@@ -16,7 +16,7 @@ import {
   threadWithHistory,
   type FakeDriver,
 } from "../../test/fakeEnvironment";
-import { render } from "../../test/render";
+import { act, render } from "../../test/render";
 
 // The socket is the only fake layer, as in test/appScenarios.renders.tsx.
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
@@ -68,7 +68,10 @@ it("keeps the thread open when a project scope is chosen and after a reload", as
     await using _app = await mountThread();
     await expect.element(scopeLabel).toHaveTextContent("All projects");
     await userEvent.click(scopeLabel);
-    await userEvent.click(page.getByRole("option", { name: "render" }));
+    const option = page.getByRole("option", { name: "render" });
+    await expect.element(option).toBeVisible();
+    // Playwright's click outlasts CI's short action timeout while the popup opens.
+    await act(async () => (option.element() as HTMLElement).click());
     await expect.element(scopeLabel).toHaveTextContent("render");
     await expect.element(lastAnswer).toBeVisible();
   }
