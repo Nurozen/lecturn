@@ -3,6 +3,8 @@ import {
   type ThreadGuestMessage,
   type ThreadGuestShare,
 } from "@lecturn/contracts";
+import type { SquireApprovalEntry } from "@lecturn/client-runtime/state/squire";
+import type { SquireCardRow } from "@lecturn/contracts";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 
@@ -23,8 +25,27 @@ export type PendingThreadFeedEntry = ThreadFeedEntry & {
   readonly acknowledged?: boolean;
 };
 
+/** An approval, question, or overlap in a Squire's chat, where it was raised. */
+export interface SquireApprovalFeedEntry {
+  readonly type: "squire-approval";
+  readonly id: string;
+  readonly createdAt: string;
+  readonly entry: SquireApprovalEntry<SquireCardRow>;
+}
+
+/** The static line above what arrived since the user last viewed the thread. */
+export interface UnreadDividerFeedEntry {
+  readonly type: "unread-divider";
+  readonly id: string;
+  readonly createdAt: string;
+}
+
 /** A row of the thread feed's list. */
-export type ThreadFeedRow = PendingThreadFeedEntry | GuestPendingFeedEntry;
+export type ThreadFeedRow =
+  | PendingThreadFeedEntry
+  | GuestPendingFeedEntry
+  | SquireApprovalFeedEntry
+  | UnreadDividerFeedEntry;
 
 /** Waiting guest messages go after the transcript, oldest first. */
 export function appendGuestPendingMessages(

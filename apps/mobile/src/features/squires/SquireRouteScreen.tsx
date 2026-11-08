@@ -9,9 +9,9 @@ import {
   SQUIRE_LEAD_INTRO_START_LABEL,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
-import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
+import { EnvironmentId, SquireId } from "@lecturn/contracts";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -28,7 +28,6 @@ import { squireEnvironment, useSquireIndicator, useSquireSupported } from "../..
 import { useAtomCommand } from "../../state/use-atom-command";
 import { RequestActionButton } from "../threads/RequestActionButton";
 import { SquireIndicator, SquireMotionClock } from "./SquireIndicator";
-import { SquireQueue } from "./SquireQueue";
 import { SquireRules } from "./SquireRules";
 import {
   SquireViewportContext,
@@ -38,27 +37,26 @@ import {
 } from "./SquireViewport";
 import {
   squireHeaderActions,
-  squireHeldRows,
+  squireRouteDestination,
   squireScreenState,
-  squireTeamFilterToggle,
-} from "./squireQueue.logic";
-import { useOpenThreadOverPage } from "../workspace/useOpenThreadOverPage";
+} from "./squireApproval.logic";
+import { useOpenThreadOverPage, useReplaceWithThread } from "../workspace/useOpenThreadOverPage";
 
 export type SquireRouteParams = {
   environmentId: string;
   squireId: string;
-  /** The item to expand (a card id). */
-  item?: string;
+  /** The Squire's details rather than its chat, from the chat's own menu. */
+  details?: boolean;
 };
 
 export function SquireRouteScreen({ route }: StaticScreenProps<SquireRouteParams>) {
-  const { environmentId, squireId, item } = route.params;
+  const { environmentId, squireId, details } = route.params;
   return (
     <SquireScreen
-      key={`${environmentId}:${squireId}:${item ?? ""}`}
+      key={`${environmentId}:${squireId}:${details === true}`}
       environmentId={EnvironmentId.make(environmentId)}
       squireId={SquireId.make(squireId)}
-      itemId={item === undefined ? null : SquireCardId.make(item)}
+      detailsRequested={details === true}
     />
   );
 }
@@ -66,7 +64,7 @@ export function SquireRouteScreen({ route }: StaticScreenProps<SquireRouteParams
 function SquireScreen(props: {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;
-  readonly itemId: SquireCardId | null;
+  readonly detailsRequested: boolean;
 }) {
   const supported = useSquireSupported(props.environmentId);
   const state = useAtomValue(squireEnvironment.state(props.environmentId));
@@ -93,7 +91,7 @@ function SquireScreen(props: {
             entry={screen.entry}
             isLead={screen.isLead}
             team={screen.team}
-            itemId={props.itemId}
+            detailsRequested={props.detailsRequested}
           />
         </SquireMotionClock>
       );
@@ -113,19 +111,43 @@ function SquireReady(props: {
   readonly entry: SquireSnapshotEntry;
   readonly isLead: boolean;
   readonly team: ReadonlyArray<SquireSnapshotEntry>;
-  readonly itemId: SquireCardId | null;
+  readonly detailsRequested: boolean;
+}) {
+  const { environmentId, entry } = props;
+  const { squire } = entry;
+  const homeShell = useQuietThreadShell(
+    squire.homeThreadId === null ? null : scopeThreadRef(environmentId, squire.homeThreadId),
+  );
+  const destination = squireRouteDestination({
+    squire,
+    detailsRequested: props.detailsRequested,
+    homeVisibleItemCount: squire.homeThreadId === null ? 0 : (homeShell?.visibleItemCount ?? null),
+  });
+  const replaceWithThread = useEffectEvent(useReplaceWithThread());
+  const chatThreadId = destination.kind === "chat" ? destination.threadId : null;
+  // oxlint-disable-next-line lecturn/react-effect-budget -- navigation runs after commit, before paint, so the blank route never shows.
+  useLayoutEffect(() => {
+    if (chatThreadId !== null) replaceWithThread({ environmentId, threadId: chatThreadId });
+  }, [environmentId, chatThreadId]);
+  if (chatThreadId !== null) return <View className="flex-1 bg-screen" />;
+  return <SquireDetails {...props} />;
+}
+
+/** What the chat cannot show: setup, the Lead's introduction, pause, the team, and rules. */
+function SquireDetails(props: {
+  readonly environmentId: EnvironmentId;
+  readonly entry: SquireSnapshotEntry;
+  readonly isLead: boolean;
+  readonly team: ReadonlyArray<SquireSnapshotEntry>;
 }) {
   const { environmentId, entry, isLead, team } = props;
   const { squire } = entry;
   const navigation = useNavigation();
-  const [teamFilter, setTeamFilter] = useState<SquireId | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollViewport = useSquireScrollViewport(scrollRef);
   useLayoutEffect(() => {
     navigation.setOptions({ title: squire.name });
   }, [navigation, squire.name]);
-  const nameOf = (id: SquireId) =>
-    [entry, ...team].find((candidate) => candidate.squire.id === id)?.squire.name ?? "A Squire";
 
   return (
     <SquireViewportContext.Provider value={scrollViewport.viewport}>
@@ -142,21 +164,8 @@ function SquireReady(props: {
         <SquireHeader environmentId={environmentId} entry={entry} isLead={isLead} team={team} />
         {isLead ? <SquireLeadIntro environmentId={environmentId} lead={squire} /> : null}
         {isLead && team.length > 0 ? (
-          <SquireTeamStrip
-            environmentId={environmentId}
-            team={team}
-            selected={teamFilter}
-            onSelect={(id) => setTeamFilter(squireTeamFilterToggle(teamFilter, id))}
-          />
+          <SquireTeamStrip environmentId={environmentId} team={team} />
         ) : null}
-        <SquireQueue
-          held={squireHeldRows(entry, team, teamFilter)}
-          environmentId={environmentId}
-          squireId={squire.id}
-          teamFilter={isLead ? teamFilter : null}
-          initialItemId={props.itemId}
-          raiserName={isLead ? nameOf : null}
-        />
         {isLead ? null : <SquireRules environmentId={environmentId} squire={squire} />}
       </ScrollView>
     </SquireViewportContext.Provider>
@@ -318,13 +327,12 @@ function SquireLeadIntro(props: {
   );
 }
 
-/** The Lead's team: tapping a portrait filters the combined queue to it; again clears it. */
+/** The Lead's team: tapping a portrait opens that Squire. */
 function SquireTeamStrip(props: {
   readonly environmentId: EnvironmentId;
   readonly team: ReadonlyArray<SquireSnapshotEntry>;
-  readonly selected: SquireId | null;
-  readonly onSelect: (squireId: SquireId) => void;
 }) {
+  const navigation = useNavigation();
   const onScroll = useSquireViewportScroll();
   return (
     <ScrollView
@@ -333,16 +341,19 @@ function SquireTeamStrip(props: {
       scrollEventThrottle={100}
       onScroll={onScroll}
       contentContainerStyle={{ gap: 14 }}
-      accessibilityLabel="Filter by Squire"
+      accessibilityLabel="Your Squires"
     >
       {props.team.map((member) => (
         <TeamPortrait
           key={member.squire.id}
           environmentId={props.environmentId}
           entry={member}
-          selected={props.selected === member.squire.id}
-          dimmed={props.selected !== null && props.selected !== member.squire.id}
-          onPress={() => props.onSelect(member.squire.id)}
+          onPress={() =>
+            navigation.navigate("Squire", {
+              environmentId: props.environmentId,
+              squireId: member.squire.id,
+            })
+          }
         />
       ))}
     </ScrollView>
@@ -352,8 +363,6 @@ function SquireTeamStrip(props: {
 function TeamPortrait(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;
-  readonly selected: boolean;
-  readonly dimmed: boolean;
   readonly onPress: () => void;
 }) {
   const { squire } = props.entry;
@@ -364,9 +373,8 @@ function TeamPortrait(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={squire.name}
-      accessibilityState={{ selected: props.selected }}
       onPress={props.onPress}
-      className={props.dimmed ? "items-center gap-1 opacity-45" : "items-center gap-1"}
+      className="items-center gap-1"
     >
       <View ref={portraitRef} onLayout={inView.onLayout} collapsable={false}>
         <SquireIndicator
@@ -377,14 +385,7 @@ function TeamPortrait(props: {
           visible={inView.visible}
         />
       </View>
-      <Text
-        className={
-          props.selected
-            ? "max-w-16 font-lecturn-bold text-2xs text-foreground"
-            : "max-w-16 font-sans text-2xs text-foreground-muted"
-        }
-        numberOfLines={1}
-      >
+      <Text className="max-w-16 font-sans text-2xs text-foreground-muted" numberOfLines={1}>
         {squire.name}
       </Text>
     </Pressable>

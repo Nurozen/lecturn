@@ -1,14 +1,14 @@
 import { seedUserInputDraftAnswers } from "@lecturn/client-runtime/state/thread-requests";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
 import {
-  holdRemaining,
-  squireQueue,
+  squireAllowRuleInput,
+  squireLeadShowsIntro,
   squireQuestionPanelQuestions,
-  squireSettledLabel,
   squireUndoOffer,
+  type SquireApprovalEntry,
+  type SquireApprovalPhase,
   type SquireEnvironmentState,
   type SquireKnownPayload,
-  type SquireQueueChip,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { UnknownUnionMember, type SquireItemsActInput } from "@lecturn/contracts";
@@ -16,8 +16,6 @@ import type {
   EnvironmentId,
   ProviderApprovalDecision,
   SquireCardId,
-  SquireCardKind,
-  SquireCardResolution,
   SquireCardRow,
   SquireId,
   SquireItemAction,
@@ -31,31 +29,19 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../../lib/threadActivity";
 
-// Shared with web; re-exported so the queue's callers keep one import.
+// Shared with web; re-exported so the chat's callers keep one import.
 export {
   SQUIRE_KIND_LABEL,
-  SQUIRE_QUEUE_PAGE_SIZE,
-  squireAcceptOffer,
-  squireActedLabel,
   squireApprovalAnswer,
-  squireAskCopy,
-  squireCardActionable,
-  squireCardOrigins,
-  squireCardPrimaryLabel,
-  squireEditedText,
   squireFollowUpDraft,
   squireOffersFollowUp,
   squireOfferRuleInput,
   squireQuestionRepeatsTitle,
-  squireRowAction,
-  squireSettledLabel,
   squireUndoOffer,
   type SquireKnownPayload,
-  type SquireRowAction,
-  type SquireRuleNames,
 } from "@lecturn/client-runtime/state/squire";
 
-// Mirrors apps/web/src/components/squire/queue/squireQueue.logic.ts where the wording must
+// Mirrors the web client where the wording must
 // match across clients but the shape differs; the web module is not importable from the app.
 
 type QuestionPayload = Extract<SquireKnownPayload, { readonly type: "question" }>;
@@ -108,170 +94,119 @@ export function squireHeaderActions(
   };
 }
 
-/** Tapping the filtered portrait again clears the filter. */
-export function squireTeamFilterToggle(
-  current: SquireId | null,
-  tapped: SquireId,
-): SquireId | null {
-  return current === tapped ? null : tapped;
-}
-
-// ── Holds ─────────────────────────────────────────────────────
-
-export interface SquireHeldRow {
-  readonly cardId: SquireCardId;
-  readonly kind: SquireCardKind;
-  readonly targetThreadId: ThreadId | null;
-  readonly squireId: SquireId;
-  readonly receivedAt: number;
-  readonly executesInMs: number;
-  /** The open card of the same raiser, thread, and kind this hold sits beside. */
-  readonly heldOverCardId?: SquireCardId;
-}
-
-/** The Lead's view holds its team's actions too, under the same team filter as its queue. */
-export function squireHeldRows(
-  viewed: SquireSnapshotEntry,
-  team: ReadonlyArray<SquireSnapshotEntry>,
-  teamFilter: SquireId | null,
-): ReadonlyArray<SquireHeldRow> {
-  const entries = [viewed, ...team].filter(
-    (entry) => teamFilter === null || entry.squire.id === teamFilter,
-  );
-  return entries.flatMap((entry) =>
-    entry.held.map((hold) => ({
-      ...hold,
-      squireId: entry.squire.id,
-      receivedAt: entry.receivedAt,
-    })),
-  );
-}
-
-export function squireHoldSeconds(receivedAt: number, executesInMs: number, now: number): number {
-  return Math.ceil(holdRemaining(receivedAt, executesInMs, now) / 1000);
-}
-
-export function squireHoldText(
-  kind: SquireCardKind,
-  targetTitle: string | null,
-  seconds: number,
-): string {
-  const action =
-    kind === "steer"
-      ? targetTitle === null
-        ? "Sending a steer"
-        : `Sending a steer to ${targetTitle}`
-      : kind === "proposal"
-        ? "Creating a thread"
-        : "Acting";
-  return seconds > 0 ? `${action} in ${seconds}s` : `${action} now`;
-}
+export type SquireRouteDestination =
+  | { readonly kind: "details" }
+  | { readonly kind: "chat"; readonly threadId: ThreadId };
 
 /**
- * A hold is not an item, so it sits beside the open card of the same raiser, thread, and
- * kind (`heldOverCardId`). When that card is listed, the hold shows under it as one block, and
- * the held card's own row and banner are left out; any other hold keeps its banner.
+ * A Squire's route is its chat. The details page stays for what only it can show: a Squire with
+ * no chat yet (no provider, or no home thread), and the Lead's first-run introduction.
  */
-export function squireHoldPairing<Row extends Pick<SquireCardRow, "id" | "status">>(
-  listed: ReadonlyArray<Row>,
-  holds: ReadonlyArray<SquireHeldRow>,
-): {
-  /** The hold shown under each open card, by that card. */
-  readonly byOpen: ReadonlyMap<SquireCardId, SquireHeldRow>;
-  /** Holds shown on their own, as banners. */
-  readonly lone: ReadonlyArray<SquireHeldRow>;
-  /** The listed rows, without the held cards shown under their open card. */
-  readonly rows: ReadonlyArray<Row>;
-} {
-  const open = new Set(listed.filter((row) => row.status === "open").map((row) => row.id));
-  const byOpen = new Map<SquireCardId, SquireHeldRow>();
-  const lone: SquireHeldRow[] = [];
-  for (const hold of holds) {
-    const over = hold.heldOverCardId;
-    if (over !== undefined && open.has(over) && !byOpen.has(over)) byOpen.set(over, hold);
-    else lone.push(hold);
-  }
-  const paired = new Set([...byOpen.values()].map((hold) => hold.cardId));
-  return { byOpen, lone, rows: listed.filter((row) => !paired.has(row.id)) };
-}
-
-// ── Queue ─────────────────────────────────────────────────────
-
-const QUEUED_STATUSES: ReadonlySet<string> = new Set(["held", "open", "accepting", "executing"]);
-
-/**
- * The open queue: chips, "Needs a decision", and "FYI" from one list, so counts and groups never
- * disagree. A row the user just acted on leaves at once and shows as a one-line confirmation
- * until a refetch drops it; a pre-expanded card that is not on a loaded page is kept in place.
- * Rows keep server order: newest first.
- */
-export function squireQueueView<Row extends SquireCardRow>(
-  rows: ReadonlyArray<Row>,
-  options: {
-    readonly chip: SquireQueueChip;
-    readonly teamFilter: SquireId | null;
-    readonly selected: (Row & { readonly resolution?: SquireCardResolution | null }) | null;
-    readonly hasMore: boolean;
-    readonly acted?: ReadonlyMap<SquireCardId, string>;
-  },
-) {
-  const acted = options.acted ?? new Map<SquireCardId, string>();
-  const { selected } = options;
-  // Only a row the server still shows as open is the user's act in flight; any other state
-  // is the server's newer word.
-  const actedOn = (row: Row) => row.status === "open" && acted.has(row.id);
-  const confirmations: Array<{ readonly row: Row; readonly label: string }> = [];
-  for (const row of rows) {
-    const label = acted.get(row.id);
-    if (label !== undefined && actedOn(row)) confirmations.push({ row, label });
-  }
-  const selectedLoaded =
-    selected === null ? null : (rows.find((row) => row.id === selected.id) ?? null);
-  if (selected !== null && selectedLoaded === null) {
-    const label = acted.get(selected.id);
-    if (!QUEUED_STATUSES.has(selected.status)) {
-      confirmations.push({ row: selected, label: label ?? squireSettledLabel(selected) });
-    } else if (label !== undefined && actedOn(selected)) {
-      confirmations.push({ row: selected, label });
+export function squireRouteDestination(input: {
+  readonly squire: Pick<
+    SquireSnapshotEntry["squire"],
+    "role" | "status" | "lifecycle" | "homeThreadId" | "onboardedAt"
+  >;
+  readonly detailsRequested: boolean;
+  /** The home thread's visible items; null until its shell has loaded. */
+  readonly homeVisibleItemCount: number | null;
+}): SquireRouteDestination {
+  const { squire } = input;
+  if (input.detailsRequested || squire.homeThreadId === null) return { kind: "details" };
+  if (squire.lifecycle === "needs_provider") return { kind: "details" };
+  if (squire.role === "lead") {
+    // A Lead yet to onboard waits for its shell, so the intro never loses to a redirect.
+    const introPending = squire.onboardedAt === null && input.homeVisibleItemCount === null;
+    if (
+      introPending ||
+      squireLeadShowsIntro({ lead: squire, homeVisibleItemCount: input.homeVisibleItemCount })
+    ) {
+      return { kind: "details" };
     }
   }
-  const confirmed = new Set(confirmations.map((entry) => entry.row.id));
-  const open = rows.filter((row) => !confirmed.has(row.id));
-  const pinned =
-    selected !== null && selectedLoaded === null && !confirmed.has(selected.id)
-      ? [selected, ...open]
-      : open;
-  const queue = squireQueue(pinned, { chip: options.chip, squireId: options.teamFilter });
-  return {
-    chips: queue.chips.map((chip) => ({
-      ...chip,
-      // An unloaded page can only hold FYI rows' older neighbours, so the count is a floor.
-      countLabel:
-        options.hasMore && (chip.chip === "all" || chip.chip === "fyi")
-          ? `${chip.count}+`
-          : String(chip.count),
-    })),
-    decision: queue.groups.find((group) => group.key === "decision") ?? null,
-    fyi: queue.groups.find((group) => group.key === "fyi") ?? null,
-    confirmations,
-  };
+  return { kind: "chat", threadId: squire.homeThreadId };
 }
+
+// ── Approvals ─────────────────────────────────────────────────
 
 export function squireCardRecommendation(
   payload: SquireKnownPayload,
-): { readonly text: string; readonly editable: boolean } | null {
+): { readonly text: string } | null {
   switch (payload.type) {
     case "steer":
-      return { text: payload.steer, editable: true };
+      return { text: payload.steer };
     case "thread-proposal":
-      return { text: payload.firstPrompt, editable: true };
+      return { text: payload.firstPrompt };
     case "squire-proposal":
-      return { text: payload.brief, editable: false };
+      return { text: payload.brief };
     case "fyi":
-      return { text: payload.text, editable: false };
+      return { text: payload.text };
     default:
       return null;
   }
+}
+
+export type SquireApprovalControls =
+  | { readonly kind: "approve"; readonly alwaysAllow: boolean }
+  | { readonly kind: "answer" }
+  | { readonly kind: "dismiss" }
+  | { readonly kind: "inactivity" }
+  | { readonly kind: "expired"; readonly allowNextTime: boolean }
+  | { readonly kind: "none" };
+
+/**
+ * What a chat row offers. An approval is Allow once, Deny, and Always allow where a rule can
+ * apply; a question keeps its answer controls and an overlap its Dismiss. An expired approval
+ * offers the rule alone. Everything closed offers nothing, since its outcome stays as its line.
+ */
+export function squireApprovalControls(input: {
+  readonly row: Pick<SquireCardRow, "id" | "squireId" | "kind" | "fyiSource" | "allowRuleOffer">;
+  readonly phase: SquireApprovalPhase;
+  readonly expired: boolean;
+  readonly canAct: boolean;
+  readonly canSaveRule: boolean;
+  /** "Saved to rules" already applies to this card this session. */
+  readonly ruleSaved: boolean;
+}): SquireApprovalControls {
+  const { row } = input;
+  const ruleAvailable = input.canSaveRule && !input.ruleSaved && squireAllowRuleInput(row) !== null;
+  if (input.phase !== "open") {
+    return input.expired ? { kind: "expired", allowNextTime: ruleAvailable } : { kind: "none" };
+  }
+  if (!input.canAct) return { kind: "none" };
+  switch (row.kind) {
+    case "steer":
+    case "proposal":
+      return { kind: "approve", alwaysAllow: ruleAvailable };
+    case "question":
+      return { kind: "answer" };
+    case "overlap":
+      return { kind: "dismiss" };
+    case "fyi":
+      return row.fyiSource === "inactivity" ? { kind: "inactivity" } : { kind: "none" };
+    default:
+      return { kind: "none" };
+  }
+}
+
+/**
+ * The one FYI a chat still renders: the inactivity check, whose answer decides whether
+ * automation pauses. `squireApprovalEntries` leaves every FYI out, so it joins here, as open.
+ */
+export function squireWithInactivityChecks<
+  Row extends Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "fyiSource">,
+>(
+  entries: ReadonlyArray<SquireApprovalEntry<Row>>,
+  fyis: ReadonlyArray<Row>,
+  chat: { readonly squireId: SquireId; readonly isLead: boolean; readonly chatFirst: boolean },
+): ReadonlyArray<SquireApprovalEntry<Row>> {
+  const checks = fyis.flatMap((row): Array<SquireApprovalEntry<Row>> => {
+    if (row.kind !== "fyi" || row.fyiSource !== "inactivity" || row.status !== "open") return [];
+    if ((chat.chatFirst || chat.isLead) && row.squireId !== chat.squireId) return [];
+    return [{ row, createdAt: row.createdAt, phase: "open", outcome: null, expired: false }];
+  });
+  if (checks.length === 0) return entries;
+  return [...entries, ...checks].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 // ── Rules ─────────────────────────────────────────────────────
@@ -438,9 +373,3 @@ export function createSquireOpenedTracker() {
 }
 
 export const squireOpenedThisSession = createSquireOpenedTracker();
-
-/** A turn summary FYI names its thread; the read model's `outcome` says what happened there. */
-export function squireRowTitle(row: Pick<SquireCardRow, "title" | "kind" | "outcome">): string {
-  const outcome = row.kind === "fyi" ? (row.outcome?.trim() ?? "") : "";
-  return outcome === "" ? row.title : `${row.title} · ${outcome}`;
-}

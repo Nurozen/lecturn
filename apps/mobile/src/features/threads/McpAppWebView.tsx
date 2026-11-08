@@ -343,7 +343,6 @@ export function ThreadMcpApp(props: {
               navigation.navigate("Squire", {
                 environmentId: link.environmentId,
                 squireId: link.squireId,
-                ...(link.item === null ? {} : { item: link.item }),
               });
             },
           }

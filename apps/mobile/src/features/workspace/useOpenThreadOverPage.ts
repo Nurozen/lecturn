@@ -16,3 +16,13 @@ export function useOpenThreadOverPage() {
     else navigation.dispatch(StackActions.push("Thread", params));
   };
 }
+
+/** Swaps the page for a thread, so Back skips it; Android selects, as above. */
+export function useReplaceWithThread() {
+  const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
+  return (params: ReactNavigation.RootParamList["Thread"]) => {
+    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
+    else navigation.dispatch(StackActions.replace("Thread", params));
+  };
+}

@@ -1,8 +1,7 @@
 import {
-  squirePairedHoldText,
   squireQuestionRecommendation,
+  type SquireApprovalEntry,
   type SquireSnapshotEntry,
-  squireSupersededNote,
 } from "@lecturn/client-runtime/state/squire";
 import {
   UnknownUnionMember,
@@ -20,24 +19,19 @@ import { togglePendingUserInputOptionSelection } from "../../lib/threadActivity"
 import {
   createSquireOpenedTracker,
   squireActOutcome,
-  squireActedLabel,
   squireApprovalAnswer,
+  squireApprovalControls,
   squireHeaderActions,
-  squireHeldRows,
-  squireHoldPairing,
-  squireHoldSeconds,
-  squireHoldText,
   squireItemsActInput,
   squireQuestionMode,
-  squireQueueView,
+  squireRouteDestination,
   squireScreenState,
-  squireTeamFilterToggle,
+  squireWithInactivityChecks,
   squireUserInputAnswer,
   squireUserInputQuestions,
   type SquireKnownPayload,
   type SquireUserInputRequest,
-  squireRowTitle,
-} from "./squireQueue.logic";
+} from "./squireApproval.logic";
 
 const ENV = "env-1" as EnvironmentId;
 const LEAD = "lead" as SquireId;
@@ -130,93 +124,6 @@ const MULTI_QUESTION: SquireUserInputRequest = {
     },
   ],
 };
-
-describe("squireQueueView", () => {
-  it("lists decisions before FYI, keeps server order, and counts chips before the chip filter", () => {
-    const newest = row("steer");
-    const fyi = row("fyi", { fyiSource: "summary" });
-    const question = row("question");
-    const view = squireQueueView([newest, fyi, question], {
-      chip: "question",
-      teamFilter: null,
-      selected: null,
-      hasMore: true,
-    });
-    expect(view.decision?.items.map((item) => item.id)).toEqual([question.id]);
-    expect(view.fyi).toBeNull();
-    const counts = Object.fromEntries(view.chips.map((chip) => [chip.chip, chip.countLabel]));
-    expect(counts).toMatchObject({ all: "3+", steer: "1", question: "1", fyi: "1+" });
-
-    const all = squireQueueView([newest, fyi, question], {
-      chip: "all",
-      teamFilter: null,
-      selected: null,
-      hasMore: false,
-    });
-    expect(all.decision?.items.map((item) => item.id)).toEqual([newest.id, question.id]);
-    expect(all.fyi?.items.map((item) => item.id)).toEqual([fyi.id]);
-  });
-
-  it("filters the Lead's combined queue to one Squire's raised or owned items", () => {
-    const docsRaised = row("steer", { squireId: DOCS, ownerSquireId: DOCS });
-    const leadOnRelease = row("proposal", { squireId: LEAD, ownerSquireId: RELEASE });
-    const view = squireQueueView([docsRaised, leadOnRelease], {
-      chip: "all",
-      teamFilter: RELEASE,
-      selected: null,
-      hasMore: false,
-    });
-    expect(view.decision?.items.map((item) => item.id)).toEqual([leadOnRelease.id]);
-  });
-
-  it("moves a row the user just acted on out of the groups into a one-line confirmation", () => {
-    const steer = row("steer");
-    const other = row("question");
-    const acted = new Map([[steer.id, squireActedLabel(steer, "accept")]]);
-    const view = squireQueueView([steer, other], {
-      chip: "all",
-      teamFilter: null,
-      selected: null,
-      hasMore: false,
-      acted,
-    });
-    expect(view.decision?.items.map((item) => item.id)).toEqual([other.id]);
-    expect(view.confirmations).toEqual([{ row: steer, label: "Sent" }]);
-    expect(view.chips.find((chip) => chip.chip === "all")?.count).toBe(1);
-
-    // Once the server moves it on (here: still listed but executing), its word wins.
-    const moved = squireQueueView([{ ...steer, status: "executing" }, other], {
-      chip: "all",
-      teamFilter: null,
-      selected: null,
-      hasMore: false,
-      acted,
-    });
-    expect(moved.confirmations).toEqual([]);
-    expect(moved.decision?.items.map((item) => item.id)).toEqual([steer.id, other.id]);
-  });
-
-  it("pins an open linked card that is not on a loaded page, and confirms a settled one", () => {
-    const loaded = row("steer");
-    const linked = { ...row("question"), resolution: null };
-    const pinned = squireQueueView([loaded], {
-      chip: "all",
-      teamFilter: null,
-      selected: linked,
-      hasMore: true,
-    });
-    expect(pinned.decision?.items.map((item) => item.id)).toEqual([linked.id, loaded.id]);
-
-    const settled = squireQueueView([loaded], {
-      chip: "all",
-      teamFilter: null,
-      selected: { ...linked, status: "resolved", resolution: "answered" },
-      hasMore: false,
-    });
-    expect(settled.confirmations.map((entry) => entry.label)).toEqual(["Answered"]);
-    expect(settled.decision?.items.map((item) => item.id)).toEqual([loaded.id]);
-  });
-});
 
 describe("squireQuestionMode", () => {
   it("answers approvals and all-option questions in place", () => {
@@ -355,72 +262,6 @@ describe("acting", () => {
   });
 });
 
-describe("holds", () => {
-  it("collects the Lead's and its team's holds under the team filter", () => {
-    const hold = (cardId: string) => ({
-      cardId: cardId as SquireCardId,
-      kind: "steer" as const,
-      targetThreadId: TARGET,
-      executesInMs: 10_000,
-    });
-    const lead = entry(LEAD, "lead", { held: [hold("a")] });
-    const release = entry(RELEASE, "squire", { held: [hold("b")], receivedAt: 5_000 });
-    expect(squireHeldRows(lead, [release], null).map((row) => row.cardId)).toEqual(["a", "b"]);
-    const filtered = squireHeldRows(lead, [release], RELEASE);
-    expect(filtered).toEqual([{ ...hold("b"), squireId: RELEASE, receivedAt: 5_000 }]);
-  });
-
-  it("counts down from when the snapshot arrived", () => {
-    expect(squireHoldSeconds(1_000, 10_000, 1_000)).toBe(10);
-    expect(squireHoldSeconds(1_000, 10_000, 4_500)).toBe(7);
-    expect(squireHoldSeconds(1_000, 10_000, 20_000)).toBe(0);
-    expect(squireHoldText("steer", "Fix CI", 7)).toBe("Sending a steer to Fix CI in 7s");
-    expect(squireHoldText("proposal", null, 0)).toBe("Creating a thread now");
-  });
-});
-
-describe("hold pairing", () => {
-  const held = (cardId: string, heldOverCardId?: string) => ({
-    cardId: cardId as SquireCardId,
-    kind: "steer" as const,
-    targetThreadId: TARGET,
-    squireId: RELEASE,
-    receivedAt: 1_000,
-    executesInMs: 52_000,
-    ...(heldOverCardId === undefined ? {} : { heldOverCardId: heldOverCardId as SquireCardId }),
-  });
-
-  it("shows a hold under its open card, dropping the held card's own row and banner", () => {
-    const open = row("steer", { id: "open" });
-    const heldRow = row("steer", { id: "paired", status: "held" });
-    const loneRow = row("steer", { id: "lone", status: "held" });
-    const pairing = squireHoldPairing(
-      [heldRow, open, loneRow],
-      [held("paired", "open"), held("lone")],
-    );
-    expect(pairing.byOpen.get("open" as SquireCardId)?.cardId).toBe("paired");
-    expect(pairing.rows.map((r) => r.id)).toEqual(["open", "lone"]);
-    expect(pairing.lone.map((hold) => hold.cardId)).toEqual(["lone"]);
-  });
-
-  it("keeps a hold as a banner when its open card is not listed or not open", () => {
-    const filtered = squireHoldPairing([row("question")], [held("paired", "open")]);
-    expect(filtered.byOpen.size).toBe(0);
-    expect(filtered.lone.map((hold) => hold.cardId)).toEqual(["paired"]);
-    const settling = squireHoldPairing(
-      [row("steer", { id: "open", status: "accepting" })],
-      [held("paired", "open")],
-    );
-    expect(settling.lone).toHaveLength(1);
-  });
-
-  it("words the paired hold and the card it is about to supersede", () => {
-    expect(squirePairedHoldText("steer", 52)).toBe("Newer steer held · sending in 52s");
-    expect(squirePairedHoldText("steer", 0)).toBe("Newer steer held · sending now");
-    expect(squireSupersededNote("steer")).toBe("A newer steer is about to send");
-  });
-});
-
 describe("screen", () => {
   it("shows nothing Squire-shaped on a server without the capability", () => {
     expect(squireScreenState(false, null, RELEASE)).toEqual({ status: "unsupported" });
@@ -453,12 +294,6 @@ describe("screen", () => {
       setupPrompt: null,
       pause: { label: "Resume", next: "active" },
     });
-  });
-
-  it("clears the team filter when the selected portrait is tapped again", () => {
-    expect(squireTeamFilterToggle(null, RELEASE)).toBe(RELEASE);
-    expect(squireTeamFilterToggle(RELEASE, DOCS)).toBe(DOCS);
-    expect(squireTeamFilterToggle(RELEASE, RELEASE)).toBeNull();
   });
 });
 
@@ -530,16 +365,134 @@ describe("question recommendation", () => {
   });
 });
 
-describe("squireRowTitle", () => {
-  it("adds a summary FYI's outcome to its thread name and leaves other rows alone", () => {
+const OFFER = { effect: "allow", capReached: false } as unknown as SquireRuleOffer;
+
+describe("squireApprovalControls", () => {
+  const base = {
+    phase: "open" as const,
+    expired: false,
+    canAct: true,
+    canSaveRule: true,
+    ruleSaved: false,
+  };
+  const card = (kind: SquireCardKind, extra: Partial<SquireCardRow> = {}) =>
+    ({ id: "c", squireId: RELEASE, kind, ...extra }) as SquireCardRow;
+
+  it("offers Always allow only where a rule can apply", () => {
+    expect(squireApprovalControls({ ...base, row: card("steer") })).toEqual({
+      kind: "approve",
+      alwaysAllow: false,
+    });
     expect(
-      squireRowTitle({ title: "Fix invoice rounding", kind: "fyi", outcome: "checks passed" }),
-    ).toBe("Fix invoice rounding · checks passed");
-    expect(squireRowTitle({ title: "Fix invoice rounding", kind: "fyi" })).toBe(
-      "Fix invoice rounding",
+      squireApprovalControls({ ...base, row: card("steer", { allowRuleOffer: OFFER }) }),
+    ).toEqual({ kind: "approve", alwaysAllow: true });
+    expect(
+      squireApprovalControls({
+        ...base,
+        row: card("proposal", { allowRuleOffer: { ...OFFER, capReached: true } }),
+      }),
+    ).toEqual({ kind: "approve", alwaysAllow: false });
+  });
+
+  it("keeps question answers, overlap Dismiss, and the inactivity check's Keep and Pause", () => {
+    expect(squireApprovalControls({ ...base, row: card("question") })).toEqual({ kind: "answer" });
+    expect(squireApprovalControls({ ...base, row: card("overlap") })).toEqual({ kind: "dismiss" });
+    expect(
+      squireApprovalControls({ ...base, row: card("fyi", { fyiSource: "inactivity" }) }),
+    ).toEqual({ kind: "inactivity" });
+    expect(squireApprovalControls({ ...base, row: card("fyi") })).toEqual({ kind: "none" });
+  });
+
+  it("offers the rule alone once expired, and nothing once it is saved", () => {
+    const row = card("steer", { allowRuleOffer: OFFER });
+    const closed = { ...base, phase: "closed" as const, expired: true, row };
+    expect(squireApprovalControls(closed)).toEqual({ kind: "expired", allowNextTime: true });
+    expect(squireApprovalControls({ ...closed, ruleSaved: true })).toEqual({
+      kind: "expired",
+      allowNextTime: false,
+    });
+    expect(squireApprovalControls({ ...closed, expired: false })).toEqual({ kind: "none" });
+  });
+
+  it("offers no controls to a viewer who cannot act", () => {
+    expect(squireApprovalControls({ ...base, canAct: false, row: card("steer") })).toEqual({
+      kind: "none",
+    });
+  });
+});
+
+describe("squireWithInactivityChecks", () => {
+  const fyi = (id: string, extra: Partial<SquireCardRow>) =>
+    ({
+      id,
+      kind: "fyi",
+      status: "open",
+      squireId: RELEASE,
+      createdAt: "2026-11-05T00:00:02.000Z",
+      ...extra,
+    }) as SquireCardRow;
+  const chat = { squireId: RELEASE, isLead: false, chatFirst: true };
+  const steer = {
+    row: { id: "s" },
+    createdAt: "2026-11-05T00:00:03.000Z",
+    phase: "open",
+    outcome: null,
+    expired: false,
+  } as unknown as SquireApprovalEntry<SquireCardRow>;
+
+  it("joins only an open inactivity check raised here, in time order", () => {
+    const check = fyi("check", { fyiSource: "inactivity" });
+    const merged = squireWithInactivityChecks(
+      [steer],
+      [
+        check,
+        fyi("summary", {}),
+        fyi("closed", { fyiSource: "inactivity", status: "resolved" }),
+        fyi("other", { fyiSource: "inactivity", squireId: DOCS }),
+      ],
+      chat,
     );
-    expect(squireRowTitle({ title: "Rerun api-e2e", kind: "steer", outcome: "x" })).toBe(
-      "Rerun api-e2e",
-    );
+    expect(merged.map((entry) => (entry.row as SquireCardRow).id)).toEqual(["check", "s"]);
+    expect(merged[0]).toMatchObject({ phase: "open", outcome: null, expired: false });
+  });
+
+  it("returns the entries untouched when no check is open", () => {
+    const entries = [steer];
+    expect(squireWithInactivityChecks(entries, [fyi("summary", {})], chat)).toBe(entries);
+  });
+});
+
+describe("squireRouteDestination", () => {
+  const home = "home-thread" as ThreadId;
+  const squire = {
+    role: "squire",
+    status: "active",
+    lifecycle: "ready",
+    homeThreadId: home,
+    onboardedAt: "2026-11-01T00:00:00.000Z",
+  } as Parameters<typeof squireRouteDestination>[0]["squire"];
+  const go = (over: object, count: number | null = 3, detailsRequested = false) =>
+    squireRouteDestination({
+      squire: { ...squire, ...over },
+      detailsRequested,
+      homeVisibleItemCount: count,
+    });
+
+  it("is the chat, unless details were asked for", () => {
+    expect(go({})).toEqual({ kind: "chat", threadId: home });
+    expect(go({}, 3, true)).toEqual({ kind: "details" });
+  });
+
+  it("keeps details for a Squire with no chat yet", () => {
+    expect(go({ homeThreadId: null })).toEqual({ kind: "details" });
+    expect(go({ lifecycle: "needs_provider" })).toEqual({ kind: "details" });
+  });
+
+  it("holds the Lead's introduction until its thread has a message", () => {
+    const lead = { role: "lead", onboardedAt: null };
+    expect(go(lead, 0)).toEqual({ kind: "details" });
+    expect(go(lead, null)).toEqual({ kind: "details" });
+    expect(go(lead, 2)).toEqual({ kind: "chat", threadId: home });
+    expect(go({ role: "lead" }, null)).toEqual({ kind: "chat", threadId: home });
   });
 });

@@ -31,6 +31,7 @@ const EVERY_CONTROL: Record<ThreadRouteControl, true> = {
   "composer-text": true,
   send: true,
   stop: true,
+  "squire-details": true,
   "thread-actions": true,
   decisions: true,
   "squire-tracking": true,
@@ -84,13 +85,16 @@ describe("thread route controls resolver", () => {
     }
   });
 
-  it("offers no thread action on a home thread, and Fork thread on an ordinary one", () => {
+  it("offers only Squire details on a home thread, and Fork thread on an ordinary one", () => {
     const input = {
       decisionsSupported: true,
       forkSupported: true,
+      homeSquireId: null,
       tracking: [{ kind: "track" as const, squireId: "docs", label: "Track with docs" }],
     };
-    expect(threadRouteHeaderActions({ ...input, controls: homeControls })).toEqual([]);
+    expect(
+      threadRouteHeaderActions({ ...input, controls: homeControls, homeSquireId: "release" }),
+    ).toEqual([{ kind: "squire-details", label: "Squire details", squireId: "release" }]);
     expect(
       threadRouteHeaderActions({ ...input, controls: ordinaryControls }).map(
         (action) => action.label,

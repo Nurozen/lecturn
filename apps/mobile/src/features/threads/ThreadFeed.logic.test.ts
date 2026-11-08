@@ -2,7 +2,14 @@ import { RunId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
-import { groupSquireUpdates } from "./ThreadFeed.logic";
+import {
+  groupSquireUpdates,
+  hideSquireQuietText,
+  insertUnreadDivider,
+  mergeSquireApprovals,
+  squireQuietRunIds,
+  threadUnreadAnchor,
+} from "./ThreadFeed.logic";
 
 const run = (id: string) => RunId.make(id);
 
@@ -38,11 +45,18 @@ function message(
     type: "message",
     id,
     createdAt: "2026-11-05T00:00:00.000Z",
-    message: { id, role, runId: run(runId), streaming: false, createdBy },
+    message: {
+      id,
+      role,
+      runId: run(runId),
+      streaming: false,
+      createdBy,
+      createdAt: "2026-11-05T00:00:00.000Z",
+    },
   } as unknown as ThreadFeedEntry;
 }
 
-const ids = (rows: ReadonlyArray<ThreadFeedEntry>) => rows.map((row) => row.id);
+const ids = (rows: ReadonlyArray<{ readonly id: string }>) => rows.map((row) => row.id);
 
 describe("groupSquireUpdates", () => {
   const feed = [
@@ -59,62 +73,179 @@ describe("groupSquireUpdates", () => {
     message("reply-3", "r4", "assistant"),
   ];
 
-  it("folds consecutive wakes and their output behind one collapsed row", () => {
-    const rows = groupSquireUpdates(feed, null, new Set());
-    expect(ids(rows)).toEqual([
+  it("drops quiet spans and keeps every message a Squire wrote", () => {
+    expect(ids(groupSquireUpdates(feed, null))).toEqual([
       "ask",
       "answer",
-      "squire-updates:wake-1",
+      "reply-1",
+      "reply-2",
       "follow-up",
-      "wake-3",
-      "reply-3",
-    ]);
-    expect(rows[2]).toMatchObject({
-      type: "squire-updates",
-      label: "2 Squire updates · pr failed, turn completed",
-      expanded: false,
-    });
-  });
-
-  it("shows the run's rows under the summary row once expanded", () => {
-    const rows = groupSquireUpdates(feed, null, new Set(["squire-updates:wake-1"]));
-    expect(ids(rows)).toEqual([
-      "ask",
-      "answer",
-      "squire-updates:wake-1",
-      ...ids(feed.slice(2, 8)),
-      "follow-up",
-      "wake-3",
       "reply-3",
     ]);
   });
 
-  it("keeps a wake still being worked visible, along with the wake it would have joined", () => {
-    expect(groupSquireUpdates(feed.slice(0, 8), run("r2"), new Set())).toEqual(feed.slice(0, 8));
+  it("drops a lone quiet wake, with no row in its place", () => {
+    const quiet = [message("ask", "r0", "user", "user"), wake("wake-1", "r1", [])];
+    expect(ids(groupSquireUpdates(quiet, null))).toEqual(["ask"]);
   });
 
-  it("leaves a pending question visible and ends the run there", () => {
+  it("keeps a wake still being worked visible", () => {
+    expect(ids(groupSquireUpdates(feed.slice(0, 8), run("r2")))).toEqual([
+      "ask",
+      "answer",
+      "reply-1",
+      "wake-2",
+      "server-note",
+      "reply-2",
+    ]);
+  });
+
+  it("leaves a pending question visible and ends the span there", () => {
     const question = activity(
       "question",
       "r1",
       { type: "user_input_request", status: "pending" },
       "inProgress",
     );
-    const rows = groupSquireUpdates(
-      [...feed.slice(2, 5), question, ...feed.slice(5)],
-      null,
-      new Set(),
-    );
-    expect(ids(rows)).toEqual(ids([...feed.slice(2, 5), question, ...feed.slice(5)]));
+    expect(ids(groupSquireUpdates([...feed.slice(2, 4), question], null))).toEqual(["question"]);
   });
 
-  it("never folds the newest wake, so its reply stays in view", () => {
-    const latest = feed.slice(0, 8);
-    expect(groupSquireUpdates(latest, null, new Set())).toBe(latest);
+  it("returns the feed untouched when no wake is in it", () => {
+    const plain = [message("ask", "r0", "user", "user"), message("reply", "r0", "assistant")];
+    expect(groupSquireUpdates(plain, null)).toBe(plain);
+  });
+});
+
+describe("runs that stayed quiet", () => {
+  const quietTool = activity("quiet", "r1", {
+    type: "dynamic_tool",
+    status: "completed",
+    toolName: "mcp__lecturn__squire_stay_quiet",
   });
 
-  it("returns the feed untouched when no two wakes run together", () => {
-    const lone = [wake("wake-1", "r1", []), message("reply-1", "r1", "assistant")];
-    expect(groupSquireUpdates(lone, null, new Set())).toBe(lone);
+  it("hides that run's text, and only that run's", () => {
+    const feed = [
+      message("said", "r0", "assistant"),
+      quietTool,
+      message("hushed", "r1", "assistant"),
+    ];
+    const quiet = squireQuietRunIds(feed);
+    expect([...quiet]).toEqual([run("r1")]);
+    expect(ids(hideSquireQuietText(feed, quiet))).toEqual(["said", "quiet"]);
+  });
+
+  it("returns the rows untouched when no run stayed quiet", () => {
+    const feed = [message("said", "r0", "assistant")];
+    expect(hideSquireQuietText(feed, squireQuietRunIds(feed))).toBe(feed);
+  });
+});
+
+const at = (seconds: number) => `2026-11-05T00:00:${String(seconds).padStart(2, "0")}.000Z`;
+
+function timed(entry: ThreadFeedEntry, seconds: number): ThreadFeedEntry {
+  const createdAt = at(seconds);
+  return entry.type === "message"
+    ? { ...entry, createdAt, message: { ...entry.message, createdAt } }
+    : { ...entry, createdAt };
+}
+
+function approval(id: string, seconds: number) {
+  return { row: { id }, createdAt: at(seconds) } as unknown as Parameters<
+    typeof mergeSquireApprovals
+  >[1][number];
+}
+
+describe("mergeSquireApprovals", () => {
+  const rows = [
+    timed(message("a", "r0", "assistant"), 10),
+    timed(message("b", "r0", "assistant"), 30),
+  ];
+
+  it("places each approval where it was raised", () => {
+    expect(ids(mergeSquireApprovals(rows, [approval("x", 20)], false))).toEqual([
+      "a",
+      "squire-approval:x",
+      "b",
+    ]);
+    expect(ids(mergeSquireApprovals(rows, [approval("late", 40)], false))).toEqual([
+      "a",
+      "b",
+      "squire-approval:late",
+    ]);
+  });
+
+  it("keeps the working row last", () => {
+    const thinking = {
+      type: "thinking",
+      id: "t",
+      createdAt: at(5),
+      runId: null,
+    } as ThreadFeedEntry;
+    expect(ids(mergeSquireApprovals([...rows, thinking], [approval("x", 40)], false))).toEqual([
+      "a",
+      "b",
+      "squire-approval:x",
+      "t",
+    ]);
+  });
+
+  it("holds an approval older than the loaded history until it loads", () => {
+    expect(ids(mergeSquireApprovals(rows, [approval("old", 5)], true))).toEqual(["a", "b"]);
+    expect(ids(mergeSquireApprovals(rows, [approval("old", 5)], false))).toEqual([
+      "squire-approval:old",
+      "a",
+      "b",
+    ]);
+  });
+
+  it("returns the rows untouched with no approvals", () => {
+    expect(mergeSquireApprovals(rows, [], false)).toBe(rows);
+  });
+});
+
+describe("the unread divider", () => {
+  const feed = [
+    timed(message("seen", "r0", "assistant"), 10),
+    timed(message("mine", "r1", "user", "user"), 20),
+    timed(message("first-new", "r1", "assistant"), 30),
+    timed(message("second-new", "r1", "assistant"), 40),
+  ];
+  const window = { lastVisitedAt: at(15), openedThrough: at(50) };
+  const none = new Set<ReturnType<typeof run>>();
+
+  it("anchors to the first non-user message since the last view", () => {
+    expect(threadUnreadAnchor(feed, window, none)).toEqual({ id: "first-new", createdAt: at(30) });
+  });
+
+  it("skips text a quiet run hid", () => {
+    expect(threadUnreadAnchor(feed, window, new Set([run("r1")]))).toBeNull();
+  });
+
+  it("shows nothing on a first visit or an old server", () => {
+    expect(threadUnreadAnchor(feed, null, none)).toBeNull();
+    expect(threadUnreadAnchor(feed, { ...window, lastVisitedAt: null }, none)).toBeNull();
+  });
+
+  it("does not move for messages that arrive during this open", () => {
+    expect(threadUnreadAnchor(feed, { ...window, openedThrough: at(25) }, none)).toBeNull();
+  });
+
+  it("sits above the anchor's row, or the next row when a fold hides it", () => {
+    const anchor = { id: "first-new", createdAt: at(30) };
+    expect(ids(insertUnreadDivider(feed, anchor))).toEqual([
+      "seen",
+      "mine",
+      "unread-divider",
+      "first-new",
+      "second-new",
+    ]);
+    const folded = feed.filter((row) => row.id !== "first-new");
+    expect(ids(insertUnreadDivider(folded, anchor))).toEqual([
+      "seen",
+      "mine",
+      "unread-divider",
+      "second-new",
+    ]);
+    expect(insertUnreadDivider(feed, null)).toBe(feed);
   });
 });

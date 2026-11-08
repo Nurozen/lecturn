@@ -12,7 +12,7 @@ import { uuidv4 } from "../../lib/uuid";
 import { squireEnvironment } from "../../state/squire";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { RequestActionButton } from "../threads/RequestActionButton";
-import { squireOfferRuleInput, type SquireRuleOfferPromptView } from "./squireQueue.logic";
+import { squireOfferRuleInput, type SquireRuleOfferPromptView } from "./squireApproval.logic";
 
 /**
  * "Always allow this" after an accept, or "Always ask first for this" after an Undo: the

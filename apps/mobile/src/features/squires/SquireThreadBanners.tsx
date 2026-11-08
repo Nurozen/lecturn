@@ -5,7 +5,7 @@ import type {
   SquireEnvironmentState,
   SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
-import type { EnvironmentId, SquireId } from "@lecturn/contracts";
+import type { EnvironmentId, SquireCardId, SquireId, SquireRuleOffer } from "@lecturn/contracts";
 import { useNavigation } from "@react-navigation/native";
 import { Atom } from "effect/reactivity";
 import { useState } from "react";
@@ -19,6 +19,8 @@ import { useEnvironmentQuery } from "../../state/query";
 import { squireEnvironment, useSquireSupported } from "../../state/squire";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useVisibleSecondClock } from "../threads/use-visible-second-clock";
+import { squireUndoOffer } from "./squireApproval.logic";
+import { SquireRuleOfferPrompt } from "./SquireRuleOffer";
 import {
   squireComposerBannerState,
   squireHoldText,
@@ -89,12 +91,11 @@ function TrackedThreadBanner(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={banner.text}
-      accessibilityHint="Opens the decision in the Squire"
+      accessibilityHint="Opens the Squire's chat"
       onPress={() =>
         navigation.navigate("Squire", {
           environmentId: props.environmentId,
           squireId: props.squireId,
-          item: banner.cardId,
         })
       }
       className="flex-row items-center gap-3 rounded-2xl border border-border bg-card px-3.5 py-3 active:opacity-70"
@@ -115,13 +116,37 @@ function SquireComposerBanners(props: {
   // Ticks only while something is held; an executed or undone hold leaves the snapshot.
   const now = useVisibleSecondClock(props.entry.held.length > 0);
   const state = squireComposerBannerState(props.entry, now, formatTime);
-  if (state.kind === "none") return null;
+  // Held here, since the undone hold leaves the snapshot and takes its banner with it.
+  const [undoOffer, setUndoOffer] = useState<{
+    readonly cardId: SquireCardId;
+    readonly offer: SquireRuleOffer;
+  } | null>(null);
+  if (state.kind === "none" && undoOffer === null) return null;
+  const holds = state.kind === "none" ? [] : state.holds;
+  const budget = state.kind === "none" ? null : state.budget;
   return (
     <View className="mx-4 mb-3 gap-2">
-      {state.holds.map((hold) => (
-        <SquireHoldBanner key={hold.cardId} environmentId={props.environmentId} hold={hold} />
+      {holds.map((hold) => (
+        <SquireHoldBanner
+          key={hold.cardId}
+          environmentId={props.environmentId}
+          hold={hold}
+          onUndone={(offer) =>
+            setUndoOffer(offer === undefined ? null : { cardId: hold.cardId, offer })
+          }
+        />
       ))}
-      {state.budget === null ? null : (
+      {undoOffer === null ? null : (
+        <SquireRuleOfferPrompt
+          key={undoOffer.cardId}
+          environmentId={props.environmentId}
+          card={{ id: undoOffer.cardId, squireId: props.entry.squire.id }}
+          offer={undoOffer.offer}
+          prompt={squireUndoOffer(undoOffer.offer)}
+          onClose={() => setUndoOffer(null)}
+        />
+      )}
+      {budget === null ? null : (
         <View
           accessible
           className="flex-row items-center gap-3 rounded-2xl border border-warning-border bg-warning px-3.5 py-3"
@@ -133,10 +158,10 @@ function SquireComposerBanners(props: {
           />
           <View className="min-w-0 flex-1">
             <AppText className="text-sm font-lecturn-medium text-warning-foreground">
-              {state.budget.text}
+              {budget.text}
             </AppText>
-            {state.budget.detail === null ? null : (
-              <AppText className="text-xs text-warning-foreground">{state.budget.detail}</AppText>
+            {budget.detail === null ? null : (
+              <AppText className="text-xs text-warning-foreground">{budget.detail}</AppText>
             )}
           </View>
         </View>
@@ -148,6 +173,7 @@ function SquireComposerBanners(props: {
 function SquireHoldBanner(props: {
   readonly environmentId: EnvironmentId;
   readonly hold: SquireHoldBannerState;
+  readonly onUndone: (offer: SquireRuleOffer | undefined) => void;
 }) {
   const { environmentId, hold } = props;
   const target = useQuietThreadShell(
@@ -158,11 +184,13 @@ function SquireHoldBanner(props: {
   const [undoing, setUndoing] = useState(false);
   const undo = async () => {
     setUndoing(true);
-    await act({
+    const result = await act({
       environmentId,
       input: { requestId: uuidv4(), cardIds: [hold.cardId], action: "undo" },
     });
     setUndoing(false);
+    if (result._tag !== "Success") return;
+    props.onUndone(result.value.results.find((r) => r.cardId === hold.cardId)?.ruleOffer);
   };
   const disabled = !canUndo || undoing || hold.seconds === 0;
   return (

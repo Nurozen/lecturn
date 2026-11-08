@@ -1,62 +1,23 @@
 import {
-  squireOverlapProviderNames,
   squireProposalCardText,
   squireProposalPaletteLabel,
-  squireProposalProviderName,
   squireProposalScopeLabels as squireScopeLabels,
-  squireRowProviderName as squireProviderLabel,
   squireRowTargetName as squireTargetName,
   squireSameText,
-  squireWaitingSince,
   type SquireKnownPayload,
 } from "@lecturn/client-runtime/state/squire";
 import type { SquireCard, SquireCardRow, SquireGrantInput } from "@lecturn/contracts";
 
 // Helpers web and mobile read alike live in client-runtime; this file keeps mobile's own
-// shapes: ages from a ticking clock, a one-string row line, and names resolved from the row.
+// shapes: a one-string row line, and names resolved from the row.
 export {
-  squireCardCaption,
-  squireCardTimeline,
   squireControlText,
   squireDiffStatsLabel,
   squirePullRequestChips,
-  squireQuestionWhyFallback,
-  squireRaiserLabel,
-  squireTimelineRows,
-  squireWaitingSince,
   squireWhyText,
   type SquireChip,
   type SquireChipTone,
 } from "@lecturn/client-runtime/state/squire";
-
-// ── Ages ──────────────────────────────────────────────────────
-
-/** A row's compact age: "now", "5m", "3h", "2d"; "" for an unreadable time. */
-export function squireAgeText(iso: string, nowMs: number): string {
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) return "";
-  const minutes = Math.floor(Math.max(0, nowMs - at) / 60_000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-/**
- * A row's age. FYIs count from when they were raised; decisions from when they began waiting,
- * read as "waiting <age>" on a question, whose wait is the point, and on an open card.
- */
-export function squireRowAgeText(
-  row: Pick<SquireCardRow, "kind" | "createdAt" | "requestedAt">,
-  expanded: boolean,
-  nowMs: number,
-): string {
-  if (row.kind === "fyi") return squireAgeText(row.createdAt, nowMs);
-  const age = squireAgeText(squireWaitingSince(row), nowMs);
-  if (age === "") return "";
-  return row.kind === "question" || expanded ? `waiting ${age}` : age;
-}
 
 // ── Rows ──────────────────────────────────────────────────────
 
@@ -72,32 +33,6 @@ export function squireRowTargetName(
     threadTitle: names.threadTitle ?? "Thread",
     projectTitle: names.projectTitle,
     overlapThreads: row.overlapProviders?.length ?? null,
-  });
-}
-
-export interface SquireProviderNames {
-  readonly instanceName: (instanceId: string) => string | null;
-  readonly driverName: (driver: string) => string | undefined;
-}
-
-/**
- * The provider a row names: its thread's, a thread proposal's (instance, else driver), or each
- * overlapping thread's, once.
- */
-export function squireRowProviderName(
-  row: Pick<SquireCardRow, "proposalProvider" | "overlapProviders" | "overlapProviderInstanceIds">,
-  threadProvider: string | null,
-  names: SquireProviderNames,
-): string | null {
-  const instanceId = row.proposalProvider?.providerInstanceId;
-  return squireProviderLabel({
-    threadProvider,
-    proposalProvider: squireProposalProviderName(
-      row.proposalProvider,
-      instanceId == null ? null : names.instanceName(instanceId),
-      names.driverName,
-    ),
-    overlapProviders: squireOverlapProviderNames(row, names),
   });
 }
 
