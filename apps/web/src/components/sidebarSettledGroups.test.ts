@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
+import type {
+  OlderSettledPages,
+  OlderSettledShelfEnvironment,
+} from "@lecturn/client-runtime/state/threads";
 import { EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
+import * as DateTime from "effect/DateTime";
 import {
-  partSettledShelfShort,
+  listSettledInParts,
   projectOlderSettledScopes,
   projectSettledPage,
+  wantedPartSettledPages,
   withUnloadedSettled,
 } from "./sidebarSettledGroups";
 
@@ -39,8 +45,6 @@ describe("project settled shelves", () => {
 });
 
 describe("older settled threads in segment and nested project shelves", () => {
-  const shelf = { expanded: true, listed: 3, limit: 10, unloaded: 40, canLoad: true };
-
   it("counts threads the shell left out as hidden, so Show more appears", () => {
     const page = withUnloadedSettled(
       projectSettledPage(rows, { expanded: true, limit: 6 }, null, 2),
@@ -48,16 +52,6 @@ describe("older settled threads in segment and nested project shelves", () => {
     );
     expect(page).toMatchObject({ total: 10, hidden: 4 });
     expect(page.visible).toHaveLength(6);
-  });
-
-  it("reads older pages only for an open shelf that lists fewer rows than it shows", () => {
-    expect(partSettledShelfShort([shelf])).toBe(true);
-    expect(partSettledShelfShort([{ ...shelf, expanded: false }])).toBe(false);
-    expect(partSettledShelfShort([{ ...shelf, listed: 10 }])).toBe(false);
-    expect(partSettledShelfShort([{ ...shelf, unloaded: 0 }])).toBe(false);
-    // No environment in scope can read more (all read, or the last read failed).
-    expect(partSettledShelfShort([{ ...shelf, canLoad: false }])).toBe(false);
-    expect(partSettledShelfShort([{ ...shelf, listed: 10 }, shelf])).toBe(true);
   });
 
   it("scopes a nested project to its members per environment", () => {
@@ -73,5 +67,127 @@ describe("older settled threads in segment and nested project shelves", () => {
       { environmentId: local, projectIds: ["a", "c"] },
       { environmentId: remote, projectIds: ["b"] },
     ]);
+  });
+});
+
+describe("segment and nested project shelves over environments with different cuts", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const at = (day: number) => DateTime.formatIso(DateTime.makeUnsafe(day * DAY));
+  const busy = EnvironmentId.make("busy");
+  const quiet = EnvironmentId.make("quiet");
+  const project = ProjectId.make("project");
+  // The busy account cut yesterday (day 99); the quiet one keeps months of settled threads.
+  const environment = (
+    cutDay: number,
+    pages: Partial<OlderSettledPages> = {},
+    unloaded = 0,
+  ): OlderSettledShelfEnvironment => ({
+    older: {
+      before: at(cutDay),
+      beforeMs: cutDay * DAY,
+      counts: new Map([[project, unloaded]]),
+    },
+    pages: { reads: [], frontier: { settledAt: at(cutDay) }, status: "ready", ...pages },
+  });
+  const settled = (environmentId: EnvironmentId, id: string, day: number) => ({
+    id: ThreadId.make(id),
+    environmentId,
+    source: {
+      id: ThreadId.make(id),
+      settledAt: DateTime.makeUnsafe(day * DAY),
+    },
+  });
+  const threads = [
+    settled(busy, "busy-new", 100),
+    settled(quiet, "quiet-week", 93),
+    settled(quiet, "quiet-month", 70),
+  ];
+
+  it("lists a quieter environment's rows below a busier environment's cut", () => {
+    const environments = new Map([
+      [busy, environment(99, {}, 400)],
+      [quiet, environment(10)],
+    ]);
+    // One list (every environment): the busy cut holds the quiet rows back until pages load.
+    const oneList = listSettledInParts(threads, environments, () => [busy, quiet]);
+    expect(oneList.map((thread) => thread.id)).toEqual(["busy-new"]);
+    // One segment per environment: each lists against its own cut, so both quiet rows list
+    // and count in the quiet segment.
+    const segments = listSettledInParts(threads, environments, (thread) => [thread.environmentId]);
+    expect(segments.map((thread) => thread.id)).toEqual(["busy-new", "quiet-week", "quiet-month"]);
+    expect(segments.filter((thread) => thread.environmentId === quiet)).toHaveLength(2);
+  });
+
+  it("reads only the short shelf's own environments, and stops at their ends", () => {
+    const environments = new Map([
+      [busy, environment(99, {}, 400)],
+      [quiet, environment(60, {}, 30)],
+    ]);
+    const quietShelf = {
+      environmentIds: [quiet],
+      expanded: true,
+      listed: 2,
+      limit: 10,
+      unloaded: 30,
+    };
+    const busyShelf = {
+      environmentIds: [busy],
+      expanded: true,
+      listed: 10,
+      limit: 10,
+      unloaded: 400,
+    };
+    const requested = new Map<EnvironmentId, number>();
+    expect([
+      ...wantedPartSettledPages({ requested, environments, parts: [busyShelf, quietShelf] }),
+    ]).toEqual([[quiet, 1]]);
+    // Reads continue from the quiet environment's own pages.
+    expect([
+      ...wantedPartSettledPages({
+        requested: new Map([[quiet, 1]]),
+        environments: new Map([
+          [busy, environment(99, {}, 400)],
+          [quiet, environment(60, { frontier: { settledAt: at(40) } }, 5)],
+        ]),
+        parts: [busyShelf, { ...quietShelf, listed: 7, unloaded: 5 }],
+      }),
+    ]).toEqual([[quiet, 2]]);
+    // Its end (no frontier), a full or closed shelf, or nothing unread: no reads.
+    const ended = new Map([
+      [busy, environment(99, {}, 400)],
+      [quiet, environment(60, { frontier: null })],
+    ]);
+    for (const [shelves, shelfEnvironments] of [
+      [[quietShelf], ended],
+      [[{ ...quietShelf, listed: 10 }], environments],
+      [[{ ...quietShelf, expanded: false }], environments],
+      [[{ ...quietShelf, unloaded: 0 }], environments],
+      [
+        [{ ...quietShelf, environmentIds: [quiet], unloaded: 30 }],
+        new Map([[busy, environment(99, {}, 400)]]),
+      ],
+    ] as const) {
+      expect(
+        wantedPartSettledPages({ requested, environments: shelfEnvironments, parts: shelves }),
+      ).toBe(requested);
+    }
+  });
+
+  it("pages a nested project spanning both environments at its own frontier", () => {
+    const environments = new Map([
+      [busy, environment(99, {}, 400)],
+      [quiet, environment(60, {}, 30)],
+    ]);
+    const project = {
+      environmentIds: [busy, quiet],
+      expanded: true,
+      listed: 1,
+      limit: 10,
+      unloaded: 30,
+    };
+    // Rows merge across both, so the busier one reads down to the quiet one's cut first.
+    expect([
+      ...wantedPartSettledPages({ requested: new Map(), environments, parts: [project] }),
+    ]).toEqual([[busy, 1]]);
   });
 });

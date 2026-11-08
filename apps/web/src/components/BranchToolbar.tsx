@@ -339,7 +339,7 @@ const RunContextSelector = memo(function RunContextSelector({
       >
         {triggerContent}
         {!isPanel ? (
-          <ChevronDownIcon className="size-3 shrink-0 mx-0! opacity-50 redesign:opacity-100" />
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:mx-0! redesign:opacity-100" />
         ) : null}
       </MenuTrigger>
       <MenuPopup

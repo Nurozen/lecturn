@@ -10,6 +10,7 @@ import {
 import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
 import { useEffect, useState } from "react";
 
+import { wantedPartSettledPages, type SettledShelfPart } from "../components/sidebarSettledGroups";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { olderSettledThreads, threadFamilies } from "./threads";
 
@@ -75,16 +76,6 @@ export function useOlderSettledShelf(input: {
       scopes: ReadonlyArray<OlderSettledScope>,
       threads: ReadonlyArray<EnvironmentThreadShell>,
     ) => unloadedOlderSettledCount({ olderSettled: olderOf, scopes, threads }),
-    /** Whether a page read can still add rows to these scopes. */
-    canLoadIn: (scopes: ReadonlyArray<OlderSettledScope>) =>
-      scopes.some(({ environmentId }) => {
-        const environment = shelf.get(environmentId);
-        return (
-          environment?.older != null &&
-          environment.pages.frontier !== null &&
-          environment.pages.status !== "failed"
-        );
-      }),
     loading: loaded.some(({ scope }) => pagesOf(scope.environmentId)?.status === "pending"),
     failed: loaded.some(({ scope }) => pagesOf(scope.environmentId)?.status === "failed"),
     retry: () => {
@@ -96,20 +87,27 @@ export function useOlderSettledShelf(input: {
 }
 
 /**
- * Reads the next pages while the shelf lists fewer rows than it shows, or while a segment or
- * nested project shelf (`partShelfShort`) lists fewer than it shows and its scope can load more.
+ * Reads the next pages while the shelf lists fewer rows than it shows. Account segments and nested
+ * projects (`parts`) page instead, each over its own environments (`wantedPartSettledPages`).
  */
 export function useOlderSettledShelfGrowth(
   shelf: ReturnType<typeof useOlderSettledShelf>,
   listedSettledThreads: ReadonlyArray<EnvironmentThreadShell>,
-  partShelfShort = false,
+  parts: ReadonlyArray<SettledShelfPart> | null = null,
 ) {
-  const wanted = wantedOlderSettledPages({
-    requested: shelf.pages,
-    environments: shelf.environments,
-    listedCount: listedSettledThreads.length,
-    visibleCount: partShelfShort ? Number.POSITIVE_INFINITY : shelf.visibleCount,
-  });
+  const wanted =
+    parts === null
+      ? wantedOlderSettledPages({
+          requested: shelf.pages,
+          environments: shelf.environments,
+          listedCount: listedSettledThreads.length,
+          visibleCount: shelf.visibleCount,
+        })
+      : wantedPartSettledPages({
+          requested: shelf.pages,
+          environments: shelf.environments,
+          parts,
+        });
   const { grow, pages } = shelf;
   useEffect(() => {
     if (wanted !== pages) grow(wanted);

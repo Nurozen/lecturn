@@ -7,10 +7,11 @@ import {
 import { useSidebarAccountStyle } from "./sidebar/useSidebarAccountStyle";
 import { StaveIcon } from "./StaveIcon";
 import {
-  partSettledShelfShort,
+  listSettledInParts,
   projectOlderSettledScopes,
   projectSettledPage,
   withUnloadedSettled,
+  type SettledShelfPart,
 } from "./sidebarSettledGroups";
 import { StaveLifecycleBadge } from "./stave/StaveLifecycleBadge";
 import { StaveConfirmDialog } from "./stave/StaveConfirmDialog";
@@ -229,7 +230,13 @@ import { sagaSidebarThreadOrder } from "./stave/staveSaga.logic";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { snapshotsPerAccount, useSidebarSegmentation } from "./sidebar/accountProjectGroups";
 import { SidebarSegments } from "./sidebar/SidebarSegments";
-import { flattenSegmentsForNavigation, nameGroupsByAccount } from "./sidebar/sidebarSegments.logic";
+import {
+  flattenSegmentsForNavigation,
+  nameGroupsByAccount,
+  OWNS_EVERY_ENVIRONMENT,
+  segmentIdOfEnvironment,
+  type OwnsEnvironment,
+} from "./sidebar/sidebarSegments.logic";
 import { useSidebarSegments } from "./sidebar/useSidebarSegments";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHierarchyPanel } from "./sidebar/SidebarHierarchyPanel";
@@ -985,17 +992,31 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     Schema.Boolean,
   );
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
-  // Account segments and nested projects page their own shelves (see `partShelfShort`).
+  // Account segments and nested projects page their own shelves (see `settledShelfParts`).
   const partSettledShelves = sidebarSegmentation !== null || nestSagaProjects;
+  const shelfEnvironmentIds = [...serverConfigs.keys()];
   const olderSettledShelf = useOlderSettledShelf({
-    scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
+    scopes: olderSettledScopes(shelfEnvironmentIds, scopedProjectKeys),
     expanded: settledShelfExpanded && !partSettledShelves,
     visibleCount: settledVisibleCount,
     partShelves: partSettledShelves,
   });
   const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
   const segmentOlderSettledScopes = (owns: (environmentId: EnvironmentId) => boolean) =>
-    olderSettledScopes([...serverConfigs.keys()].filter(owns), scopedProjectKeys);
+    olderSettledScopes(shelfEnvironmentIds.filter(owns), scopedProjectKeys);
+  // A nested project's members in scope (and in one segment), as older-settled scopes.
+  const nodeOlderSettledScopes = (
+    refs: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly projectId: ProjectId }>,
+    owns: OwnsEnvironment = OWNS_EVERY_ENVIRONMENT,
+  ) =>
+    projectOlderSettledScopes(
+      refs.filter(
+        (ref) =>
+          owns(ref.environmentId) &&
+          (scopedProjectKeys === null ||
+            scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`)),
+      ),
+    );
   const settledCount = settledThreads.length + olderSettledShelf.unloadedCount(visibleThreads);
   const visibleSettledThreads = (() => {
     const visible = listedSettledThreads.slice(0, settledVisibleCount);
@@ -1070,6 +1091,31 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
   })();
+  // A segment or nested project lists settled rows against its own environments' frontier only.
+  const segmentOf = (environmentId: EnvironmentId) =>
+    sidebarSegmentation === null
+      ? null
+      : segmentIdOfEnvironment(sidebarSegmentation, environmentId);
+  const sagaNodes = scopedSagaTree.flatMap((root) => [root, ...root.children]);
+  const nodeEnvironmentIds = new Map<string, ReadonlyArray<EnvironmentId>>();
+  for (const node of nestSagaProjects ? sagaNodes : []) {
+    const environmentIds = [
+      ...new Set(node.group.memberProjectRefs.map((ref) => ref.environmentId)),
+    ];
+    for (const ref of node.group.memberProjectRefs) {
+      const key = `${ref.environmentId}:${ref.projectId}`;
+      if (!nodeEnvironmentIds.has(key)) nodeEnvironmentIds.set(key, environmentIds);
+    }
+  }
+  const partListedSettledThreads = partSettledShelves
+    ? listSettledInParts(settledThreads, olderSettledShelf.environments, (thread) => {
+        const segment = segmentOf(thread.environmentId);
+        const environmentIds =
+          nodeEnvironmentIds.get(`${thread.environmentId}:${thread.projectId}`) ??
+          shelfEnvironmentIds;
+        return environmentIds.filter((environmentId) => segmentOf(environmentId) === segment);
+      })
+    : listedSettledThreads;
   const [projectSettledShelves, setProjectSettledShelves] = useState<
     Readonly<Record<string, { expanded: boolean; limit: number }>>
   >({});
@@ -1078,8 +1124,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       string,
       ReturnType<typeof projectSettledPage<EnvironmentThreadShell>>
     >();
-    for (const node of scopedSagaTree.flatMap((root) => [root, ...root.children])) {
-      const rows = listedSettledThreads.filter((thread) =>
+    for (const node of sagaNodes) {
+      const rows = partListedSettledThreads.filter((thread) =>
         node.group.memberProjectRefs.some(
           (ref) => ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
         ),
@@ -1097,15 +1143,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return entries;
   })();
   const nestedSettledThreads = [...settledByProject.values()].flatMap((page) => page.visible);
-  const olderSettledByProject = new Map(
-    scopedSagaTree
-      .flatMap((root) => [root, ...root.children])
-      .map((node) => {
-        const scopes = projectOlderSettledScopes(node.group.memberProjectRefs);
-        const unloaded = olderSettledShelf.unloadedCountIn(scopes, visibleThreads);
-        return [node.group.key, { unloaded, canLoad: olderSettledShelf.canLoadIn(scopes) }];
-      }),
-  );
   const sidebarSegments = useSidebarSegments({
     segmentation: sidebarSegmentation,
     projects,
@@ -1115,7 +1152,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     visibleWorkingThreads,
     snoozedThreads,
     visibleSnoozedThreads,
-    settledThreads: listedSettledThreads,
+    settledThreads: partListedSettledThreads,
     renderedSettledThreads,
     nestedSettledThreads,
     scopedSagaTree,
@@ -1135,25 +1172,45 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     unloadedSettledCountOf: (owns) =>
       olderSettledShelf.unloadedCountIn(segmentOlderSettledScopes(owns), visibleThreads),
   });
-  // A segment or nested project shelf that shows more rows than it lists reads older pages.
-  const partShelfShort = partSettledShelfShort(
-    nestSagaProjects
-      ? [...settledByProject].map(([key, page]) => ({
-          expanded: page.expanded,
-          listed: page.total,
-          limit: page.limit,
-          unloaded: olderSettledByProject.get(key)?.unloaded ?? 0,
-          canLoad: olderSettledByProject.get(key)?.canLoad ?? false,
-        }))
+  // A segment or nested project shelf that shows more rows than it lists reads older pages of
+  // its own environments. A nested project spanning segments pages once per segment.
+  const settledShelfParts: ReadonlyArray<SettledShelfPart> | null = !partSettledShelves
+    ? null
+    : nestSagaProjects
+      ? sagaNodes.flatMap((node) => {
+          const page = settledByProject.get(node.group.key);
+          if (page === undefined) return [];
+          const segments = [
+            ...new Set(node.group.memberProjectRefs.map((ref) => segmentOf(ref.environmentId))),
+          ];
+          return segments.map((segment) => {
+            const refs = node.group.memberProjectRefs.filter(
+              (ref) => segmentOf(ref.environmentId) === segment,
+            );
+            const scopes = nodeOlderSettledScopes(refs);
+            return {
+              environmentIds: scopes.map((scope) => scope.environmentId),
+              expanded: page.expanded,
+              listed: partListedSettledThreads.filter((thread) =>
+                refs.some(
+                  (ref) =>
+                    ref.environmentId === thread.environmentId &&
+                    ref.projectId === thread.projectId,
+                ),
+              ).length,
+              limit: page.limit,
+              unloaded: olderSettledShelf.unloadedCountIn(scopes, visibleThreads),
+            };
+          });
+        })
       : (sidebarSegments.segments ?? []).map((segment) => ({
+          environmentIds: shelfEnvironmentIds.filter(segment.ownsEnvironment),
           expanded: segment.settledShelfExpanded,
           listed: segment.settledThreads.length,
           limit: segment.settledVisibleCount,
           unloaded: segment.unloadedSettledCount,
-          canLoad: olderSettledShelf.canLoadIn(segmentOlderSettledScopes(segment.ownsEnvironment)),
-        })),
-  );
-  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads, partShelfShort);
+        }));
+  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads, settledShelfParts);
   const orderedThreads = (() => {
     if (sidebarSegments.segments !== null) {
       return flattenSegmentsForNavigation(sidebarSegments.segments);
@@ -3132,8 +3189,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onSettle={settleFromDrag}
                               >
                                 {({ pinned, active, working = [], snoozed, settled }) => {
-                                  const olderCount =
-                                    olderSettledByProject.get(node.group.key)?.unloaded ?? 0;
+                                  const olderCount = olderSettledShelf.unloadedCountIn(
+                                    nodeOlderSettledScopes(
+                                      node.group.memberProjectRefs,
+                                      segment.ownsEnvironment,
+                                    ),
+                                    visibleThreads,
+                                  );
                                   if (
                                     !pinned.length &&
                                     !active.length &&
