@@ -15,6 +15,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import { MacSystemApplicationRoots } from "@lecturn/shared/editor";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { SpawnExecutableResolution } from "@lecturn/shared/shell";
 import * as ExternalLauncher from "./externalLauncher.ts";
@@ -56,6 +57,7 @@ function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: ()
 const layerTest = (input: {
   readonly platform: NodeJS.Platform;
   readonly env?: Record<string, string>;
+  readonly macSystemApplicationRoots?: ReadonlyArray<string>;
   readonly resolveExecutable?: (command: string) => string | undefined;
   readonly onSpawn?: (command: ChildProcess.StandardCommand) => void;
   readonly onUnref?: () => void;
@@ -83,6 +85,8 @@ const layerTest = (input: {
   return Layer.mergeAll(
     ExternalLauncher.layer.pipe(Layer.provide(Layer.merge(NodeServices.layer, layerSpawner))),
     Layer.succeed(HostProcess.Platform, input.platform),
+    // Keep the host's real /Applications out of discovery.
+    Layer.succeed(MacSystemApplicationRoots, input.macSystemApplicationRoots ?? []),
     Layer.succeed(
       SpawnExecutableResolution,
       (command) => input.resolveExecutable?.(command) ?? command,
@@ -421,10 +425,11 @@ it.effect("keeps the macOS VS Code Insiders bundle out of stable VS Code", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const home = yield* fs.makeTempDirectoryScoped({ prefix: "lecturn-editor-insiders-" });
+    const systemApplications = path.join(home, "system-applications");
     // The real Insiders bundle ships both `code-insiders` and `code`.
     const bin = path.join(
-      home,
-      "Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin",
+      systemApplications,
+      "Visual Studio Code - Insiders.app/Contents/Resources/app/bin",
     );
     yield* fs.makeDirectory(bin, { recursive: true });
     for (const name of ["code", "code-insiders"]) {
@@ -443,6 +448,7 @@ it.effect("keeps the macOS VS Code Insiders bundle out of stable VS Code", () =>
         layerTest({
           platform: "darwin",
           env: { HOME: home, PATH: path.join(home, "empty") },
+          macSystemApplicationRoots: [systemApplications],
           onSpawn: (command) => {
             spawned = command;
           },
