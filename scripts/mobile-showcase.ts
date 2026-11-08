@@ -1520,7 +1520,7 @@ async function captureIos(
     }
     if ((scene as string).endsWith("-end")) {
       // Capture-only: scroll the page to its end.
-      for (let i = 0; i < 4; i += 1) {
+      for (let i = 0; i < 8; i += 1) {
         await runAxe(simulator.udid, ["swipe", "--start-x", "220", "--start-y", "760", "--end-x", "220", "--end-y", "220", "--duration", "0.3"]).catch((error: unknown) =>
           NodeProcess.stdout.write(`ios ${scene} swipe failed: ${String(error)}\n`));
         await delay(800);
@@ -1917,11 +1917,12 @@ async function captureAndroid(
     }
     if ((scene as string).endsWith("-end")) {
       // Capture-only: scroll the page to its end.
-      const size = /(\d+)x(\d+)/.exec(await adbOutput(serial, ["shell", "wm", "size"]).catch(() => "")) ?? null;
+      const wmSize = await adbOutput(serial, ["shell", "wm", "size"]).catch(() => "");
+      const size = /Override size: (\d+)x(\d+)/.exec(wmSize) ?? /(\d+)x(\d+)/.exec(wmSize);
       const w = size ? Number(size[1]) : 1080;
       const h = size ? Number(size[2]) : 1920;
       NodeProcess.stdout.write(`${scene} swipe in ${w}x${h}\n`);
-      for (let i = 0; i < 4; i += 1) {
+      for (let i = 0; i < 8; i += 1) {
         await runAdb(serial, ["shell", "input", "swipe", String(Math.round(w * 0.6)), String(Math.round(h * 0.75)), String(Math.round(w * 0.6)), String(Math.round(h * 0.25)), "300"]);
         await delay(800);
       }
