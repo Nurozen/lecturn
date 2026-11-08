@@ -4,12 +4,71 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeUtil from "node:util";
+import * as NodeZlib from "node:zlib";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
-const SHOWCASE_PROJECT_ID = "lecturn";
-const SHOWCASE_THREAD_ID = "remote-command-center";
-const SHOWCASE_WATCH_ID = "showcase-remote-handoff";
+export const SHOWCASE_PROJECT_ID = "lecturn";
+export const SHOWCASE_THREAD_ID = "remote-command-center";
+export const SHOWCASE_TERMINAL_ID = "term-1";
+export const SHOWCASE_WATCH_ID = "showcase-remote-handoff";
+// Capture-only (batch-001704): a ZIP attachment on the showcase request (#19463).
+export const SHOWCASE_ZIP_ATTACHMENT_ID = "remote-command-center-5a1d0c3e-0b7e-4f2a-9c41-7d2e8b6f1a90-zip";
+export const SHOWCASE_ZIP_NAME = "handoff-logs.zip";
+const SHOWCASE_ZIP_ENTRIES: ReadonlyArray<readonly [string, string]> = [
+  ["handoff-logs/README.md", "# Handoff logs\n\nCaptured from the remote command center run.\n"],
+  ["handoff-logs/terminal/term-1.log", "vpr dev\nVITE ready in 1.24s\n612 passed, 2 warnings, 0 failed\n"],
+  ["handoff-logs/diff/remote-handoff.patch", "--- a/apps/mobile/src/Stack.tsx\n+++ b/apps/mobile/src/Stack.tsx\n@@ -42 +42 @@\n-  handoff()\n+  handoff(thread)\n"],
+  ["handoff-logs/notes/checklist.txt", "1. Keep the terminal\n2. Keep the diff\n3. Land before the train of thought wanders\n"],
+];
+
+/** Capture-only: a stored (uncompressed) ZIP archive, enough for the archive reader. */
+export function showcaseZipArchive(): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of SHOWCASE_ZIP_ENTRIES) {
+    const nameBytes = Buffer.from(name, "utf8");
+    const data = Buffer.from(text, "utf8");
+    const crc = NodeZlib.crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0x5a21, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    local.writeUInt16LE(0, 28);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0x5a21, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, data);
+    centrals.push(central, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const centralDirectory = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(SHOWCASE_ZIP_ENTRIES.length, 8);
+  end.writeUInt16LE(SHOWCASE_ZIP_ENTRIES.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralDirectory, end]);
+}
 
 export const SHOWCASE_SCENES = [
   "threads",
@@ -62,6 +121,10 @@ export const SHOWCASE_SCENES = [
   "settings-threads-end",
   "settings-general",
   "settings-labs",
+  "settings-microphone",
+  "settings-environments",
+  "connections",
+  "zip",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 
@@ -199,7 +262,7 @@ export const SHOWCASE_THREADS = [
     request:
       "Give Lecturn a remote-first command center. Make three machines feel one tap away, keep agent work in sync, and make every handoff feel instant. Start from [Terminal 1](t3-context://v1/terminal/term-1).",
     response:
-      "## Remote command center\n\nEvery machine now feels **one tap away**. The handoff keeps the terminal and diff:\n\n```ts\nexport function handoff(thread: Thread): Handoff {\n  const terminal = thread.terminals.at(-1);\n  return { threadId: thread.id, terminal, at: Date.now() };\n}\n```\n\n### Checks\n\n- `pnpm test` in [README.md](README.md)\n- See [the docs](https://example.com/docs) for setup\n\nI touched `apps/mobile/src/Stack.tsx:42`: **612 tests passed**.",
+      "## Remote command center\n\nEvery machine now feels **one tap away**. The handoff keeps the terminal and diff:\n\n```ts\nexport function handoff(thread: Thread): Handoff {\n  const terminal = thread.terminals.at(-1);\n  return { threadId: thread.id, terminal, at: Date.now() };\n}\n```\n\n### Checks\n\n- `pnpm test` in [README.md](README.md)\n- See [the docs](https://example.com/docs) for setup\n- Log: C:\\Users\\alex\\.lecturn\\_build\\handoff.log\n\nI touched `apps/mobile/src/Stack.tsx:42`: **612 tests passed**.",
   },
   {
     id: "pocket-command-center",
@@ -543,8 +606,17 @@ function seedDatabase(
       `INSERT INTO projection_thread_messages (
         message_id, thread_id, turn_id, role, text, is_streaming, attachments_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     );
+    const zipAttachments = JSON.stringify([
+      {
+        type: "file",
+        id: SHOWCASE_ZIP_ATTACHMENT_ID,
+        name: SHOWCASE_ZIP_NAME,
+        mimeType: "application/zip",
+        sizeBytes: showcaseZipArchive().length,
+      },
+    ]);
     for (const thread of threads) {
       const turnId = `${thread.id}-turn`;
       const requestTime = minutesBefore(now, thread.minutesAgo + 5);
@@ -554,6 +626,7 @@ function seedDatabase(
         turnId,
         "user",
         thread.request,
+        thread.id === SHOWCASE_THREAD_ID ? zipAttachments : null,
         requestTime,
         requestTime,
       );
@@ -565,6 +638,7 @@ function seedDatabase(
           turnId,
           "assistant",
           thread.response,
+          null,
           responseTime,
           responseTime,
         );
@@ -673,6 +747,12 @@ export async function seedShowcaseEnvironment(input: {
   const dbPath = NodePath.join(input.baseDir, "userdata", "statev2.sqlite");
   if (primaryProject.id === SHOWCASE_PROJECT_ID) {
     await seedLecturnWorkspace(workspaceRoot);
+    const attachmentsDirectory = NodePath.join(input.baseDir, "userdata", "attachments");
+    await NodeFSP.mkdir(attachmentsDirectory, { recursive: true });
+    await NodeFSP.writeFile(
+      NodePath.join(attachmentsDirectory, `${SHOWCASE_ZIP_ATTACHMENT_ID}.zip`),
+      showcaseZipArchive(),
+    );
   }
   await Promise.all(
     projects

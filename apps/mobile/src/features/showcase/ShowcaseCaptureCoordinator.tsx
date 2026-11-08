@@ -117,6 +117,24 @@ const CAPTURE_FLOWS: Partial<Record<string, (c: CaptureFlowContext) => Navigatio
   "settings-end": settingsPage(),
   "settings-general": settingsPage("SettingsOrganization"),
   "settings-labs": settingsPage("SettingsLabs"),
+  // Capture-only (batch-001704): microphone routes (#26096), Connections (#16698), ZIP (#19463).
+  "settings-microphone": settingsPage("SettingsMicrophone"),
+  "settings-environments": settingsPage("SettingsEnvironments"),
+  connections: homeAnd(() => [{ name: "Connections" }]),
+  zip: homeAnd((c) => [
+    threadRoute(c),
+    {
+      name: "ThreadAttachment",
+      params: {
+        environmentId: c.environmentId,
+        threadId: SHOWCASE_THREAD_ID,
+        attachmentId: "remote-command-center-5a1d0c3e-0b7e-4f2a-9c41-7d2e8b6f1a90-zip",
+        name: "handoff-logs.zip",
+        mimeType: "application/zip",
+        sizeBytes: "888",
+      },
+    },
+  ]),
   "settings-search": settingsPage(),
   "settings-back": settingsPage("SettingsEnvironments"),
   "settings-select": settingsPage("SettingsEnvironments"),

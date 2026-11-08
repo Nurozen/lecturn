@@ -53,6 +53,10 @@ const SHOWCASE_SCENES = [
   "settings-threads-end",
   "settings-general",
   "settings-labs",
+  "settings-microphone",
+  "settings-environments",
+  "connections",
+  "zip",
 ] as const;
 export type ShowcaseScene = (typeof SHOWCASE_SCENES)[number];
 
