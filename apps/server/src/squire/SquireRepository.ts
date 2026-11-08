@@ -143,7 +143,7 @@ export const SquireCardRow = Schema.Struct({
 });
 export type SquireCardRow = typeof SquireCardRow.Type;
 /** Only approvals set `expires_at`, so every other insert leaves it out. */
-export type SquireCardInsert = Omit<SquireCardRow, "expires_at"> & {
+type SquireCardInsert = Omit<SquireCardRow, "expires_at"> & {
   readonly expires_at?: string | null;
 };
 
