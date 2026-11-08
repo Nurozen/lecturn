@@ -5,7 +5,6 @@ import {
   type EnvironmentId,
   type ProviderApprovalDecision,
   type Squire,
-  type SquireCard,
   type SquireCardKind,
   type SquireCardPayload,
   type SquireCardResolution,
@@ -20,7 +19,6 @@ import {
   type SquireRoomPost,
   type SquireRoomPostId,
   type SquireRoomRow,
-  type SquireRoutingReceipt,
   type SquireRouting,
   type SquireRule,
   type SquireRuleOffer,
@@ -623,12 +621,6 @@ export function squireHeldLabel(kind: SquireCardKind): string {
   return `Newer ${heldWords(kind)[0]} held`;
 }
 
-/** The line under an open card for the newer hold beside it: "Newer steer held · sending in 52s". */
-export function squirePairedHoldText(kind: SquireCardKind, seconds: number): string {
-  const progressive = heldWords(kind)[2];
-  return `${squireHeldLabel(kind)} · ${progressive} ${seconds > 0 ? `in ${seconds}s` : "now"}`;
-}
-
 /**
  * A question's suggested answer or next step, shown above its options. One that only
  * repeats the question or the title adds nothing.
@@ -706,58 +698,6 @@ export function squireOverlapThreadLine(
     provider: names.instanceName ?? names.driverName(thread.provider) ?? thread.provider,
     branch: branch === "" ? null : branch,
     pullRequest: thread.pullRequest === undefined ? null : `#${thread.pullRequest}`,
-  };
-}
-
-// ── Queue ─────────────────────────────────────────────────────
-
-export type SquireQueueChip = "all" | SquireCardKind;
-
-export const SQUIRE_QUEUE_CHIPS: ReadonlyArray<{
-  readonly chip: SquireQueueChip;
-  readonly label: string;
-}> = [
-  { chip: "all", label: "All" },
-  { chip: "steer", label: "Action" },
-  { chip: "question", label: "Question" },
-  { chip: "overlap", label: "Overlap" },
-  { chip: "proposal", label: "Proposal" },
-  { chip: "fyi", label: "FYI" },
-];
-
-/**
- * Chips count after the team-strip filter and before the chip filter, so every chip
- * shows what selecting it would list. Decision items come first, FYI apart.
- */
-export function squireQueue<
-  Row extends Pick<SquireCardRow, "kind" | "squireId" | "ownerSquireId"> &
-    Partial<Pick<SquireCardRow, "relatedSquireIds">>,
->(
-  items: ReadonlyArray<Row>,
-  filter: { readonly chip?: SquireQueueChip; readonly squireId?: SquireId | null } = {},
-) {
-  const scoped =
-    filter.squireId == null
-      ? items
-      : items.filter(
-          (item) =>
-            item.ownerSquireId === filter.squireId ||
-            item.squireId === filter.squireId ||
-            (item.relatedSquireIds?.includes(filter.squireId!) ?? false),
-        );
-  const chips = SQUIRE_QUEUE_CHIPS.map(({ chip, label }) => ({
-    chip,
-    label,
-    count: chip === "all" ? scoped.length : scoped.filter((item) => item.kind === chip).length,
-  }));
-  const chip = filter.chip ?? "all";
-  const shown = chip === "all" ? scoped : scoped.filter((item) => item.kind === chip);
-  return {
-    chips,
-    groups: [
-      { key: "decision", label: "Needs a decision", items: shown.filter((i) => i.kind !== "fyi") },
-      { key: "fyi", label: "FYI", items: shown.filter((i) => i.kind === "fyi") },
-    ].filter((group) => group.items.length > 0),
   };
 }
 
@@ -870,29 +810,8 @@ export function squireSettledLabel(
   return "Done";
 }
 
-/** What the user's own successful act did, shown until the refetched queue agrees. */
-export function squireActedLabel(
-  row: Pick<SquireCardRow, "kind" | "fyiSource">,
-  action: "accept" | "dismiss",
-): string {
-  if (row.kind === "fyi" && row.fyiSource === "inactivity") {
-    return action === "accept" ? "Kept running" : "Paused";
-  }
-  if (action === "dismiss") return "Dismissed";
-  switch (row.kind) {
-    case "question":
-      return "Answered";
-    case "steer":
-      return "Sent";
-    case "overlap":
-      return "Reviewed";
-    default:
-      return "Accepted";
-  }
-}
-
 /** Only an open card takes a decision; a held one belongs to the hold banner. */
-export function squireCardActionable(row: Pick<SquireCardRow, "status">): boolean {
+function squireCardActionable(row: Pick<SquireCardRow, "status">): boolean {
   return row.status === "open";
 }
 
@@ -929,33 +848,6 @@ export function squireRowAction(
   }
 }
 
-/** The card's primary for its payload; questions answer through the thread's options. */
-export function squireCardPrimaryLabel(payload: SquireKnownPayload): string | null {
-  switch (payload.type) {
-    case "steer":
-      return "Send steer";
-    case "thread-proposal":
-      return "Create thread";
-    case "squire-proposal":
-      return "Accept";
-    case "room-proposal":
-      return "Open room";
-    case "control":
-      return "Accept";
-    case "overlap":
-      return "Review";
-    default:
-      return null;
-  }
-}
-
-/** The edited text the accept sends, or nothing when the user left the recommendation alone. */
-export function squireEditedText(original: string, draft: string | null): string | undefined {
-  if (draft === null) return undefined;
-  const trimmed = draft.trim();
-  return trimmed === "" || trimmed === original.trim() ? undefined : trimmed;
-}
-
 /**
  * Whether a card offers "Follow up in thread". A question whose runtime request is still pending
  * (the card carries its live `request` copy) owns the thread's composer, so a follow-up draft
@@ -976,19 +868,6 @@ export function squireFollowUpDraft(question: string, existing: string): string 
   if (quoted === ">") return existing;
   if (rest.startsWith(quoted)) return existing;
   return rest === "" ? `${quoted}\n\n` : `${quoted}\n\n${rest}`;
-}
-
-/**
- * The ask's cost copy before sending. The client knows only whether the thread's provider forks
- * natively (`conversationFork`); whether it may probe at all is the server's `probeSupport`,
- * so a refusal comes back as the ask's error.
- */
-export function squireAskCopy(
-  provider: { readonly name: string; readonly conversationFork: string | undefined } | null,
-): string {
-  const base = "Asks a temporary read-only copy of the thread, then discards it. Uses tokens.";
-  if (provider === null || provider.conversationFork === "native") return base;
-  return `${base} ${provider.name} cannot fork natively, so Lecturn replays the thread's recent context first, which costs more.`;
 }
 
 export interface SquireRuleNames {
@@ -1353,50 +1232,6 @@ export function squireRoomMarkReadTarget(input: {
   return newestPostId === input.lastMarkedPostId ? null : newestPostId;
 }
 
-// ── Routing receipts ──────────────────────────────────────────
-
-const KIND_ARTICLE: Readonly<Record<SquireCardKind, string>> = {
-  steer: "a steer",
-  question: "a question",
-  overlap: "an overlap",
-  proposal: "a proposal",
-  fyi: "an FYI",
-};
-
-/** Routing receipt row: "Sent to Release", then what its turn raised, then those items' states. */
-export function squireReceiptState(
-  receipt: SquireRoutingReceipt,
-  nameOf: (squireId: SquireId) => string,
-) {
-  const name = nameOf(receipt.toSquireId);
-  const text = (() => {
-    switch (receipt.status) {
-      case "acted":
-        if (receipt.items.length === 0) return `Sent to ${name}: ${receipt.text}`;
-        return receipt.items.length === 1
-          ? `Sent to ${name} as ${KIND_ARTICLE[receipt.items[0]!.kind]}: ${receipt.text}`
-          : `Sent to ${name} as ${receipt.items.length} items: ${receipt.text}`;
-      case "quiet":
-        return receipt.quietReason === null || receipt.quietReason.trim() === ""
-          ? `${name}: no action`
-          : `${name}: no action, ${receipt.quietReason}`;
-      case "rejected":
-        return `Not sent to ${name}`;
-      default:
-        return `Sent to ${name}`;
-    }
-  })();
-  const live = new Set(["held", "open", "accepting", "executing"]);
-  return {
-    text,
-    items: receipt.items,
-    settled:
-      receipt.status !== "sent" &&
-      receipt.status !== "unknown" &&
-      receipt.items.every((item) => !live.has(item.status)),
-  };
-}
-
 // ── Card evidence, timelines, and Lead items (shared by web and mobile) ──
 
 /** Text that reads the same to the user: spacing and case aside. */
@@ -1433,56 +1268,6 @@ export function squireRowTargetName(
   if (project === null) return null;
   if (row.kind !== "proposal") return project;
   return row.proposalProvider === undefined ? `New Squire · ${project}` : `New thread · ${project}`;
-}
-
-/** The provider a thread proposal would run on, when the client has no instance to name it. */
-export function squireProposalProviderName(
-  proposal: SquireCardRow["proposalProvider"],
-  instanceName: string | null,
-  driverName: (driver: string) => string | undefined,
-): string | null {
-  if (proposal === undefined) return null;
-  return instanceName ?? driverName(proposal.provider) ?? proposal.provider;
-}
-
-/**
- * Each overlapping thread's provider as its thread line on the card names it: the recorded
- * instance's name, else the driver's, else the raw driver. Null on a row that is no overlap.
- */
-export function squireOverlapProviderNames(
-  row: {
-    readonly overlapProviders?: ReadonlyArray<string>;
-    readonly overlapProviderInstanceIds?: ReadonlyArray<string | null>;
-  },
-  names: {
-    readonly instanceName: (instanceId: string) => string | null;
-    readonly driverName: (driver: string) => string | undefined;
-  },
-): ReadonlyArray<string> | null {
-  if (row.overlapProviders === undefined) return null;
-  return row.overlapProviders.map((provider, index) => {
-    const instanceId = row.overlapProviderInstanceIds?.[index] ?? null;
-    return (
-      (instanceId === null ? null : names.instanceName(instanceId)) ??
-      names.driverName(provider) ??
-      provider
-    );
-  });
-}
-
-/**
- * The provider a row names, wherever one is known: its thread's, a thread proposal's, or each
- * overlapping thread's, once. Only the Lead view leaves it off, on every row.
- */
-export function squireRowProviderName(input: {
-  readonly threadProvider: string | null;
-  readonly proposalProvider: string | null;
-  readonly overlapProviders?: ReadonlyArray<string> | null;
-}): string | null {
-  if (input.threadProvider !== null) return input.threadProvider;
-  if (input.proposalProvider !== null) return input.proposalProvider;
-  const overlap = [...new Set(input.overlapProviders ?? [])];
-  return overlap.length === 0 ? null : overlap.join(" + ");
 }
 
 /** The budget a card would spend; only an open card is still deciding. */
@@ -1575,53 +1360,6 @@ export function squireWhyText(
   const text = why.trim();
   if (text === "" || squireSameText(text, titles.title)) return "";
   return titles.threadTitle !== null && squireSameText(text, titles.threadTitle) ? "" : text;
-}
-
-/**
- * The inbox detail's timeline: the server's thread events when it has them. A card with no
- * target thread (an overlap, a proposal) or no recorded events gets what the card itself
- * knows: when it was raised, the PR change it carries, and its last replacement.
- */
-export function squireCardTimeline(
-  card: Pick<SquireCard, "timeline" | "createdAt" | "updatedAt" | "replacedCount" | "evidence">,
-): ReadonlyArray<{ readonly at: string; readonly text: string }> {
-  if (card.timeline.length > 0) return card.timeline;
-  const entries: Array<{ at: string; text: string }> = [];
-  const pr = card.evidence.pullRequest;
-  if (pr !== undefined) {
-    entries.push({
-      at: card.createdAt,
-      text: `PR #${pr.number} ${pr.transition.replaceAll(":", " ").replaceAll("-", " ")}`,
-    });
-  }
-  entries.push({ at: card.createdAt, text: "raised" });
-  if (card.replacedCount > 0 && card.updatedAt !== card.createdAt) {
-    entries.push({ at: card.updatedAt, text: "updated" });
-  }
-  return entries;
-}
-
-/** The card's own entries, which the server writes without a subject. */
-const TIMELINE_SUBJECT: ReadonlyMap<string, (raiser: string) => string> = new Map([
-  ["raised", (raiser: string) => `${raiser} raised this`],
-  ["opened", () => "You opened this"],
-]);
-
-/**
- * The inbox timeline as one "time · event" row per entry, oldest first as the server sends.
- * `raiser` names who raised the card, as `squireRaiserLabel` does.
- */
-export function squireTimelineRows(
-  timeline: ReadonlyArray<{ readonly at: string; readonly text: string }>,
-  formatTime: (iso: string) => string,
-  raiser: string,
-): ReadonlyArray<{ readonly key: string; readonly time: string; readonly text: string }> {
-  return timeline.flatMap((entry, index) => {
-    const trimmed = entry.text.trim();
-    const text = TIMELINE_SUBJECT.get(trimmed.toLowerCase())?.(raiser) ?? trimmed;
-    // Two entries may share a time and text, so the index keeps keys apart.
-    return text === "" ? [] : [{ key: `${index}:${entry.at}`, time: formatTime(entry.at), text }];
-  });
 }
 
 type SquireControlPayload = Extract<SquireKnownPayload, { readonly type: "control" }>;
@@ -2028,17 +1766,4 @@ export function squireUpdateGroups<T>(
   });
   close(items.length);
   return groups;
-}
-
-const SQUIRE_UPDATE_KINDS_SHOWN = 3;
-
-/** "3 Squire updates · pr failed, turn completed". */
-export function squireUpdateGroupLabel(
-  group: Pick<SquireUpdateGroup, "wakeCount" | "eventKinds">,
-): string {
-  const kinds = group.eventKinds.map((kind) => kind.replaceAll("-", " "));
-  const shown = kinds.slice(0, SQUIRE_UPDATE_KINDS_SHOWN).join(", ");
-  const more = kinds.length > SQUIRE_UPDATE_KINDS_SHOWN ? ", …" : "";
-  const head = `${group.wakeCount} Squire updates`;
-  return shown === "" ? head : `${head} · ${shown}${more}`;
 }
