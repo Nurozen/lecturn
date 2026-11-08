@@ -881,7 +881,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     compactSquireEvents,
   });
   const rows = useStableRows(
-    insertUnreadDivider(mergeSquireApprovalRows(rawRows, squireApprovals), unreadWindow),
+    insertUnreadDivider(
+      mergeSquireApprovalRows(rawRows, squireApprovals, historyControls?.hasMoreHistory === true),
+      unreadWindow,
+    ),
     listIdentityKey,
   );
   // Run status/timestamps change per stream event; keep them out of shared row context.

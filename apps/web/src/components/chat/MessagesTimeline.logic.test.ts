@@ -4124,6 +4124,25 @@ describe("chat rows merged after derivation", () => {
     ]);
   });
 
+  it("holds back closed rows older than the loaded history, never open ones", () => {
+    const withPhases = approvals(5, 6, 20);
+    const entries = withPhases.entries.map((entry, index) =>
+      index === 0 ? { ...entry, phase: "closed" as const } : entry,
+    );
+    const rows = [message("a", 10)];
+    expect(ids(mergeSquireApprovalRows(rows, { ...withPhases, entries }, true))).toEqual([
+      "squire-approval:card-6",
+      "a",
+      "squire-approval:card-20",
+    ]);
+    expect(ids(mergeSquireApprovalRows(rows, { ...withPhases, entries }, false))).toEqual([
+      "squire-approval:card-5",
+      "squire-approval:card-6",
+      "a",
+      "squire-approval:card-20",
+    ]);
+  });
+
   it("keeps a running turn's indicator below the newest approval", () => {
     expect(ids(mergeSquireApprovalRows([message("a", 10), working], approvals(20)))).toEqual([
       "a",

@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect } from "react";
 
+import { useWindowFocused } from "../../../hooks/useWindowFocused";
 import { randomUUID } from "../../../lib/utils";
 import { squireEnvironment } from "../../../state/squires";
 import { useAtomCommand } from "../../../state/use-atom-command";
@@ -128,7 +129,10 @@ export function useSquireItemsAct(environmentId: EnvironmentId) {
 
 const squireOpenedThisSession = createSquireOpenedTracker();
 
-/** Marks a card opened once it is on screen, which cancels its phone escalation. */
+/**
+ * Marks a card opened once it is on screen in a focused window, which cancels its phone
+ * escalation. An unfocused window has been seen by nobody, so the phone must still alert.
+ */
 export function useSquireMarkOpened(
   environmentId: EnvironmentId,
   cardId: SquireCardId | null,
@@ -136,14 +140,15 @@ export function useSquireMarkOpened(
 ) {
   const canMark = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
   const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
+  const windowFocused = useWindowFocused();
   // oxlint-disable-next-line lecturn/react-effect-budget -- tells the server a card reached the screen.
   useEffect(() => {
-    if (cardId === null || !canMark) return;
+    if (cardId === null || !canMark || !windowFocused) return;
     if (!squireOpenedThisSession.take(environmentId, cardId, openedAt)) return;
     void markOpened({ environmentId, input: { requestId: randomUUID(), cardIds: [cardId] } }).then(
       (result) => {
         if (result._tag === "Failure") squireOpenedThisSession.release(environmentId, cardId);
       },
     );
-  }, [environmentId, cardId, openedAt, canMark, markOpened]);
+  }, [environmentId, cardId, openedAt, canMark, markOpened, windowFocused]);
 }

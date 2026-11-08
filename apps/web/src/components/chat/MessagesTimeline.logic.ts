@@ -2903,13 +2903,24 @@ const LIVE_TAIL_KINDS: ReadonlySet<MessagesTimelineRow["kind"]> = new Set([
 /**
  * Lecturn: approvals at the time they were raised, among the rows they happened between. Rows
  * with no time and the live rows of a running turn stay last, so an approval never lands under
- * the "working" indicator.
+ * the "working" indicator. A closed row older than the loaded history waits for that history,
+ * so it never stacks above the rows it belongs among; anything still open always shows.
  */
 export function mergeSquireApprovalRows(
   rows: MessagesTimelineRow[],
   approvals: SquireChatApprovalsInput | undefined,
+  hasMoreHistory = false,
 ): MessagesTimelineRow[] {
   if (approvals === undefined || approvals.entries.length === 0) return rows;
+  const oldestLoaded = rows.find((row) => row.createdAt !== null)?.createdAt ?? null;
+  const oldestLoadedMs = oldestLoaded === null ? Number.NaN : Date.parse(oldestLoaded);
+  const entries =
+    hasMoreHistory && !Number.isNaN(oldestLoadedMs)
+      ? approvals.entries.filter(
+          (entry) => entry.phase !== "closed" || Date.parse(entry.createdAt) >= oldestLoadedMs,
+        )
+      : approvals.entries;
+  if (entries.length === 0) return rows;
   const approvalRow = (entry: SquireApprovalEntry<SquireCardRow>): MessagesTimelineRow => ({
     kind: "squire-approval",
     id: squireApprovalRowId(entry.row.id),
@@ -2926,7 +2937,6 @@ export function mergeSquireApprovalRows(
   }
   const merged: MessagesTimelineRow[] = [];
   let next = 0;
-  const entries = approvals.entries;
   for (let index = 0; index < tailStart; index += 1) {
     const row = rows[index]!;
     if (row.createdAt !== null) {

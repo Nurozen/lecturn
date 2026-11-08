@@ -2,26 +2,17 @@ import { type ScopedThreadRef } from "@lecturn/contracts";
 import { resolveThreadLastVisitedAt } from "../Sidebar.logic";
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { claimThreadOpen } from "@lecturn/client-runtime/state/thread-search";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 import { useUiStateStore } from "../../uiStateStore";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadShell } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useWindowFocused } from "../../hooks/useWindowFocused";
 
 // During an active turn the thread's updatedAt advances several times per
 // second, and every server-side visit is a full command dispatch plus a
 // broadcast to all shell subscribers.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
-
-const subscribeWindowFocus = (onChange: () => void) => {
-  window.addEventListener("focus", onChange);
-  window.addEventListener("blur", onChange);
-  return () => {
-    window.removeEventListener("focus", onChange);
-    window.removeEventListener("blur", onChange);
-  };
-};
-const readWindowFocused = () => document.hasFocus();
 
 // The visit watermark is the one part of the chat view that follows the
 // shell's updatedAt, which ticks while a run streams. Keeping it in a leaf lets
@@ -29,7 +20,7 @@ const readWindowFocused = () => document.hasFocus();
 export function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRef }) {
   const serverThread = useThreadShell(props.threadRef);
   // An open window nobody is looking at has not been read; a visit also closes Squire FYIs.
-  const windowFocused = useSyncExternalStore(subscribeWindowFocus, readWindowFocused, () => true);
+  const windowFocused = useWindowFocused();
   const threadKey = scopedThreadKey(props.threadRef);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const activeThreadLocalLastVisitedAt = useUiStateStore(
