@@ -3744,6 +3744,7 @@ export default function ChatView(props: ChatViewProps) {
                   emptyPlaceholderInset={composerReservedHeight}
                   topFadeEnabled={!hasTimelineTopBanner}
                   notesAllowed={allows("notes")}
+                  contextualAllowed={isServerThread}
                   openAtNewestAppCard={openAtNewestAppCard}
                   compactSquireEvents={!allows("turn-details")}
                   minimapEnabled={allows("timeline-navigation")}
