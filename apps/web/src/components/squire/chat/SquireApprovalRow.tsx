@@ -60,7 +60,11 @@ import { openSquireSetup } from "../setup/squireSetupStore";
 import { squireChildAgeText } from "../sidebar/squireSidebar.logic";
 import { SquireIndicator } from "../SquireIndicator";
 import { commandFailureMessage } from "../squireCommandFailure";
-import { useSquireApprovalRuleSaved, useSquireItemsAct } from "./squireApprovalsState";
+import {
+  useSquireApprovalRuleSaved,
+  useSquireItemsAct,
+  useSquireMarkOpened,
+} from "./squireApprovalsState";
 import {
   squireCardRecommendation,
   squireOpenInThreadTarget,
@@ -106,6 +110,7 @@ export const SquireApprovalRow = memo(function SquireApprovalRow(props: {
   );
   const card = detail.data?.card ?? null;
   const age = squireChildAgeText(useRelativeTimeState(squireWaitingSince(row)));
+  useSquireMarkOpened(environmentId, entry.phase === "open" ? row.id : null, row.openedAt);
   return (
     <section
       aria-label={row.title}
@@ -168,7 +173,7 @@ function SquireApprovalBody(props: {
         </p>
       ) : recommendation === null ? null : (
         <p className="whitespace-pre-wrap rounded-md bg-muted/40 px-2.5 py-2 text-foreground/90">
-          {recommendation.text}
+          {recommendation}
         </p>
       )}
       {payload?.type === "question" || payload?.type === "control" ? null : (

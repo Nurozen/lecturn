@@ -2,7 +2,7 @@ import { type ScopedThreadRef } from "@lecturn/contracts";
 import { resolveThreadLastVisitedAt } from "../Sidebar.logic";
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { claimThreadOpen } from "@lecturn/client-runtime/state/thread-search";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useUiStateStore } from "../../uiStateStore";
 import { threadEnvironment } from "../../state/threads";
 import { useThreadShell } from "../../state/entities";
@@ -13,11 +13,23 @@ import { useAtomCommand } from "../../state/use-atom-command";
 // broadcast to all shell subscribers.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
 
+const subscribeWindowFocus = (onChange: () => void) => {
+  window.addEventListener("focus", onChange);
+  window.addEventListener("blur", onChange);
+  return () => {
+    window.removeEventListener("focus", onChange);
+    window.removeEventListener("blur", onChange);
+  };
+};
+const readWindowFocused = () => document.hasFocus();
+
 // The visit watermark is the one part of the chat view that follows the
 // shell's updatedAt, which ticks while a run streams. Keeping it in a leaf lets
 // ChatView read the quiet shell.
 export function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRef }) {
   const serverThread = useThreadShell(props.threadRef);
+  // An open window nobody is looking at has not been read; a visit also closes Squire FYIs.
+  const windowFocused = useSyncExternalStore(subscribeWindowFocus, readWindowFocused, () => true);
   const threadKey = scopedThreadKey(props.threadRef);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const activeThreadLocalLastVisitedAt = useUiStateStore(
@@ -32,7 +44,7 @@ export function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRe
   // palette pick already sent it with the query. It runs before the watermark
   // effect, which then sees this watermark as sent.
   useEffect(() => {
-    if (!serverThread?.id) return;
+    if (!serverThread?.id || !windowFocused) return;
     if (recordedOpenRef.current === threadKey) return;
     recordedOpenRef.current = threadKey;
     // Recorded here even when the server cannot take opens, so recents follow it.
@@ -55,10 +67,11 @@ export function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRe
     serverThread?.lastVisitedAt,
     serverThread?.updatedAt,
     visitThreadMutation,
+    windowFocused,
   ]);
 
   useEffect(() => {
-    if (!serverThread?.id) return;
+    if (!serverThread?.id || !windowFocused) return;
     const threadUpdatedAt = Date.parse(serverThread.updatedAt);
     if (Number.isNaN(threadUpdatedAt)) return;
     const effectiveLastVisitedAt = resolveThreadLastVisitedAt(
@@ -112,6 +125,7 @@ export function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRe
     serverThread?.latestRun?.completedAt,
     serverThread?.updatedAt,
     visitThreadMutation,
+    windowFocused,
   ]);
   return null;
 }

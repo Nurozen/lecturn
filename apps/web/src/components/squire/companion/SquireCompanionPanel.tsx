@@ -1,5 +1,5 @@
 import {
-  SQUIRE_QUEUE_PAGE_SIZE,
+  SQUIRE_ITEMS_PAGE_SIZE,
   squireFigureState,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
@@ -94,7 +94,7 @@ function SquireRecentList(props: {
   const queue = useAtomValue(
     squireEnvironment.items({
       environmentId,
-      input: { squireId, scope: "open", limit: SQUIRE_QUEUE_PAGE_SIZE },
+      input: { squireId, scope: "open", limit: SQUIRE_ITEMS_PAGE_SIZE },
     }),
   );
   const entries = Option.getOrNull(AsyncResult.value(log))?.entries ?? null;

@@ -965,7 +965,7 @@ describe("Squire notch rows from the Lead's combined queue", () => {
       ["lead-card", "Lead", "Question"],
     ]);
     expect(rows[1]).toMatchObject({
-      squire: { squireId: "release", palette: "gold", cardKind: "question" },
+      squire: { squireId: "lead", palette: "gold", cardKind: "question" },
       actions: [
         { id: "squire-open", label: "Answer" },
         { id: "squire-dismiss", label: "Dismiss" },
@@ -1021,7 +1021,7 @@ describe("Squire notch rows from the Lead's combined queue", () => {
     );
     expect(target).toMatchObject({
       type: "card",
-      squireId: "release",
+      squireId: "lead",
       card: { squireId: "lead", ownerSquireId: "release" },
     });
   });

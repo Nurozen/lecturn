@@ -202,13 +202,6 @@ export function createSquireEnvironmentAtoms<R, E>(
     }).pipe(Atom.withLabel(`squire:activity:${key}`)),
   );
 
-  const leadItemsSignal = Atom.family((environmentId: EnvironmentId) =>
-    Atom.make((get) => {
-      const lead = get(state(environmentId))?.lead ?? null;
-      return lead === null ? "" : get(itemsSignal(pairKey(environmentId, lead)));
-    }).pipe(Atom.withLabel(`squire:lead-items:${environmentId}`)),
-  );
-
   // Any edit bumps the record's revision, so the full record refetches only then.
   const detailSignal = Atom.family((key: string) =>
     Atom.make((get) => String(get(entry(key))?.squire.revision ?? "")).pipe(
@@ -281,7 +274,6 @@ export function createSquireEnvironmentAtoms<R, E>(
     track: command("track", WS_METHODS.squireTrack),
     untrack: command("untrack", WS_METHODS.squireUntrack),
     itemsAct: command("items-act", WS_METHODS.squireItemsAct),
-    itemAsk: command("item-ask", WS_METHODS.squireItemAsk),
     voiceNote: command("voice-note", WS_METHODS.squireVoiceNote),
     leadEnsure: command("lead-ensure", WS_METHODS.squireLeadEnsure),
     // The Lead's digest and daily triggers run in the zone of the client that opened it.
@@ -432,12 +424,6 @@ export function createSquireEnvironmentAtoms<R, E>(
       tag: WS_METHODS.squireTriggerRuns,
       staleTimeMs: 15_000,
       refreshTrigger: ({ environmentId }) => triggersRefresh(environmentId),
-    }),
-    leadReceipts: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "squire:lead-receipts",
-      tag: WS_METHODS.squireLeadReceipts,
-      staleTimeMs: 30_000,
-      refreshTrigger: ({ environmentId }) => leadItemsSignal(environmentId),
     }),
     roomPosts: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "squire:room-posts",
@@ -772,8 +758,7 @@ export function squireRuleOfferPrompt(offer: SquireRuleOffer) {
 /** A payload this build knows; the card shows only its row fields for a newer one. */
 export type SquireKnownPayload = Exclude<SquireCardPayload, UnknownUnionMember>;
 
-/** FYI pages after the first are requested only when the user asks for older items. */
-export const SQUIRE_QUEUE_PAGE_SIZE = 50;
+export const SQUIRE_ITEMS_PAGE_SIZE = 50;
 
 export const SQUIRE_KIND_LABEL: Readonly<Record<SquireCardKind, string>> = {
   steer: "Action",
@@ -1582,7 +1567,10 @@ export function squireApprovalEntries<
   const entries: Array<SquireApprovalEntry<Row>> = [];
   for (const row of rows) {
     // The inactivity check is an FYI only in name: unanswered, automation pauses.
-    if (row.kind === "fyi" && !(row.fyiSource === "inactivity" && row.status === "open")) continue;
+    if (row.kind === "fyi") {
+      // Without chat-first a server's `squire_notify` text has no other surface.
+      if (row.status !== "open" || (chat.chatFirst && row.fyiSource !== "inactivity")) continue;
+    }
     if (row.status === "held") continue;
     const phase = SQUIRE_APPROVAL_PHASE[row.status];
     if (phase === undefined) continue;
@@ -1649,7 +1637,9 @@ export function squireApprovalControls(
   }
   switch (row.kind) {
     case "fyi":
-      return { ...closed, inactivity: row.fyiSource === "inactivity" };
+      return row.fyiSource === "inactivity"
+        ? { ...closed, inactivity: true }
+        : { ...closed, deny: "Dismiss" };
     case "question":
     case "overlap":
       return { ...closed, deny: "Dismiss" };
@@ -1662,6 +1652,51 @@ export function squireApprovalControls(
         deny: "Deny",
       };
   }
+}
+
+/**
+ * Where the chat's jump pill goes: the oldest row still waiting on the user, which may have
+ * scrolled far above, and how many are waiting.
+ */
+export function squireOpenApprovalJump(
+  entries: ReadonlyArray<SquireApprovalEntry<Pick<SquireCardRow, "id" | "kind" | "fyiSource">>>,
+): { readonly cardId: SquireCardRow["id"]; readonly label: string } | null {
+  const waiting = entries.filter(
+    (entry) =>
+      entry.phase === "open" && (entry.row.kind !== "fyi" || entry.row.fyiSource === "inactivity"),
+  );
+  const oldest = waiting[0];
+  if (oldest === undefined) return null;
+  return {
+    cardId: oldest.row.id,
+    label: `${waiting.length} ${waiting.length === 1 ? "needs" : "need"} you`,
+  };
+}
+
+/**
+ * One `squire.items.markOpened` per card per session: the first open cancels the card's phone
+ * escalation, and a card some surface already opened needs none. A failed send releases it.
+ */
+export function createSquireOpenedTracker() {
+  const sent = new Set<string>();
+  const key = (environmentId: EnvironmentId, cardId: SquireCardRow["id"]) =>
+    JSON.stringify([environmentId, cardId]);
+  return {
+    /** True when this open should be sent, and records it as sent. */
+    take(
+      environmentId: EnvironmentId,
+      cardId: SquireCardRow["id"],
+      openedAt: string | null | undefined,
+    ): boolean {
+      const id = key(environmentId, cardId);
+      if (sent.has(id)) return false;
+      sent.add(id);
+      return openedAt == null;
+    },
+    release(environmentId: EnvironmentId, cardId: SquireCardRow["id"]): void {
+      sent.delete(key(environmentId, cardId));
+    },
+  };
 }
 
 export type SquireApprovalResult =
@@ -1783,9 +1818,6 @@ export interface SquireUpdateGroup {
   readonly start: number;
   /** Exclusive. */
   readonly end: number;
-  readonly wakeCount: number;
-  /** The wakes' event kinds, first seen first. */
-  readonly eventKinds: ReadonlyArray<string>;
 }
 
 /**
@@ -1796,25 +1828,16 @@ export interface SquireUpdateGroup {
 export function squireUpdateGroups<T>(
   items: ReadonlyArray<T>,
   roleOf: (item: T) => SquireUpdateItemRole,
-  eventKindsOf: (item: T) => ReadonlyArray<string>,
 ): ReadonlyArray<SquireUpdateGroup> {
   const groups: SquireUpdateGroup[] = [];
-  let wakes: number[] = [];
+  let start: number | null = null;
   const close = (end: number) => {
-    if (wakes.length > 0) {
-      const eventKinds: string[] = [];
-      for (const index of wakes) {
-        for (const kind of eventKindsOf(items[index]!)) {
-          if (!eventKinds.includes(kind)) eventKinds.push(kind);
-        }
-      }
-      groups.push({ start: wakes[0]!, end, wakeCount: wakes.length, eventKinds });
-    }
-    wakes = [];
+    if (start !== null) groups.push({ start, end });
+    start = null;
   };
   items.forEach((item, index) => {
     const role = roleOf(item);
-    if (role === "wake") wakes.push(index);
+    if (role === "wake") start ??= index;
     else if (role !== "update") close(index);
   });
   close(items.length);

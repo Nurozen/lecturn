@@ -23,16 +23,14 @@ export function squireSteerKindLabel(kind: SquireSteerKind | null): string | nul
  * The recommendation as text: a steer or first prompt, or an inactivity check's note. Overlaps,
  * Squire proposals, and control proposals render their own blocks.
  */
-export function squireCardRecommendation(
-  payload: SquireKnownPayload,
-): { readonly text: string; readonly labelled: boolean } | null {
+export function squireCardRecommendation(payload: SquireKnownPayload): string | null {
   switch (payload.type) {
     case "steer":
-      return { text: payload.steer, labelled: true };
+      return payload.steer;
     case "thread-proposal":
-      return { text: payload.firstPrompt, labelled: true };
+      return payload.firstPrompt;
     case "fyi":
-      return { text: payload.text, labelled: false };
+      return payload.text;
     default:
       return null;
   }

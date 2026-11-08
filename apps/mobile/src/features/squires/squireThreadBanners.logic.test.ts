@@ -105,7 +105,7 @@ describe("tracked-thread banner", () => {
         "thread-1",
         "Release",
       ),
-    ).toEqual({ text: "Release · 2 need a decision", cardId: "older" });
+    ).toEqual({ text: "Release · 2 need a decision" });
     expect(trackedThreadBanner([row("only")], "thread-1", "Release")?.text).toBe(
       "Release · 1 needs a decision",
     );

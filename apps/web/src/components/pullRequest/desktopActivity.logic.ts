@@ -562,7 +562,7 @@ export function squireActivityRows(
           ...(excerpt === null ? {} : { excerpt: excerpt.slice(0, 180) }),
           ...(origins.length === 0 ? {} : { detail: origins.join("\n") }),
           squire: {
-            squireId: card.ownerSquireId,
+            squireId: card.squireId,
             cardId: card.id,
             cardKind: card.kind,
             palette: raiser.squire.companion.palette,
@@ -635,7 +635,7 @@ export function squireActivityRows(
       subtitle: offer.squireName,
       status: "Rule offer",
       squire: {
-        squireId: offer.card.ownerSquireId,
+        squireId: offer.card.squireId,
         cardId: offer.card.id,
         cardKind: offer.card.kind,
         palette: offer.palette,
@@ -678,7 +678,7 @@ export type SquireActivityTarget =
       readonly type: "card";
       readonly row: DesktopActivityRow;
       readonly environmentId: EnvironmentId;
-      /** The owner, whose view opens the card. */
+      /** The raiser, whose chat shows the card. */
       readonly squireId: SquireId;
       readonly cardId: SquireCardId;
       /** What an Undo's ask-first offer needs; its rule belongs to the raiser. */
@@ -735,7 +735,7 @@ export function resolveSquireActivityAction(
     type: "card",
     row,
     environmentId,
-    squireId: item?.ownerSquireId ?? row.squire.squireId,
+    squireId: raiser,
     cardId: item?.id ?? cardId,
     card: {
       id: item?.id ?? cardId,

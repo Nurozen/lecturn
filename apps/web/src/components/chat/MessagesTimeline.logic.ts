@@ -294,9 +294,6 @@ function isUserWrittenMessage(message: Pick<ChatMessage, "role" | "createdBy">):
   return message.role === "user" && (message.createdBy ?? "user") === "user";
 }
 
-const NO_EVENT_KINDS: ReadonlyArray<string> = [];
-const noSquireEventKinds = () => NO_EVENT_KINDS;
-
 function squireRunIdsToHideText(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<RunId> {
   return squireQuietRunIds(entries, (entry) => {
     if (entry.kind === "message") {
@@ -1716,10 +1713,8 @@ export function deriveMessagesTimelineRows(input: {
   const hiddenSquireIndexes = new Set<number>();
   if (input.compactSquireEvents) {
     const quietRunIds = squireRunIdsToHideText(timelineEntries);
-    const groups = squireUpdateGroups(
-      timelineEntries,
-      (entry) => squireUpdateEntryRole(entry, runIdIsActiveResponse, quietRunIds),
-      noSquireEventKinds,
+    const groups = squireUpdateGroups(timelineEntries, (entry) =>
+      squireUpdateEntryRole(entry, runIdIsActiveResponse, quietRunIds),
     );
     for (const group of groups) {
       for (let index = group.start; index < group.end; index += 1) {
@@ -2897,6 +2892,8 @@ export interface SquireChatApprovalsInput {
   readonly entries: ReadonlyArray<SquireApprovalEntry<SquireCardRow>>;
 }
 
+export const squireApprovalRowId = (cardId: SquireCardRow["id"]) => `squire-approval:${cardId}`;
+
 const LIVE_TAIL_KINDS: ReadonlySet<MessagesTimelineRow["kind"]> = new Set([
   "working",
   "thinking",
@@ -2915,7 +2912,7 @@ export function mergeSquireApprovalRows(
   if (approvals === undefined || approvals.entries.length === 0) return rows;
   const approvalRow = (entry: SquireApprovalEntry<SquireCardRow>): MessagesTimelineRow => ({
     kind: "squire-approval",
-    id: `squire-approval:${entry.row.id}`,
+    id: squireApprovalRowId(entry.row.id),
     createdAt: entry.createdAt,
     environmentId: approvals.environmentId,
     squireId: approvals.squireId,

@@ -1,5 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
+  createSquireOpenedTracker,
   squireApprovalEntries,
   type SquireApprovalEntry,
 } from "@lecturn/client-runtime/state/squire";
@@ -14,6 +15,7 @@ import type {
 } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { useEffect } from "react";
 
 import { randomUUID } from "../../../lib/utils";
 import { squireEnvironment } from "../../../state/squires";
@@ -26,42 +28,36 @@ const FYI_KINDS: ReadonlyArray<SquireCardKind> = ["fyi"];
 
 const NO_ROWS: ReadonlyArray<SquireCardRow> = [];
 
-// An older server cannot settle a row inline, so only open approvals show there. Open FYIs load
-// on their own so a full history can never crowd out the inactivity check.
+// Open rows load on their own: the closed history is capped newest first, and an old open row
+// must keep its place in the chat while the badge says it needs you. Open FYIs load separately
+// so a long history never crowds out the inactivity check.
 const chatRowsAtom = Atom.family((key: string) => {
   const [environmentId, squireId, chatFirst] = JSON.parse(key) as [
     EnvironmentId,
     SquireId,
     boolean,
   ];
+  const page = (
+    get: Atom.AtomContext,
+    scope: "open" | "all",
+    kinds: ReadonlyArray<SquireCardKind>,
+  ) =>
+    Option.getOrNull(
+      AsyncResult.value(
+        get(
+          squireEnvironment.items({
+            environmentId,
+            input: { squireId, scope, kinds, limit: SQUIRE_CHAT_ROWS_LIMIT },
+          }),
+        ),
+      ),
+    )?.items ?? NO_ROWS;
   return Atom.make((get): ReadonlyArray<SquireCardRow> => {
-    const decisions = Option.getOrNull(
-      AsyncResult.value(
-        get(
-          squireEnvironment.items({
-            environmentId,
-            input: {
-              squireId,
-              scope: chatFirst ? "all" : "open",
-              kinds: CHAT_KINDS,
-              limit: SQUIRE_CHAT_ROWS_LIMIT,
-            },
-          }),
-        ),
-      ),
-    );
-    const fyis = Option.getOrNull(
-      AsyncResult.value(
-        get(
-          squireEnvironment.items({
-            environmentId,
-            input: { squireId, scope: "open", kinds: FYI_KINDS, limit: SQUIRE_CHAT_ROWS_LIMIT },
-          }),
-        ),
-      ),
-    );
-    if (decisions === null && fyis === null) return NO_ROWS;
-    return [...(decisions?.items ?? []), ...(fyis?.items ?? [])];
+    const byId = new Map<SquireCardId, SquireCardRow>();
+    for (const row of chatFirst ? page(get, "all", CHAT_KINDS) : NO_ROWS) byId.set(row.id, row);
+    for (const row of page(get, "open", CHAT_KINDS)) byId.set(row.id, row);
+    for (const row of page(get, "open", FYI_KINDS)) byId.set(row.id, row);
+    return byId.size === 0 ? NO_ROWS : [...byId.values()];
   }).pipe(Atom.withLabel(`web-squire-chat-rows:${key}`));
 });
 
@@ -128,4 +124,26 @@ export function useSquireItemsAct(environmentId: EnvironmentId) {
       },
     });
   return { canAct, run };
+}
+
+const squireOpenedThisSession = createSquireOpenedTracker();
+
+/** Marks a card opened once it is on screen, which cancels its phone escalation. */
+export function useSquireMarkOpened(
+  environmentId: EnvironmentId,
+  cardId: SquireCardId | null,
+  openedAt: string | null,
+) {
+  const canMark = useAtomValue(squireEnvironment.itemsMarkOpened.permissionAtom(environmentId));
+  const markOpened = useAtomCommand(squireEnvironment.itemsMarkOpened, { reportFailure: false });
+  // oxlint-disable-next-line lecturn/react-effect-budget -- tells the server a card reached the screen.
+  useEffect(() => {
+    if (cardId === null || !canMark) return;
+    if (!squireOpenedThisSession.take(environmentId, cardId, openedAt)) return;
+    void markOpened({ environmentId, input: { requestId: randomUUID(), cardIds: [cardId] } }).then(
+      (result) => {
+        if (result._tag === "Failure") squireOpenedThisSession.release(environmentId, cardId);
+      },
+    );
+  }, [environmentId, cardId, openedAt, canMark, markOpened]);
 }

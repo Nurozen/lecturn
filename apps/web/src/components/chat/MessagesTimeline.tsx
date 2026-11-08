@@ -101,14 +101,17 @@ import {
   insertUnreadDivider,
   mergeSquireApprovalRows,
   type MessagesTimelineRow,
+  squireApprovalRowId,
   type SquireChatApprovalsInput,
   type TimelineLatestRun,
 } from "./MessagesTimeline.logic";
 import type { ThreadUnreadWindow } from "@lecturn/client-runtime/state/thread-visits";
+import { squireOpenApprovalJump } from "@lecturn/client-runtime/state/squire";
 import { SquireApprovalRow } from "../squire/chat/SquireApprovalRow";
 import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
 import type { ThreadFindPositionReader } from "./threadFind";
+import { Button } from "../ui/button";
 import { TooltipScrollDismissArea } from "../ui/tooltip";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
@@ -1447,9 +1450,28 @@ const ConversationTimeline = memo(function ConversationTimeline({
     );
   }
 
+  const approvalJump =
+    squireApprovals === undefined ? null : squireOpenApprovalJump(squireApprovals.entries);
+  const jumpToApproval = () => {
+    if (approvalJump === null) return;
+    const index = rows.findIndex((row) => row.id === squireApprovalRowId(approvalJump.cardId));
+    if (index === -1) return;
+    onManualNavigation();
+    void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
+  };
+
   return (
     <>
       {activityAnnouncer}
+      {approvalJump === null ? null : (
+        <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center">
+          <div className="pointer-events-auto">
+            <Button size="xs" variant="secondary" onClick={jumpToApproval}>
+              {approvalJump.label}
+            </Button>
+          </div>
+        </div>
+      )}
       <MarkdownFindContext value={findActive}>
         <TimelineRowActivityCtx value={activityState}>
           {/* Tooltip dismissal wraps the reveal surface: ui primitives take no feature classes. */}
