@@ -665,7 +665,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         ) : null}
       </div>
       <UserMessageProjectedStatus row={row} />
-      {ctx.threadRef && (!folded || expanded) ? (
+      {ctx.threadRef && ctx.contextualAllowed && (!folded || expanded) ? (
         <ContextualMessageDisclosure
           environmentId={ctx.threadRef.environmentId}
           threadId={ctx.threadRef.threadId}
