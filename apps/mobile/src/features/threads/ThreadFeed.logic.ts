@@ -16,17 +16,12 @@ import type { SquireApprovalFeedEntry, ThreadFeedRow } from "./pending-thread-fe
 
 type ThreadFeedActivityItem = ThreadFeedActivity["projectedItem"]["item"];
 
-const NO_EVENT_KINDS: ReadonlyArray<string> = [];
-
-function squireWakeEventKinds(entry: ThreadFeedEntry): ReadonlyArray<string> | null {
-  if (entry.type !== "activity-group") return null;
-  for (const activity of entry.activities) {
+function isSquireWake(entry: ThreadFeedEntry): boolean {
+  if (entry.type !== "activity-group") return false;
+  return entry.activities.some((activity) => {
     const item = activity.projectedItem.item;
-    if (item.type === "notification" && item.source.kind === "squire") {
-      return item.source.eventKinds ?? NO_EVENT_KINDS;
-    }
-  }
-  return null;
+    return item.type === "notification" && item.source.kind === "squire";
+  });
 }
 
 function rowRunId(entry: ThreadFeedEntry): RunId | null {
@@ -54,7 +49,7 @@ export function squireUpdateRole(
   if (activeRunId !== null && rowRunId(entry) === activeRunId) return "keep";
   switch (entry.type) {
     case "activity-group":
-      if (squireWakeEventKinds(entry) !== null) return "wake";
+      if (isSquireWake(entry)) return "wake";
       return entry.activities.some((activity) => {
         const item = activity.projectedItem.item;
         return (
@@ -90,11 +85,7 @@ export function groupSquireUpdates<T extends ThreadFeedEntry>(
   rows: ReadonlyArray<T>,
   activeRunId: RunId | null,
 ): ReadonlyArray<T> {
-  const groups = squireUpdateGroups(
-    rows,
-    (entry) => squireUpdateRole(entry, activeRunId),
-    (entry) => squireWakeEventKinds(entry) ?? NO_EVENT_KINDS,
-  );
+  const groups = squireUpdateGroups(rows, (entry) => squireUpdateRole(entry, activeRunId));
   if (groups.length === 0) return rows;
   const result: T[] = [];
   let index = 0;
@@ -145,6 +136,10 @@ export function hideSquireQuietText<T extends ThreadFeedEntry>(
   return rows.filter((entry) => !isQuietText(entry, quietRunIds));
 }
 
+export function squireApprovalRowId(cardId: string): string {
+  return `squire-approval:${cardId}`;
+}
+
 /**
  * Places a Squire's approvals among the chat's rows by when they were raised. While earlier
  * history is unloaded, a closed row older than the first row waits for it, so it never sits
@@ -171,7 +166,7 @@ export function mergeSquireApprovals(
       if (before !== null && entry.createdAt >= before) return;
       const row: SquireApprovalFeedEntry = {
         type: "squire-approval",
-        id: `squire-approval:${entry.row.id}`,
+        id: squireApprovalRowId(entry.row.id),
         createdAt: entry.createdAt,
         entry,
       };

@@ -7,6 +7,7 @@ import {
   hideSquireQuietText,
   insertUnreadDivider,
   mergeSquireApprovals,
+  squireApprovalRowId,
   squireChatQuietRunIds,
   threadUnreadAnchor,
 } from "./ThreadFeed.logic";
@@ -260,6 +261,11 @@ describe("mergeSquireApprovals", () => {
       "a",
       "b",
     ]);
+  });
+
+  it("gives each approval the row id its jump pill targets", () => {
+    const [row] = mergeSquireApprovals([], [approval("x", 5)], false);
+    expect(row?.id).toBe(squireApprovalRowId("x"));
   });
 
   it("returns the rows untouched with no approvals", () => {

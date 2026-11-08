@@ -12,7 +12,6 @@ import {
 } from "@lecturn/client-runtime/state/squire";
 import { UnknownUnionMember, type SquireItemsActInput } from "@lecturn/contracts";
 import type {
-  EnvironmentId,
   ProviderApprovalDecision,
   SquireCardId,
   SquireCardRow,
@@ -155,8 +154,8 @@ export type SquireChatControls =
 
 /**
  * What a chat row offers this viewer: the shared controls, narrowed by what this session may do.
- * A question keeps its answer controls and an overlap its Dismiss; an expired approval offers
- * the rule alone. Everything closed offers nothing, since its outcome stays as its line.
+ * A question keeps its answer controls, and an overlap or an older server's FYI its Dismiss; an
+ * expired approval offers the rule alone. Everything closed offers nothing, since its outcome stays as its line.
  */
 export function squireChatControls(input: {
   readonly entry: SquireApprovalEntry<SquireCardRow>;
@@ -184,28 +183,8 @@ export function squireChatControls(input: {
       alwaysAllow: canSave && shared.alwaysAllow,
     };
   }
-  if (entry.row.kind === "question") return { kind: "answer" };
-  return entry.row.kind === "overlap" ? { kind: "dismiss" } : { kind: "none" };
-}
-
-/**
- * The one FYI a chat still renders: the inactivity check, whose answer decides whether
- * automation pauses. `squireApprovalEntries` leaves every FYI out, so it joins here, as open.
- */
-export function squireWithInactivityChecks<
-  Row extends Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "fyiSource">,
->(
-  entries: ReadonlyArray<SquireApprovalEntry<Row>>,
-  fyis: ReadonlyArray<Row>,
-  chat: { readonly squireId: SquireId; readonly isLead: boolean; readonly chatFirst: boolean },
-): ReadonlyArray<SquireApprovalEntry<Row>> {
-  const checks = fyis.flatMap((row): Array<SquireApprovalEntry<Row>> => {
-    if (row.kind !== "fyi" || row.fyiSource !== "inactivity" || row.status !== "open") return [];
-    if ((chat.chatFirst || chat.isLead) && row.squireId !== chat.squireId) return [];
-    return [{ row, createdAt: row.createdAt, phase: "open", outcome: null, expired: false }];
-  });
-  if (checks.length === 0) return entries;
-  return [...entries, ...checks].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (shared.deny === null) return { kind: "none" };
+  return entry.row.kind === "question" ? { kind: "answer" } : { kind: "dismiss" };
 }
 
 // ── Rules ─────────────────────────────────────────────────────
@@ -342,33 +321,3 @@ export function squireUserInputAnswer(
 }
 
 export type { QuestionPayload as SquireQuestionPayload };
-
-// ── Opened ────────────────────────────────────────────────────
-
-/**
- * One `squire.items.markOpened` per card per app session: the first open cancels the card's
- * phone escalation, and a card some surface already opened needs none. A failed send releases
- * the card so the next open retries.
- */
-export function createSquireOpenedTracker() {
-  const sent = new Set<string>();
-  const key = (environmentId: EnvironmentId, cardId: SquireCardId) =>
-    JSON.stringify([environmentId, cardId]);
-  return {
-    take(
-      environmentId: EnvironmentId,
-      cardId: SquireCardId,
-      openedAt: string | null | undefined,
-    ): boolean {
-      const id = key(environmentId, cardId);
-      if (sent.has(id)) return false;
-      sent.add(id);
-      return openedAt == null;
-    },
-    release(environmentId: EnvironmentId, cardId: SquireCardId): void {
-      sent.delete(key(environmentId, cardId));
-    },
-  };
-}
-
-export const squireOpenedThisSession = createSquireOpenedTracker();

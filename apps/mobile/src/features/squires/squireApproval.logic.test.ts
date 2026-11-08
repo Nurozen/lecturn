@@ -1,11 +1,9 @@
 import {
   squireQuestionRecommendation,
-  type SquireApprovalEntry,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import {
   UnknownUnionMember,
-  type EnvironmentId,
   type SquireCardId,
   type SquireCardKind,
   type SquireCardRow,
@@ -17,7 +15,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { togglePendingUserInputOptionSelection } from "../../lib/threadActivity";
 import {
-  createSquireOpenedTracker,
   squireActOutcome,
   squireApprovalAnswer,
   squireChatControls,
@@ -26,17 +23,14 @@ import {
   squireQuestionMode,
   squireRouteDestination,
   squireScreenState,
-  squireWithInactivityChecks,
   squireUserInputAnswer,
   squireUserInputQuestions,
   type SquireKnownPayload,
   type SquireUserInputRequest,
 } from "./squireApproval.logic";
 
-const ENV = "env-1" as EnvironmentId;
 const LEAD = "lead" as SquireId;
 const RELEASE = "release" as SquireId;
-const DOCS = "docs" as SquireId;
 const TARGET = "thread-target" as ThreadId;
 
 let sequence = 0;
@@ -297,18 +291,6 @@ describe("screen", () => {
   });
 });
 
-describe("createSquireOpenedTracker", () => {
-  it("marks a card opened once per session, skips one already opened, and retries a failure", () => {
-    const tracker = createSquireOpenedTracker();
-    const card = "card" as SquireCardId;
-    expect(tracker.take(ENV, card, null)).toBe(true);
-    expect(tracker.take(ENV, card, null)).toBe(false);
-    tracker.release(ENV, card);
-    expect(tracker.take(ENV, card, null)).toBe(true);
-    expect(tracker.take(ENV, "seen" as SquireCardId, "2026-11-01T10:00:00.000Z")).toBe(false);
-  });
-});
-
 describe("rule offers", () => {
   function offer(overrides: Partial<SquireRuleOffer> = {}): SquireRuleOffer {
     return {
@@ -409,7 +391,7 @@ describe("squireChatControls", () => {
     expect(label("thread-proposal")).toMatchObject({ allowLabel: "Allow once" });
   });
 
-  it("keeps question answers, overlap Dismiss, and the inactivity check's Keep and Pause", () => {
+  it("keeps question answers, Dismiss on overlaps and FYIs, and the inactivity check's Keep and Pause", () => {
     expect(squireChatControls({ ...base, entry: open(card("question")) })).toEqual({
       kind: "answer",
     });
@@ -419,7 +401,7 @@ describe("squireChatControls", () => {
     expect(
       squireChatControls({ ...base, entry: open(card("fyi", { fyiSource: "inactivity" })) }),
     ).toEqual({ kind: "inactivity" });
-    expect(squireChatControls({ ...base, entry: open(card("fyi")) })).toEqual({ kind: "none" });
+    expect(squireChatControls({ ...base, entry: open(card("fyi")) })).toEqual({ kind: "dismiss" });
   });
 
   it("offers the rule alone once expired, and nothing once it is saved", () => {
@@ -439,47 +421,6 @@ describe("squireChatControls", () => {
     expect(squireChatControls({ ...base, canAct: false, entry: open(card("steer")) })).toEqual({
       kind: "none",
     });
-  });
-});
-
-describe("squireWithInactivityChecks", () => {
-  const fyi = (id: string, extra: Partial<SquireCardRow>) =>
-    ({
-      id,
-      kind: "fyi",
-      status: "open",
-      squireId: RELEASE,
-      createdAt: "2026-11-05T00:00:02.000Z",
-      ...extra,
-    }) as SquireCardRow;
-  const chat = { squireId: RELEASE, isLead: false, chatFirst: true };
-  const steer = {
-    row: { id: "s" },
-    createdAt: "2026-11-05T00:00:03.000Z",
-    phase: "open",
-    outcome: null,
-    expired: false,
-  } as unknown as SquireApprovalEntry<SquireCardRow>;
-
-  it("joins only an open inactivity check raised here, in time order", () => {
-    const check = fyi("check", { fyiSource: "inactivity" });
-    const merged = squireWithInactivityChecks(
-      [steer],
-      [
-        check,
-        fyi("summary", {}),
-        fyi("closed", { fyiSource: "inactivity", status: "resolved" }),
-        fyi("other", { fyiSource: "inactivity", squireId: DOCS }),
-      ],
-      chat,
-    );
-    expect(merged.map((entry) => (entry.row as SquireCardRow).id)).toEqual(["check", "s"]);
-    expect(merged[0]).toMatchObject({ phase: "open", outcome: null, expired: false });
-  });
-
-  it("returns the entries untouched when no check is open", () => {
-    const entries = [steer];
-    expect(squireWithInactivityChecks(entries, [fyi("summary", {})], chat)).toBe(entries);
   });
 });
 

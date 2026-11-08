@@ -36,6 +36,7 @@ import {
   resolveUserMessagePresentation,
 } from "@lecturn/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
+import { squireOpenApprovalJump } from "@lecturn/client-runtime/state/squire";
 import type { ThreadUnreadWindow } from "@lecturn/client-runtime/state/thread-visits";
 import {
   resolveMessageForkPoints,
@@ -277,6 +278,7 @@ import {
   hideSquireQuietText,
   insertUnreadDivider,
   mergeSquireApprovals,
+  squireApprovalRowId,
   squireChatQuietRunIds,
   threadUnreadAnchor,
 } from "./ThreadFeed.logic";
@@ -2952,6 +2954,8 @@ function ThreadFeedView(props: ThreadFeedProps) {
     ),
     threadUnreadAnchor(props.feed, props.unreadWindow ?? null, quietRunIds),
   );
+  const approvalJump = squireOpenApprovalJump(squireApprovals);
+  const [approvalJumpRowId, setApprovalJumpRowId] = useState<string | null>(null);
   const presentedFeedRef = useRef(presentedFeed);
   // oxlint-disable-next-line lecturn/react-effect-budget -- refs take the feed after commit, never in render.
   useLayoutEffect(() => {
@@ -2995,6 +2999,20 @@ function ThreadFeedView(props: ThreadFeedProps) {
   const { jumpToMessageId } = props;
   const finishJump = useEffectEvent(() => props.onJumpedToMessage?.());
   const stopFollowingEnd = useEffectEvent(() => setEndFollow(false));
+  const finishApprovalJump = useEffectEvent(() => setApprovalJumpRowId(null));
+  // oxlint-disable-next-line lecturn/react-effect-budget -- the list leaves the end a render before it can scroll, as a message jump does.
+  useEffect(() => {
+    if (approvalJumpRowId === null || loadedListKey !== listMountKey) return;
+    const index = presentedFeed.findIndex((entry) => entry.id === approvalJumpRowId);
+    if (index !== -1 && endFollowEnabled) {
+      stopFollowingEnd();
+      return;
+    }
+    if (index !== -1) {
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.2, animated: false });
+    }
+    finishApprovalJump();
+  }, [approvalJumpRowId, endFollowEnabled, listMountKey, listRef, loadedListKey, presentedFeed]);
   useEffect(() => {
     if (!jumpToMessageId || loadedListKey !== listMountKey) return;
     const index = presentedFeed.findIndex(
@@ -3603,6 +3621,20 @@ function ThreadFeedView(props: ThreadFeedProps) {
             />
           </View>
         ) : null}
+        {approvalJump === null ? null : (
+          <View
+            pointerEvents="box-none"
+            className="absolute inset-x-0 items-center"
+            style={{ top: topContentInset + 8 }}
+          >
+            <Button
+              label={approvalJump.label}
+              tone="secondary"
+              accessibilityLabel={`${approvalJump.label}. Jumps to the oldest open approval.`}
+              onPress={() => setApprovalJumpRowId(squireApprovalRowId(approvalJump.cardId))}
+            />
+          </View>
+        )}
         <VideoPreviewModal source={expandedVideo} onRequestClose={() => setExpandedVideo(null)} />
         <FilePreviewModal source={expandedFile} onRequestClose={() => setExpandedFile(null)} />
       </View>

@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import {
+  createSquireOpenedTracker,
   squireApprovalEntries,
   type SquireApprovalEntry,
 } from "@lecturn/client-runtime/state/squire";
@@ -24,20 +25,21 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import {
   squireActOutcome,
   squireItemsActInput,
-  squireOpenedThisSession,
-  squireWithInactivityChecks,
   type SquireActOutcome,
   type SquireAnswer,
 } from "./squireApproval.logic";
 
 const NO_ITEMS: ReadonlyArray<SquireCardRow> = [];
 const APPROVAL_KINDS = ["steer", "proposal", "question", "overlap"] as const;
-const CLOSED_PAGE_LIMIT = 100;
+const CHAT_ROWS_LIMIT = 200;
+
+const squireOpenedThisSession = createSquireOpenedTracker();
 
 /**
- * The rows a Squire's chat renders, oldest first. Every open row counts, with the newest
- * closed rows on a chat-first server, so one that expired or was denied keeps its place in the
- * feed. Older servers list open rows only, and keep the combined queue on the Lead.
+ * The rows a Squire's chat renders, oldest first. Open rows load on their own, so a long closed
+ * history never crowds them out, with the newest closed rows on a chat-first server keeping
+ * their place. Open FYIs load apart for the inactivity check, and on older servers, whose notify
+ * text has no other surface.
  */
 export function useSquireChatApprovals(
   environmentId: EnvironmentId,
@@ -50,7 +52,12 @@ export function useSquireChatApprovals(
       ? null
       : squireEnvironment.items({
           environmentId,
-          input: { squireId, scope: "open", kinds: [...APPROVAL_KINDS] },
+          input: {
+            squireId,
+            scope: "open",
+            kinds: [...APPROVAL_KINDS],
+            limit: CHAT_ROWS_LIMIT,
+          },
         }),
   );
   const fyis = useEnvironmentQuery(
@@ -58,7 +65,7 @@ export function useSquireChatApprovals(
       ? null
       : squireEnvironment.items({
           environmentId,
-          input: { squireId, scope: "open", kinds: ["fyi"] },
+          input: { squireId, scope: "open", kinds: ["fyi"], limit: CHAT_ROWS_LIMIT },
         }),
   );
   const recent = useEnvironmentQuery(
@@ -70,22 +77,20 @@ export function useSquireChatApprovals(
             squireId,
             scope: "all",
             kinds: [...APPROVAL_KINDS],
-            limit: CLOSED_PAGE_LIMIT,
+            limit: CHAT_ROWS_LIMIT,
           },
         }),
   );
   if (squireId === null) return EMPTY_APPROVALS;
   const byId = new Map<SquireCardId, SquireCardRow>();
+  for (const row of recent.data?.items ?? NO_ITEMS) byId.set(row.id, row);
   for (const row of open.data?.items ?? NO_ITEMS) byId.set(row.id, row);
-  for (const row of recent.data?.items ?? NO_ITEMS) {
-    if (!byId.has(row.id)) byId.set(row.id, row);
-  }
-  const chat = { squireId, isLead: entry?.squire.role === "lead", chatFirst };
-  return squireWithInactivityChecks(
-    squireApprovalEntries([...byId.values()], chat),
-    fyis.data?.items ?? NO_ITEMS,
-    chat,
-  );
+  for (const row of fyis.data?.items ?? NO_ITEMS) byId.set(row.id, row);
+  return squireApprovalEntries([...byId.values()], {
+    squireId,
+    isLead: entry?.squire.role === "lead",
+    chatFirst,
+  });
 }
 
 const EMPTY_APPROVALS: ReadonlyArray<SquireApprovalEntry<SquireCardRow>> = [];
