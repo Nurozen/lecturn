@@ -8,7 +8,6 @@ import {
   UnknownUnionMember,
   WS_METHODS,
   type AuthSessionState,
-  type SquireCard,
   type SquireCardId,
   type SquireCardRow,
   type SquireId,
@@ -16,7 +15,6 @@ import {
   type SquirePullRequestSnapshot,
   type SquireRoomPost,
   type SquireRoomPostId,
-  type SquireRoutingReceipt,
   type SquireRouting,
   type SquireRule,
   type SquireRuleId,
@@ -46,12 +44,9 @@ import {
   createSquireEnvironmentAtoms,
   holdRemaining,
   squireAcceptOffer,
-  squireActedLabel,
-  squireAskCopy,
   squireBudgetCaption,
   squireCardOriginLabels,
   squireCardOrigins,
-  squireEditedText,
   squireFollowUpDraft,
   squireOffersFollowUp,
   squireOfferRuleInput,
@@ -60,8 +55,6 @@ import {
   squireEntryIndicator,
   squireMentionCompletions,
   squireMentionQuery,
-  squireQueue,
-  squireReceiptState,
   squireMentionStep,
   squireRoomAuthorLabel,
   squireRoomLogRows,
@@ -79,32 +72,35 @@ import {
   squireRuleText,
   squireScopeLine,
   squireSettledLabel,
+  squireSidebarState,
+  createSquireOpenedTracker,
+  squireApprovalControls,
+  squireOpenApprovalJump,
+  squireApprovalEntries,
+  squireAllowRuleInput,
+  runSquireAlwaysAllow,
+  isSquireStayQuietTool,
+  squireQuietRunIds,
   squireSnapshotGestures,
   squireStateLine,
   squireUndoOffer,
   squireVocabularyHints,
   squireCardCaption,
-  squireCardTimeline,
   squireControlText,
   squireDiffStatsLabel,
-  squireOverlapProviderNames,
   squireOverlapThreadLine,
   squireProposalCardText,
   squireProposalPaletteLabel,
   squireProposalPermissionsLabel,
-  squireProposalProviderName,
   squireProposalScopeLabels,
   squirePullRequestChips,
   squireQuestionWhyFallback,
   squireRaiserLabel,
-  squireRowProviderName,
   squireRowTargetName,
   squireSameText,
-  squireTimelineRows,
   squireWaitingSince,
   squireWhyText,
   type SquireSnapshotEntry,
-  squireUpdateGroupLabel,
   squireUpdateGroups,
   type SquireUpdateItemRole,
 } from "./squire.ts";
@@ -537,49 +533,6 @@ describe("holdRemaining", () => {
   });
 });
 
-describe("queue", () => {
-  const row = (kind: SquireCardRow["kind"], squireId = "squire-a") => ({
-    kind,
-    squireId: squireId as SquireId,
-    ownerSquireId: squireId as SquireId,
-  });
-  const items = [row("steer"), row("fyi"), row("question", "squire-b"), row("steer", "squire-b")];
-
-  it("groups decisions before FYI and counts every chip", () => {
-    const queue = squireQueue(items);
-    expect(queue.chips.map((c) => [c.label, c.count])).toEqual([
-      ["All", 4],
-      ["Action", 2],
-      ["Question", 1],
-      ["Overlap", 0],
-      ["Proposal", 0],
-      ["FYI", 1],
-    ]);
-    expect(queue.groups.map((g) => [g.label, g.items.length])).toEqual([
-      ["Needs a decision", 3],
-      ["FYI", 1],
-    ]);
-  });
-
-  it("counts within the team-strip filter and lists only the chosen chip", () => {
-    const queue = squireQueue(items, { chip: "steer", squireId: "squire-b" as SquireId });
-    expect(queue.chips.find((c) => c.chip === "all")?.count).toBe(2);
-    expect(queue.groups).toEqual([
-      { key: "decision", label: "Needs a decision", items: [items[3]] },
-    ]);
-  });
-
-  it("keeps an overlap row under the filter of either thread's Squire", () => {
-    const overlap = {
-      ...row("overlap"),
-      relatedSquireIds: ["squire-a", "squire-c"] as Array<SquireId>,
-    };
-    const filtered = squireQueue([overlap], { squireId: "squire-c" as SquireId });
-    expect(filtered.chips.find((c) => c.chip === "overlap")?.count).toBe(1);
-    expect(squireQueue([overlap], { squireId: "squire-d" as SquireId }).chips[0]?.count).toBe(0);
-  });
-});
-
 describe("labels", () => {
   const card = (overrides: Partial<Pick<SquireCardRow, "origin" | "routedTaskId" | "ruleId">>) =>
     ({
@@ -698,38 +651,6 @@ describe("labels", () => {
     expect(chip({ kind: "pending" }, [])).toBe("Routing…");
     // A routing kind this build does not know still reads as routed.
     expect(chip(new UnknownUnionMember("kind", "vote"), ["r"])).toBe("Routed");
-  });
-
-  it("follows a routing receipt from sent to its items' states", () => {
-    const receipt = (overrides: Partial<SquireRoutingReceipt>) =>
-      ({
-        taskId: "task",
-        toSquireId: "release",
-        text: "Rerun api-e2e on #318",
-        status: "sent",
-        quietReason: null,
-        items: [],
-        createdAt: at,
-        ...overrides,
-      }) as SquireRoutingReceipt;
-    const nameOf = () => "Release";
-    expect(squireReceiptState(receipt({}), nameOf)).toMatchObject({
-      text: "Sent to Release",
-      settled: false,
-    });
-    const item = (status: string) => ({ cardId: "c", kind: "proposal", status }) as never;
-    expect(
-      squireReceiptState(receipt({ status: "acted", items: [item("open")] }), nameOf),
-    ).toMatchObject({
-      text: "Sent to Release as a proposal: Rerun api-e2e on #318",
-      settled: false,
-    });
-    expect(
-      squireReceiptState(receipt({ status: "acted", items: [item("resolved")] }), nameOf).settled,
-    ).toBe(true);
-    expect(
-      squireReceiptState(receipt({ status: "quiet", quietReason: "already green" }), nameOf).text,
-    ).toBe("Release: no action, already green");
   });
 });
 
@@ -944,19 +865,6 @@ describe("queue cards", () => {
     ...overrides,
   });
 
-  it("names how a card ended, and what the user's own act did", () => {
-    expect(squireSettledLabel({ status: "resolved", resolution: "answered" })).toBe("Answered");
-    expect(squireSettledLabel({ status: "outdated", resolution: "expired" })).toBe("Outdated");
-    expect(squireSettledLabel({ status: "dismissed" })).toBe("Dismissed");
-    expect(squireActedLabel(row("question"), "accept")).toBe("Answered");
-    expect(squireActedLabel(row("overlap"), "accept")).toBe("Reviewed");
-    expect(squireActedLabel(row("proposal"), "accept")).toBe("Accepted");
-    expect(squireActedLabel(row("steer"), "dismiss")).toBe("Dismissed");
-    const inactivity = row("fyi", { fyiSource: "inactivity" });
-    expect(squireActedLabel(inactivity, "accept")).toBe("Kept running");
-    expect(squireActedLabel(inactivity, "dismiss")).toBe("Paused");
-  });
-
   it("acts inline only on open cards, expanding what needs the card to answer", () => {
     expect(squireRowAction(row("steer"))).toEqual({ type: "accept", label: "Send steer" });
     expect(squireRowAction(row("proposal"))).toEqual({ type: "accept", label: "Accept" });
@@ -979,15 +887,6 @@ describe("queue cards", () => {
       squireRowAction(row("fyi", { squireId: LEAD, title: "Keep Squire triggers running?" }))?.type,
     ).toBe("dismiss");
     expect(squireRowAction(row("fyi", { fyiSource: "notify" }))?.type).toBe("dismiss");
-  });
-
-  it("sends edited text only when it differs from the recommendation", () => {
-    expect(squireEditedText("Rebase on main", null)).toBeUndefined();
-    expect(squireEditedText("Rebase on main", " Rebase on main ")).toBeUndefined();
-    expect(squireEditedText("Rebase on main", "   ")).toBeUndefined();
-    expect(squireEditedText("Rebase on main", "Rebase on main, then rerun")).toBe(
-      "Rebase on main, then rerun",
-    );
   });
 
   it("quotes the question above the thread's existing draft, once", () => {
@@ -1061,14 +960,6 @@ describe("queue cards", () => {
         steerKind: "rebase",
       }),
     ).toBe(false);
-  });
-
-  it("warns that a provider without a native fork replays context first", () => {
-    expect(squireAskCopy({ name: "Codex", conversationFork: "native" })).not.toContain("replays");
-    expect(squireAskCopy({ name: "Cursor", conversationFork: "unsupported" })).toContain(
-      "Cursor cannot fork natively, so Lecturn replays the thread's recent context first",
-    );
-    expect(squireAskCopy({ name: "Grok", conversationFork: undefined })).toContain("replays");
   });
 
   describe("origin labels", () => {
@@ -1298,11 +1189,6 @@ describe("queue cards", () => {
 
   describe("row names", () => {
     const names = { threadTitle: "Fix invoice rounding", projectTitle: "billing-service" };
-    const providers = {
-      instanceName: (id: string) => (id === "work-claude" ? "Claude (work)" : null),
-      driverName: (driver: string) => (driver === "codex" ? "Codex" : undefined),
-    };
-
     it("names a row by its thread, an overlap by its thread count, a proposal by what it makes", () => {
       expect(squireRowTargetName(row("steer"), names)).toBe("Fix invoice rounding");
       const unthreaded = { targetThreadId: null };
@@ -1332,137 +1218,11 @@ describe("queue cards", () => {
       expect(squireRowTargetName(row("fyi"), names)).toBe("Fix invoice rounding");
     });
 
-    it("names a provider by thread, then proposal instance or driver, then each overlap once", () => {
-      expect(squireRowProviderName({ threadProvider: "Cursor", proposalProvider: "Codex" })).toBe(
-        "Cursor",
-      );
-      expect(squireRowProviderName({ threadProvider: null, proposalProvider: "Codex" })).toBe(
-        "Codex",
-      );
-      const proposal = { provider: "claudeAgent" as never, providerInstanceId: null };
-      expect(squireProposalProviderName(proposal, "Claude (work)", providers.driverName)).toBe(
-        "Claude (work)",
-      );
-      expect(squireProposalProviderName(proposal, null, providers.driverName)).toBe("claudeAgent");
-      expect(squireProposalProviderName(undefined, null, providers.driverName)).toBeNull();
-      const overlap = squireOverlapProviderNames(
-        {
-          overlapProviders: ["codex", "claudeAgent", "codex"],
-          overlapProviderInstanceIds: [null, "work-claude", null],
-        },
-        providers,
-      );
-      expect(overlap).toEqual(["Codex", "Claude (work)", "Codex"]);
-      expect(squireOverlapProviderNames({}, providers)).toBeNull();
-      // An unknown instance falls back to the driver's name, then the raw driver.
-      expect(
-        squireOverlapProviderNames(
-          { overlapProviders: ["codex", "acme"], overlapProviderInstanceIds: ["codex-gone"] },
-          providers,
-        ),
-      ).toEqual(["Codex", "acme"]);
-      expect(
-        squireRowProviderName({
-          threadProvider: null,
-          proposalProvider: null,
-          overlapProviders: overlap,
-        }),
-      ).toBe("Codex + Claude (work)");
-      expect(squireRowProviderName({ threadProvider: null, proposalProvider: null })).toBeNull();
-    });
-
-    it("names each overlap provider as the card's thread line does", () => {
-      const overlap = {
-        overlapProviders: ["scripted", "codex"],
-        overlapProviderInstanceIds: ["scripted", null],
-      };
-      const instanceName = (id: string) => (id === "scripted" ? "Scripted (test)" : null);
-      expect(squireOverlapProviderNames(overlap, { ...providers, instanceName })).toEqual(
-        overlap.overlapProviders.map(
-          (provider, index) =>
-            squireOverlapThreadLine(
-              { provider, branch: null } as Parameters<typeof squireOverlapThreadLine>[0],
-              {
-                title: null,
-                instanceName: instanceName(overlap.overlapProviderInstanceIds[index] ?? ""),
-                driverName: providers.driverName,
-              },
-            ).provider,
-        ),
-      );
-    });
-
     it("names the Lead's own items Lead, and treats spacing and case as the same text", () => {
       expect(squireRaiserLabel({ name: "Steward", role: "lead" })).toBe("Lead");
       expect(squireRaiserLabel({ name: "Release", role: "squire" })).toBe("Release");
       expect(squireSameText(" Fix  invoice\nrounding ", "fix invoice rounding")).toBe(true);
       expect(squireSameText("Fix invoice", "Fix invoices")).toBe(false);
-    });
-  });
-
-  describe("timelines", () => {
-    const base = {
-      timeline: [] as SquireCard["timeline"],
-      createdAt: "2026-11-01T14:02:00.000Z" as SquireCard["createdAt"],
-      updatedAt: "2026-11-01T14:02:00.000Z" as SquireCard["updatedAt"],
-      replacedCount: 0,
-      evidence: {},
-    };
-    const formatTime = (iso: string) => iso.slice(11, 16);
-
-    it("uses the server's timeline when it has one", () => {
-      const timeline = [
-        { at: "2026-11-01T14:05:00.000Z", text: "PR #318 pushed abc1234" },
-      ] as SquireCard["timeline"];
-      expect(squireCardTimeline({ ...base, timeline })).toBe(timeline);
-    });
-
-    it("falls back to what the card knows: its PR change, raised, and its last update", () => {
-      expect(squireCardTimeline(base)).toEqual([{ at: base.createdAt, text: "raised" }]);
-      const pr = {
-        repository: "acme/billing",
-        number: 318,
-        headSha: "abc1234",
-        transition: "checks:failed",
-        baseBranch: "main",
-        checks: { passed: 12, failed: 2, failingJobs: [] },
-        review: "none",
-        mergeable: null,
-        merged: false,
-        closed: false,
-      } as unknown as NonNullable<SquireCard["evidence"]["pullRequest"]>;
-      const timeline = squireCardTimeline({
-        ...base,
-        evidence: { pullRequest: pr },
-        replacedCount: 1,
-        updatedAt: "2026-11-01T14:09:00.000Z" as SquireCard["updatedAt"],
-      });
-      expect(squireTimelineRows(timeline, formatTime, "Release")).toEqual([
-        { key: "0:2026-11-01T14:02:00.000Z", time: "14:02", text: "PR #318 checks failed" },
-        { key: "1:2026-11-01T14:02:00.000Z", time: "14:02", text: "Release raised this" },
-        { key: "2:2026-11-01T14:09:00.000Z", time: "14:09", text: "updated" },
-      ]);
-    });
-
-    it("gives the card's own entries their subject and skips blank events", () => {
-      expect(
-        squireTimelineRows(
-          [
-            { at: "2026-11-01T20:15:00.000Z", text: " raised " },
-            { at: "2026-11-01T20:16:00.000Z", text: "  " },
-            { at: "2026-11-01T20:17:00.000Z", text: "opened" },
-            { at: "2026-11-01T20:18:00.000Z", text: "Release raised the budget" },
-          ],
-          formatTime,
-          "Release",
-        ).map((entry) => entry.text),
-      ).toEqual(["Release raised this", "You opened this", "Release raised the budget"]);
-    });
-
-    it("keys identical entries apart", () => {
-      const entry = { at: "2026-11-01T20:15:00.000Z", text: "updated" };
-      const rows = squireTimelineRows([entry, entry], formatTime, "Lead");
-      expect(new Set(rows.map((entry) => entry.key)).size).toBe(2);
     });
   });
 
@@ -1625,62 +1385,482 @@ describe("queue cards", () => {
 });
 
 describe("squireUpdateGroups", () => {
-  type Item = { readonly role: SquireUpdateItemRole; readonly kinds?: ReadonlyArray<string> };
-  const groups = (items: ReadonlyArray<Item>) =>
-    squireUpdateGroups(
-      items,
-      (item) => item.role,
-      (item) => item.kinds ?? [],
-    );
+  type Item = { readonly role: SquireUpdateItemRole };
+  const groups = (items: ReadonlyArray<Item>) => squireUpdateGroups(items, (item) => item.role);
 
-  it("folds older consecutive wakes with what their turns produced, never the newest", () => {
+  it("spans consecutive wakes with what their turns did, down to one wake", () => {
     expect(
       groups([
         { role: "user" },
         { role: "update" },
-        { role: "wake", kinds: ["turn-completed"] },
+        { role: "wake" },
         { role: "update" },
-        { role: "update" },
-        { role: "wake", kinds: ["pr-failed", "turn-completed"] },
-        { role: "update" },
-        { role: "wake", kinds: ["message"] },
+        { role: "wake" },
         { role: "update" },
       ]),
-    ).toEqual([{ start: 2, end: 7, wakeCount: 2, eventKinds: ["turn-completed", "pr-failed"] }]);
+    ).toEqual([{ start: 2, end: 6 }]);
+    expect(groups([{ role: "wake" }, { role: "update" }])).toEqual([{ start: 0, end: 2 }]);
   });
 
-  it("leaves a lone wake alone, and splits at the user's own messages", () => {
+  it("splits at the user's own messages and leaves work outside a wake alone", () => {
     expect(
       groups([
         { role: "wake" },
         { role: "update" },
         { role: "user" },
+        { role: "update" },
         { role: "wake" },
-        { role: "wake" },
+      ]),
+    ).toEqual([
+      { start: 0, end: 2 },
+      { start: 4, end: 5 },
+    ]);
+  });
+
+  it("never spans a kept row, so a reply or a running turn stays in view", () => {
+    expect(groups([{ role: "wake" }, { role: "keep" }, { role: "wake" }])).toEqual([
+      { start: 0, end: 1 },
+      { start: 2, end: 3 },
+    ]);
+  });
+});
+
+describe("squireApprovalEntries", () => {
+  const lead = "squire-lead" as SquireId;
+  const squire = "squire-a" as SquireId;
+  const card = (
+    id: string,
+    overrides: Partial<
+      Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution" | "fyiSource">
+    > = {},
+  ) => ({
+    id,
+    kind: "steer" as const,
+    status: "open" as const,
+    squireId: squire,
+    createdAt: at,
+    ...overrides,
+  });
+
+  it("keeps an open inactivity check, the one FYI whose answer matters", () => {
+    const rows = [
+      card("check", { kind: "fyi", fyiSource: "inactivity" }),
+      card("news", { kind: "fyi", fyiSource: "summary" }),
+      card("answered", { kind: "fyi", fyiSource: "inactivity", status: "resolved" }),
+    ];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["check"]);
+  });
+
+  it("orders a chat's rows oldest first, leaving FYIs and holds out", () => {
+    const entries = squireApprovalEntries(
+      [
+        card("newer", { createdAt: "2026-11-01T11:00:00.000Z" }),
+        card("fyi", { kind: "fyi" }),
+        card("held", { status: "held" }),
+        card("older", { createdAt: "2026-11-01T10:30:00.000Z" }),
+      ],
+      { squireId: squire, isLead: false, chatFirst: true },
+    );
+    expect(entries.map((entry) => entry.row.id)).toEqual(["older", "newer"]);
+  });
+
+  it("gives a closed row its outcome and marks an expired one", () => {
+    const [expired, denied] = squireApprovalEntries(
+      [
+        card("expired", { status: "outdated", resolution: "expired" }),
+        card("denied", {
+          status: "dismissed",
+          resolution: "denied",
+          createdAt: "2026-11-01T10:01:00.000Z",
+        }),
+      ],
+      { squireId: squire, isLead: false, chatFirst: true },
+    );
+    expect(expired).toMatchObject({ phase: "closed", outcome: "Expired", expired: true });
+    expect(denied).toMatchObject({ phase: "closed", outcome: "Denied", expired: false });
+  });
+
+  it("a row belongs to the chat of its raiser on a chat-first server", () => {
+    const rows = [card("lead-raised", { squireId: lead }), card("own")];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["own"]);
+    expect(
+      squireApprovalEntries(rows, { squireId: lead, isLead: true, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised"]);
+  });
+
+  it("an older server's Squire keeps its whole list; its Lead keeps what it raised", () => {
+    const rows = [card("lead-raised", { squireId: lead }), card("own")];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: false }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised", "own"]);
+    expect(
+      squireApprovalEntries(rows, { squireId: lead, isLead: true, chatFirst: false }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["lead-raised"]);
+  });
+});
+
+describe("squireApprovalEntries on an older server", () => {
+  const row = (fyiSource: "summary" | "inactivity") => ({
+    id: "fyi",
+    kind: "fyi" as const,
+    status: "open" as const,
+    squireId: "squire-a" as SquireId,
+    createdAt: at,
+    fyiSource,
+  });
+
+  it("keeps a Squire's open notes, with Dismiss, when chat-first is absent", () => {
+    const entries = squireApprovalEntries([row("summary")], {
+      squireId: "squire-a" as SquireId,
+      isLead: false,
+      chatFirst: false,
+    });
+    expect(entries).toHaveLength(1);
+    expect(squireApprovalControls(entries[0]! as never, null)).toMatchObject({ deny: "Dismiss" });
+  });
+});
+
+describe("squireApprovalControls", () => {
+  const offer: SquireRuleOffer = {
+    effect: "allow",
+    actionClass: "steer",
+    targetKind: "thread",
+    targetId: "thread-1",
+    text: "Research may auto-send review-feedback steers",
+    capReached: false,
+  };
+  const base = {
+    id: "card-1" as SquireCardId,
+    squireId: "squire-a" as SquireId,
+    createdAt: at,
+    status: "open" as const,
+    resolution: undefined,
+  };
+  const entry = (
+    patch: Partial<SquireCardRow> & Pick<SquireCardRow, "kind">,
+    phase: "open" | "sending" | "closed" = "open",
+    expired = false,
+  ) => ({
+    row: { ...base, ...patch },
+    createdAt: at,
+    phase,
+    outcome: phase === "closed" ? (expired ? "Expired" : "Sent") : null,
+    expired,
+  });
+
+  it("gives an open approval Allow once and Deny, with Always allow only if a rule can apply", () => {
+    expect(squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }), null)).toEqual({
+      allow: "Allow once",
+      alwaysAllow: true,
+      deny: "Deny",
+      inactivity: false,
+      allowNextTime: false,
+    });
+    expect(squireApprovalControls(entry({ kind: "steer" }), null).alwaysAllow).toBe(false);
+  });
+
+  it("names a Squire or room proposal's own accept", () => {
+    const proposal = (type: string) =>
+      squireApprovalControls(entry({ kind: "proposal" }), { type } as never).allow;
+    expect(proposal("squire-proposal")).toBe("Accept");
+    expect(proposal("room-proposal")).toBe("Open room");
+    expect(proposal("thread-proposal")).toBe("Allow once");
+  });
+
+  it("answers a question in place and offers an overlap only Dismiss", () => {
+    expect(squireApprovalControls(entry({ kind: "question" }), null)).toMatchObject({
+      allow: null,
+      deny: "Dismiss",
+    });
+    expect(squireApprovalControls(entry({ kind: "overlap" }), null)).toMatchObject({
+      allow: null,
+      deny: "Dismiss",
+    });
+  });
+
+  it("gives the inactivity check its Keep and Pause", () => {
+    expect(
+      squireApprovalControls(entry({ kind: "fyi", fyiSource: "inactivity" }), null),
+    ).toMatchObject({ inactivity: true, allow: null, deny: null });
+  });
+
+  it("offers Always allow next time only on an expired approval a rule could cover", () => {
+    expect(
+      squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }, "closed", true), null),
+    ).toMatchObject({ allowNextTime: true, allow: null, deny: null });
+    expect(
+      squireApprovalControls(entry({ kind: "steer" }, "closed", true), null).allowNextTime,
+    ).toBe(false);
+    expect(
+      squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }, "closed"), null)
+        .allowNextTime,
+    ).toBe(false);
+  });
+});
+
+describe("Always allow", () => {
+  const offer: SquireRuleOffer = {
+    effect: "allow",
+    actionClass: "steer",
+    targetKind: "thread",
+    targetId: "thread-1",
+    text: "Research may auto-send review-feedback steers",
+    capReached: false,
+  };
+  const row = (allowRuleOffer: SquireRuleOffer | null = offer) => ({
+    id: "card-1" as SquireCardId,
+    squireId: "squire-a" as SquireId,
+    ...(allowRuleOffer === null ? {} : { allowRuleOffer }),
+  });
+
+  it("offers a rule only where the server attached one that can be saved", () => {
+    expect(squireAllowRuleInput(row())).toMatchObject({
+      effect: "allow",
+      actionClass: "steer",
+      targetId: "thread-1",
+      fromCardId: "card-1",
+    });
+    expect(squireAllowRuleInput(row(null))).toBeNull();
+    expect(squireAllowRuleInput(row({ ...offer, capReached: true }))).toBeNull();
+    expect(squireAllowRuleInput(row({ ...offer, effect: "ask-first" }))).toBeNull();
+  });
+
+  it("saves the rule only after the accept goes through", async () => {
+    const saved: unknown[] = [];
+    const saveRule = async (input: unknown) => {
+      saved.push(input);
+      return { ok: true as const };
+    };
+    await expect(
+      runSquireAlwaysAllow(row(), {
+        accept: async () => ({ ok: true }),
+        saveRule,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(saved).toHaveLength(1);
+
+    await expect(
+      runSquireAlwaysAllow(row(), {
+        accept: async () => ({ ok: false, error: "Already handled" }),
+        saveRule,
+      }),
+    ).resolves.toEqual({ ok: false, error: "Already handled" });
+    expect(saved).toHaveLength(1);
+  });
+});
+
+describe("squireSidebarState", () => {
+  const shell = (patch: { lastVisitedAt?: string | null; status?: string } = {}) =>
+    ({
+      latestRun: patch.status === undefined ? null : { status: patch.status, runId: "run-1" },
+      lastVisitedAt: patch.lastVisitedAt,
+      session: patch.status === undefined ? null : { status: patch.status },
+    }) as never;
+  const entry = (patch: { openDecisionCount?: number; lastMessageAt?: string } = {}) => ({
+    ...snapshot("a", { openDecisionCount: patch.openDecisionCount ?? 0 }),
+    ...(patch.lastMessageAt === undefined ? {} : { lastMessageAt: patch.lastMessageAt }),
+  });
+
+  it("an open decision is needs-you, ahead of unread", () => {
+    expect(
+      squireSidebarState(
+        entry({ openDecisionCount: 1, lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("needs-you");
+  });
+
+  it("unread only when a message landed after the last visit", () => {
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("unread");
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T09:00:00.000Z" }),
+        shell({ lastVisitedAt: "2026-11-01T10:00:00.000Z" }),
+      ),
+    ).toBe("none");
+    expect(
+      squireSidebarState(
+        entry({ lastMessageAt: "2026-11-01T11:00:00.000Z" }),
+        shell({
+          lastVisitedAt: null,
+        }),
+      ),
+    ).toBe("unread");
+  });
+
+  it("is quiet on an older server without lastMessageAt", () => {
+    expect(squireSidebarState(entry(), shell({ lastVisitedAt: null }))).toBe("none");
+  });
+});
+
+describe("squireQuietRunIds", () => {
+  type Item = { readonly run: string | null; readonly tool?: string; readonly user?: boolean };
+  const quiet = (items: ReadonlyArray<Item>) => [
+    ...squireQuietRunIds(items, (item) => ({
+      runId: item.run,
+      toolName: item.tool ?? null,
+      userMessage: item.user === true,
+    })),
+  ];
+  const stay = "mcp__lecturn__squire_stay_quiet";
+
+  it("marks a run that only stayed quiet", () => {
+    expect(
+      quiet([
+        { run: "a", tool: "squire_get_summary" },
+        { run: "a", tool: stay },
+      ]),
+    ).toEqual(["a"]);
+  });
+
+  it("leaves a batch that also spoke about another thread", () => {
+    expect(
+      quiet([
+        { run: "a", tool: stay },
+        { run: "a", tool: "mcp__lecturn__squire_notify" },
+      ]),
+    ).toEqual([]);
+    expect(
+      quiet([
+        { run: "a", tool: "squire_recommend_steer" },
+        { run: "a", tool: stay },
       ]),
     ).toEqual([]);
   });
 
-  it("keeps a running turn or a waiting card outside the group", () => {
+  it("never silences a run the user started", () => {
     expect(
-      groups([
-        { role: "wake" },
-        { role: "update" },
-        { role: "wake" },
-        { role: "keep" },
-        { role: "update" },
-        { role: "wake" },
+      quiet([
+        { run: "a", user: true },
+        { run: "a", tool: stay },
       ]),
-    ).toEqual([{ start: 0, end: 3, wakeCount: 2, eventKinds: [] }]);
+    ).toEqual([]);
   });
 
-  it("labels the count and the first few event kinds", () => {
-    expect(squireUpdateGroupLabel({ wakeCount: 3, eventKinds: ["pr-failed"] })).toBe(
-      "3 Squire updates · pr failed",
-    );
-    expect(squireUpdateGroupLabel({ wakeCount: 2, eventKinds: [] })).toBe("2 Squire updates");
-    expect(squireUpdateGroupLabel({ wakeCount: 4, eventKinds: ["a", "b", "c", "d"] })).toBe(
-      "4 Squire updates · a, b, c, …",
-    );
+  it("does not count another Squire's message or a read as speaking", () => {
+    expect(
+      quiet([
+        { run: "a", tool: "squire_send_message" },
+        { run: "a", tool: stay },
+        { run: null, tool: stay },
+      ]),
+    ).toEqual(["a"]);
+  });
+});
+
+describe("isSquireStayQuietTool", () => {
+  it("matches the tool however the provider namespaces it", () => {
+    expect(isSquireStayQuietTool("squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("mcp__lecturn__squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("lecturn.squire_stay_quiet")).toBe(true);
+    expect(isSquireStayQuietTool("squire_notify")).toBe(false);
+    expect(isSquireStayQuietTool("mysquire_stay_quiet")).toBe(false);
+    expect(isSquireStayQuietTool(null)).toBe(false);
+  });
+});
+
+describe("squireSettledLabel", () => {
+  it("names how a card ended", () => {
+    expect(squireSettledLabel({ status: "resolved", resolution: "answered" })).toBe("Answered");
+    expect(squireSettledLabel({ status: "outdated", resolution: "expired" })).toBe("Expired");
+    expect(squireSettledLabel({ status: "dismissed", resolution: "denied" })).toBe("Denied");
+    expect(squireSettledLabel({ status: "dismissed" })).toBe("Dismissed");
+  });
+});
+
+describe("squireOverlapThreadLine", () => {
+  const thread = { provider: "codex", branch: null } as Parameters<
+    typeof squireOverlapThreadLine
+  >[0];
+  const driverName = (driver: string) => (driver === "codex" ? "Codex" : undefined);
+
+  it("names the provider by its instance, then its driver, then the raw driver", () => {
+    expect(
+      squireOverlapThreadLine(thread, { title: null, instanceName: "Work", driverName }).provider,
+    ).toBe("Work");
+    expect(
+      squireOverlapThreadLine(thread, { title: null, instanceName: null, driverName }).provider,
+    ).toBe("Codex");
+    expect(
+      squireOverlapThreadLine(thread, {
+        title: null,
+        instanceName: null,
+        driverName: () => undefined,
+      }).provider,
+    ).toBe("codex");
+  });
+});
+
+describe("squireOpenApprovalJump", () => {
+  const entry = (
+    id: string,
+    phase: "open" | "sending" | "closed",
+    kind: SquireCardRow["kind"] = "steer",
+    fyiSource?: "inactivity" | "summary",
+  ) => ({
+    row: {
+      id: id as SquireCardId,
+      kind,
+      ...(fyiSource === undefined ? {} : { fyiSource }),
+    },
+    createdAt: at,
+    phase,
+    outcome: null,
+    expired: false,
+  });
+
+  it("goes to the oldest open row and counts what is waiting", () => {
+    expect(
+      squireOpenApprovalJump([
+        entry("closed", "closed"),
+        entry("old", "open"),
+        entry("new", "open"),
+      ]),
+    ).toEqual({ cardId: "old", label: "2 need you" });
+  });
+
+  it("reads singular, and ignores what is already underway or only news", () => {
+    expect(
+      squireOpenApprovalJump([
+        entry("running", "sending"),
+        entry("news", "open", "fyi", "summary"),
+        entry("check", "open", "fyi", "inactivity"),
+      ]),
+    ).toEqual({ cardId: "check", label: "1 needs you" });
+    expect(squireOpenApprovalJump([entry("running", "sending")])).toBeNull();
+  });
+});
+
+describe("createSquireOpenedTracker", () => {
+  const env = "env" as EnvironmentId;
+  const card = "card-1" as SquireCardId;
+
+  it("sends once per card, skips one already opened, and retries after a failure", () => {
+    const tracker = createSquireOpenedTracker();
+    expect(tracker.take(env, card, null)).toBe(true);
+    expect(tracker.take(env, card, null)).toBe(false);
+    tracker.release(env, card);
+    expect(tracker.take(env, card, null)).toBe(true);
+    const other = createSquireOpenedTracker();
+    expect(other.take(env, card, "2026-11-01T10:00:00.000Z")).toBe(false);
   });
 });

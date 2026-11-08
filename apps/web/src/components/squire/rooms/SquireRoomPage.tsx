@@ -39,7 +39,7 @@ import {
   WorkspaceBreadcrumbText,
 } from "../../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../../WorkspacePageHeader";
-import { commandFailureMessage } from "../queue/SquireEvidenceCard";
+import { commandFailureMessage } from "../squireCommandFailure";
 import { SquireRoomComposer } from "./SquireRoomComposer";
 import { SquireRoomLog, type SquireRoomLogContext } from "./SquireRoomLog";
 import { SquireRoomPortraits } from "./SquireRoomPortraits";

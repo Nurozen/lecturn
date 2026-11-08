@@ -79,23 +79,17 @@ export function squireHoldText(
 
 export interface TrackedThreadBannerState {
   readonly text: string;
-  /** The item the banner opens: the oldest open decision on this thread. */
-  readonly cardId: SquireCardId;
 }
 
 /** "Release · 1 needs a decision" for a tracking Squire's open decisions on this thread. */
 export function trackedThreadBanner(
-  rows: ReadonlyArray<Pick<SquireCardRow, "id" | "status" | "targetThreadId" | "createdAt">>,
+  rows: ReadonlyArray<Pick<SquireCardRow, "status" | "targetThreadId">>,
   threadId: string,
   squireName: string,
 ): TrackedThreadBannerState | null {
-  const open = rows
-    .filter((row) => row.status === "open" && row.targetThreadId === threadId)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const first = open[0];
-  if (first === undefined) return null;
+  const open = rows.filter((row) => row.status === "open" && row.targetThreadId === threadId);
+  if (open.length === 0) return null;
   return {
     text: `${squireName} · ${open.length} ${open.length === 1 ? "needs" : "need"} a decision`,
-    cardId: first.id,
   };
 }

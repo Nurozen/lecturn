@@ -155,7 +155,7 @@ export const readSquireQuestion = Effect.fn("SquireItems.readSquireQuestion")(fu
 const decodeFyiSource = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ source: Schema.String })),
 );
-const fyiSourceOf = (payloadJson: string | null): string =>
+export const fyiSourceOf = (payloadJson: string | null): string =>
   payloadJson === null
     ? "unknown"
     : Option.match(decodeFyiSource(payloadJson), {
@@ -279,6 +279,7 @@ export const squireCardRowFields = (row: SquireRepository.SquireCardRow) => ({
   ...(row.kind === "proposal" ? proposalProviderOf(row.payload_json) : {}),
   ...(row.kind === "overlap" ? overlapSquiresOf(row.payload_json) : {}),
   ...(row.kind === "question" ? questionFieldsOf(row.payload_json) : {}),
+  ...(row.resolution === null ? {} : { resolution: row.resolution }),
   id: row.id,
   squireId: row.squire_id,
   ownerSquireId: row.owner_squire_id,

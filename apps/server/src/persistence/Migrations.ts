@@ -118,6 +118,7 @@ import Migration0087 from "./Migrations/069_ThreadMessageSearch.ts";
 import Migration0088 from "./Migrations/070_PeerLinks.ts";
 import Migration0089 from "./Migrations/071_PeerLinkFence.ts";
 import Migration0090 from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0091 from "./Migrations/091_SquireChatFirst.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -349,6 +350,7 @@ const migrationEntries = [
   [88, "PeerLinks", Migration0088],
   [89, "PeerLinkFence", PeerLinkFenceCompatibility],
   [90, "WaitingLinkRequestIndex", WaitingLinkRequestIndexCompatibility],
+  [91, "SquireChatFirst", Migration0091],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

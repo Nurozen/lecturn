@@ -109,13 +109,28 @@ the stored result. Held and accepted actions follow the durable protocol in
 [SquireActions.ts][actions]: the receipt decides the outcome, and because the orchestrator replays a
 rejected receipt forever, a deliberate retry needs a new attempt number.
 
+**Approvals.** An approval is an open steer or proposal. It renders and counts only in the raiser's
+chat, so a badge never needs correcting for what another chat shows. One a background turn raised
+waits [`SQUIRE_APPROVAL_TTL`][repository], refreshed when a re-raise replaces it in place, then the
+clock moves it to `outdated`/`expired` writing no Lead event and no push: a stale ask leaves quietly,
+and its rule offer stays savable. An approval the user or a voice note started never expires.
+
+Deny is dismiss on an open approval. The slot (thread and kind, or project and title for a proposal
+with no thread) is refused until the user next writes in that Squire's chat. That message closes the
+Squire's open approvals and ends its denials, and it can be a steer into a running turn, so the
+trigger is the user's `user_message` item, bounded by its time so cards raised after it survive. It
+writes no Lead event: the user just settled those items where the Lead would report them. A denial
+is in force while its card's `expires_at` is null; ending it stamps that column, so the history row
+keeps reading Denied.
+
 **Holds are not items.** A held Auto action is a `squire_card` in `held` status, outside the
 one-open-card index, so it never replaces an open card for the same thread and kind. The read model
 pairs them (`heldOverCardId`) so every surface shows the hold under the card it would supersede.
 Undo supersedes the older card, then opens the hold in its place, so the newer intent wins. Pausing
 does not: `openHeldCards` opens each hold, newest first, only where no open card holds that slot,
 and marks the rest `outdated` (`superseded`). An open card therefore survives a pause and the
-holds under it are dropped.
+holds under it are dropped. A hold never expires and a chat message does not cancel it, since the
+Undo window is the user's say; one that reopens as an approval gets its TTL then.
 
 **Origins.** Text a Squire wrote never drives an Auto action or a rule match, directly or laundered
 through the Lead. Voice, webhook, test, sweep, and unknown origins are recommend-only and ignore
@@ -181,6 +196,9 @@ including clients older than the mode.
 ## Notifications
 
 Transport follows notification intents, not decision counts; Notify Off writes none.
+`squire_notify` is the alert: an FYI card and a `notification.pushed` row, with the reply as the body.
+The phone counts open FYIs, so a visit to the home thread or a user message there closes them, or
+attention would never clear; the inactivity check stays open until answered.
 [SquireMobileAttention.ts][mobile-attention] publishes one relay row per Squire with a count, never
 item text, and `userPresent: false`, because the relay's own suppression counts mobile clients.
 [SquirePresence.ts][presence] owns hold-back: only a focused web or desktop client with input in
@@ -200,6 +218,7 @@ intent is recorded as coalesced.
 [reactor]: ../../apps/server/src/squire/SquireReactor.ts
 [floor]: ../../apps/server/src/squire/SquireCompactionFloor.ts
 [actions]: ../../apps/server/src/squire/SquireActions.ts
+[repository]: ../../apps/server/src/squire/SquireRepository.ts
 [room-routing]: ../../apps/server/src/squire/squireRoomRouting.ts
 [jev]: ../../apps/server/src/squire/SquireJevRouter.ts
 [app-route]: ../../apps/server/src/squire/SquireMcpAppRoute.ts

@@ -59,6 +59,7 @@ export type SquireSweepRefusal =
   | "not-a-sweep"
   | "not-a-candidate"
   | "finding-dismissed"
+  | "finding-outdated"
   | "already-raised"
   | "sweep-findings-reached"
   | "daily-findings-reached";
@@ -297,7 +298,7 @@ const make = Effect.gen(function* () {
   const candidateFor = Effect.fnUntraced(function* (
     shell: OrchestrationV2ThreadShell,
     nowMs: number,
-    dismissed: ReadonlySet<string>,
+    passedOn: ReadonlySet<string>,
   ) {
     if (shell.activeRunId !== null) return Option.none<SquireSweepCandidate & { at: number }>();
     const lastStart = ms(shell.latestRunStartedAt) ?? ms(shell.latestRunRequestedAt);
@@ -316,7 +317,7 @@ const make = Effect.gen(function* () {
         pullRequestNumber: link.number,
         headSha,
       };
-      if (dismissed.has(findingKeyOf(candidate))) continue;
+      if (passedOn.has(findingKeyOf(candidate))) continue;
       const failedAt = yield* failureAt(shell.id, link, headSha);
       if (lastStart === null || lastStart < failedAt) {
         return Option.some({ ...candidate, at: lastTurn });
@@ -330,7 +331,7 @@ const make = Effect.gen(function* () {
         pullRequestNumber: link.number,
         headSha: link.snapshot?.headSha ?? null,
       };
-      if (!dismissed.has(findingKeyOf(candidate)))
+      if (!passedOn.has(findingKeyOf(candidate)))
         return Option.some({ ...candidate, at: lastTurn });
     }
     return Option.none<SquireSweepCandidate & { at: number }>();
@@ -349,10 +350,12 @@ const make = Effect.gen(function* () {
         .map((row) => row.id),
     );
     if (active.size === 0) return [];
-    const dismissed = new Set(
-      (yield* repository.listCards({ squireId: lead.id, statuses: ["dismissed"] })).flatMap(
-        (card) => (card.finding_key === null ? [] : [card.finding_key]),
-      ),
+    // A finding that lapsed unanswered is passed on, like a dismissed one.
+    const passedOn = new Set(
+      (yield* repository.listCards({
+        squireId: lead.id,
+        statuses: ["dismissed", "outdated"],
+      })).flatMap((card) => (card.finding_key === null ? [] : [card.finding_key])),
     );
     const nowMs = DateTime.toEpochMillis(now);
     const found: Array<SquireSweepCandidate & { at: number }> = [];
@@ -361,7 +364,7 @@ const make = Effect.gen(function* () {
       if (!(shell.pullRequests ?? []).some((link) => link.snapshot?.state === "open")) continue;
       const trackers = yield* scope.trackersOf(shell.id);
       if (!trackers.some((id) => active.has(id))) continue;
-      const candidate = yield* candidateFor(shell, nowMs, dismissed);
+      const candidate = yield* candidateFor(shell, nowMs, passedOn);
       if (Option.isNone(candidate) || (yield* hasOpenDecision(shell.id))) continue;
       found.push(candidate.value);
     }
@@ -537,6 +540,10 @@ const make = Effect.gen(function* () {
     const same = findings.filter((card) => card.finding_key === findingKey);
     if (same.some((card) => card.status === "dismissed")) {
       return refusal("finding-dismissed", "The user already dismissed this finding.");
+    }
+    // Expiry, like a dismissal, is the user passing on this state of the thread.
+    if (same.some((card) => card.status === "outdated")) {
+      return refusal("finding-outdated", "This finding already came up and lapsed.");
     }
     if (same.some((card) => (OPEN_STATUSES as ReadonlyArray<string>).includes(card.status))) {
       return refusal("already-raised", "This finding is already in the queue.");

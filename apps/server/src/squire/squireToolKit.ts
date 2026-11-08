@@ -4,6 +4,7 @@
  * @module squire/squireToolKit
  */
 import type {
+  ProjectId,
   SquireCardId,
   SquireCardOrigin,
   SquireId,
@@ -110,6 +111,20 @@ export interface SquireToolKit {
       R
     >,
   ) => Effect.Effect<SquireToolResult, E | PersistenceSqlError, R>;
+  /**
+   * Inside the transaction raising an approval: the refusal when the user denied this slot since
+   * they last wrote in this Squire's chat. A thread's slot is its thread and kind; without a
+   * thread it is the project and title. Return it as the `commit` body's result.
+   */
+  readonly deniedRefusal: (
+    ctx: SquireToolContext,
+    slot: {
+      readonly kind: "steer" | "proposal";
+      readonly targetThreadId: ThreadId | null;
+      readonly projectId: ProjectId | null;
+      readonly title: string;
+    },
+  ) => Effect.Effect<Option.Option<SquireToolResult>, PersistenceSqlError>;
   /** The run's delivered batch rows; empty for a user turn. */
   readonly batchEvents: (
     ctx: SquireToolContext,

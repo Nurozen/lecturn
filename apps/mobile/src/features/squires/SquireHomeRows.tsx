@@ -19,6 +19,7 @@ import {
   useSquireEntry,
   useSquireIndicator,
   useSquireReadableEnvironments,
+  useSquireSidebarState,
 } from "../../state/squire";
 import { setMobileProjectGroupCollapsed } from "../home/accountSectionExpansion";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -34,7 +35,6 @@ import {
   squireHomeLeadTrailing,
   squireHomeRowLabel,
   squireHomeRowStatusLine,
-  squireHomeRowTrailing,
   type HomeSquireItem,
 } from "./squireHomeItems.logic";
 
@@ -176,17 +176,16 @@ function SquireHomeRowBody(props: {
   useViewabilityAmount(useCallback((token) => setVisible(token.sizeVisible > 0), [setVisible]));
   const indicator = useSquireIndicator(environmentId, entry);
   const aggregate = useAtomValue(folded ? leadAggregateAtom(environmentId) : NO_AGGREGATE_ATOM);
-  const trailing = isLead
-    ? squireHomeLeadTrailing(indicator, aggregate, folded)
-    : squireHomeRowTrailing(indicator);
+  const sidebarState = useSquireSidebarState(environmentId, entry);
+  const trailing = isLead ? squireHomeLeadTrailing(sidebarState, aggregate, folded) : sidebarState;
   const statusLine = squireHomeRowStatusLine(entry, indicator);
-  const label = squireHomeRowLabel(squire.name, indicator, folded ? trailing : undefined);
+  const label = squireHomeRowLabel(squire.name, trailing, indicator);
   const subtitle = [props.environmentLabel, statusLine].filter(Boolean).join(" · ");
   const tint = squireTint(squire.companion.palette, isLead, themeAppearance);
   const sidebarPane = props.pane === "sidebar";
 
   // The fold is its own 44pt control beside the row, as on project group headers, so opening
-  // the queue and folding the group stay separate for touch and VoiceOver/TalkBack.
+  // the chat and folding the group stay separate for touch and VoiceOver/TalkBack.
   return (
     <GlassCard
       radius={ROW_RADIUS}
@@ -212,7 +211,7 @@ function SquireHomeRowBody(props: {
       <RowPressable
         accessibilityRole="button"
         accessibilityLabel={[label, props.environmentLabel, statusLine].filter(Boolean).join(", ")}
-        accessibilityHint="Opens the Squire's queue"
+        accessibilityHint="Opens the Squire's chat"
         onPress={() => navigation.navigate("Squire", { environmentId, squireId: squire.id })}
         className="min-w-0 flex-1"
       >
@@ -248,11 +247,11 @@ function SquireHomeRowBody(props: {
               </Text>
             )}
           </View>
-          {trailing.kind === "working" ? (
+          {trailing === "working" ? (
             <Text className="text-xs text-foreground-muted">working</Text>
-          ) : trailing.kind === "badge" ? (
+          ) : trailing === "needs-you" ? (
             <View
-              className="min-w-[22px] items-center justify-center rounded-full px-1.5"
+              className="items-center justify-center rounded-full px-2"
               style={{
                 height: 22,
                 backgroundColor: themeColorWithAlpha(tint.ring, 0.22),
@@ -261,13 +260,12 @@ function SquireHomeRowBody(props: {
               }}
             >
               {/* The thread tone is the palette's text-safe one: light on dark, deepened on light. */}
-              <Text
-                className="text-xs font-lecturn-bold tabular-nums"
-                style={{ color: tint.thread }}
-              >
-                {trailing.count}
+              <Text className="text-xs font-lecturn-bold" style={{ color: tint.thread }}>
+                Needs you
               </Text>
             </View>
+          ) : trailing === "unread" ? (
+            <View className="size-2 rounded-full bg-primary" />
           ) : null}
         </View>
       </RowPressable>

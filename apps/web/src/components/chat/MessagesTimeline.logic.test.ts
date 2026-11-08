@@ -28,6 +28,8 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  insertUnreadDivider,
+  mergeSquireApprovalRows,
   liveWorkEntryLabel,
   timelineEntryTurnFoldRunId,
   deriveMessagesTimelineRowsWithState,
@@ -3853,7 +3855,7 @@ describe("Squire home thread event rows", () => {
     ).toBeNull();
   });
 
-  const rows = (compactSquireEvents: boolean) =>
+  const rows = (compactSquireEvents: boolean, running = false) =>
     deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -3904,11 +3906,11 @@ describe("Squire home thread event rows", () => {
       ],
       latestRun: {
         runId: RunId.make("wake"),
-        status: "completed",
+        status: running ? "running" : "completed",
         startedAt: time(1),
-        completedAt: time(3),
+        completedAt: running ? null : time(3),
       },
-      isWorking: false,
+      isWorking: running,
       turnDiffSummaries: [],
       supportsConversationRollback: false,
       compactSquireEvents,
@@ -3923,11 +3925,12 @@ describe("Squire home thread event rows", () => {
     return row?.kind === "turn-fold" ? row.label : undefined;
   };
 
-  it("on a Squire thread, shows one compact row per batch and folds the calls as Tool calls", () => {
-    const compact = rows(true);
-    expect(batchLabel(compact)).toBe("Squire update · item raised");
-    expect(compact.map((row) => row.id)).toEqual(["batch", "turn-fold:wake", "reply"]);
-    expect(foldLabel(compact)).toBe("Tool calls (1)");
+  it("on a Squire thread, a settled wake leaves only its reply", () => {
+    expect(rows(true).map((row) => row.id)).toEqual(["reply"]);
+  });
+
+  it("on a Squire thread, a running wake shows its one compact row", () => {
+    expect(batchLabel(rows(true, true))).toBe("Squire update · item raised");
   });
 
   it("leaves an ordinary thread's rows as they were", () => {
@@ -4008,72 +4011,235 @@ describe("Squire home thread event rows", () => {
       streaming: false,
     },
   });
-  const grouped = (
-    timelineEntries: ReadonlyArray<TimelineEntry>,
-    expandedWorkGroupIds?: ReadonlySet<string>,
-  ) =>
+  const grouped = (timelineEntries: ReadonlyArray<TimelineEntry>) =>
     deriveMessagesTimelineRows({
       timelineEntries,
       isWorking: false,
       turnDiffSummaries: [],
       supportsConversationRollback: false,
       compactSquireEvents: true,
-      ...(expandedWorkGroupIds === undefined ? {} : { expandedWorkGroupIds }),
     });
+  const quietCall = (n: number) => ({
+    kind: "work" as const,
+    id: `quiet-${n}`,
+    createdAt: time(n * 10 + 1),
+    entry: {
+      id: `quiet-${n}`,
+      runId: RunId.make(`wake-${n}`),
+      createdAt: time(n * 10 + 1),
+      label: "Stay quiet",
+      tone: "tool" as const,
+      structuredPayload: {
+        type: "dynamic_tool",
+        toolName: "mcp__lecturn__squire_stay_quiet",
+      } as never,
+    },
+  });
 
-  it("folds consecutive wakes into one collapsed row until the user writes", () => {
-    const list = grouped([
-      ...wake(1, ["pr-failed"]),
-      userMessage(1, "agent"),
-      ...wake(2, ["turn-completed"]),
-      userMessage(2, "user"),
-      ...wake(3, ["pr-failed"]),
-    ]);
-    expect(list.map((row) => row.id)).toEqual([
-      "squire-updates:batch-1",
-      "user-2",
-      "batch-3",
-      "reply-3",
-    ]);
-    const group = list[0];
-    expect(group?.kind === "squire-updates" ? group.label : null).toBe(
-      "2 Squire updates · pr failed, turn completed",
+  it("shows a Squire's replies and hides its wakes, even a lone one", () => {
+    expect(
+      grouped([
+        ...wake(1, ["pr-failed"]),
+        userMessage(1, "agent"),
+        ...wake(2, ["turn-completed"]),
+        userMessage(2, "user"),
+        ...wake(3, ["pr-failed"]),
+      ]).map((row) => row.id),
+    ).toEqual(["reply-1", "user-1", "reply-2", "user-2", "reply-3"]);
+  });
+
+  it("renders no row for a wake whose turn wrote nothing", () => {
+    const [batch] = wake(1, ["pr-failed"]);
+    expect(grouped([batch!])).toEqual([]);
+  });
+
+  it("hides the text of a run that called squire_stay_quiet", () => {
+    const [batch, reply] = wake(1, []);
+    expect(grouped([batch!, quietCall(1), reply!]).map((row) => row.id)).toEqual([]);
+  });
+
+  it("keeps the text of a run that also raised something", () => {
+    const [batch, reply] = wake(1, []);
+    const notify = {
+      ...quietCall(1),
+      id: "notify-1",
+      entry: {
+        ...quietCall(1).entry,
+        id: "notify-1",
+        structuredPayload: {
+          type: "dynamic_tool",
+          toolName: "mcp__lecturn__squire_notify",
+        } as never,
+      },
+    };
+    expect(grouped([batch!, quietCall(1), notify, reply!]).map((row) => row.id)).toContain(
+      "reply-1",
     );
   });
 
-  it("keeps the newest wake out of the group, so its reply stays in view", () => {
-    expect(grouped([...wake(1, []), ...wake(2, [])]).map((row) => row.id)).toEqual([
-      "batch-1",
-      "reply-1",
-      "batch-2",
-      "reply-2",
-    ]);
-    expect(grouped([...wake(1, []), ...wake(2, []), ...wake(3, [])]).map((row) => row.id)).toEqual([
-      "squire-updates:batch-1",
-      "batch-3",
-      "reply-3",
-    ]);
+  it("never folds away a message the user wrote in a run that stayed quiet", () => {
+    const [batch, reply] = wake(1, []);
+    const mine = {
+      ...userMessage(1, "user"),
+      message: { ...userMessage(1, "user").message, runId: RunId.make("wake-1") },
+    };
+    const ids = grouped([batch!, mine, quietCall(1), reply!]).map((row) => row.id);
+    expect(ids).toContain("user-1");
+    expect(ids).toContain("reply-1");
   });
 
-  it("shows a group's rows once expanded, and never folds an ordinary thread", () => {
-    const entries = [...wake(1, []), ...wake(2, []), ...wake(3, [])];
-    expect(grouped(entries, new Set(["squire-updates:batch-1"])).map((row) => row.id)).toEqual([
-      "squire-updates:batch-1",
-      "batch-1",
-      "reply-1",
-      "batch-2",
-      "reply-2",
-      "batch-3",
-      "reply-3",
-    ]);
+  it("keeps a failure in view", () => {
+    const [batch] = wake(1, []);
+    const failed = {
+      kind: "work" as const,
+      id: "failed-1",
+      createdAt: time(11),
+      entry: {
+        id: "failed-1",
+        runId: RunId.make("wake-1"),
+        createdAt: time(11),
+        label: "Provider error",
+        tone: "error" as const,
+      },
+    };
+    const list = deriveMessagesTimelineRows({
+      timelineEntries: [batch!, failed],
+      latestRun: {
+        runId: RunId.make("wake-1"),
+        status: "failed",
+        startedAt: time(10),
+        completedAt: time(11),
+      },
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      compactSquireEvents: true,
+    });
+    expect(list.map((row) => row.id)).toEqual(["failed-1"]);
+  });
+
+  it("leaves an ordinary thread's wakes alone", () => {
     expect(
       deriveMessagesTimelineRows({
-        timelineEntries: entries,
+        timelineEntries: [...wake(1, []), ...wake(2, [])],
         isWorking: false,
         turnDiffSummaries: [],
         supportsConversationRollback: false,
-      }).some((row) => row.kind === "squire-updates"),
-    ).toBe(false);
+      }).map((row) => row.id),
+    ).toContain("batch-1");
+  });
+});
+
+describe("chat rows merged after derivation", () => {
+  const at = (seconds: number) => `2026-01-01T00:00:${String(seconds).padStart(2, "0")}.000Z`;
+  const message = (id: string, seconds: number, role: "user" | "assistant" = "assistant") =>
+    ({
+      kind: "message",
+      id,
+      createdAt: at(seconds),
+      message: {
+        id: MessageId.make(id),
+        role,
+        text: id,
+        runId: null,
+        createdAt: at(seconds),
+        updatedAt: at(seconds),
+        streaming: false,
+      },
+      durationStart: at(seconds),
+      showAssistantMeta: false,
+      showAssistantCopyButton: false,
+      assistantCopyStreaming: false,
+    }) as unknown as MessagesTimelineRow;
+  const working = {
+    kind: "working",
+    id: "working-indicator-row",
+    createdAt: at(1),
+  } as MessagesTimelineRow;
+  const approvals = (...seconds: ReadonlyArray<number>) => ({
+    environmentId: "env" as never,
+    squireId: "squire" as never,
+    entries: seconds.map((second) => ({
+      row: { id: `card-${second}` } as never,
+      createdAt: at(second),
+      phase: "open" as const,
+      outcome: null,
+      expired: false,
+    })),
+  });
+  const ids = (rows: ReadonlyArray<MessagesTimelineRow>) => rows.map((row) => row.id);
+
+  it("places an approval at the time it was raised", () => {
+    const rows = [message("a", 10), message("b", 30)];
+    expect(ids(mergeSquireApprovalRows(rows, approvals(5, 20, 40)))).toEqual([
+      "squire-approval:card-5",
+      "a",
+      "squire-approval:card-20",
+      "b",
+      "squire-approval:card-40",
+    ]);
+  });
+
+  it("holds back closed rows older than the loaded history, never open ones", () => {
+    const withPhases = approvals(5, 6, 20);
+    const entries = withPhases.entries.map((entry, index) =>
+      index === 0 ? { ...entry, phase: "closed" as const } : entry,
+    );
+    const rows = [message("a", 10)];
+    expect(ids(mergeSquireApprovalRows(rows, { ...withPhases, entries }, true))).toEqual([
+      "squire-approval:card-6",
+      "a",
+      "squire-approval:card-20",
+    ]);
+    expect(ids(mergeSquireApprovalRows(rows, { ...withPhases, entries }, false))).toEqual([
+      "squire-approval:card-5",
+      "squire-approval:card-6",
+      "a",
+      "squire-approval:card-20",
+    ]);
+  });
+
+  it("keeps a running turn's indicator below the newest approval", () => {
+    expect(ids(mergeSquireApprovalRows([message("a", 10), working], approvals(20)))).toEqual([
+      "a",
+      "squire-approval:card-20",
+      "working-indicator-row",
+    ]);
+  });
+
+  it("returns the rows untouched with no approvals", () => {
+    const rows = [message("a", 10)];
+    expect(mergeSquireApprovalRows(rows, undefined)).toBe(rows);
+    expect(mergeSquireApprovalRows(rows, approvals())).toBe(rows);
+  });
+
+  const unread = (lastVisitedAt: string | null) => ({ lastVisitedAt, openedThrough: at(50) });
+
+  it("puts the New divider above the first unread message, skipping the user's own", () => {
+    const rows = [message("old", 5), message("mine", 15, "user"), message("reply", 20)];
+    expect(ids(insertUnreadDivider(rows, unread(at(10))))).toEqual([
+      "old",
+      "mine",
+      "unread-divider-row",
+      "reply",
+    ]);
+  });
+
+  it("does not move the divider for a message arriving after the open", () => {
+    const rows = [message("old", 5), message("reply", 20), message("later", 55)];
+    expect(ids(insertUnreadDivider(rows, unread(at(10))))).toEqual([
+      "old",
+      "unread-divider-row",
+      "reply",
+      "later",
+    ]);
+  });
+
+  it("adds nothing to a read or never-visited thread", () => {
+    const rows = [message("old", 5)];
+    expect(insertUnreadDivider(rows, unread(at(10)))).toBe(rows);
+    expect(insertUnreadDivider(rows, unread(null))).toBe(rows);
+    expect(insertUnreadDivider(rows, null)).toBe(rows);
   });
 });
 

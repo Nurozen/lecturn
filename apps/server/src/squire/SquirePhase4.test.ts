@@ -365,7 +365,7 @@ describe("Squire reactor and delivery integration", () => {
     ),
   );
 
-  it.effect("(i) a tracked turn is one delivered batch on the home thread and one FYI", () =>
+  it.effect("(i) a tracked turn is one delivered batch on the home thread and no card", () =>
     withHome(({ squireId, homeThreadId, restart }) =>
       restart()(
         Effect.gen(function* () {
@@ -394,9 +394,7 @@ describe("Squire reactor and delivery integration", () => {
             ["turn-finished:delivered"],
           );
           const repository = yield* SquireRepository.SquireRepository;
-          const fyis = yield* repository.listCards({ squireId, kinds: ["fyi"] });
-          assert.lengthOf(fyis, 1);
-          assert.strictEqual(fyis[0]!.target_thread_id, tracked);
+          assert.lengthOf(yield* repository.listCards({ squireId }), 0);
           assert.lengthOf(yield* squireMessages(homeThreadId), 1);
         }),
       ),

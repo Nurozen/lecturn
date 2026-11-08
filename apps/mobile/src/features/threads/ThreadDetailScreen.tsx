@@ -10,7 +10,10 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { parseThreadKey, threadKey } from "@lecturn/client-runtime/state/entities";
-import { createThreadVisitTracker } from "@lecturn/client-runtime/state/thread-visits";
+import {
+  createThreadVisitTracker,
+  type ThreadUnreadWindow,
+} from "@lecturn/client-runtime/state/thread-visits";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { ChatGptUsageLimitNotice } from "./ChatGptUsageLimitNotice";
@@ -1150,6 +1153,20 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     }
   };
   const showContent = props.showContent ?? true;
+  // Lecturn: frozen per open, and read in render so it precedes the tracker's visit below.
+  const [unreadOpen, setUnreadOpen] = useState<{
+    readonly threadKey: string;
+    readonly window: ThreadUnreadWindow;
+  } | null>(null);
+  if (showContent && !props.draftMode && unreadOpen?.threadKey !== selectedThreadKey) {
+    setUnreadOpen({
+      threadKey: selectedThreadKey,
+      window: {
+        lastVisitedAt: props.selectedThread.lastVisitedAt ?? null,
+        openedThrough: props.selectedThread.updatedAt,
+      },
+    });
+  }
   // Showing the thread counts as viewing it, before its live shell arrives too.
   useAtomMount(
     threadVisitTracker(
@@ -1465,10 +1482,16 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
               onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
               onEndFollowEnabledChange={handleEndFollowEnabledChange}
               skills={selectedProviderSkills}
-              squireHome={
+              squireChatSquireId={
                 props.selectedThread.squire?.role === "home" &&
                 props.serverConfig?.environment.capabilities.squire === true
+                  ? props.selectedThread.squire.squireId
+                  : null
               }
+              squireChatFirst={
+                props.serverConfig?.environment.capabilities.squireChatFirst === true
+              }
+              unreadWindow={unreadOpen?.threadKey === selectedThreadKey ? unreadOpen.window : null}
               onUseArtifactTemplate={
                 allows("artifact-templates") ? handleUseArtifactTemplate : undefined
               }

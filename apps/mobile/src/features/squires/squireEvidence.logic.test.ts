@@ -2,50 +2,12 @@ import type { SquireCardRow, SquirePermissions } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  squireAgeText,
   squireCiUnavailableText,
   squireProposalScopeLabels,
   squireProposalText,
-  squireRowAgeText,
   squireRowMetaText,
-  squireRowProviderName,
   squireRowTargetName,
 } from "./squireEvidence.logic";
-
-const NOW = Date.parse("2026-11-02T12:00:00.000Z");
-const minutesAgo = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
-
-const names = {
-  instanceName: (id: string) => (id === "work-claude" ? "Claude (work)" : null),
-  driverName: (driver: string) => (driver === "codex" ? "Codex" : undefined),
-};
-
-describe("ages", () => {
-  it("reads now, minutes, hours, and days", () => {
-    expect(squireAgeText(minutesAgo(0.5), NOW)).toBe("now");
-    expect(squireAgeText(minutesAgo(5), NOW)).toBe("5m");
-    expect(squireAgeText(minutesAgo(180), NOW)).toBe("3h");
-    expect(squireAgeText(minutesAgo(60 * 50), NOW)).toBe("2d");
-    expect(squireAgeText("not a date", NOW)).toBe("");
-  });
-
-  it("counts a question's wait from when the thread asked", () => {
-    const row = {
-      kind: "question" as const,
-      createdAt: minutesAgo(2),
-      requestedAt: minutesAgo(45),
-    };
-    expect(squireRowAgeText(row, false, NOW)).toBe("waiting 45m");
-    expect(squireRowAgeText({ ...row, requestedAt: undefined }, false, NOW)).toBe("waiting 2m");
-  });
-
-  it("prefixes waiting on other decisions only while open, never on an FYI", () => {
-    const steer = { kind: "steer" as const, createdAt: minutesAgo(10) };
-    expect(squireRowAgeText(steer, false, NOW)).toBe("10m");
-    expect(squireRowAgeText(steer, true, NOW)).toBe("waiting 10m");
-    expect(squireRowAgeText({ ...steer, kind: "fyi" }, true, NOW)).toBe("10m");
-  });
-});
 
 describe("rows", () => {
   const base = {
@@ -82,27 +44,6 @@ describe("rows", () => {
     expect(squireRowTargetName(steer, { threadTitle: "Fix login", projectTitle: "web" })).toBe(
       "Fix login",
     );
-  });
-
-  it("names a thread proposal's provider by instance, else driver, else raw", () => {
-    const withInstance = {
-      proposalProvider: {
-        provider: "claudeAgent" as never,
-        providerInstanceId: "work-claude" as never,
-      },
-    };
-    expect(squireRowProviderName(withInstance, null, names)).toBe("Claude (work)");
-    expect(
-      squireRowProviderName(
-        { proposalProvider: { provider: "codex" as never, providerInstanceId: null } },
-        null,
-        names,
-      ),
-    ).toBe("Codex");
-    expect(squireRowProviderName({}, "Cursor", names)).toBe("Cursor");
-    expect(
-      squireRowProviderName({ overlapProviders: ["codex", "codex"] as never }, null, names),
-    ).toBe("Codex");
   });
 
   it("leaves the provider off in the Lead view and drops a target that repeats the title", () => {

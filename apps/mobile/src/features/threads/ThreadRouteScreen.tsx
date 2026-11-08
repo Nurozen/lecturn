@@ -996,6 +996,7 @@ function ThreadRouteContent(
     decisionsSupported:
       serverConfig?.environment.capabilities.threadDecisions === true && selectedThread !== null,
     forkSupported,
+    homeSquireId: homeSquireTarget.squireId,
     tracking: squireTracking.actions,
   });
   const runHeaderAction = (action: (typeof headerActions)[number]) => {
@@ -1009,6 +1010,15 @@ function ThreadRouteContent(
         environmentId: selectedThread.environmentId,
         projectId: selectedThread.projectId,
         threadId: selectedThread.id,
+      });
+      return;
+    }
+    if (action.kind === "squire-details") {
+      if (selectedThread === null) return;
+      navigation.navigate("Squire", {
+        environmentId: selectedThread.environmentId,
+        squireId: action.squireId,
+        details: true,
       });
       return;
     }
@@ -1061,12 +1071,16 @@ function ThreadRouteContent(
       }
     : null;
   const trackingActions = headerActions.flatMap((action) =>
-    action.kind === "track" || action.kind === "untrack" ? [action] : [],
+    action.kind === "track" || action.kind === "untrack" || action.kind === "squire-details"
+      ? [action]
+      : [],
   );
   const squireTrackingHeaderMenu: AppBarMenu | null =
     trackingActions.length > 0
       ? {
-          title: "Squire tracking",
+          title: trackingActions.some((action) => action.kind !== "squire-details")
+            ? "Squire tracking"
+            : "Squire",
           icon: "person.2",
           items: trackingActions.map((action) => ({
             id: `${action.kind}:${action.squireId}`,

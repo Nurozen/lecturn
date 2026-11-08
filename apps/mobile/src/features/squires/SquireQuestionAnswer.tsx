@@ -19,7 +19,7 @@ import {
   type SquireAnswer,
   type SquireQuestionPayload,
   type SquireUserInputRequest,
-} from "./squireQueue.logic";
+} from "./squireApproval.logic";
 
 /**
  * The thread's own request controls, fed from the card's live copy of the request

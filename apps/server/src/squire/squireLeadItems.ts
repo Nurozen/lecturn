@@ -1,7 +1,7 @@
 /**
  * The Lead's item-raised and item-resolved rows. A decision item
  * a Squire raises wakes the Lead when it is raised and when it leaves
- * open/held; FYI items and the Lead's own items never do.
+ * open/held, except by expiring; FYI items and the Lead's own items never do.
  */
 import type { SquireEvent, SquireId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";

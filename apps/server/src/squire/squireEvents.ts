@@ -12,7 +12,8 @@ import {
   RunId,
   type ProjectId,
   SquireEvidence,
-  type SquireEventToggles,
+  SquireEventToggles,
+  type SquireId,
   type SquireThreadMarker,
   SquireTurnOutcome,
   type ThreadId,
@@ -27,9 +28,10 @@ import {
 } from "@lecturn/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type { SquireEventRow } from "./SquireRepository.ts";
+import type { SquireEventRow, SquireRow } from "./SquireRepository.ts";
 
 /** The thread events the reactor turns into `squire_event` rows. */
 export type SquireThreadEventKind =
@@ -121,6 +123,21 @@ export type SquireReactorEffect =
     }
   /** Drops the thread's deferred turn-finished rows of other runs. */
   | { readonly type: "run-started"; readonly threadId: ThreadId; readonly runId: RunId }
+  /**
+   * The user wrote in a home thread, starting a run or steering one. An item can update
+   * again, so the work is bounded by `at`, which stays the same when it does.
+   */
+  | {
+      readonly type: "home-user-message";
+      readonly squireId: SquireId;
+      readonly at: DateTime.Utc;
+    }
+  /** The user opened or caught up on a home thread. */
+  | {
+      readonly type: "home-visited";
+      readonly squireId: SquireId;
+      readonly at: DateTime.Utc;
+    }
   /** Re-evaluate the thread's `background` deferred rows against its pending tasks now. */
   | { readonly type: "background-work-ended"; readonly threadId: ThreadId }
   | {
@@ -225,11 +242,13 @@ const MARKER_EVENT_TYPES = new Set<OrchestrationV2DomainEvent["type"]>([
   "turn-item.updated",
   "run.background-work-cancelled",
   "thread.pull-request-link-updated",
+  "thread.visited",
 ]);
 
 const turnItemMayClassify = (event: OrchestrationV2DomainEvent) =>
   event.type !== "turn-item.updated" ||
   event.payload.type === "secret_request" ||
+  event.payload.type === "user_message" ||
   turnItemUpdateCanEndBackgroundWork(event.payload);
 
 /**
@@ -264,6 +283,11 @@ const THREAD_EVENT_KINDS = new Set<string>([
 export function isSummaryBearing(kind: string): kind is SquireThreadEventKind {
   return THREAD_EVENT_KINDS.has(kind);
 }
+
+const decodeToggles = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEventToggles));
+const DEFAULT_TOGGLES = Schema.decodeSync(SquireEventToggles)({});
+export const squireEventTogglesOf = (row: Pick<SquireRow, "events_json">) =>
+  Option.getOrElse(decodeToggles(row.events_json), () => DEFAULT_TOGGLES);
 
 export function squireEventToggle(
   kind: SquireThreadEventKind,
@@ -533,8 +557,23 @@ function classifyTurnItem(
   event: DomainEvent<"turn-item.updated">,
   context: SquireClassifyContext,
 ): SquireClassification {
-  if (context.threadMarker !== null) return NONE;
   const item = event.payload;
+  if (context.threadMarker !== null) {
+    return context.threadMarker.role === "home" &&
+      item.type === "user_message" &&
+      item.createdBy === "user"
+      ? {
+          candidates: [],
+          effects: [
+            {
+              type: "home-user-message",
+              squireId: context.threadMarker.squireId,
+              at: item.startedAt ?? item.updatedAt,
+            },
+          ],
+        }
+      : NONE;
+  }
   const secret = item.type === "secret_request" ? classifySecretRequest(event, item) : NONE;
   return turnItemUpdateCanEndBackgroundWork(item)
     ? {
@@ -619,6 +658,19 @@ export function classifySquireEvent(
         : NONE;
     case "thread.pull-request-link-updated":
       return classifyPullRequestLink(event, context);
+    case "thread.visited":
+      return context.threadMarker?.role === "home"
+        ? {
+            candidates: [],
+            effects: [
+              {
+                type: "home-visited",
+                squireId: context.threadMarker.squireId,
+                at: event.occurredAt,
+              },
+            ],
+          }
+        : NONE;
     case "thread.created":
       return {
         candidates: [],

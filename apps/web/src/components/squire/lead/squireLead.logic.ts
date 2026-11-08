@@ -13,7 +13,6 @@ import { squireLeadHello, squireLeadShowsIntro } from "@lecturn/client-runtime/s
 export {
   squireProposalCardText,
   squireProposalPaletteLabel,
-  squireProposalScopeLabels,
 } from "@lecturn/client-runtime/state/squire";
 
 export type SquireProposalPayload = Extract<

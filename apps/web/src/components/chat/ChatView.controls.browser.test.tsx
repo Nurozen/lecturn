@@ -502,9 +502,8 @@ describe("ChatView controls", () => {
     expect([...shown].every((control) => SQUIRE_THREAD_CONTROLS.has(control!))).toBe(true);
     expect(shown).toEqual(new Set(["copy", "expand", "composer-text", "send"]));
     expect(names.filter((name) => DENIED_NAMES.has(name))).toEqual([]);
-    expect(document.body.textContent).toContain(
-      "Squire update · 2 events: pull request changed, turn finished",
-    );
+    // A wake that said nothing to the user leaves no row in the chat.
+    expect(document.body.textContent).not.toContain("Squire update");
     expect(document.querySelector('[data-resting-block="mode"]')).toBeNull();
   });
 

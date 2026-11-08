@@ -984,6 +984,8 @@ export const SquireCardResolution = ForwardCompatibleLiteral(
     "executed",
     "outdated",
     "expired",
+    /** The user denied it; the same slot is refused until they write in the Squire's chat. */
+    "denied",
     "failed",
   ],
   "unknown",
@@ -1196,6 +1198,17 @@ export const SquireCardRow = Schema.Struct({
    * note's speaker was verified. Absent on every other card.
    */
   speakerVerified: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Why a closed item closed, so a chat row can read Expired or Denied without fetching the card.
+   * Absent while open and on older servers.
+   */
+  resolution: Schema.optionalKey(SquireCardResolution),
+  /**
+   * The "Always allow" rule this approval could become, prefilled as {@link SquireRuleOffer}. Absent
+   * where a rule cannot apply (voice, webhook, test, sweep, message, Lead, and `other` steers), so
+   * the button is hidden rather than offered and refused.
+   */
+  allowRuleOffer: Schema.optionalKey(SquireRuleOffer),
   executesAt: Schema.NullOr(IsoDateTime),
   openedAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
@@ -1465,6 +1478,8 @@ export const SquireSnapshot = Schema.Struct({
   itemsRevision: NonNegativeInt,
   /** Bumped by decision items only, so FYI writes do not wake decision badges. */
   decisionRevision: NonNegativeInt,
+  /** The Squire's newest visible chat message, for sidebar unread. Absent until it has spoken. */
+  lastMessageAt: Schema.optionalKey(IsoDateTime),
 });
 export type SquireSnapshot = typeof SquireSnapshot.Type;
 
@@ -1900,3 +1915,21 @@ export const SquireRoomMarkReadInput = Schema.Struct({
   throughPostId: SquireRoomPostId,
 });
 export const SquireRoomMarkReadResult = Schema.Struct({});
+
+/** Tools that put something in front of the user, so a run that calls one is not quiet. */
+export const SQUIRE_SPEAKING_TOOLS: ReadonlySet<string> = new Set([
+  "squire_notify",
+  "squire_recommend_steer",
+  "squire_send_steer",
+  "squire_propose_thread",
+  "squire_create_thread",
+  "squire_propose_room",
+  "squire_open_room",
+  "squire_propose_squire",
+  "squire_raise_overlap",
+  "squire_pause",
+  "squire_resume",
+  "squire_rescope",
+  "squire_forward_item",
+  "squire_publish_showcase",
+]);

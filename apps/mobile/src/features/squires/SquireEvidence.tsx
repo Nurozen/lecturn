@@ -1,78 +1,24 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
-import { resolveProviderInstanceDisplayName } from "@lecturn/client-runtime/state/provider-instance-display";
 import type { SquireKnownPayload } from "@lecturn/client-runtime/state/squire";
-import { PROVIDER_DISPLAY_NAMES } from "@lecturn/contracts";
 import type { EnvironmentId, SquireCard, SquireId } from "@lecturn/contracts";
-import { useIsFocused } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { AppState, View } from "react-native";
+import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { cn } from "../../lib/cn";
-import { useEnvironmentServerConfig, useProjects, useQuietThreadShell } from "../../state/entities";
-import { squireEnvironment, useSquireEntry } from "../../state/squire";
+import { useProjects, useQuietThreadShell } from "../../state/entities";
+import { squireEnvironment } from "../../state/squire";
 import { PullRequestDiffStats } from "../pull-requests/PullRequestPresentation";
 import { SquireIndicator } from "./SquireIndicator";
 import {
-  squireCardCaption,
-  squireCardTimeline,
   squireCiUnavailableText,
   squireControlText,
   squireDiffStatsLabel,
   squireProposalText,
   squirePullRequestChips,
-  squireRaiserLabel,
-  squireTimelineRows,
   type SquireChipTone,
-  type SquireProviderNames,
 } from "./squireEvidence.logic";
 import { squireTint } from "./squirePalette";
-
-/**
- * A clock for row ages ("5m", "waiting 2h"). Ages read in minutes, so it ticks twice a minute,
- * and only while the screen is focused and the app is active: retained routes stay mounted.
- */
-export function useSquireAgeClock(): number {
-  const focused = useIsFocused();
-  const [appActive, setAppActive] = useState(() => AppState.currentState === "active");
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to AppState to stop the age clock in the background
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) =>
-      setAppActive(state === "active"),
-    );
-    return () => subscription.remove();
-  }, []);
-  const ticking = focused && appActive;
-  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- runs the age clock interval while the screen is showing and clears it on cleanup
-  useEffect(() => {
-    if (!ticking) return;
-    // oxlint-disable-next-line react/set-state-in-effect -- Resuming reads the clock that stood still.
-    setNowMs(Date.now());
-    const intervalId = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => clearInterval(intervalId);
-  }, [ticking]);
-  return nowMs;
-}
-
-const driverName = (driver: string): string | undefined =>
-  PROVIDER_DISPLAY_NAMES[driver as keyof typeof PROVIDER_DISPLAY_NAMES];
-
-/** Names providers as their threads do: the instance's name, else the driver's. */
-export function useSquireProviderNames(environmentId: EnvironmentId): SquireProviderNames {
-  const providers = useEnvironmentServerConfig(environmentId)?.providers;
-  return {
-    instanceName: (instanceId) => {
-      const provider = providers?.find((candidate) => candidate.instanceId === instanceId);
-      return provider === undefined ? null : resolveProviderInstanceDisplayName(provider);
-    },
-    driverName,
-  };
-}
-
-export const formatSquireTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 export function SquireSectionLabel(props: { readonly label: string }) {
   return (
@@ -165,42 +111,6 @@ export function SquireCiEvidence(props: { readonly card: SquireCard }) {
         <Text className="font-sans text-xs text-foreground-muted">{unavailable}</Text>
       )}
     </View>
-  );
-}
-
-/** The budget line from the raiser's snapshot entry, then the card's timeline. */
-export function SquireCaptionAndTimeline(props: {
-  readonly environmentId: EnvironmentId;
-  readonly card: SquireCard;
-}) {
-  const { environmentId, card } = props;
-  const raiser = useSquireEntry(environmentId, card.squireId);
-  const caption = squireCardCaption(card, raiser, formatSquireTime);
-  const timeline = squireTimelineRows(
-    squireCardTimeline(card),
-    formatSquireTime,
-    raiser === null ? "A Squire" : squireRaiserLabel(raiser.squire),
-  );
-  return (
-    <>
-      {caption === null ? null : (
-        <Text className="font-sans text-xs text-foreground-muted">{caption}</Text>
-      )}
-      {timeline.length === 0 ? null : (
-        <View className="gap-1 border-t border-border pt-2.5" accessibilityLabel="Timeline">
-          <SquireSectionLabel label="Timeline" />
-          {timeline.map((row) => (
-            <View key={row.key} className="flex-row gap-1.5">
-              <Text className="font-sans text-xs tabular-nums text-foreground-muted">
-                {row.time}
-              </Text>
-              <Text className="font-sans text-xs text-foreground-muted">·</Text>
-              <Text className="flex-1 font-sans text-xs text-foreground-secondary">{row.text}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </>
   );
 }
 

@@ -1,5 +1,5 @@
 /**
- * A durable cursor over committed events: each is classified from its own stored payload and every interested Squire
+ * A durable cursor over committed events: each is classified from its own stored payload and the thread's owning Squire
  * gets an `INSERT OR IGNORE` row, so ingestion is idempotent across lag and restarts. Summary generation and
  * re-homing are forked so a slow model call never holds the cursor; `drainThrough` waits for both.
  */
@@ -14,7 +14,6 @@ import {
   SquireCardId,
   SquireCardPayload,
   SquireCardTrigger,
-  SquireEventToggles,
   type SquireId,
   type SquireTurnSummary,
   ThreadId,
@@ -44,7 +43,12 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
-import { questionCardTrigger, readSquireQuestion, squireQuestionTitle } from "./SquireItems.ts";
+import {
+  fyiSourceOf,
+  questionCardTrigger,
+  readSquireQuestion,
+  squireQuestionTitle,
+} from "./SquireItems.ts";
 import * as SquireLifecycle from "./SquireLifecycle.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
 import * as SquireHooks from "./squireHooks.ts";
@@ -64,6 +68,7 @@ import {
   scheduleSquireEvent,
   squireClassifyNeeds,
   squireEventToggle,
+  squireEventTogglesOf,
   squireInterruptActor,
   squirePullRequestRevision,
   squirePullRequestStates,
@@ -138,8 +143,6 @@ const isFixtureProject = (
 
 const encodePayload = Schema.encodeSync(SquireEventPayloadJson);
 const decodePayload = Schema.decodeUnknownOption(SquireEventPayloadJson);
-const decodeToggles = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEventToggles));
-const DEFAULT_TOGGLES = Schema.decodeSync(SquireEventToggles)({});
 const decodeModel = Schema.decodeUnknownOption(Schema.fromJsonString(ModelSelection));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(SquireCardTrigger));
 const decodeTrigger = Schema.decodeUnknownOption(Schema.fromJsonString(SquireCardTrigger));
@@ -158,8 +161,7 @@ const THREAD_CHANGE_EVENTS: ReadonlySet<string> = new Set([
   "thread.metadata-updated",
 ]);
 
-const togglesOf = (row: SquireRepository.SquireRow) =>
-  Option.getOrElse(decodeToggles(row.events_json), () => DEFAULT_TOGGLES);
+const togglesOf = squireEventTogglesOf;
 
 // Ignored events are re-read harmlessly after a restart, so the cursor is
 // written after each event that did work and only every so often otherwise.
@@ -302,16 +304,13 @@ const make = Effect.gen(function* () {
   ) {
     const threadId = candidates[0]?.threadId;
     if (threadId === undefined) return;
-    const trackerIds = yield* scope.trackersOf(threadId);
-    if (trackerIds.length === 0) return;
     if (shell !== null && (yield* isFixtureProject(config, projects, shell.projectId))) return;
-    const tracking = (yield* repository.listSquires).filter(
-      (row) => row.role === "squire" && trackerIds.includes(row.id),
-    );
-    const interested = tracking.filter(
-      (row) => row.status === "active" && row.lifecycle !== "deleting",
-    );
-    if (interested.length === 0) return;
+    const squires = new Map((yield* repository.listSquires).map((row) => [row.id, row]));
+    const owners = new Map<
+      SquireEventCandidate["kind"],
+      Option.Option<SquireRepository.SquireRow>
+    >();
+    const interested = new Map<SquireId, SquireRepository.SquireRow>();
     const createdAt = yield* nowIso;
     const inserted: Array<InsertedRow> = [];
     for (const candidate of candidates) {
@@ -320,9 +319,19 @@ const make = Effect.gen(function* () {
         candidate.kind === "pull-request-changed" && shell?.latestRunId
           ? { ...candidate.payload, runId: shell.latestRunId }
           : candidate.payload;
-      for (const squire of interested) {
+      const toggle = squireEventToggle(candidate.kind);
+      let owner = owners.get(candidate.kind);
+      if (owner === undefined) {
+        const id = yield* scope.ownerOf(threadId, (squireId) => {
+          const row = squires.get(squireId);
+          return row !== undefined && togglesOf(row)[toggle];
+        });
+        owner = Option.flatMap(id, (found) => Option.fromNullishOr(squires.get(found)));
+        owners.set(candidate.kind, owner);
+      }
+      for (const squire of Option.toArray(owner)) {
+        interested.set(squire.id, squire);
         const toggles = togglesOf(squire);
-        if (!toggles[squireEventToggle(candidate.kind)]) continue;
         const schedule = scheduleSquireEvent(candidate.timing, toggles);
         const id = yield* repository.insertTriggerEvent({
           squire_id: squire.id,
@@ -364,7 +373,7 @@ const make = Effect.gen(function* () {
     }
     if (immediate.length > 0) yield* promote(immediate);
     for (const { key, ids } of bySummary.values()) {
-      yield* ensureThenPromote(key, tracking, ids);
+      yield* ensureThenPromote(key, [...interested.values()], ids);
     }
   });
 
@@ -568,6 +577,7 @@ const make = Effect.gen(function* () {
       escalate_at: null,
       opened_at: null,
       executes_at: null,
+      expires_at: null,
       attempt: 0,
       command_id: null,
       execution_key: null,
@@ -727,6 +737,7 @@ const make = Effect.gen(function* () {
     patchOf: (card: SquireRepository.SquireCardRow) => SquireRepository.SquireCardPatch,
     now: string,
     reason: string,
+    options: { readonly quiet?: boolean } = {},
   ) =>
     repository
       .transaction(
@@ -743,6 +754,7 @@ const make = Effect.gen(function* () {
             moved.push(updated.value);
             if (updated.value.status === "outdated") yield* logHoldCancelled(card, reason, now);
           }
+          if (options.quiet === true) return Option.none<SquireId>();
           return yield* writeLeadItemsResolved(repository, moved, now);
         }),
       )
@@ -821,6 +833,51 @@ const make = Effect.gen(function* () {
       now,
       "a newer turn started in the thread",
     );
+  });
+
+  /** What the user has read needs no more attention; the inactivity check stays until answered. */
+  const closeReadFyis = Effect.fnUntraced(function* (squireId: SquireId, at: DateTime.Utc) {
+    const atMs = DateTime.toEpochMillis(at);
+    const fyis = yield* repository.listCards({ squireId, kinds: ["fyi"], statuses: ["open"] });
+    yield* moveCards(
+      fyis.filter(
+        (card) =>
+          fyiSourceOf(card.payload_json) !== "inactivity" && Date.parse(card.updated_at) <= atMs,
+      ),
+      () => ({ status: "dismissed", resolution: "dismissed" }),
+      yield* nowIso,
+      "the user read the chat",
+    );
+  });
+
+  /**
+   * The user's message answers what was waiting in that Squire's chat: its approvals close, with
+   * no Lead event because the user just settled them here, and its denials end. Holds keep their
+   * Undo window, and a card raised after the message is newer than `at`.
+   */
+  const onHomeUserMessage = Effect.fnUntraced(function* (
+    effect: Extract<SquireReactorEffect, { readonly type: "home-user-message" }>,
+  ) {
+    const atMs = DateTime.toEpochMillis(effect.at);
+    const approvals = yield* repository.listCards({
+      squireId: effect.squireId,
+      kinds: ["steer", "proposal"],
+      statuses: ["open"],
+    });
+    const now = yield* nowIso;
+    yield* moveCards(
+      approvals.filter((card) => Date.parse(card.updated_at) <= atMs),
+      () => ({ status: "outdated", resolution: "outdated", executes_at: null }),
+      now,
+      "the user wrote in the chat",
+      { quiet: true },
+    );
+    yield* repository.clearDenials({
+      squireId: effect.squireId,
+      before: DateTime.formatIso(effect.at),
+      at: now,
+    });
+    yield* closeReadFyis(effect.squireId, effect.at);
   });
 
   /** A new state for the same PR obsoletes cards raised for one it no longer holds. */
@@ -1168,6 +1225,10 @@ const make = Effect.gen(function* () {
         return onRequestResolved(effect.threadId, effect.requestId, questionSettledBy(stored));
       case "run-started":
         return onRunStarted(effect.threadId, effect.runId);
+      case "home-user-message":
+        return onHomeUserMessage(effect);
+      case "home-visited":
+        return closeReadFyis(effect.squireId, effect.at);
       case "background-work-ended":
         return onBackgroundWorkEnded(effect.threadId);
       case "thread-deleted":

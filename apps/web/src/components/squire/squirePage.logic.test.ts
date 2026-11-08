@@ -1,7 +1,6 @@
 import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import {
   RunId,
-  SquireCardId,
   SquireId,
   SquireSnapshot,
   type SquireActionLogKind,
@@ -12,19 +11,11 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  nextSquireViewSearch,
   SQUIRE_ACTIVITY_KINDS,
   squireActivityLabel,
   squireBudgetBanner,
-  squireConversationHint,
-  squireConversationLayout,
   squireConversationPane,
-  squireExpandedConversationPx,
-  squireLeadStateLine,
-  squireHeaderStateLine,
-  squireUnshownHolds,
   squireHoldCountdown,
-  squireMiniComposerDraft,
   squireHoldRuleLabel,
   squireHoldText,
   squirePageState,
@@ -33,9 +24,6 @@ import {
   squireRecentFromSnapshot,
   squireRecentLabel,
   squireSwitchDescription,
-  SQUIRE_INBOX_MIN_PX,
-  squireViewBreakpoint,
-  squireViewLayout,
 } from "./squirePage.logic";
 
 const at = "2026-11-01T10:00:00.000Z";
@@ -102,83 +90,14 @@ describe("squirePageState", () => {
     expect(squirePageState(true, state, SquireId.make("gone")).status).toBe("unavailable");
   });
 
-  it("gives only the Lead a team strip, without itself", () => {
-    const leadPage = squirePageState(true, state, lead.squire.id);
-    const releasePage = squirePageState(true, state, release.squire.id);
-    expect(leadPage.status === "ready" && leadPage.team.map((e) => e.squire.id)).toEqual([
-      release.squire.id,
-    ]);
-    expect(releasePage.status === "ready" && releasePage.team).toEqual([]);
-  });
-});
-
-describe("squireViewLayout", () => {
-  it("offers the inbox at 1440x900, where the main width is about 1184 px", () => {
-    expect(squireViewLayout(1184, false)).toEqual({
-      inboxOffered: true,
-      companionPanel: "shown",
-      queueLayout: "list",
+  it("marks the Lead", () => {
+    expect(squirePageState(true, state, lead.squire.id)).toMatchObject({
+      status: "ready",
+      isLead: true,
     });
-  });
-
-  it("collapses the companion panel while the inbox is open", () => {
-    expect(squireViewLayout(1184, true)).toEqual({
-      inboxOffered: true,
-      companionPanel: "collapsed",
-      queueLayout: "inbox",
-    });
-  });
-
-  it("shows the panel from exactly 1100 px", () => {
-    expect(squireViewLayout(1100, false).companionPanel).toBe("shown");
-    expect(squireViewLayout(1099, false).companionPanel).toBe("collapsed");
-  });
-
-  it("offers the inbox at a 1280 px window, where the main is about 1024 px", () => {
-    expect(squireViewLayout(1024, false)).toEqual({
-      inboxOffered: true,
-      companionPanel: "collapsed",
-      queueLayout: "list",
-    });
-    expect(squireViewLayout(1024, true).queueLayout).toBe("inbox");
-    expect(squireViewLayout(SQUIRE_INBOX_MIN_PX, true).queueLayout).toBe("inbox");
-  });
-
-  it("below the inbox width keeps the list even with the inbox toggled", () => {
-    expect(squireViewLayout(SQUIRE_INBOX_MIN_PX - 1, false)).toEqual({
-      inboxOffered: false,
-      companionPanel: "collapsed",
-      queueLayout: "list",
-    });
-    expect(squireViewLayout(800, true).queueLayout).toBe("list");
-  });
-
-  it("changes breakpoint only when a width crosses the inbox or the panel width", () => {
-    expect(squireViewBreakpoint(700)).toBe(squireViewBreakpoint(959));
-    expect(squireViewBreakpoint(960)).toBe(squireViewBreakpoint(1099));
-    expect(squireViewBreakpoint(1100)).toBe(squireViewBreakpoint(1600));
-    expect(new Set([959, 960, 1100].map(squireViewBreakpoint)).size).toBe(3);
-  });
-});
-
-describe("nextSquireViewSearch", () => {
-  const item = SquireCardId.make("card-1");
-  const squire = SquireId.make("release");
-
-  it("keeps the bare route for the all chip, no item, and no team filter", () => {
-    expect(
-      nextSquireViewSearch(
-        { filter: "steer", item, squire },
-        { chip: "all", item: null, squire: null },
-      ),
-    ).toEqual({});
-  });
-
-  it("changes only the patched keys", () => {
-    expect(nextSquireViewSearch({ filter: "fyi", squire }, { item })).toEqual({
-      item,
-      filter: "fyi",
-      squire,
+    expect(squirePageState(true, state, release.squire.id)).toMatchObject({
+      status: "ready",
+      isLead: false,
     });
   });
 });
@@ -463,160 +382,6 @@ describe("squireConversationPane", () => {
     expect(
       squireConversationPane(entry("x", { lifecycle: "creating", homeThreadId: null }).squire),
     ).toEqual({ kind: "pending" });
-  });
-});
-
-describe("squireConversationLayout", () => {
-  const thread = squireConversationPane(entry("release").squire);
-
-  it("is one slim line while collapsed, so the queue gets the view", () => {
-    expect(squireConversationLayout(thread, true)).toEqual({ kind: "slim" });
-  });
-
-  it("expanded at 1440x900 under a long queue, leaves a tall card most of the window", () => {
-    const layout = squireConversationLayout(thread, false);
-    if (layout.kind !== "expanded") throw new Error("expected expanded");
-    // 900 px tall less the 52 px top bar.
-    const view = 848;
-    const pane = squireExpandedConversationPx(layout, view, 1200);
-    expect(view - pane).toBe(360);
-    // Under the pane's toggle row and the composer, the timeline keeps over 300 px for a card.
-    expect(pane - 32 - 140).toBeGreaterThan(300);
-    // A tall window caps the queue at its share, so the pane grows with the window.
-    expect(squireExpandedConversationPx(layout, 1400, 1200)).toBe(840);
-  });
-
-  it("gives the pane everything a short queue leaves", () => {
-    const layout = squireConversationLayout(thread, false);
-    if (layout.kind !== "expanded") throw new Error("expected expanded");
-    expect(squireExpandedConversationPx(layout, 848, 220)).toBe(628);
-  });
-
-  it("gives way to the queue first in a short window", () => {
-    const layout = squireConversationLayout(thread, false);
-    if (layout.kind !== "expanded") throw new Error("expected expanded");
-    expect(squireExpandedConversationPx(layout, 500, 1200)).toBe(140);
-    expect(squireExpandedConversationPx(layout, 300, 1200)).toBe(0);
-  });
-
-  it("shows the provider prompt or nothing when there is no home thread", () => {
-    const lead = entry("lead", { role: "lead", lifecycle: "needs_provider", homeThreadId: null });
-    expect(squireConversationLayout(squireConversationPane(lead.squire), true)).toEqual({
-      kind: "prompt",
-    });
-    const creating = entry("x", { lifecycle: "creating", homeThreadId: null });
-    expect(squireConversationLayout(squireConversationPane(creating.squire), false)).toEqual({
-      kind: "none",
-    });
-  });
-
-  it("hints at what the collapsed conversation holds", () => {
-    expect(squireConversationHint({ visibleItemCount: 12 }, false)).toBe("12 entries");
-    expect(squireConversationHint(null, false)).toBe("No messages yet");
-    expect(squireConversationHint({ visibleItemCount: 12 }, true)).toBe("Working…");
-  });
-});
-
-describe("squireLeadStateLine", () => {
-  const lead = (state: "idle" | "waiting" | "working", openDecisionCount: number) => ({
-    squire: { role: "lead" as const, status: "active" as const, lifecycle: "ready" as const },
-    indicator: { state, badge: null, workingLabel: false },
-    openDecisionCount,
-    heldCount: 0,
-  });
-
-  it("counts the team's open decisions with the Lead's own, as the Lead view lists them", () => {
-    expect(
-      squireLeadStateLine(lead("waiting", 1), [{ openDecisionCount: 2 }, { openDecisionCount: 0 }]),
-    ).toBe("Waiting on you · 3 need a decision");
-    expect(squireLeadStateLine(lead("idle", 0), [{ openDecisionCount: 1 }])).toBe(
-      "Waiting on you · 1 needs a decision",
-    );
-    expect(squireLeadStateLine(lead("working", 0), [{ openDecisionCount: 2 }])).toBe(
-      "Working · 2 need a decision",
-    );
-  });
-
-  it("counts a Lead-raised item on a Squire's thread once, though both badges show it", () => {
-    expect(
-      squireLeadStateLine(lead("waiting", 1), [
-        { openDecisionCount: 3, leadRaisedDecisionCount: 1 },
-      ]),
-    ).toBe("Waiting on you · 3 need a decision");
-  });
-
-  it("reads the Lead's own state when nothing waits", () => {
-    expect(squireLeadStateLine(lead("idle", 0), [{ openDecisionCount: 0 }])).toBe("Idle");
-    expect(squireLeadStateLine(lead("working", 0), [])).toBe("Working");
-  });
-});
-
-describe("squireHeaderStateLine", () => {
-  const input = (
-    role: "lead" | "squire",
-    state: "idle" | "waiting" | "working",
-    openDecisionCount: number,
-    heldCount = 0,
-  ) => ({
-    squire: { role, status: "active" as const, lifecycle: "ready" as const },
-    indicator: { state, badge: null, workingLabel: false },
-    openDecisionCount,
-    heldCount,
-  });
-
-  it("counts the queue's decision rows, not the own-items badge count", () => {
-    // Release's badge counts 1 (its own); its queue also lists the Lead's overlap, and a hold.
-    expect(
-      squireHeaderStateLine(input("squire", "waiting", 1, 1), { decisions: 2, held: 1 }, null),
-    ).toBe("Waiting on you · 2 need a decision");
-    expect(
-      squireHeaderStateLine(input("squire", "waiting", 0, 1), { decisions: 0, held: 1 }, null),
-    ).toBe("Waiting on you · 1 action held");
-  });
-
-  it("falls back to the snapshot until the queue loads", () => {
-    expect(squireHeaderStateLine(input("squire", "waiting", 1), null, null)).toBe(
-      "Waiting on you · 1 needs a decision",
-    );
-    expect(
-      squireHeaderStateLine(input("lead", "waiting", 1), null, [{ openDecisionCount: 2 }]),
-    ).toBe("Waiting on you · 3 need a decision");
-  });
-
-  it("counts the Lead's combined queue once, not again with its team", () => {
-    expect(
-      squireHeaderStateLine(input("lead", "working", 0), { decisions: 4, held: 0 }, [
-        { openDecisionCount: 3 },
-      ]),
-    ).toBe("Working · 4 need a decision");
-  });
-});
-
-describe("squireUnshownHolds", () => {
-  const held = [{ cardId: "a" }, { cardId: "b" }];
-
-  it("shows a banner for every hold until the queue loads, then only those without a row", () => {
-    expect(squireUnshownHolds(held, null)).toEqual(held);
-    expect(squireUnshownHolds(held, new Set(["a"]))).toEqual([{ cardId: "b" }]);
-    expect(squireUnshownHolds(held, new Set(["a", "b"]))).toEqual([]);
-  });
-});
-
-describe("squireMiniComposerDraft", () => {
-  it("hands nothing over for blank text, so Send stays disabled", () => {
-    expect(squireMiniComposerDraft("", null)).toBeNull();
-    expect(squireMiniComposerDraft("   \n ", "kept draft")).toBeNull();
-  });
-
-  it("becomes the draft when the thread has none", () => {
-    expect(squireMiniComposerDraft("  ship it  ", null)).toBe("ship it");
-    expect(squireMiniComposerDraft("ship it", "  \n")).toBe("ship it");
-  });
-
-  it("keeps an existing draft and continues after it", () => {
-    expect(squireMiniComposerDraft("and the docs", "Update the changelog\n")).toBe(
-      "Update the changelog\n\nand the docs",
-    );
   });
 });
 

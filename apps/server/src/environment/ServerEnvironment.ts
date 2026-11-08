@@ -304,6 +304,7 @@ export const make = Effect.gen(function* () {
           agentActivityPublishing,
           ...(squire ? { squire: true } : {}),
           ...(squireSwitch.pinned ? {} : { squireLiveSwitch: true }),
+          squireChatFirst: true,
         },
       };
     }),

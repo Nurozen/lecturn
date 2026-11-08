@@ -11,9 +11,6 @@ import {
   SquireBudgets,
   type SquireBatchEvent,
   type SquireBatchFailingCheck,
-  SquireCardId,
-  SquireCardPayload,
-  SquireCardTrigger,
   SquireEvent,
   type SquireGrantKind,
   type SquireId,
@@ -190,8 +187,6 @@ function chooseBatch(ready: ReadonlyArray<SquireEventRow>): ReadonlyArray<Squire
 const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEvent));
 const decodePayload = Schema.decodeUnknownOption(SquireEventPayloadJson);
 const decodeBudgets = Schema.decodeUnknownOption(Schema.fromJsonString(SquireBudgets));
-const encodeCardPayload = Schema.encodeSync(Schema.fromJsonString(SquireCardPayload));
-const encodeCardTrigger = Schema.encodeSync(Schema.fromJsonString(SquireCardTrigger));
 
 type KnownEvent = Exclude<SquireEvent, UnknownUnionMember>;
 type OtherEvent = Extract<SquireBatchEvent, { readonly kind: "event" }>["event"];
@@ -772,33 +767,9 @@ const make = Effect.gen(function* () {
   // Leaves a newer server's kinds alone instead of dropping them.
   const knownKind = (kind: string) => LEAD_KINDS.has(kind) || SQUIRE_KINDS.has(kind);
 
-  /** Callers hold the Squire's lock. Only rows this call moves get FYIs, so a repeat writes none. */
-  const finalizeBatch = Effect.fn("SquireDelivery.finalizeBatch")(function* (
-    squire: SquireRow,
-    batchId: string,
-    runId: RunId,
-  ) {
-    const now = yield* nowIso;
-    yield* repository.transaction(
-      Effect.gen(function* () {
-        const delivered = yield* repository.markBatchDelivered(batchId);
-        // The latest summary-bearing event per thread; a newer FYI would replace earlier ones.
-        const latest = new Map<ThreadId, SquireEventRow>();
-        for (const row of delivered) {
-          // A waiting-on-user event raises its own question card.
-          if (!isSummaryBearing(row.kind) || row.kind === "waiting-on-user") continue;
-          if (row.thread_id !== null) latest.set(row.thread_id, row);
-        }
-        for (const [threadId, row] of latest) {
-          const decided = yield* repository.runRaisedDecisionCard({
-            squireId: squire.id,
-            runId,
-            threadId,
-          });
-          if (!decided) yield* writeFyi({ squire, runId, row, now });
-        }
-      }),
-    );
+  /** Callers hold the Squire's lock. A quiet turn creates nothing here: only the turn's own tools write cards. */
+  const finalizeBatch = Effect.fn("SquireDelivery.finalizeBatch")(function* (batchId: string) {
+    yield* repository.markBatchDelivered(batchId);
   });
 
   /**
@@ -851,7 +822,7 @@ const make = Effect.gen(function* () {
           runIds: [runId],
         });
         if (!runs.some((run) => TERMINAL_RUN_STATUSES.has(run.status))) return;
-        yield* finalizeBatch(squire, outstandingId, runId);
+        yield* finalizeBatch(outstandingId);
       }
     }
 
@@ -931,108 +902,6 @@ const make = Effect.gen(function* () {
   const deliverReady: SquireDelivery["Service"]["deliverReady"] = (squireId) =>
     lockFor(squireId).withPermits(1)(deliverNext(squireId));
 
-  const writeFyi = Effect.fn("SquireDelivery.writeFyi")(function* (input: {
-    readonly squire: SquireRow;
-    readonly runId: RunId;
-    readonly row: SquireEventRow;
-    readonly now: string;
-  }) {
-    const { squire, row, now } = input;
-    const threadId = row.thread_id;
-    if (threadId === null) return;
-    const payload = Option.getOrNull(decodePayload(row.payload_json ?? ""));
-    const shell = yield* projections.getThreadShell(threadId);
-    const title = shell?.title ?? threadId;
-    const outcome = payload?.outcome ?? row.kind;
-    const text = `${title}: ${outcome}`;
-    // The card keys the summary (thread, run, stage) instead of copying it.
-    const trigger = encodeCardTrigger({
-      ...(payload?.runId ? { runId: payload.runId } : {}),
-      ...(payload?.pendingRequest ? { requestId: payload.pendingRequest.requestId } : {}),
-      ...(payload?.pullRequest
-        ? {
-            prKey: `${payload.pullRequest.host}/${payload.pullRequest.repository}#${payload.pullRequest.number}`,
-            headSha: payload.pullRequest.headSha,
-            transition: payload.pullRequest.transition,
-          }
-        : {}),
-    });
-    const cardPayload = encodeCardPayload({ type: "fyi", source: "summary", text, threadId });
-    const open = yield* repository.listCards({
-      squireId: squire.id,
-      statuses: ["open"],
-      targetThreadId: threadId,
-      kinds: ["fyi"],
-    });
-    const existing = open[0];
-    let cardId: SquireCardId;
-    if (existing) {
-      // One open item per (Squire, thread, type); the newer one replaces it.
-      yield* repository.updateCard({
-        id: existing.id,
-        fromStatuses: ["open"],
-        patch: {
-          title,
-          payload_json: cardPayload,
-          trigger_json: trigger,
-          replaced_count: existing.replaced_count + 1,
-        },
-        updatedAt: now,
-      });
-      cardId = existing.id;
-    } else {
-      cardId = SquireCardId.make(`fyi:${squire.id}:${row.id}`);
-      yield* repository.insertCard({
-        id: cardId,
-        squire_id: squire.id,
-        owner_squire_id: squire.id,
-        kind: "fyi",
-        status: "open",
-        target_thread_id: threadId,
-        project_id: shell?.projectId ?? null,
-        title,
-        why: "",
-        payload_json: cardPayload,
-        evidence_json: "{}",
-        trigger_json: trigger,
-        intent_json: null,
-        origin: "event",
-        steer_kind: null,
-        routed_task_id: null,
-        rule_id: null,
-        finding_key: null,
-        escalate_at: null,
-        opened_at: null,
-        executes_at: null,
-        attempt: 0,
-        command_id: null,
-        execution_key: null,
-        dedupe_key: null,
-        replaced_count: 0,
-        ask_json: null,
-        resolution: null,
-        created_at: now,
-        updated_at: now,
-      });
-    }
-    yield* repository.insertActionLog({
-      squire_id: squire.id,
-      kind: "card.created",
-      room_id: null,
-      post_id: null,
-      trigger_id: null,
-      task_id: null,
-      thread_id: threadId,
-      card_id: cardId,
-      event_id: row.id,
-      run_id: input.runId,
-      invocation_key: null,
-      execution_key: null,
-      data_json: encodeLogData({ kind: "fyi", source: "summary" }),
-      created_at: now,
-    });
-  });
-
   const wake: SquireDelivery["Service"]["wake"] = (squireId) =>
     FiberSet.run(
       fibers,
@@ -1053,9 +922,7 @@ const make = Effect.gen(function* () {
     const parsed = run ? parseSquireMessageId(run.userMessageId) : Option.none();
     const found = yield* repository.getSquire(input.squireId);
     if (Option.isSome(parsed) && Option.isSome(found)) {
-      yield* lockFor(input.squireId).withPermits(1)(
-        finalizeBatch(found.value, parsed.value.batchId, input.runId),
-      );
+      yield* lockFor(input.squireId).withPermits(1)(finalizeBatch(parsed.value.batchId));
     }
     yield* wake(input.squireId);
   });
@@ -1093,7 +960,7 @@ const make = Effect.gen(function* () {
                 runIds: [runId],
               });
               if (!runs.some((run) => TERMINAL_RUN_STATUSES.has(run.status))) return;
-              yield* finalizeBatch(squire, batchId, runId);
+              yield* finalizeBatch(batchId);
               yield* wake(squireId);
               return;
             }

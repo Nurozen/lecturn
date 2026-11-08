@@ -18,6 +18,8 @@ export type ThreadRouteControl =
   | "composer-text"
   | "send"
   | "stop"
+  /** The menu entry for a Squire's pause, scope, and rules. */
+  | "squire-details"
   // Denied there.
   /** The iOS "Thread" header menu and the Android Squire tracking menu. */
   | "thread-actions"
@@ -68,6 +70,7 @@ export const SQUIRE_THREAD_CONTROLS: ThreadRouteControls = new Set<ThreadRouteCo
   "composer-text",
   "send",
   "stop",
+  "squire-details",
 ]);
 
 export function allowsThreadRouteControl(
@@ -95,6 +98,7 @@ export function resolveThreadRouteControls(input: {
 export type ThreadRouteHeaderAction =
   | { readonly kind: "decisions"; readonly label: string }
   | { readonly kind: "fork"; readonly label: string }
+  | { readonly kind: "squire-details"; readonly label: string; readonly squireId: string }
   | {
       readonly kind: "track" | "untrack";
       readonly label: string;
@@ -123,15 +127,22 @@ export function threadRouteHeaderActions(input: {
   readonly controls: ThreadRouteControls | undefined;
   readonly decisionsSupported: boolean;
   readonly forkSupported: boolean;
+  /** The Squire whose chat this is; null on any other thread. */
+  readonly homeSquireId: string | null;
   readonly tracking: ReadonlyArray<{
     readonly kind: "track" | "untrack";
     readonly label: string;
     readonly squireId: string;
   }>;
 }): ReadonlyArray<ThreadRouteHeaderAction> {
-  if (!allowsThreadRouteControl(input.controls, "thread-actions")) return [];
   const allows = (control: ThreadRouteControl) => allowsThreadRouteControl(input.controls, control);
+  const details: ReadonlyArray<ThreadRouteHeaderAction> =
+    input.homeSquireId !== null && allows("squire-details")
+      ? [{ kind: "squire-details", label: "Squire details", squireId: input.homeSquireId }]
+      : [];
+  if (!allows("thread-actions")) return details;
   return [
+    ...details,
     ...(input.decisionsSupported && allows("decisions")
       ? [{ kind: "decisions" as const, label: "Decisions" }]
       : []),

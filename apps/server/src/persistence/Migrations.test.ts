@@ -201,6 +201,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -228,6 +229,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
       ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
@@ -248,6 +250,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
       ]);
       yield* insertSearchMessage("after-upgrade");
 
@@ -277,6 +280,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
       ]);
 
       assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
@@ -296,6 +300,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -335,6 +340,7 @@ describe("runMigrations", () => {
         [88, "PeerLinks"],
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
+        [91, "SquireChatFirst"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

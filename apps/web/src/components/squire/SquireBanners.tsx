@@ -1,4 +1,4 @@
-import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
+import { squireUndoOffer, type SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireCardId, SquireRuleOffer } from "@lecturn/contracts";
 import { GaugeIcon, TimerIcon } from "lucide-react";
 import { memo, useState } from "react";
@@ -7,17 +7,11 @@ import { useClientSettings } from "../../hooks/useSettings";
 import { formatShortTimestamp } from "../../timestampFormat";
 import { ComposerBanner } from "../chat/ComposerBanner";
 import { Button } from "../ui/button";
-import { SquireHoldRuleBadge, useSquireHoldUndo } from "./queue/SquireHoldControls";
-import { SquireRuleOfferPrompt } from "./queue/SquireRuleOffer";
-import { squireUndoOffer } from "./queue/squireQueue.logic";
-import { useSquireShownHolds } from "./queue/squireQueueState";
-import { squireBudgetBanner, squireUnshownHolds } from "./squirePage.logic";
+import { SquireHoldRuleBadge, useSquireHoldUndo } from "./chat/SquireHoldControls";
+import { SquireRuleOfferPrompt } from "./chat/SquireRuleOffer";
+import { squireBudgetBanner } from "./squirePage.logic";
 
-/**
- * Holds and the budget notice, in the Squire layer above the conversation pane. A
- * hold shows its countdown and Undo on its queue row; this banner keeps only the holds the
- * queue does not show.
- */
+/** Holds, with their countdown and Undo, and the budget notice, above the chat. */
 export const SquireBanners = memo(function SquireBanners(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;
@@ -25,8 +19,7 @@ export const SquireBanners = memo(function SquireBanners(props: {
   const { environmentId, entry } = props;
   const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const budget = squireBudgetBanner(entry, (iso) => formatShortTimestamp(iso, timestampFormat));
-  const shownHolds = useSquireShownHolds(environmentId, entry.squire.id);
-  const held = squireUnshownHolds(entry.held, shownHolds);
+  const held = entry.held;
   // Kept here because the undone hold, and its banner, leave the snapshot at once.
   const [undoOffer, setUndoOffer] = useState<{
     readonly cardId: SquireCardId;
@@ -76,7 +69,6 @@ export const SquireBanners = memo(function SquireBanners(props: {
   );
 });
 
-/** A hold whose row the queue does not show, e.g. under a chip or team filter. */
 function SquireHoldBanner(props: Parameters<typeof useSquireHoldUndo>[0]) {
   const hold = useSquireHoldUndo(props);
   return (

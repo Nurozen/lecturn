@@ -258,14 +258,6 @@ type ThreadFeedEntryContent =
       readonly runId: RunId | null;
     }
   | {
-      /** Stands for a run of Squire wakes in a Squire's home thread; see `ThreadFeed.logic.ts`. */
-      readonly type: "squire-updates";
-      readonly id: string;
-      readonly createdAt: string;
-      readonly label: string;
-      readonly expanded: boolean;
-    }
-  | {
       /** Lecturn: where an imported session's history ends and work done here begins. */
       readonly type: "import-divider";
       readonly id: string;
@@ -1426,7 +1418,7 @@ function threadFeedEntryRow(entry: ThreadFeedEntry): {
   if (entry.type === "message") {
     return { runId: entry.message.runId, createdAt: entry.message.createdAt };
   }
-  if (entry.type === "import-divider" || entry.type === "squire-updates") {
+  if (entry.type === "import-divider") {
     return { runId: null, createdAt: entry.createdAt };
   }
   return { runId: entry.runId, createdAt: entry.createdAt };
@@ -1632,12 +1624,7 @@ export function deriveThreadFeedPresentation(
     Exclude<
       ThreadFeedEntry,
       {
-        readonly type:
-          | "run-fold"
-          | "work-toggle"
-          | "thinking"
-          | "import-divider"
-          | "squire-updates";
+        readonly type: "run-fold" | "work-toggle" | "thinking" | "import-divider";
       }
     >
   > = [];
@@ -1648,8 +1635,7 @@ export function deriveThreadFeedPresentation(
       entry.type === "run-fold" ||
       entry.type === "work-toggle" ||
       entry.type === "thinking" ||
-      entry.type === "import-divider" ||
-      entry.type === "squire-updates"
+      entry.type === "import-divider"
     )
       continue;
     retainedFeed.push(entry);

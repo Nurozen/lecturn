@@ -653,7 +653,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
       linking: "decisions/:environmentId/:projectId",
       options: { ...SOLID_HEADER_OPTIONS, title: "Decisions" },
     }),
-    // Lecturn: Squire queue and room screens (capability-gated inside the screens).
+    // Lecturn: Squire chat and room screens (capability-gated inside the screens).
     Squire: createNativeStackScreen({
       screen: SquireRouteScreen,
       linking: "squires/:environmentId/:squireId",

@@ -365,6 +365,7 @@ const cardRow = (id: string): SquireRepository.SquireCardRow => ({
   escalate_at: null,
   opened_at: null,
   executes_at: null,
+  expires_at: null,
   attempt: 0,
   command_id: null,
   execution_key: null,

@@ -101,6 +101,7 @@ const cardRow = (
   escalate_at: null,
   opened_at: null,
   executes_at: null,
+  expires_at: null,
   attempt: 0,
   command_id: null,
   execution_key: null,
@@ -125,6 +126,8 @@ const candidatesOf = (row: SquireRepository.SquireEventRow | undefined) =>
 const leadRow = Effect.flatMap(SquireRepository.SquireRepository, (repository) =>
   Effect.map(repository.getSquire(lead), Option.getOrThrow),
 );
+
+const isoFar = "2999-01-01T00:00:00.000Z";
 
 const findWork = Effect.flatMap(SquireSweep.SquireSweep, (sweep) =>
   sweep.request({ requestId: requestId() }),
@@ -290,6 +293,45 @@ describe("SquireSweep", () => {
       assert.lengthOf(yield* sweepEvents, 4);
       yield* TestClock.setTime(Date.parse("2026-11-03T12:00:01.000Z"));
       assert.strictEqual((yield* findWork).outcome, "queued");
+    }).pipe(Effect.provide(sweepLayer())),
+  );
+
+  it.effect("a lapsed finding for the same head stays lapsed", () =>
+    Effect.gen(function* () {
+      yield* seed();
+      yield* standardShells();
+      const repository = yield* SquireRepository.SquireRepository;
+      yield* findWork;
+      const admission = yield* raise("card:finding-lapsed", idle);
+      assert.isTrue(admission.ok);
+      yield* repository.updateCard({
+        id: SquireCardId.make("card:finding-lapsed"),
+        fromStatuses: ["open"],
+        patch: { status: "outdated", resolution: "expired" },
+        updatedAt: NOW,
+      });
+      const again = yield* admit(idle);
+      assert.strictEqual(!again.ok && again.reason, "finding-outdated");
+      // Not offered again either, so it costs no Lead turn and frees its slot.
+      yield* findWork;
+      assert.notInclude(
+        candidatesOf((yield* sweepEvents).at(-1)).map(
+          (candidate) => (candidate as { threadId: string }).threadId,
+        ),
+        idle,
+      );
+
+      // The 30-day purge keeps it, or it would become raisable again.
+      yield* repository.pruneHistory({
+        eventsBefore: isoFar,
+        cardsBefore: isoFar,
+        actionLogBefore: isoFar,
+        budgetUsageBefore: isoFar,
+        closedRoomPostsBefore: isoFar,
+      });
+      assert.isTrue(
+        Option.isSome(yield* repository.getCard(SquireCardId.make("card:finding-lapsed"))),
+      );
     }).pipe(Effect.provide(sweepLayer())),
   );
 

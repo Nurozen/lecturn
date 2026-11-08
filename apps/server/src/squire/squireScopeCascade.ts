@@ -9,6 +9,55 @@ import * as Option from "effect/Option";
 import { writeLeadItemsResolved } from "./squireLeadItems.ts";
 import type * as SquireRepository from "./SquireRepository.ts";
 import type * as SquireScope from "./SquireScope.ts";
+import { isSummaryBearing, squireEventToggle, squireEventTogglesOf } from "./squireEvents.ts";
+
+/**
+ * What `leaving` had queued about a thread goes to whoever owns that event now, so a pause, an
+ * exclusion, or a delete does not lose it. Thread events only: anything else was addressed to
+ * this Squire. Returns the rows it moved; the caller drops the rest, in its transaction.
+ */
+const handOverQueuedEvents = Effect.fn("squireScopeCascade.handOverQueuedEvents")(function* (
+  repository: SquireRepository.SquireRepository["Service"],
+  scope: SquireScope.SquireScope["Service"],
+  input: {
+    readonly leaving: SquireId;
+    readonly rows: ReadonlyArray<SquireRepository.SquireEventRow>;
+  },
+) {
+  const squires = new Map((yield* repository.listSquires).map((row) => [row.id, row]));
+  const moved = new Set<number>();
+  for (const row of input.rows) {
+    const { kind, thread_id: threadId } = row;
+    if (threadId === null || !isSummaryBearing(kind)) continue;
+    const toggle = squireEventToggle(kind);
+    const owner = yield* scope.ownerOf(threadId, (id) => {
+      const squire = squires.get(id);
+      return id !== input.leaving && squire !== undefined && squireEventTogglesOf(squire)[toggle];
+    });
+    if (Option.isSome(owner)) {
+      if (yield* repository.reassignQueuedEvent({ id: row.id, squireId: owner.value })) {
+        moved.add(row.id);
+      }
+    }
+  }
+  return moved;
+});
+
+/** A pause: what the Squire had queued goes to the next owner, and the rest is dropped. */
+export const handOverOrDropQueuedEvents = Effect.fn(
+  "squireScopeCascade.handOverOrDropQueuedEvents",
+)(function* (
+  repository: SquireRepository.SquireRepository["Service"],
+  scope: SquireScope.SquireScope["Service"],
+  squireId: SquireId,
+) {
+  const rows = yield* repository.listEventsByStatus({
+    squireId,
+    statuses: ["deferred", "pending"],
+  });
+  yield* handOverQueuedEvents(repository, scope, { leaving: squireId, rows });
+  yield* repository.dropQueuedEvents(squireId);
+});
 
 /**
  * Run inside the transaction that changed the scope, so scope reads see its
@@ -54,9 +103,13 @@ export const retireOutOfScope = Effect.fn("squireScopeCascade.retireOutOfScope")
     return left;
   });
 
-  const dropped = yield* Effect.filter(events, (row) => gone(row.thread_id!));
+  const left = yield* Effect.filter(events, (row) => gone(row.thread_id!));
+  const handedOver = yield* handOverQueuedEvents(repository, scope, {
+    leaving: squireId,
+    rows: left,
+  });
   yield* repository.setEventStatus({
-    ids: dropped.map((row) => row.id),
+    ids: left.filter((row) => !handedOver.has(row.id)).map((row) => row.id),
     fromStatuses: ["deferred", "pending"],
     status: "dropped",
   });

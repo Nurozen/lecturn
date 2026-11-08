@@ -1,7 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { SquireId, ThreadId } from "@lecturn/contracts";
+import { SquireCardId, SquireId, ThreadId } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -180,6 +181,69 @@ describe("SquireClock", () => {
       yield* TestClock.adjust(1_000);
       yield* settle;
       assert.include(probe.executed, executesAt);
+    }).pipe(Effect.provide(layerClock(probe)), Effect.scoped);
+  });
+
+  it.effect("expires a due approval quietly and arms on its expires_at", () => {
+    const probe = newProbe();
+    const approval = (id: string, overrides: Partial<SquireRepository.SquireCardRow> = {}) => ({
+      id: SquireCardId.make(id),
+      squire_id: release,
+      owner_squire_id: release,
+      kind: "steer" as const,
+      status: "open" as const,
+      target_thread_id: ThreadId.make(`thread:${id}`),
+      project_id: null,
+      title: "Rerun the checks",
+      why: "",
+      payload_json: "{}",
+      evidence_json: "{}",
+      trigger_json: "{}",
+      intent_json: null,
+      origin: "event" as const,
+      steer_kind: null,
+      routed_task_id: null,
+      rule_id: null,
+      finding_key: null,
+      escalate_at: null,
+      opened_at: null,
+      executes_at: null,
+      expires_at: null,
+      attempt: 0,
+      command_id: null,
+      execution_key: null,
+      dedupe_key: null,
+      replaced_count: 0,
+      ask_json: null,
+      resolution: null,
+      created_at: iso(START),
+      updated_at: iso(START),
+      ...overrides,
+    });
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(START);
+      const clock = yield* SquireClock.SquireClock;
+      const repository = yield* SquireRepository.SquireRepository;
+      yield* repository.createSquire(squireRow(release));
+      yield* Effect.forkScoped(clock.start);
+      yield* settle;
+      const dueAt = START + Duration.toMillis(SquireRepository.SQUIRE_APPROVAL_TTL);
+      yield* repository.insertCard(approval("due", { expires_at: iso(dueAt) }));
+      yield* repository.insertCard(approval("question", { kind: "question", expires_at: null }));
+      yield* settle;
+      yield* TestClock.adjust(Duration.toMillis(SquireRepository.SQUIRE_APPROVAL_TTL) - MINUTE);
+      yield* settle;
+      const stateOf = (id: string) =>
+        repository
+          .getCard(SquireCardId.make(id))
+          .pipe(Effect.map(Option.map((card) => [card.status, card.resolution])));
+      assert.deepEqual(yield* stateOf("due"), Option.some(["open", null]));
+
+      yield* TestClock.adjust(MINUTE);
+      yield* settle;
+      assert.deepEqual(yield* stateOf("due"), Option.some(["outdated", "expired"]));
+      assert.deepEqual(yield* stateOf("question"), Option.some(["open", null]));
+      assert.deepEqual(probe.woken, []);
     }).pipe(Effect.provide(layerClock(probe)), Effect.scoped);
   });
 

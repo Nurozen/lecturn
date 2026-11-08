@@ -13,7 +13,7 @@ import { squireEnvironment } from "../../../state/squires";
 import { useQuickSteer } from "../../pullRequest/useQuickSteer";
 import { Button } from "../../ui/button";
 import { toastManager } from "../../ui/toast";
-import { useSquireItemsAct } from "../queue/squireQueueState";
+import { useSquireItemsAct } from "../chat/squireApprovalsState";
 import { openSquireSetup } from "../setup/squireSetupStore";
 import { SquireCompanion, type SquireCompanionHandle } from "../SquireCompanion";
 import { SquirePortrait, useSquireHomeShell, useSquireIndicator } from "../SquireHeader";

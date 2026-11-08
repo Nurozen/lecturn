@@ -244,6 +244,51 @@ const onlyExecution = (team: Team, cardId: SquireCardId) =>
     return rows[0]!;
   });
 
+/** An open merge proposal, as the Lead recorded one before the merge tool was retired. */
+const seedMergeProposal = (team: Team, itemIds: ReadonlyArray<SquireCardId>, name: string) =>
+  Effect.gen(function* () {
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const id = SquireCardId.make(`card:proposal:merge:${name}`);
+    yield* (yield* repo).insertCard({
+      id,
+      squire_id: team.leadId,
+      owner_squire_id: team.leadId,
+      kind: "proposal",
+      status: "open",
+      target_thread_id: null,
+      project_id: null,
+      title: "Merge duplicate items",
+      why: "Two Squires raised the same item.",
+      payload_json: JSON.stringify({
+        type: "control",
+        action: "merge",
+        squireId: null,
+        cardIds: itemIds,
+      }),
+      evidence_json: "{}",
+      trigger_json: "{}",
+      intent_json: null,
+      origin: "lead",
+      steer_kind: null,
+      routed_task_id: null,
+      rule_id: null,
+      finding_key: null,
+      escalate_at: null,
+      opened_at: null,
+      executes_at: null,
+      attempt: 0,
+      command_id: null,
+      execution_key: null,
+      dedupe_key: null,
+      replaced_count: 0,
+      ask_json: null,
+      resolution: null,
+      created_at: now,
+      updated_at: now,
+    });
+    return id;
+  });
+
 /** An open steer item raised by `squireId` on `threadId`, as a Squire turn writes one. */
 const seedItem = (squireId: SquireId, threadId: ThreadId, name: string) =>
   Effect.gen(function* () {
@@ -359,7 +404,6 @@ describe("Lead control in every Manage Squires cell (P8, P17.6)", () => {
           leadCall(team, "squire_resume", { squireId: team.research }),
           leadCall(team, "squire_rescope", { squireId: team.release, grants: [] }),
           leadCall(team, "squire_forward_item", { itemId: item, toSquireId: team.research }),
-          leadCall(team, "squire_merge_items", { itemIds: [item, item] }),
         ];
         for (const call of calls) {
           const result = yield* call;
@@ -423,9 +467,7 @@ describe("Lead control in every Manage Squires cell (P8, P17.6)", () => {
         assert.strictEqual(moved.status, "open");
 
         const duplicate = yield* seedItem(team.release, tracked, "recommend-duplicate");
-        const merge = cardIdOf(
-          yield* leadCall(team, "squire_merge_items", { itemIds: [item, duplicate] }),
-        );
+        const merge = yield* seedMergeProposal(team, [item, duplicate], "recommend");
         yield* accept([merge]);
         assert.strictEqual((yield* cardOf(item)).status, "open");
         assert.strictEqual((yield* cardOf(duplicate)).status, "outdated");
@@ -440,29 +482,38 @@ describe("Lead control in every Manage Squires cell (P8, P17.6)", () => {
     ),
   );
 
-  it.effect(
-    "Recommend refuses forwards outside the target's scope and merges of non-duplicates",
-    () =>
-      withTeam((team) =>
-        Effect.gen(function* () {
-          yield* setManage(team, "recommend");
-          const onTax = yield* seedItem(team.release, second, "out-of-scope");
-          const forward = yield* leadCall(team, "squire_forward_item", {
-            itemId: onTax,
-            toSquireId: team.research,
-          });
-          assert.isTrue(forward.isError);
-          assert.include(forward.text, "scope does not cover");
+  it.effect("a background control proposal expires, and denying it closes the slot", () =>
+    withTeam((team) =>
+      Effect.gen(function* () {
+        yield* setManage(team, "recommend");
+        const pause = cardIdOf(yield* leadCall(team, "squire_pause", { squireId: team.research }));
+        assert.isNotNull((yield* cardOf(pause)).expires_at);
+        yield* dismiss(pause);
+        assert.strictEqual((yield* cardOf(pause)).resolution, "denied");
+        const again = yield* leadCall(team, "squire_pause", {
+          squireId: team.research,
+          reason: "still noisy",
+        });
+        assert.isTrue(again.isError);
+        assert.include(again.text, "denied");
+      }),
+    ),
+  );
 
-          const onInvoice = yield* seedItem(team.release, tracked, "other-thread");
-          const merge = yield* leadCall(team, "squire_merge_items", {
-            itemIds: [onTax, onInvoice],
-          });
-          assert.isTrue(merge.isError);
-          assert.include(merge.text, "only duplicates merge");
-          assert.lengthOf(yield* leadCards(team), 0);
-        }),
-      ),
+  it.effect("Recommend refuses forwards outside the target's scope", () =>
+    withTeam((team) =>
+      Effect.gen(function* () {
+        yield* setManage(team, "recommend");
+        const onTax = yield* seedItem(team.release, second, "out-of-scope");
+        const forward = yield* leadCall(team, "squire_forward_item", {
+          itemId: onTax,
+          toSquireId: team.research,
+        });
+        assert.isTrue(forward.isError);
+        assert.include(forward.text, "scope does not cover");
+        assert.lengthOf(yield* leadCards(team), 0);
+      }),
+    ),
   );
 
   it.effect(
@@ -594,7 +645,9 @@ describe("squire.control.revert (P17.6)", () => {
         assert.strictEqual((yield* cardOf(item)).owner_squire_id, team.release);
 
         const duplicate = yield* seedItem(team.research, tracked, "revert-merge");
-        const merged = yield* run("squire_merge_items", { itemIds: [item, duplicate] });
+        const storedMerge = yield* seedMergeProposal(team, [item, duplicate], "revert");
+        yield* accept([storedMerge]);
+        const merged = (yield* onlyExecution(team, storedMerge)).id;
         assert.strictEqual((yield* cardOf(duplicate)).status, "outdated");
         yield* revert(merged, "revert-merge");
         assert.strictEqual((yield* cardOf(duplicate)).status, "open");

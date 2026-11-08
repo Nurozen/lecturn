@@ -482,6 +482,7 @@ const openCard = (
   escalate_at: null,
   opened_at: null,
   executes_at: null,
+  expires_at: null,
   attempt: 0,
   command_id: null,
   execution_key: null,
@@ -684,6 +685,60 @@ describe("SquireReactor stops and scope", () => {
       ),
   );
 
+  it.effect("an event goes to the closest tracker with its toggle on, or nobody", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup([
+          squireRow(release, { events_json: '{"turnFinished":false}' }),
+          squireRow(billing),
+        ]);
+        const { drain } = yield* startReactor;
+        yield* finishRun(RunId.make("run:1"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.deepStrictEqual(
+          (yield* rows).map((row) => [row.squire_id, row.state_key]),
+          [[billing, "run:1"]],
+        );
+
+        yield* repository.updateSquire({
+          id: billing,
+          patch: { events_json: '{"turnFinished":false}' },
+          updatedAt: DateTime.formatIso(yield* DateTime.now),
+        });
+        yield* finishRun(RunId.make("run:2"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.lengthOf(yield* rows, 1);
+      }),
+    ),
+  );
+
+  it.effect("a paused owner hands the next event to the next Squire", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup([squireRow(release), squireRow(billing)]);
+        const { drain } = yield* startReactor;
+        yield* finishRun(RunId.make("run:1"), "completed", yield* DateTime.now);
+        yield* drain;
+        yield* repository.updateSquire({
+          id: release,
+          patch: { status: "paused" },
+          updatedAt: "2026-11-01T00:00:00.000Z",
+        });
+        yield* finishRun(RunId.make("run:2"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.deepStrictEqual(
+          (yield* rows).map((row) => [row.squire_id, row.state_key]),
+          [
+            [release, "run:1"],
+            [billing, "run:2"],
+          ],
+        );
+      }),
+    ),
+  );
+
   it.effect("a Squire with turn-finished off and a paused Squire get no row", () =>
     runIn(() =>
       Effect.gen(function* () {
@@ -716,6 +771,127 @@ describe("SquireReactor stops and scope", () => {
         assert.deepStrictEqual(calls.finalized, [{ runId, status: "completed" }]);
       }),
     ),
+  );
+});
+
+describe("SquireReactor home-thread attention", () => {
+  const leadId = SquireId.make("squire:lead");
+  const fyi = (id: string, overrides: Partial<SquireRepository.SquireCardRow> = {}) =>
+    openCard(id, {
+      kind: "fyi",
+      target_thread_id: null,
+      project_id: null,
+      payload_json: '{"type":"fyi","source":"notify","text":"Heads up","threadId":null}',
+      ...overrides,
+    });
+  const denied = (id: string, updatedAt: string) =>
+    openCard(id, {
+      status: "dismissed",
+      resolution: "denied",
+      updated_at: updatedAt,
+    });
+  const cardOf = (id: string) =>
+    Effect.flatMap(SquireRepository.SquireRepository, (repository) =>
+      repository.getCard(SquireCardId.make(id)).pipe(Effect.map(Option.getOrThrow)),
+    );
+
+  const userItem = (
+    runId: RunId,
+    createdBy: OrchestrationV2Actor,
+    now: DateTime.Utc,
+    inputIntent: "turn_start" | "steer" = "turn_start",
+  ) =>
+    itemEvent(home, now, {
+      id: `item:${runId}:${inputIntent}`,
+      runId,
+      type: "user_message",
+      messageId: MessageId.make(`message:${runId}:${inputIntent}`),
+      createdBy,
+      creationSource: "web",
+      inputIntent,
+      text: "carry on",
+      attachments: [],
+    });
+
+  it.effect("a user message there closes approvals and FYIs and ends denials, quietly", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup([squireRow(release), squireRow(leadId, { role: "lead" })]);
+        yield* createHome;
+        const now = yield* DateTime.now;
+        const later = DateTime.formatIso(DateTime.add(now, { minutes: 1 }));
+        yield* repository.insertCard(openCard("card:approval"));
+        yield* repository.insertCard(
+          openCard("card:raised", { updated_at: later, kind: "proposal", target_thread_id: null }),
+        );
+        yield* repository.insertCard(
+          openCard("card:held", { status: "held", kind: "proposal", target_thread_id: null }),
+        );
+        yield* repository.insertCard(fyi("card:fyi"));
+        yield* repository.insertCard(denied("card:denied", DateTime.formatIso(now)));
+        yield* repository.insertCard(denied("card:denied-newer", later));
+        const { drain } = yield* startReactor;
+
+        // A delivered wake is not the user writing.
+        const run = RunId.make("run:wake");
+        yield* write([userItem(run, "agent", now)]);
+        yield* drain;
+        assert.strictEqual((yield* cardOf("card:approval")).status, "open");
+
+        // The user steers the running wake turn: no new run, the item is the only trace.
+        yield* write([userItem(run, "user", now, "steer")]);
+        yield* drain;
+        assert.strictEqual((yield* cardOf("card:approval")).status, "outdated");
+        assert.strictEqual((yield* cardOf("card:fyi")).status, "dismissed");
+        // Raised after the message: a card this turn raised stays.
+        assert.strictEqual((yield* cardOf("card:raised")).status, "open");
+        assert.strictEqual((yield* cardOf("card:held")).status, "held");
+        assert.isNotNull((yield* cardOf("card:denied")).expires_at);
+        assert.strictEqual((yield* cardOf("card:denied")).resolution, "denied");
+        assert.isNull((yield* cardOf("card:denied-newer")).expires_at);
+        assert.deepStrictEqual(yield* leadItemRows, []);
+      }),
+    ),
+  );
+
+  it.effect(
+    "a visit closes that home thread's FYIs, except the inactivity check and newer ones",
+    () =>
+      runIn(() =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* setup();
+          yield* createHome;
+          const now = yield* DateTime.now;
+          yield* repository.insertCard(fyi("card:notify"));
+          yield* repository.insertCard(
+            fyi("card:inactivity", {
+              target_thread_id: worker,
+              payload_json:
+                '{"type":"fyi","source":"inactivity","text":"Still there?","threadId":null}',
+            }),
+          );
+          yield* repository.insertCard(
+            fyi("card:newer", {
+              target_thread_id: home,
+              updated_at: DateTime.formatIso(DateTime.add(now, { minutes: 1 })),
+            }),
+          );
+          const { drain } = yield* startReactor;
+          yield* orchestrator.dispatch({
+            type: "thread.visit",
+            commandId: CommandId.make("cmd:visit-home"),
+            threadId: home,
+            visitedAt: DateTime.formatIso(now),
+          });
+          yield* drain;
+          assert.strictEqual((yield* cardOf("card:notify")).status, "dismissed");
+          assert.strictEqual((yield* cardOf("card:inactivity")).status, "open");
+          assert.strictEqual((yield* cardOf("card:newer")).status, "open");
+        }),
+      ),
   );
 });
 

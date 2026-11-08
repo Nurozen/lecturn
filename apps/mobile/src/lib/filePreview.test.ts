@@ -60,6 +60,11 @@ const audio = vi.hoisted(() => ({
   navigate: vi.fn(),
   query: vi.fn(),
 }));
+// The feed renders no Squire rows here; the real ones pull in native storage modules.
+vi.mock("../features/squires/SquireApprovalRow", () => ({ SquireApprovalRow: () => null }));
+vi.mock("../features/squires/squireApprovalState", () => ({
+  useSquireChatApprovals: () => [],
+}));
 vi.mock("expo-audio", () => ({
   AudioModule: { setAudioSessionOwner: audio.setSessionOwner },
   useAudioPlayer: () => audio.player,

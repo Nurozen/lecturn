@@ -104,6 +104,8 @@ const make = Effect.gen(function* () {
     const now = yield* DateTime.now;
     yield* reactor.promoteDue(now);
     yield* triggers.fireDueSlots(now);
+    // Expiry is quiet: no Lead row and no push, only the row reading Expired.
+    yield* repository.expireDueApprovals(DateTime.formatIso(now));
     if (Option.isSome(digest)) yield* digest.value.due(now);
     if (Option.isSome(findWork)) yield* findWork.value.due(now);
     // Before the wake below, so a Jev timeout's released Lead row is delivered now.
@@ -134,9 +136,21 @@ const make = Effect.gen(function* () {
     const proposalAt = Option.isSome(roomTools)
       ? yield* roomTools.value.nextExpiryAt
       : Option.none();
-    return [deferred, slot, held, escalation, digestAt, sweepAt, jevAt, roomAt, proposalAt].reduce<
-      Option.Option<DateTime.Utc>
-    >(
+    const approvalExpiry = Option.flatMap(yield* repository.earliestApprovalExpiryAt, (iso) =>
+      DateTime.make(iso),
+    );
+    return [
+      deferred,
+      slot,
+      held,
+      escalation,
+      digestAt,
+      sweepAt,
+      jevAt,
+      roomAt,
+      proposalAt,
+      approvalExpiry,
+    ].reduce<Option.Option<DateTime.Utc>>(
       (earliest, at) =>
         Option.isNone(at)
           ? earliest

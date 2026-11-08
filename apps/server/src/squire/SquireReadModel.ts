@@ -16,6 +16,7 @@ import {
   type SquireItemsListResult,
   type SquireRoomId,
   type SquireRoomRow,
+  SquireRuleOffer,
   type SquireSnapshot,
   SquireStoredSummary,
   type SquireSubscribeEvent,
@@ -28,6 +29,7 @@ import {
   SquireTurnSummary,
   type SquireVocabularyResult,
   type ThreadId,
+  SQUIRE_SPEAKING_TOOLS,
 } from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -50,6 +52,7 @@ import { orSquireError } from "./SquireLifecycle.ts";
 import * as SquireContainers from "./SquireContainers.ts";
 import * as squirePolicy from "./squirePolicy.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
 import { toRule } from "./SquireTools.ts";
@@ -85,6 +88,8 @@ type CardStat = SquireRepository.SquireCardStatRow;
 type CardStatus = SquireRepository.SquireCardRow["status"];
 
 const RECENT_ACTIVITY = 8;
+// A quiet run rarely writes text, so the newest visible message is near the top.
+const RECENT_ASSISTANT_MESSAGES = 20;
 const DEFAULT_PAGE = 50;
 const TRIGGER_RUNS = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -181,9 +186,20 @@ interface Entry {
   readonly key: string;
 }
 
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "interrupted",
+  "cancelled",
+  "rolled_back",
+]);
+
 interface EnvState {
   readonly generation: number;
   readonly threadSet: number;
+  /** Counts home-thread runs that ended; a run's reply reaches no Squire table. */
+  readonly homeRunsEnded: number;
+  readonly homeThreads: ReadonlySet<ThreadId>;
   readonly lead: SquireId | null;
   readonly entries: ReadonlyMap<SquireId, Entry>;
   readonly rooms: ReadonlyMap<SquireRoomId, { readonly row: SquireRoomRow; readonly key: string }>;
@@ -254,6 +270,16 @@ const make = Effect.gen(function* () {
   // any Squire write, so thread lifecycle events refresh the snapshot too.
   const threadSet = yield* Ref.make(0);
   const threadSetChanges = yield* PubSub.sliding<void>(1);
+  const homeRunsEnded = yield* Ref.make(0);
+  const lastMessages = new Map<
+    SquireId,
+    {
+      readonly homeThreadId: ThreadId;
+      readonly homeRunsEnded: number;
+      readonly at: string | undefined;
+    }
+  >();
+  const rules = yield* Effect.serviceOption(SquireRules.SquireRules);
   const eventStore = yield* Effect.serviceOption(OrchestrationEventStore.OrchestrationEventStore);
   const fixtureStave = yield* Effect.serviceOption(SquireContainers.SquireFixtureStave);
   const squireSwitch = yield* SquireSwitch.SquireSwitch;
@@ -273,9 +299,21 @@ const make = Effect.gen(function* () {
           yield* Stream.runForEach(
             store.streamApplicationEvents({ afterSequence: highWater.value }),
             (stored) =>
-              "event" in stored && THREAD_SET_EVENTS.has(stored.event.type)
-                ? threadSetChanged
-                : Effect.void,
+              Effect.gen(function* () {
+                if (!("event" in stored)) return;
+                const { event } = stored;
+                if (THREAD_SET_EVENTS.has(event.type)) return yield* threadSetChanged;
+                if (
+                  event.type !== "run.updated" ||
+                  !TERMINAL_RUN_STATUSES.has(event.payload.status)
+                ) {
+                  return;
+                }
+                const state = yield* Ref.get(cache);
+                if (Option.isNone(state) || !state.value.homeThreads.has(event.threadId)) return;
+                yield* Ref.update(homeRunsEnded, (n) => n + 1);
+                yield* PubSub.publish(threadSetChanges, undefined);
+              }),
           ).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Squire thread-set follower stopped; tracking refreshes by TTL.", {
@@ -445,6 +483,58 @@ const make = Effect.gen(function* () {
     };
   });
 
+  /** The clients' rule: stayed quiet, raised and notified nothing, and the user did not write in it. */
+  const quietRunsOf = Effect.fnUntraced(function* (
+    squireId: SquireId,
+    homeThreadId: ThreadId,
+    runIds: ReadonlyArray<RunId>,
+  ) {
+    const logged = yield* repository.listActionLogForRuns({
+      squireId,
+      kinds: ["quiet.recorded", "tool.called"],
+      runIds,
+    });
+    const quiet = new Set(
+      logged.flatMap((row) => (row.kind === "quiet.recorded" ? [row.run_id] : [])),
+    );
+    for (const row of logged) {
+      const tool = row.kind === "tool.called" ? logData(row).tool : undefined;
+      if (typeof tool === "string" && SQUIRE_SPEAKING_TOOLS.has(tool)) quiet.delete(row.run_id);
+    }
+    const candidates = runIds.filter((runId) => quiet.has(runId));
+    if (candidates.length === 0) return quiet;
+    const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
+      messageRoles: ["user"],
+      messageRunIds: candidates,
+    });
+    for (const message of messages) {
+      if (message.createdBy === "user") quiet.delete(message.runId);
+    }
+    return quiet;
+  });
+
+  /** The newest message a run that stayed quiet did not write; re-read only when a home run ends. */
+  const lastMessageAtOf = Effect.fnUntraced(function* (squire: Squire, homeRunsVersion: number) {
+    const homeThreadId = squire.homeThreadId;
+    if (homeThreadId === null) return undefined;
+    const known = lastMessages.get(squire.id);
+    if (known?.homeThreadId === homeThreadId && known.homeRunsEnded === homeRunsVersion) {
+      return known.at;
+    }
+    const messages = yield* projections.listRecentAssistantMessages(
+      homeThreadId,
+      RECENT_ASSISTANT_MESSAGES,
+    );
+    const quietRuns = yield* quietRunsOf(squire.id, homeThreadId, [
+      ...new Set(messages.flatMap((message) => message.runId ?? [])),
+    ]);
+    const at = messages.find(
+      (message) => message.runId === null || !quietRuns.has(message.runId),
+    )?.updatedAt;
+    lastMessages.set(squire.id, { homeThreadId, homeRunsEnded: homeRunsVersion, at });
+    return at;
+  });
+
   const recentActivity = (squireId: SquireId) =>
     repository.listActionLogDesc({ squireId, limit: RECENT_ACTIVITY + 1 }).pipe(
       Effect.map((newest) => {
@@ -466,6 +556,7 @@ const make = Effect.gen(function* () {
   const compute = Effect.fn("SquireReadModel.compute")(function* (
     generation: number,
     threadSetVersion: number,
+    homeRunsVersion: number,
   ) {
     const nowMs = yield* Clock.currentTimeMillis;
     const rows = (yield* repository.listSquires).filter((row) => row.lifecycle !== "deleting");
@@ -542,13 +633,8 @@ const make = Effect.gen(function* () {
       // The Lead's queue is every Squire's items; a Squire's is what it raised or owns.
       const inQueue = (stat: Pick<CardStat, "squire_id" | "owner_squire_id">) =>
         isLead || stat.squire_id === id || stat.owner_squire_id === id;
-      // A row counts what its view lists, so the badge matches the view's "Needs a decision":
-      // a Squire's view lists what it raised or owns, Lead-raised items on its threads included.
-      // The Lead's lists every Squire's, but its badge counts only what the Lead raised.
-      const countsHere = (card: {
-        readonly squire_id: SquireId;
-        readonly owner_squire_id: SquireId;
-      }) => (isLead ? card.squire_id === id : inQueue(card));
+      // An approval counts only in the chat where it renders: the raiser's.
+      const countsHere = (card: { readonly squire_id: SquireId }) => card.squire_id === id;
       const queueStats = stats.filter(inQueue);
       const decisionStats = stats.filter(
         (stat) => stat.kind !== "fyi" && (stat.squire_id === id || stat.owner_squire_id === id),
@@ -576,11 +662,6 @@ const make = Effect.gen(function* () {
         (stat) => stat.kind !== "fyi" && waitingOnDecision.has(stat.status) && countsHere(stat),
       );
       const openDecisionCount = decisionCounted.reduce((sum, stat) => sum + stat.n, 0);
-      const leadRaisedDecisionCount = isLead
-        ? 0
-        : decisionCounted
-            .filter((stat) => stat.squire_id === leadId)
-            .reduce((sum, stat) => sum + stat.n, 0);
       const held = heldCards.flatMap((card): ReadonlyArray<HeldEntry> => {
         if (!countsHere(card) || card.executes_at === null) return [];
         const heldOverCardId = heldOver.get(card.id);
@@ -615,10 +696,10 @@ const make = Effect.gen(function* () {
       }
 
       const { brief: _brief, ...record } = squire;
+      const lastMessageAt = yield* lastMessageAtOf(squire, homeRunsVersion);
       const base: Entry["base"] = {
         squire: record,
         openDecisionCount,
-        ...(leadRaisedDecisionCount === 0 ? {} : { leadRaisedDecisionCount }),
         countsByKind,
         budget: yield* budgetOf(squire, nowMs),
         conflicts,
@@ -627,6 +708,7 @@ const make = Effect.gen(function* () {
         recentActivity: yield* recentActivity(id),
         itemsRevision: next.items,
         decisionRevision: next.decision,
+        ...(lastMessageAt === undefined ? {} : { lastMessageAt }),
       };
       entries.set(id, { base, held, key: toKey([base, held]) });
     }
@@ -643,6 +725,10 @@ const make = Effect.gen(function* () {
     const state: EnvState = {
       generation,
       threadSet: threadSetVersion,
+      homeRunsEnded: homeRunsVersion,
+      homeThreads: new Set(
+        rows.flatMap((row) => (row.home_thread_id === null ? [] : [row.home_thread_id])),
+      ),
       lead: leadId,
       entries,
       rooms,
@@ -658,15 +744,17 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const generation = yield* repository.changeGeneration;
       const threadSetVersion = yield* Ref.get(threadSet);
+      const homeRunsVersion = yield* Ref.get(homeRunsEnded);
       const cached = yield* Ref.get(cache);
       if (
         Option.isSome(cached) &&
         cached.value.generation === generation &&
-        cached.value.threadSet === threadSetVersion
+        cached.value.threadSet === threadSetVersion &&
+        cached.value.homeRunsEnded === homeRunsVersion
       ) {
         return cached.value;
       }
-      const state = yield* compute(generation, threadSetVersion);
+      const state = yield* compute(generation, threadSetVersion, homeRunsVersion);
       yield* Ref.set(cache, Option.some(state));
       return state;
     }),
@@ -745,6 +833,13 @@ const make = Effect.gen(function* () {
         ),
       );
 
+  /** Only where a row can still act on it: open, and expired so "Always allow next time" still works. */
+  const allowRuleOfferOf = (row: SquireRepository.SquireCardRow) =>
+    Option.isSome(rules) &&
+    (row.status === "open" || (row.status === "outdated" && row.resolution === "expired"))
+      ? rules.value.offerFor(row)
+      : Effect.succeed(Option.none<typeof SquireRuleOffer.Type>());
+
   const itemsList: SquireReadModel["Service"]["itemsList"] = Effect.fn("SquireReadModel.itemsList")(
     function* (input) {
       const squire = yield* requireSquire(input.squireId);
@@ -757,7 +852,14 @@ const make = Effect.gen(function* () {
         limit: limit + 1,
       });
       const shown = page.slice(0, limit);
-      const items = yield* Effect.forEach(shown, (row) => decodeCardRow(squireCardRowFields(row)));
+      const items = yield* Effect.forEach(shown, (row) =>
+        Effect.flatMap(allowRuleOfferOf(row), (allowRuleOffer) =>
+          decodeCardRow({
+            ...squireCardRowFields(row),
+            ...(Option.isSome(allowRuleOffer) ? { allowRuleOffer: allowRuleOffer.value } : {}),
+          }),
+        ),
+      );
       const state = yield* current;
       const itemsRevision = state.entries.get(squire.id)?.base.itemsRevision ?? revisionBase;
       return {

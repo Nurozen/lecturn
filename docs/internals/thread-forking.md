@@ -95,8 +95,8 @@ clients and hard-stops forks from older or misbehaving ones.
 
 ## Squire probes
 
-A Squire's "Ask about this" is a `thread.fork` with the server-only `squireProbe` field, refused
-from clients. [ThreadForkDeltas.ts][deltas] marks the child as a hidden probe and resets what the
+A Squire's "Ask about this", which the server keeps only for older clients, is a `thread.fork` with
+the server-only `squireProbe` field, refused from clients. [ThreadForkDeltas.ts][deltas] marks the child as a hidden probe and resets what the
 fork would otherwise copy: runtime mode, PR links, and pins. Otherwise a read-only question would
 run with the source's full access or show up as its PR. The probe also honors this kill switch, and
 it is deleted once answered, because an archived shell still streams. Forking a Squire's own home

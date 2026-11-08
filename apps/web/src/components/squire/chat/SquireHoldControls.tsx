@@ -1,9 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
-import {
-  squirePairedHoldText,
-  type SquireSnapshotEntry,
-} from "@lecturn/client-runtime/state/squire";
+import type { SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireId, SquireRuleOffer } from "@lecturn/contracts";
 import { useState, useSyncExternalStore } from "react";
 
@@ -13,7 +10,6 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { squireEnvironment, useSquireEnvironmentState } from "../../../state/squires";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { Badge } from "../../ui/badge";
-import { Button } from "../../ui/button";
 import { squireHoldCountdown, squireHoldRuleLabel, squireHoldText } from "../squirePage.logic";
 
 export type SquireHold = SquireSnapshotEntry["held"][number];
@@ -51,8 +47,6 @@ export function useSquireHoldUndo(input: {
   readonly squireId: SquireId;
   readonly receivedAt: number;
   readonly onUndone: (offer: SquireRuleOffer) => void;
-  /** Shown under the open card it sits beside, so it names itself as the newer one. */
-  readonly paired?: boolean;
 }) {
   const { environmentId, hold } = input;
   const seconds = useHoldSeconds(input.receivedAt, hold.executesInMs);
@@ -79,9 +73,7 @@ export function useSquireHoldUndo(input: {
     if (offer !== undefined) input.onUndone(offer);
   };
   return {
-    text: input.paired
-      ? squirePairedHoldText(hold.kind, seconds)
-      : squireHoldText(hold.kind, target?.title ?? null, seconds),
+    text: squireHoldText(hold.kind, target?.title ?? null, seconds),
     ruleLabel,
     undoDisabled: !canUndo || undoing || seconds === 0,
     undo: () => void undo(),
@@ -94,21 +86,6 @@ export function SquireHoldRuleBadge(props: { readonly label: string | null }) {
     <Badge size="sm" variant="secondary" className="shrink-0">
       {props.label}
     </Badge>
-  );
-}
-
-/** The hold's line right under its queue row: countdown, rule, Undo. */
-export function SquireRowHoldLine(props: Parameters<typeof useSquireHoldUndo>[0]) {
-  const hold = useSquireHoldUndo(props);
-  return (
-    <div className="flex min-h-7 items-center gap-2 pr-2 pb-1.5 pl-6 text-xs text-muted-foreground">
-      <span className="min-w-0 truncate tabular-nums">{hold.text}</span>
-      <SquireHoldRuleBadge label={hold.ruleLabel} />
-      <span className="flex-1" />
-      <Button size="xs" variant="outline" disabled={hold.undoDisabled} onClick={hold.undo}>
-        Undo
-      </Button>
-    </div>
   );
 }
 

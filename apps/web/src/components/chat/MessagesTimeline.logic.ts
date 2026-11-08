@@ -1,12 +1,23 @@
-import type { OrchestrationV2Notification } from "@lecturn/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationV2Notification,
+  SquireCardRow,
+  SquireId,
+} from "@lecturn/contracts";
 import { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@lecturn/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@lecturn/client-runtime/state/subagentRuntime";
 import {
-  squireUpdateGroupLabel,
+  squireQuietRunIds,
   squireUpdateGroups,
+  type SquireApprovalEntry,
   type SquireUpdateItemRole,
 } from "@lecturn/client-runtime/state/squire";
+import {
+  threadUnreadBoundary,
+  type ThreadUnreadWindow,
+} from "@lecturn/client-runtime/state/thread-visits";
+import { workEntryToolName } from "@lecturn/client-runtime/work-log/presentation";
 import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import {
@@ -243,24 +254,27 @@ export function squireTurnFoldLabel(
 }
 
 /**
- * Lecturn: a Squire home thread's entries by their part in an update group. A turn still
- * running, and anything that waits on the user or that they asked to see (a card, a plan, a
- * question), stays out of the group.
+ * Lecturn: a Squire home thread's entries by their part in an update group. Assistant text
+ * always stays, as does a running turn and anything that waits on the user or that they asked
+ * to see (a card, a plan, a question); a run that called `squire_stay_quiet` keeps nothing.
  */
 function squireUpdateEntryRole(
   entry: TimelineEntry,
   runIsActive: (runId: RunId | null | undefined) => boolean,
+  quietRunIds: ReadonlySet<RunId>,
 ): SquireUpdateItemRole {
   switch (entry.kind) {
     case "message":
+      if (isUserWrittenMessage(entry.message)) return "user";
+      if (entry.message.runId != null && quietRunIds.has(entry.message.runId)) return "update";
       if (runIsActive(entry.message.runId)) return "keep";
-      // Older messages carry no author; they read as the user's own.
-      return entry.message.role === "user" && (entry.message.createdBy ?? "user") === "user"
-        ? "user"
-        : "update";
+      return entry.message.role === "assistant" ? "keep" : "update";
     case "work": {
       if (runIsActive(entry.entry.runId)) return "keep";
       if (entry.entry.questionAnswer !== undefined) return "keep";
+      if (entry.entry.tone === "error" || entry.entry.sourceActivityKind === "runtime.error") {
+        return "keep";
+      }
       const payload = entry.entry.structuredPayload;
       return payload?.type === "notification" && payload.source.kind === "squire"
         ? "wake"
@@ -275,12 +289,20 @@ function squireUpdateEntryRole(
   }
 }
 
-function squireUpdateEventKinds(entry: TimelineEntry): ReadonlyArray<string> {
-  if (entry.kind !== "work") return [];
-  const payload = entry.entry.structuredPayload;
-  return payload?.type === "notification" && payload.source.kind === "squire"
-    ? (payload.source.eventKinds ?? [])
-    : [];
+/** Older messages carry no author; they read as the user's own. */
+function isUserWrittenMessage(message: Pick<ChatMessage, "role" | "createdBy">): boolean {
+  return message.role === "user" && (message.createdBy ?? "user") === "user";
+}
+
+function squireRunIdsToHideText(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<RunId> {
+  return squireQuietRunIds(entries, (entry) => {
+    if (entry.kind === "message") {
+      return { runId: entry.message.runId, userMessage: isUserWrittenMessage(entry.message) };
+    }
+    return entry.kind === "work"
+      ? { runId: entry.entry.runId, toolName: workEntryToolName(entry.entry) }
+      : null;
+  });
 }
 
 export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
@@ -672,13 +694,17 @@ type MessagesTimelineRowContent =
       hasFailure: boolean;
     }
   | {
-      kind: "squire-updates";
+      kind: "squire-approval";
       id: string;
       createdAt: string;
-      /** Its expansion lives with the work groups'. */
-      groupId: string;
-      label: string;
-      expanded: boolean;
+      environmentId: EnvironmentId;
+      squireId: SquireId;
+      entry: SquireApprovalEntry<SquireCardRow>;
+    }
+  | {
+      kind: "unread-divider";
+      id: string;
+      createdAt: string | null;
     }
   | {
       kind: "turn-fold";
@@ -1682,36 +1708,29 @@ export function deriveMessagesTimelineRows(input: {
     ? lastResponseBoundaryIndex(timelineEntries) + 1
     : timelineEntries.length;
 
-  // Lecturn: consecutive Squire wakes fold into one row, collapsed until opened.
-  const squireGroupByStart = new Map<
-    number,
-    Extract<MessagesTimelineRow, { kind: "squire-updates" }>
-  >();
-  const collapsedSquireIndexes = new Set<number>();
+  // Lecturn: a Squire's wakes and their turns show nothing short of a message, and a run that
+  // called `squire_stay_quiet` shows no text.
+  const hiddenSquireIndexes = new Set<number>();
   if (input.compactSquireEvents) {
-    const groups = squireUpdateGroups(
-      timelineEntries,
-      (entry) => squireUpdateEntryRole(entry, runIdIsActiveResponse),
-      squireUpdateEventKinds,
+    const quietRunIds = squireRunIdsToHideText(timelineEntries);
+    const groups = squireUpdateGroups(timelineEntries, (entry) =>
+      squireUpdateEntryRole(entry, runIdIsActiveResponse, quietRunIds),
     );
     for (const group of groups) {
-      const first = timelineEntries[group.start]!;
-      const groupId = `squire-updates:${first.id}`;
-      const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
-      squireGroupByStart.set(group.start, {
-        kind: "squire-updates",
-        id: groupId,
-        createdAt: first.createdAt,
-        groupId,
-        label: squireUpdateGroupLabel(group),
-        expanded,
-      });
-      if (!expanded) {
-        for (let index = group.start; index < group.end; index += 1) {
-          collapsedSquireIndexes.add(index);
-        }
+      for (let index = group.start; index < group.end; index += 1) {
+        hiddenSquireIndexes.add(index);
       }
     }
+    timelineEntries.forEach((entry, index) => {
+      if (
+        entry.kind === "message" &&
+        entry.message.role === "assistant" &&
+        entry.message.runId != null &&
+        quietRunIds.has(entry.message.runId)
+      ) {
+        hiddenSquireIndexes.add(index);
+      }
+    });
   }
 
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
@@ -1972,9 +1991,7 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    const squireGroup = squireGroupByStart.get(index);
-    if (squireGroup) nextRows.push(squireGroup);
-    if (collapsedSquireIndexes.has(index)) continue;
+    if (hiddenSquireIndexes.has(index)) continue;
 
     const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
     if (turnFold) {
@@ -2703,8 +2720,21 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
 
-    case "turn-fold":
-    case "squire-updates": {
+    case "squire-approval": {
+      const ba = b as typeof a;
+      return (
+        a.environmentId === ba.environmentId &&
+        a.squireId === ba.squireId &&
+        a.entry.phase === ba.entry.phase &&
+        a.entry.outcome === ba.entry.outcome &&
+        a.entry.row.updatedAt === ba.entry.row.updatedAt
+      );
+    }
+
+    case "unread-divider":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "turn-fold": {
       const bf = b as typeof a;
       return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
     }
@@ -2859,4 +2889,106 @@ export function sameRowsInput(
     return false;
   }
   return Object.keys(left).length === Object.keys(right).length;
+}
+
+export interface SquireChatApprovalsInput {
+  readonly environmentId: EnvironmentId;
+  readonly squireId: SquireId;
+  readonly entries: ReadonlyArray<SquireApprovalEntry<SquireCardRow>>;
+}
+
+export const squireApprovalRowId = (cardId: SquireCardRow["id"]) => `squire-approval:${cardId}`;
+
+const LIVE_TAIL_KINDS: ReadonlySet<MessagesTimelineRow["kind"]> = new Set([
+  "working",
+  "thinking",
+  "work-live",
+]);
+
+/**
+ * Lecturn: approvals at the time they were raised, among the rows they happened between. Rows
+ * with no time and the live rows of a running turn stay last, so an approval never lands under
+ * the "working" indicator. A closed row older than the loaded history waits for that history,
+ * so it never stacks above the rows it belongs among; anything still open always shows.
+ */
+export function mergeSquireApprovalRows(
+  rows: MessagesTimelineRow[],
+  approvals: SquireChatApprovalsInput | undefined,
+  hasMoreHistory = false,
+): MessagesTimelineRow[] {
+  if (approvals === undefined || approvals.entries.length === 0) return rows;
+  const oldestLoaded = rows.find((row) => row.createdAt !== null)?.createdAt ?? null;
+  const oldestLoadedMs = oldestLoaded === null ? Number.NaN : Date.parse(oldestLoaded);
+  const entries =
+    hasMoreHistory && !Number.isNaN(oldestLoadedMs)
+      ? approvals.entries.filter(
+          (entry) => entry.phase !== "closed" || Date.parse(entry.createdAt) >= oldestLoadedMs,
+        )
+      : approvals.entries;
+  if (entries.length === 0) return rows;
+  const approvalRow = (entry: SquireApprovalEntry<SquireCardRow>): MessagesTimelineRow => ({
+    kind: "squire-approval",
+    id: squireApprovalRowId(entry.row.id),
+    createdAt: entry.createdAt,
+    environmentId: approvals.environmentId,
+    squireId: approvals.squireId,
+    entry,
+  });
+  let tailStart = rows.length;
+  while (tailStart > 0) {
+    const row = rows[tailStart - 1]!;
+    if (row.createdAt !== null && !LIVE_TAIL_KINDS.has(row.kind)) break;
+    tailStart -= 1;
+  }
+  const merged: MessagesTimelineRow[] = [];
+  let next = 0;
+  for (let index = 0; index < tailStart; index += 1) {
+    const row = rows[index]!;
+    if (row.createdAt !== null) {
+      const rowTime = Date.parse(row.createdAt);
+      while (next < entries.length && Date.parse(entries[next]!.createdAt) < rowTime) {
+        merged.push(approvalRow(entries[next]!));
+        next += 1;
+      }
+    }
+    merged.push(row);
+  }
+  while (next < entries.length) {
+    merged.push(approvalRow(entries[next]!));
+    next += 1;
+  }
+  for (let index = tailStart; index < rows.length; index += 1) merged.push(rows[index]!);
+  return merged;
+}
+
+const UNREAD_DIVIDER_ROW_ID = "unread-divider-row";
+
+/** Lecturn: the static "New" divider above the first message since the last visit. */
+export function insertUnreadDivider(
+  rows: MessagesTimelineRow[],
+  window: ThreadUnreadWindow | null,
+): MessagesTimelineRow[] {
+  if (window === null || window.lastVisitedAt === null) return rows;
+  const visitedMs = Date.parse(window.lastVisitedAt);
+  if (Number.isNaN(visitedMs)) return rows;
+  // Walk only the unread tail; a read thread's newest row stops this at once.
+  const messages: ChatMessage[] = [];
+  let tailStart = rows.length;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]!;
+    if (row.createdAt !== null && Date.parse(row.createdAt) <= visitedMs) break;
+    tailStart = index;
+    if (row.kind === "message") messages.unshift(row.message);
+  }
+  const anchorId = threadUnreadBoundary(messages, window);
+  if (anchorId === null) return rows;
+  const anchorIndex = rows.findIndex(
+    (row, index) => index >= tailStart && row.kind === "message" && row.message.id === anchorId,
+  );
+  if (anchorIndex === -1) return rows;
+  return [
+    ...rows.slice(0, anchorIndex),
+    { kind: "unread-divider", id: UNREAD_DIVIDER_ROW_ID, createdAt: rows[anchorIndex]!.createdAt },
+    ...rows.slice(anchorIndex),
+  ];
 }

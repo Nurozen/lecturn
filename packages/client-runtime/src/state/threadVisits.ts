@@ -45,6 +45,47 @@ export interface ThreadVisitTrackerOptions {
   readonly markLocalVisit?: (ref: ScopedThreadRef, visitedAt: string) => void;
 }
 
+/** What one open of a thread remembers from before it marked the thread read. */
+export interface ThreadUnreadWindow {
+  /** The visit mark as it stood before this open marked it read; null when never visited. */
+  readonly lastVisitedAt: string | null;
+  /** Server time when this open began, so messages arriving during it never move the divider. */
+  readonly openedThrough: string;
+}
+
+type UnreadMessage = {
+  readonly id: string;
+  readonly role: string;
+  readonly createdBy?: string | undefined;
+  readonly createdAt: string;
+};
+
+/**
+ * Where the static "New" divider goes for this open: the id of the first message since the
+ * user last viewed the thread, in the order `messages` lists them (oldest first). Only messages
+ * the user did not write count; a thread with no prior visit shows no divider. Walks from the
+ * newest message, so its cost is only the unread messages.
+ */
+export function threadUnreadBoundary<M extends UnreadMessage>(
+  messages: ReadonlyArray<M>,
+  window: ThreadUnreadWindow | null,
+): M["id"] | null {
+  if (window === null || window.lastVisitedAt === null) return null;
+  const visitedMs = Date.parse(window.lastVisitedAt);
+  const throughMs = Date.parse(window.openedThrough);
+  if (Number.isNaN(visitedMs) || Number.isNaN(throughMs)) return null;
+  let anchor: M["id"] | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    const createdMs = Date.parse(message.createdAt);
+    if (createdMs <= visitedMs) break;
+    if (createdMs > throughMs) continue;
+    if (message.role === "user" && (message.createdBy ?? "user") === "user") continue;
+    anchor = message.id;
+  }
+  return anchor;
+}
+
 /**
  * While mounted, a tracker counts as the user viewing the thread: mounting it
  * records one open (which also feeds search ranking), and every shell update

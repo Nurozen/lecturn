@@ -1,4 +1,8 @@
-import { squireFigureState, type SquireSnapshotEntry } from "@lecturn/client-runtime/state/squire";
+import {
+  SQUIRE_ITEMS_PAGE_SIZE,
+  squireFigureState,
+  type SquireSnapshotEntry,
+} from "@lecturn/client-runtime/state/squire";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, SquireId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
@@ -9,7 +13,6 @@ import { useQuietThreadShell } from "../../../state/entities";
 import { squireEnvironment } from "../../../state/squires";
 import { SquireCompanion, type SquireCompanionHandle } from "../SquireCompanion";
 import { useSquireViewStateLine } from "../SquireHeader";
-import { SQUIRE_QUEUE_PAGE_SIZE } from "../queue/squireQueue.logic";
 import {
   SQUIRE_COMPANION_PANEL_PX,
   SQUIRE_RECENT_KINDS,
@@ -31,13 +34,11 @@ import { useSquireGesturePlayer } from "./squireGesturePlayer";
 export function SquireCompanionPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: SquireSnapshotEntry;
-  readonly team: ReadonlyArray<SquireSnapshotEntry>;
 }) {
-  const { environmentId, entry, team } = props;
+  const { environmentId, entry } = props;
   const { squire } = entry;
   const isLead = squire.role === "lead";
-  // The header's line, so the panel and header agree on the count.
-  const { indicator, line: stateLine } = useSquireViewStateLine(environmentId, entry, team);
+  const { indicator, line: stateLine } = useSquireViewStateLine(environmentId, entry);
   const companion = useRef<SquireCompanionHandle>(null);
   useSquireGesturePlayer(squire.id, entry.recentActivity, companion, squire.role !== "lead");
   useSquireGestureRequests(squire.id, companion);
@@ -93,7 +94,7 @@ function SquireRecentList(props: {
   const queue = useAtomValue(
     squireEnvironment.items({
       environmentId,
-      input: { squireId, scope: "open", limit: SQUIRE_QUEUE_PAGE_SIZE },
+      input: { squireId, scope: "open", limit: SQUIRE_ITEMS_PAGE_SIZE },
     }),
   );
   const entries = Option.getOrNull(AsyncResult.value(log))?.entries ?? null;

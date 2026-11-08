@@ -27,7 +27,7 @@ import { formatShortTimestamp } from "../../../timestampFormat";
 import { Button } from "../../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../../ui/menu";
 import { toastManager } from "../../ui/toast";
-import { commandFailureMessage } from "../queue/SquireEvidenceCard";
+import { commandFailureMessage } from "../squireCommandFailure";
 import { SquirePortrait } from "../SquireHeader";
 
 const AUTHOR_PX = 24;

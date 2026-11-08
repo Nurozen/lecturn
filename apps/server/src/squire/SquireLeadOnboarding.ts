@@ -500,6 +500,13 @@ const make = Effect.gen(function* () {
       ctx,
       null,
       Effect.gen(function* () {
+        const denied = yield* kit.deniedRefusal(ctx, {
+          kind: "proposal",
+          targetThreadId: null,
+          projectId: firstProject === undefined ? null : ProjectId.make(firstProject.targetId),
+          title: titleOf(args.name),
+        });
+        if (Option.isSome(denied)) return { result: denied.value };
         yield* repository.insertCard({
           id: cardId,
           squire_id: ctx.squire.id,
@@ -522,6 +529,13 @@ const make = Effect.gen(function* () {
           escalate_at: null,
           opened_at: null,
           executes_at: null,
+          expires_at: SquireRepository.squireApprovalExpiresAt(
+            {
+              kind: "proposal",
+              origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
+            },
+            ctx.now,
+          ),
           attempt: 0,
           command_id: null,
           execution_key: null,

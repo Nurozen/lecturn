@@ -730,6 +730,7 @@ const fakeKit = (
     ok,
     refused,
     refuse: (_ctx, reason, text) => Effect.succeed(refused(reason, text)),
+    deniedRefusal: () => Effect.succeedNone,
     logRow: (ctx, kind, data, extra) =>
       repository.insertActionLog({
         squire_id: ctx.squire.id,

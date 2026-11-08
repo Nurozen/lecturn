@@ -2,17 +2,15 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import {
   squireEntryIndicator,
+  squireSidebarState,
   type SquireEnvironmentState,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
-import type { EnvironmentId, SquireCardId, SquireCardRow, SquireId } from "@lecturn/contracts";
+import type { EnvironmentId, SquireId } from "@lecturn/contracts";
 import { useMatch, useNavigate } from "@tanstack/react-router";
-import * as Option from "effect/Option";
-import { AsyncResult } from "effect/reactivity";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { memo, type ComponentProps } from "react";
 
-import { useRelativeTimeState } from "../../../hooks/useRelativeTimeState";
 import { cn } from "../../../lib/utils";
 import { useQuietThreadShell } from "../../../state/entities";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../../../state/environments";
@@ -37,41 +35,27 @@ import { SquireHoverCard } from "../companion/SquireHoverCard";
 import { squireLeadBadgeTooltip } from "../lead/squireLead.logic";
 import { SquireIndicator } from "../SquireIndicator";
 import { SQUIRE_PALETTE_TINT } from "../squirePaletteTint";
-import type { SquireViewSearch } from "../squireView.logic";
 import {
   isSquireFoldCollapsed,
-  isSquireRowExpanded,
   isSquiresGroupVisible,
   parseSquireRouteKey,
   showSquireEnvironmentLabels,
-  squireChildAgeText,
-  squireChildRows,
   squireTeamRaisedCounts,
   squireFoldKey,
-  squireKindDot,
   squireLeadBlock,
   squireLeadFold,
-  squireLeadItemsLabel,
   squireLeadTrailing,
   squireRouteKey,
   squireRowLabel,
-  squireRowSelection,
+  squireRowSelected,
   squireRowStatusLine,
   squireRowTrailing,
   type SquireFoldTarget,
-  type SquireKindDotTone,
   type SquireLeadBlock,
   type SquireRouteSelection,
 } from "./squireSidebar.logic";
 
 const INDICATOR_SIZE = 22;
-
-const DOT_TONE_CLASS: Readonly<Record<SquireKindDotTone, string>> = {
-  info: "bg-info",
-  warning: "bg-warning",
-  destructive: "bg-destructive",
-  success: "bg-success",
-};
 
 /**
  * Nested lists indent from the left only. `SidebarMenuSub` insets both sides, which compounds
@@ -86,10 +70,10 @@ export interface SquiresSidebarGroupProps {
   readonly isSearching: boolean;
 }
 
-type Navigate = (
-  target: { readonly environmentId: EnvironmentId; readonly squireId: SquireId },
-  search: SquireViewSearch,
-) => void;
+type Navigate = (target: {
+  readonly environmentId: EnvironmentId;
+  readonly squireId: SquireId;
+}) => void;
 
 interface RowContext {
   readonly route: SquireRouteSelection | null;
@@ -138,12 +122,11 @@ export const SquiresSidebarGroup = memo(function SquiresSidebarGroup(
     collapsedByKey,
     onToggle: (target) =>
       setCollapsed(squireFoldKey(target), !isSquireFoldCollapsed(collapsedByKey, target)),
-    navigate: (target, search) => {
+    navigate: (target) => {
       if (isMobile) setOpenMobile(false);
       void routerNavigate({
         to: "/squires/$environmentId/$squireId",
         params: { environmentId: target.environmentId, squireId: target.squireId },
-        search,
       });
     },
   };
@@ -364,32 +347,22 @@ function SquireRow(props: {
     squire.homeThreadId === null ? null : scopeThreadRef(environmentId, squire.homeThreadId),
   );
   const indicator = squireEntryIndicator(entry, homeShell);
+  const state = squireSidebarState(entry, homeShell);
   const statusLine = squireRowStatusLine(entry, indicator);
   const isLead = squire.id === leadId;
   const palette = isLead ? "gold" : squire.companion.palette;
-  const label = squireRowLabel(squire.name, indicator);
-  const selection = squireRowSelection(context.route, environmentId, squire.id);
-  const foldTarget: SquireFoldTarget =
-    block === undefined
-      ? { kind: "squire", environmentId, squireId: squire.id }
-      : { kind: "lead", environmentId };
+  const label = squireRowLabel(squire.name, indicator, state);
+  const active = squireRowSelected(context.route, environmentId, squire.id);
+  const foldTarget: SquireFoldTarget = { kind: "lead", environmentId };
   const fold =
     block === undefined
-      ? {
-          expandable: entry.openDecisionCount > 0,
-          expanded: isSquireRowExpanded(
-            context.collapsedByKey,
-            { kind: "squire", environmentId, squireId: squire.id },
-            entry.openDecisionCount,
-          ),
-        }
+      ? { expandable: false, expanded: false }
       : squireLeadFold(context.collapsedByKey, environmentId, block);
   const trailing =
     block === undefined
-      ? squireRowTrailing(indicator)
-      : squireLeadTrailing(indicator, block, fold.expandable && !fold.expanded);
-  const open = (search: SquireViewSearch) =>
-    context.navigate({ environmentId, squireId: squire.id }, search);
+      ? squireRowTrailing(state, entry.openDecisionCount)
+      : squireLeadTrailing(state, block, fold.expandable && !fold.expanded);
+  const open = () => context.navigate({ environmentId, squireId: squire.id });
   const Item = nested ? SidebarMenuSubItem : SidebarMenuItem;
 
   return (
@@ -413,14 +386,14 @@ function SquireRow(props: {
           <span aria-hidden className="size-5 shrink-0" />
         )}
         <SidebarMenuButton
-          isActive={selection.active}
+          isActive={active}
           aria-label={label}
-          aria-current={selection.active ? "page" : undefined}
+          aria-current={active ? "page" : undefined}
           data-testid="squire-sidebar-row"
           data-squire-id={squire.id}
           data-squire-role={isLead ? "lead" : "squire"}
           className="min-w-0 flex-1"
-          onClick={() => open({})}
+          onClick={open}
         >
           <SquireHoverCard
             cardKey={`${environmentId}:${squire.id}`}
@@ -442,7 +415,13 @@ function SquireRow(props: {
           <span className="min-w-0 flex-1 truncate text-sidebar-foreground">{squire.name}</span>
           {trailing.kind === "working" ? (
             <span className="shrink-0 text-xs font-normal text-muted-foreground">working</span>
-          ) : trailing.kind === "badge" ? (
+          ) : trailing.kind === "unread" ? (
+            <span
+              aria-hidden
+              data-testid="squire-sidebar-unread"
+              className="size-1.5 shrink-0 rounded-full bg-primary"
+            />
+          ) : trailing.kind === "needs-you" ? (
             <SquireCountBadge
               count={trailing.count}
               palette={palette}
@@ -465,7 +444,7 @@ function SquireRow(props: {
               size="sm"
               render={<button type="button" />}
               className="w-full"
-              onClick={() => open({})}
+              onClick={open}
             >
               <span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
                 {statusLine}
@@ -476,18 +455,6 @@ function SquireRow(props: {
       )}
       {fold.expandable ? (
         <SidebarHierarchyPanel open={fold.expanded}>
-          {entry.openDecisionCount > 0 ? (
-            <SquireDecisionRows
-              environmentId={environmentId}
-              squireId={squire.id}
-              leadId={leadId}
-              openDecisionCount={entry.openDecisionCount}
-              leadRaisedDecisionCount={entry.leadRaisedDecisionCount ?? 0}
-              label={block === undefined ? null : squireLeadItemsLabel(block)}
-              selectedItem={selection.selectedItem}
-              onOpen={open}
-            />
-          ) : null}
           {block !== undefined && block.squires.length > 0 ? (
             <SquireList
               environmentId={environmentId}
@@ -506,92 +473,5 @@ function SquireRow(props: {
         </SidebarHierarchyPanel>
       ) : null}
     </Item>
-  );
-}
-
-/** Mounted only while the row is open, so a folded Squire runs no items query. */
-function SquireDecisionRows(props: {
-  readonly environmentId: EnvironmentId;
-  readonly squireId: SquireId;
-  readonly leadId: SquireId | null;
-  readonly openDecisionCount: number;
-  readonly leadRaisedDecisionCount: number;
-  readonly label: string | null;
-  readonly selectedItem: SquireCardId | null;
-  readonly onOpen: (search: SquireViewSearch) => void;
-}) {
-  const { environmentId, squireId, leadId, openDecisionCount, selectedItem, onOpen } = props;
-  const result = useAtomValue(squireEnvironment.decisionItems({ environmentId, squireId }));
-  const items = Option.getOrNull(AsyncResult.value(result))?.items ?? [];
-  const { rows, moreCount } = squireChildRows(items, {
-    squireId,
-    leadId,
-    openDecisionCount,
-    leadRaisedDecisionCount: props.leadRaisedDecisionCount,
-  });
-  if (rows.length === 0 && moreCount === 0) return null;
-  return (
-    <NestedList data-testid="squire-sidebar-decisions">
-      {props.label === null ? null : (
-        <li className="flex h-5 items-center px-2 text-2xs font-medium text-sidebar-muted-foreground">
-          {props.label}
-        </li>
-      )}
-      {rows.map((item) => (
-        <SquireDecisionRow
-          key={item.id}
-          item={item}
-          selected={item.id === selectedItem}
-          onSelect={() => onOpen({ item: item.id })}
-        />
-      ))}
-      {moreCount > 0 ? (
-        <SidebarMenuSubItem>
-          <SidebarMenuSubButton
-            size="sm"
-            render={<button type="button" />}
-            className="w-full"
-            onClick={() => onOpen({})}
-          >
-            <span className="text-muted-foreground">+{moreCount} more</span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      ) : null}
-    </NestedList>
-  );
-}
-
-function SquireDecisionRow(props: {
-  readonly item: SquireCardRow;
-  readonly selected: boolean;
-  readonly onSelect: () => void;
-}) {
-  const { item, selected, onSelect } = props;
-  const dot = squireKindDot(item.kind);
-  const age = squireChildAgeText(useRelativeTimeState(item.createdAt));
-  return (
-    <SidebarMenuSubItem>
-      <SidebarMenuSubButton
-        size="sm"
-        isActive={selected}
-        aria-current={selected ? "true" : undefined}
-        data-testid="squire-sidebar-decision"
-        data-squire-item-id={item.id}
-        render={<button type="button" />}
-        className="w-full"
-        onClick={onSelect}
-      >
-        {dot === null ? null : (
-          <span
-            role="img"
-            aria-label={dot.label}
-            className={cn("size-1.5 shrink-0 rounded-full", DOT_TONE_CLASS[dot.tone])}
-          />
-        )}
-        {/* A <button> centres its text, so a short title would start right of a long one. */}
-        <span className="min-w-0 flex-1 truncate text-left">{item.title}</span>
-        <span className="shrink-0 text-muted-foreground tabular-nums">{age}</span>
-      </SidebarMenuSubButton>
-    </SidebarMenuSubItem>
   );
 }

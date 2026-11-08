@@ -37,6 +37,8 @@ import {
   resolveUserMessagePresentation,
 } from "@lecturn/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@lecturn/client-runtime/state/thread-workflows";
+import { squireOpenApprovalJump } from "@lecturn/client-runtime/state/squire";
+import type { ThreadUnreadWindow } from "@lecturn/client-runtime/state/thread-visits";
 import {
   resolveMessageForkPoints,
   type ThreadForkPoint,
@@ -57,6 +59,7 @@ import {
   type MessageId,
   type OrchestrationV2ProjectedTurnItem,
   type RunId,
+  type SquireId,
   type ThreadImportOrigin,
   type ScheduledTaskId,
   type ScopedThreadRef,
@@ -258,7 +261,17 @@ import {
 } from "./pending-thread-feed";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
-import { groupSquireUpdates } from "./ThreadFeed.logic";
+import {
+  groupSquireUpdates,
+  hideSquireQuietText,
+  insertUnreadDivider,
+  mergeSquireApprovals,
+  squireApprovalRowId,
+  squireChatQuietRunIds,
+  threadUnreadAnchor,
+} from "./ThreadFeed.logic";
+import { SquireApprovalRow } from "../squires/SquireApprovalRow";
+import { useSquireChatApprovals } from "../squires/squireApprovalState";
 import { htmlRenderFrameHeight } from "@lecturn/shared/htmlRender";
 import { htmlRenderRowHeight, ThreadHtmlRender } from "./HtmlRenderWebView";
 import { ThreadMcpApp } from "./McpAppWebView";
@@ -416,8 +429,12 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
-  /** A Squire's home thread on an environment with Squires on: its runs of wakes fold away. */
-  readonly squireHome?: boolean;
+  /** The Squire whose chat this is, on an environment with Squires on; null for any other thread. */
+  readonly squireChatSquireId?: SquireId | null;
+  /** The server renders approvals in the chat: `capabilities.squireChatFirst`. */
+  readonly squireChatFirst?: boolean;
+  /** What this open knew before it marked the thread read; null shows no "New" divider. */
+  readonly unreadWindow?: ThreadUnreadWindow | null;
 }
 
 async function waitForThreadShell(
@@ -1329,7 +1346,6 @@ function renderFeedEntry(
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey?: string, groupId?: string) => void;
     readonly onToggleTurnFold: (runId: RunId) => void;
-    readonly onToggleSquireUpdates: (groupId: string) => void;
     readonly onOpenTurnDiff: ((checkpoint: ThreadCheckpointSummary) => void) | null;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPlaybackStart: () => void;
@@ -1427,32 +1443,21 @@ function renderFeedEntry(
     );
   }
 
-  if (entry.type === "squire-updates") {
+  if (entry.type === "squire-approval") {
+    return <SquireApprovalRow environmentId={props.environmentId} entry={entry.entry} />;
+  }
+
+  if (entry.type === "unread-divider") {
     return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: entry.expanded }}
-        onPress={() => props.onToggleSquireUpdates(entry.id)}
-        hitSlop={4}
-        className="mb-1 min-h-11 flex-row items-center gap-2 border-b border-border-subtle px-2"
-        style={{
-          minHeight: Math.max(TURN_FOLD_HEIGHT - 3.5, props.workRowSizing.estimatedRowHeight),
-        }}
+      <View
+        accessible
+        accessibilityLabel="New messages"
+        className="mb-3 flex-row items-center gap-3 px-1 py-1"
       >
-        <Text
-          key={props.workRowSizing.textSizeKey}
-          className="shrink font-lecturn-medium text-sm tabular-nums text-foreground-muted"
-          numberOfLines={1}
-        >
-          {entry.label}
-        </Text>
-        <ThreadDisclosureChevron
-          expanded={entry.expanded}
-          collapsedDirection="right"
-          size={15}
-          tintColor={iconSubtleColor}
-        />
-      </Pressable>
+        <View className="h-px flex-1 bg-primary" />
+        <Text className="shrink-0 font-lecturn-medium text-xs text-primary-text">New</Text>
+        <View className="h-px flex-1 bg-primary" />
+      </View>
     );
   }
 
@@ -2232,7 +2237,7 @@ function useThreadFeedPresentation(
   expandedTurnIds: ReadonlySet<RunId>,
   expandedWorkGroups: Record<string, boolean>,
   unsettledTurnId: RunId | null,
-  expandedSquireUpdates: ReadonlySet<string>,
+  quietRunIds: ReadonlySet<RunId>,
 ) {
   const [feedCache] = useState(createThreadFeedCache);
   const ungroupedFeed = appendPendingThreadMessages(
@@ -2253,8 +2258,8 @@ function useThreadFeedPresentation(
     props.feed,
     props.queuedMessages,
   );
-  return props.squireHome
-    ? groupSquireUpdates(ungroupedFeed, unsettledTurnId, expandedSquireUpdates)
+  return props.squireChatSquireId
+    ? groupSquireUpdates(hideSquireQuietText(ungroupedFeed, quietRunIds), unsettledTurnId)
     : ungroupedFeed;
 }
 
@@ -2356,9 +2361,6 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     expandedTurnIds: new Set(),
   });
   const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
-  const [expandedSquireUpdates, setExpandedSquireUpdates] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
   const markdownLinkRequest = useRef<AbortController | null>(null);
   const onInlinePlaybackStart = () => {
     markdownLinkRequest.current?.abort();
@@ -2932,16 +2934,31 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const { jumpToMessageId } = props;
   const jumpReady = !!jumpToMessageId && loadedListKey === `${feedThreadKey}:filled`;
-  const presentedFeed = appendGuestPendingMessages(
-    useThreadFeedPresentation(
-      props,
-      expandedTurnIds,
-      expandedWorkGroups,
-      unsettledTurnId,
-      expandedSquireUpdates,
-    ),
-    guestShare,
+  const quietRunIds = props.squireChatSquireId ? squireChatQuietRunIds(props.feed) : EMPTY_RUN_IDS;
+  const squireApprovals = useSquireChatApprovals(
+    props.environmentId,
+    props.squireChatSquireId ?? null,
+    props.squireChatFirst === true,
   );
+  const presentedFeed = insertUnreadDivider(
+    mergeSquireApprovals(
+      appendGuestPendingMessages(
+        useThreadFeedPresentation(
+          props,
+          expandedTurnIds,
+          expandedWorkGroups,
+          unsettledTurnId,
+          quietRunIds,
+        ),
+        guestShare,
+      ),
+      squireApprovals,
+      props.historyControls?.hasMoreHistory === true,
+    ),
+    threadUnreadAnchor(props.feed, props.unreadWindow ?? null, quietRunIds),
+  );
+  const approvalJump = squireOpenApprovalJump(squireApprovals);
+  const [approvalJumpRowId, setApprovalJumpRowId] = useState<string | null>(null);
   const presentedFeedRef = useRef(presentedFeed);
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- keeps the latest presented feed for disclosure callbacks that run outside render
   useLayoutEffect(() => {
@@ -3005,6 +3022,22 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     }
     props.onJumpedToMessage?.();
   });
+  const stopFollowingEnd = useEffectEvent(() => setEndFollow(false));
+  const finishApprovalJump = useEffectEvent(() => setApprovalJumpRowId(null));
+  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- the list leaves the end a render before it can scroll, as a message jump does.
+  useEffect(() => {
+    if (approvalJumpRowId === null || loadedListKey !== listMountKey) return;
+    const index = presentedFeed.findIndex((entry) => entry.id === approvalJumpRowId);
+    if (index !== -1 && endFollowEnabled) {
+      stopFollowingEnd();
+      return;
+    }
+    if (index !== -1) {
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.2, animated: false });
+    }
+    // oxlint-disable-next-line react/set-state-in-effect -- the jump is one-shot, cleared only after its native scroll ran.
+    finishApprovalJump();
+  }, [approvalJumpRowId, endFollowEnabled, listMountKey, listRef, loadedListKey, presentedFeed]);
   // Z: a native list scroll after the commit that rendered its target row. The
   // row is often already measured, so no LegendList callback fires for that
   // commit, and setEndFollow notifies the parent, so it can't run during render.
@@ -3283,15 +3316,6 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     });
   };
 
-  const onToggleSquireUpdates = (groupId: string) => {
-    suspendEndScrollMaintenanceForDisclosure(groupId);
-    setExpandedSquireUpdates((current) => {
-      const next = new Set(current);
-      if (!next.delete(groupId)) next.add(groupId);
-      return next;
-    });
-  };
-
   const onPressPreview = (source: FilePreviewSource) => {
     markdownLinkRequest.current?.abort();
     openPreview(markdownLinkScope, { file: source });
@@ -3301,7 +3325,13 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
   // estimatedItemSize tall, and scrolling up through unmeasured content
   // corrects each row's height as it mounts — the feed visibly jumps.
   const getFixedItemSize = (entry: ThreadFeedRow) => {
-    if (entry.type === "guest-pending") return undefined;
+    if (
+      entry.type === "guest-pending" ||
+      entry.type === "squire-approval" ||
+      entry.type === "unread-divider"
+    ) {
+      return undefined;
+    }
     if (entry.type === "html-render") {
       return htmlRenderRowHeight(htmlRenderFrameHeight(entry.render, contentWidth));
     }
@@ -3310,7 +3340,6 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
     }
     switch (entry.type) {
       case "run-fold":
-      case "squire-updates":
       case "import-divider":
         return resolveThreadFeedFixedItemSize(entry.type);
       case "work-toggle":
@@ -3391,7 +3420,6 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
             onToggleWorkGroup,
             onToggleWorkRow,
             onToggleTurnFold,
-            onToggleSquireUpdates,
             onOpenTurnDiff: props.turnDiffEnabled === false ? null : onOpenTurnDiff,
             onPressPreview,
             onPlaybackStart: onInlinePlaybackStart,
@@ -3598,6 +3626,20 @@ function ThreadFeedView(props: ThreadFeedProps & { readonly ref?: Ref<ThreadFeed
             />
           </View>
         ) : null}
+        {approvalJump === null ? null : (
+          <View
+            pointerEvents="box-none"
+            className="absolute inset-x-0 items-center"
+            style={{ top: topContentInset + 8 }}
+          >
+            <Button
+              label={approvalJump.label}
+              tone="secondary"
+              accessibilityLabel={`${approvalJump.label}. Jumps to the oldest open approval.`}
+              onPress={() => setApprovalJumpRowId(squireApprovalRowId(approvalJump.cardId))}
+            />
+          </View>
+        )}
         <VideoPreviewModal source={expandedVideo} onRequestClose={closeVideoPreview} />
         <FilePreviewModal source={expandedFile} onRequestClose={closeFilePreview} />
       </View>
