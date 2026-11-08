@@ -53,11 +53,49 @@ function visitedThreadIds() {
   );
 }
 
+// Headless Chromium doesn't report the test page as focused.
+function windowFocus(focused: boolean) {
+  const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(focused);
+  return {
+    gain() {
+      hasFocus.mockReturnValue(true);
+      window.dispatchEvent(new Event("focus"));
+    },
+    [Symbol.dispose]: () => hasFocus.mockRestore(),
+  };
+}
+
+it("waits for window focus before recording a visit", async () => {
+  mocks.visitRun.mockReset();
+  mocks.visitRun.mockResolvedValue(AsyncResult.success(undefined));
+  setShell(threadA, "2026-01-02T00:00:00.000Z");
+  using focus = windowFocus(false);
+  using _timers = fakeTimers();
+  vi.setSystemTime(NOW);
+
+  await using screen = await render(
+    <AppAtomRegistryProvider>
+      <ThreadVisitWatermark threadRef={threadA} />
+    </AppAtomRegistryProvider>,
+  );
+  expect(visitedThreadIds()).toEqual([]);
+
+  focus.gain();
+  await screen.rerender(
+    <AppAtomRegistryProvider>
+      <ThreadVisitWatermark threadRef={threadA} />
+    </AppAtomRegistryProvider>,
+  );
+
+  expect(visitedThreadIds()).toEqual(["a"]);
+});
+
 it("records the visit of the next thread at once after switching threads", async () => {
   mocks.visitRun.mockReset();
   mocks.visitRun.mockResolvedValue(AsyncResult.success(undefined));
   setShell(threadA, "2026-01-02T00:00:00.000Z");
   setShell(threadB, "2026-01-03T00:00:00.000Z");
+  using _focus = windowFocus(true);
   using _timers = fakeTimers();
   vi.setSystemTime(NOW);
   // A palette pick already sent B's open with its query, so B's visit is a plain watermark advance.
