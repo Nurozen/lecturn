@@ -44,7 +44,12 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
-import { questionCardTrigger, readSquireQuestion, squireQuestionTitle } from "./SquireItems.ts";
+import {
+  fyiSourceOf,
+  questionCardTrigger,
+  readSquireQuestion,
+  squireQuestionTitle,
+} from "./SquireItems.ts";
 import * as SquireLifecycle from "./SquireLifecycle.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
 import * as SquireHooks from "./squireHooks.ts";
@@ -819,6 +824,51 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /** What the user has read needs no more attention; the inactivity check stays until answered. */
+  const closeReadFyis = Effect.fnUntraced(function* (squireId: SquireId, at: DateTime.Utc) {
+    const atMs = DateTime.toEpochMillis(at);
+    const fyis = yield* repository.listCards({ squireId, kinds: ["fyi"], statuses: ["open"] });
+    yield* moveCards(
+      fyis.filter(
+        (card) =>
+          fyiSourceOf(card.payload_json) !== "inactivity" && Date.parse(card.updated_at) <= atMs,
+      ),
+      () => ({ status: "dismissed", resolution: "dismissed" }),
+      yield* nowIso,
+      "the user read the chat",
+    );
+  });
+
+  /**
+   * The user's message answers what was waiting in that Squire's chat: its approvals close and its
+   * denials end. Holds keep their Undo window, and anything this run raised is newer than `requestedAt`.
+   */
+  const onHomeRunStarted = Effect.fnUntraced(function* (
+    effect: Extract<SquireReactorEffect, { readonly type: "home-run-started" }>,
+  ) {
+    const message = yield* projections.getRunMessage(effect.threadId, effect.runId);
+    if (message?.createdBy !== "user") return;
+    const requestedMs = DateTime.toEpochMillis(effect.requestedAt);
+    const approvals = yield* repository.listCards({
+      squireId: effect.squireId,
+      kinds: ["steer", "proposal"],
+      statuses: ["open"],
+    });
+    const now = yield* nowIso;
+    yield* moveCards(
+      approvals.filter((card) => Date.parse(card.updated_at) <= requestedMs),
+      () => ({ status: "outdated", resolution: "outdated", executes_at: null }),
+      now,
+      "the user wrote in the chat",
+    );
+    yield* repository.clearDenials({
+      squireId: effect.squireId,
+      before: DateTime.formatIso(effect.requestedAt),
+      at: now,
+    });
+    yield* closeReadFyis(effect.squireId, effect.requestedAt);
+  });
+
   /** A new state for the same PR obsoletes cards raised for one it no longer holds. */
   const onPullRequestLink = Effect.fnUntraced(function* (
     threadId: ThreadId,
@@ -1164,6 +1214,10 @@ const make = Effect.gen(function* () {
         return onRequestResolved(effect.threadId, effect.requestId, questionSettledBy(stored));
       case "run-started":
         return onRunStarted(effect.threadId, effect.runId);
+      case "home-run-started":
+        return onHomeRunStarted(effect);
+      case "home-visited":
+        return closeReadFyis(effect.squireId, effect.at);
       case "background-work-ended":
         return onBackgroundWorkEnded(effect.threadId);
       case "thread-deleted":

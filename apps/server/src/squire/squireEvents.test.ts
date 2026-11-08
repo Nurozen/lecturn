@@ -631,7 +631,7 @@ describe("Squire threads (P1.4, P3.2, D9)", () => {
     expect(effects(request("command", "resolved"), onHome)).toEqual([]);
   });
 
-  it("a Squire-thread run terminal finalizes; a start does not", () => {
+  it("a Squire-thread run terminal finalizes; a start reports the user message's run", () => {
     for (const status of [
       "completed",
       "failed",
@@ -643,7 +643,15 @@ describe("Squire threads (P1.4, P3.2, D9)", () => {
         { type: "squire-run-ended", threadId, squire: home, runId, status },
       ]);
     }
-    expect(effects(runUpdated("running"), onHome)).toEqual([]);
+    const started = effects(runUpdated("running"), onHome);
+    expect(started).toEqual([
+      expect.objectContaining({
+        type: "home-run-started",
+        threadId,
+        squireId: home.squireId,
+        runId,
+      }),
+    ]);
     expect(effects(runUpdated("waiting"), onHome)).toEqual([]);
   });
 });

@@ -614,6 +614,14 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     runId: RunId,
   ) => Effect.Effect<OrchestrationV2ConversationMessage | undefined, ProjectionStoreV2Error>;
+  /** Lecturn: a thread's newest assistant messages, newest first. */
+  readonly listRecentAssistantMessages: (
+    threadId: ThreadId,
+    limit: number,
+  ) => Effect.Effect<
+    ReadonlyArray<{ readonly runId: RunId | null; readonly updatedAt: string }>,
+    ProjectionStoreV2Error
+  >;
   readonly canStartQueuedRun: (
     threadId: ThreadId,
   ) => Effect.Effect<boolean, ProjectionStoreV2Error>;
@@ -5312,6 +5320,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
         .pipe(Effect.mapError(controlReadError(threadId)));
 
+    const listRecentAssistantMessages: ProjectionStoreV2Shape["listRecentAssistantMessages"] = (
+      threadId,
+      limit,
+    ) =>
+      sql<{ readonly run_id: string | null; readonly updated_at: string }>`
+        SELECT run_id, updated_at FROM orchestration_v2_projection_messages
+        WHERE thread_id = ${threadId} AND role = 'assistant'
+        ORDER BY created_at DESC, message_id DESC
+        LIMIT ${limit}`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            runId: row.run_id === null ? null : RunId.make(row.run_id),
+            updatedAt: row.updated_at,
+          })),
+        ),
+        Effect.mapError(controlReadError(threadId)),
+      );
+
     const canStartQueuedRun: ProjectionStoreV2Shape["canStartQueuedRun"] = (threadId) =>
       sql
         .withTransaction(
@@ -6840,6 +6866,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getCheckpointCaptureContext: readOnReader(getCheckpointCaptureContext),
       getCheckpointRollbackContext: readOnReader(getCheckpointRollbackContext),
       getRunMessage: readOnReader(getRunMessage),
+      listRecentAssistantMessages: readOnReader(listRecentAssistantMessages),
       canStartQueuedRun: readOnReader(canStartQueuedRun),
       getPendingNativeUserInputs: readOnReader(getPendingNativeUserInputs),
       hasUnpairedRunInterruptRequest: readOnReader(hasUnpairedRunInterruptRequest),
@@ -7548,6 +7575,21 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         const run = projection.runs.find((candidate) => candidate.id === runId);
         return projection.messages.find((message) => message.id === run?.userMessageId);
       }),
+      listRecentAssistantMessages: Effect.fn("ProjectionStore.listRecentAssistantMessages")(
+        function* (threadId, limit) {
+          const projection = (yield* Ref.get(replayState)).projections.get(threadId);
+          return (projection?.messages ?? [])
+            .filter((message) => message.role === "assistant")
+            .toSorted(
+              (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
+            )
+            .slice(0, limit)
+            .map((message) => ({
+              runId: message.runId,
+              updatedAt: DateTime.formatIso(message.updatedAt),
+            }));
+        },
+      ),
       canStartQueuedRun: Effect.fn("ProjectionStore.canStartQueuedRun")(function* (threadId) {
         const projection = (yield* Ref.get(replayState)).projections.get(threadId);
         if (projection === undefined)

@@ -155,7 +155,7 @@ export const readSquireQuestion = Effect.fn("SquireItems.readSquireQuestion")(fu
 const decodeFyiSource = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ source: Schema.String })),
 );
-const fyiSourceOf = (payloadJson: string | null): string =>
+export const fyiSourceOf = (payloadJson: string | null): string =>
   payloadJson === null
     ? "unknown"
     : Option.match(decodeFyiSource(payloadJson), {

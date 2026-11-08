@@ -761,6 +761,113 @@ describe("SquireReactor stops and scope", () => {
   );
 });
 
+describe("SquireReactor home-thread attention", () => {
+  const fyi = (id: string, overrides: Partial<SquireRepository.SquireCardRow> = {}) =>
+    openCard(id, {
+      kind: "fyi",
+      target_thread_id: null,
+      project_id: null,
+      payload_json: '{"type":"fyi","source":"notify","text":"Heads up","threadId":null}',
+      ...overrides,
+    });
+  const denied = (id: string, updatedAt: string) =>
+    openCard(id, {
+      status: "dismissed",
+      resolution: "denied",
+      updated_at: updatedAt,
+    });
+  const cardOf = (id: string) =>
+    Effect.flatMap(SquireRepository.SquireRepository, (repository) =>
+      repository.getCard(SquireCardId.make(id)).pipe(Effect.map(Option.getOrThrow)),
+    );
+
+  it.effect("a user message there closes approvals and FYIs and ends denials, not holds", () =>
+    runIn(() =>
+      Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
+        yield* setup();
+        yield* createHome;
+        const now = yield* DateTime.now;
+        const later = DateTime.formatIso(DateTime.add(now, { minutes: 1 }));
+        yield* repository.insertCard(openCard("card:approval"));
+        yield* repository.insertCard(
+          openCard("card:raised", { updated_at: later, kind: "proposal", target_thread_id: null }),
+        );
+        yield* repository.insertCard(
+          openCard("card:held", { status: "held", kind: "proposal", target_thread_id: null }),
+        );
+        yield* repository.insertCard(fyi("card:fyi"));
+        yield* repository.insertCard(denied("card:denied", DateTime.formatIso(now)));
+        yield* repository.insertCard(denied("card:denied-newer", later));
+        const { drain } = yield* startReactor;
+
+        // A wake run is not the user writing.
+        const wake = RunId.make("run:wake");
+        yield* write([
+          userMessage(home, wake, "agent", now),
+          runEvent(home, wake, "running", now, "run.created"),
+        ]);
+        yield* drain;
+        assert.strictEqual((yield* cardOf("card:approval")).status, "open");
+
+        const user = RunId.make("run:user");
+        yield* write([
+          userMessage(home, user, "user", now),
+          runEvent(home, user, "running", now, "run.created"),
+        ]);
+        yield* drain;
+        assert.strictEqual((yield* cardOf("card:approval")).status, "outdated");
+        assert.strictEqual((yield* cardOf("card:fyi")).status, "dismissed");
+        // Raised after the message was sent: this run's own card stays.
+        assert.strictEqual((yield* cardOf("card:raised")).status, "open");
+        assert.strictEqual((yield* cardOf("card:held")).status, "held");
+        assert.isNotNull((yield* cardOf("card:denied")).expires_at);
+        assert.strictEqual((yield* cardOf("card:denied")).resolution, "denied");
+        assert.isNull((yield* cardOf("card:denied-newer")).expires_at);
+      }),
+    ),
+  );
+
+  it.effect(
+    "a visit closes that home thread's FYIs, except the inactivity check and newer ones",
+    () =>
+      runIn(() =>
+        Effect.gen(function* () {
+          const repository = yield* SquireRepository.SquireRepository;
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* setup();
+          yield* createHome;
+          const now = yield* DateTime.now;
+          yield* repository.insertCard(fyi("card:notify"));
+          yield* repository.insertCard(
+            fyi("card:inactivity", {
+              target_thread_id: worker,
+              payload_json:
+                '{"type":"fyi","source":"inactivity","text":"Still there?","threadId":null}',
+            }),
+          );
+          yield* repository.insertCard(
+            fyi("card:newer", {
+              target_thread_id: home,
+              updated_at: DateTime.formatIso(DateTime.add(now, { minutes: 1 })),
+            }),
+          );
+          const { drain } = yield* startReactor;
+          yield* orchestrator.dispatch({
+            type: "thread.visit",
+            commandId: CommandId.make("cmd:visit-home"),
+            threadId: home,
+            visitedAt: DateTime.formatIso(now),
+          });
+          yield* drain;
+          assert.strictEqual((yield* cardOf("card:notify")).status, "dismissed");
+          assert.strictEqual((yield* cardOf("card:inactivity")).status, "open");
+          assert.strictEqual((yield* cardOf("card:newer")).status, "open");
+        }),
+      ),
+  );
+});
+
 describe("SquireReactor PR dedupe", () => {
   it.effect("fail, pass, fail on three heads is three rows even when ingested late", () =>
     runIn(() =>

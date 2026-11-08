@@ -19,6 +19,7 @@ import {
 import type * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -1038,6 +1039,61 @@ describe("squire.items.act", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("a background approval expires after the TTL; replacing it in place refreshes it", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        const card = yield* openCard(home);
+        const ttl = Duration.toMillis(SquireRepository.SQUIRE_APPROVAL_TTL);
+        assert.strictEqual(
+          card.expires_at,
+          DateTime.formatIso(
+            DateTime.add(DateTime.makeUnsafe(card.created_at), { milliseconds: ttl }),
+          ),
+        );
+        yield* TestClock.adjust(5 * 60_000);
+        yield* sendSteer(home);
+        const replaced = yield* onlyCard(home.squireId);
+        assert.strictEqual(replaced.replaced_count, 1);
+        assert.strictEqual(
+          replaced.expires_at,
+          DateTime.formatIso(
+            DateTime.add(DateTime.makeUnsafe(replaced.updated_at), { milliseconds: ttl }),
+          ),
+        );
+      }),
+    ),
+  );
+
+  it.effect("a denied slot refuses the same raise until the user next writes", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        const card = yield* openCard(home);
+        const denied = yield* act({ requestId: "deny", cardIds: [card.id], action: "dismiss" });
+        assert.strictEqual(denied.results[0]!.status, "dismissed");
+        const row = yield* cardOf(card.id);
+        assert.strictEqual(row.resolution, "denied");
+        assert.isNull(row.expires_at);
+
+        const refused = yield* sendSteer(home);
+        assert.isTrue(refused.isError);
+        assert.match(refused.text, /denied/);
+        assert.lengthOf(yield* cardsOf(home.squireId), 1);
+
+        // Another thread is another slot.
+        const other = yield* sendSteer(home, undefined, { threadId: second });
+        assert.isFalse(other.isError);
+
+        const repository = yield* SquireRepository.SquireRepository;
+        const now = DateTime.formatIso(yield* DateTime.now);
+        yield* repository.clearDenials({ squireId: home.squireId, before: now, at: now });
+        const again = yield* sendSteer(home);
+        assert.isFalse(again.isError);
+        // The history row keeps reading Denied.
+        assert.strictEqual((yield* cardOf(card.id)).resolution, "denied");
+      }),
+    ),
+  );
+
   it.effect("dismiss closes an open card; accept-all resolves each card", () =>
     withSquire((home) =>
       Effect.gen(function* () {
@@ -1066,6 +1122,30 @@ describe("thread create", () => {
         },
       ),
     );
+
+  it.effect("a denied null-target proposal blocks the same project and title only", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* setPermissions(home.squireId, { steer: "recommend", createThread: "recommend" });
+        const raise = (firstPrompt: string, reason: string) =>
+          Effect.flatMap(need(SquireTools.SquireTools), (tools) =>
+            tools.call(
+              { squireId: home.squireId, role: "squire", threadId: home.homeThreadId },
+              "squire_propose_thread",
+              { project: "billing-service", provider: "scripted", firstPrompt, reason },
+            ),
+          );
+        yield* raise("Add a CHANGELOG entry.", "PR #318 merged.");
+        const card = yield* onlyCard(home.squireId);
+        yield* act({ requestId: "deny-p", cardIds: [card.id], action: "dismiss" });
+        const refused = yield* raise("Add a CHANGELOG entry.", "PR #318 merged, again.");
+        assert.isTrue(refused.isError);
+        assert.match(refused.text, /denied/);
+        const other = yield* raise("Bump the version.", "PR #318 merged.");
+        assert.isFalse(other.isError);
+      }),
+    ),
+  );
 
   const launchIntentOf = (card: SquireRepository.SquireCardRow) => {
     const intent = Option.getOrThrow(decodeSquireActionIntent(card.intent_json));

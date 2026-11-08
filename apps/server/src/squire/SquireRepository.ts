@@ -12,6 +12,7 @@ import {
 } from "@lecturn/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -142,6 +143,23 @@ export const SquireCardRow = Schema.Struct({
   updated_at: Text,
 });
 export type SquireCardRow = typeof SquireCardRow.Type;
+/** How long a background approval waits before it reads Expired; the rule offer outlives it. */
+export const SQUIRE_APPROVAL_TTL = Duration.minutes(30);
+/** What the user started themselves is theirs to leave open; a voice note counts as the user. */
+const APPROVAL_TTL_EXEMPT_ORIGINS: ReadonlySet<SquireCardRow["origin"]> = new Set([
+  "user",
+  "voice",
+]);
+/** When an approval raised, or re-raised in place, at `now` expires; null for one that never does. */
+export const squireApprovalExpiresAt = (
+  card: Pick<SquireCardRow, "kind" | "origin">,
+  now: string,
+): string | null =>
+  (card.kind === "steer" || card.kind === "proposal") &&
+  !APPROVAL_TTL_EXEMPT_ORIGINS.has(card.origin)
+    ? DateTime.formatIso(DateTime.addDuration(DateTime.makeUnsafe(now), SQUIRE_APPROVAL_TTL))
+    : null;
+
 /** Only approvals set `expires_at`, so every other insert leaves it out. */
 type SquireCardInsert = Omit<SquireCardRow, "expires_at"> & {
   readonly expires_at?: string | null;
@@ -402,6 +420,18 @@ export class SquireRepository extends Context.Service<
       readonly resolution: string;
       readonly updatedAt: string;
     }) => Result<ReadonlyArray<SquireCardId>>;
+    /** Open approvals past `expires_at` become `outdated`/`expired`; what is left of them is the row in chat. */
+    readonly expireDueApprovals: (now: string) => Result<ReadonlyArray<SquireCardId>>;
+    readonly earliestApprovalExpiryAt: Result<Option.Option<string>>;
+    /**
+     * A denial stays in force while its card's `expires_at` is null; stamping it ends the denial
+     * and keeps the card reading Denied. `before` excludes a denial newer than the user's message.
+     */
+    readonly clearDenials: (input: {
+      readonly squireId: SquireId;
+      readonly before: string;
+      readonly at: string;
+    }) => Result<number>;
     /**
      * Pause: the Squire's holds become open recommendations without a timer. A hold whose open slot (one per Squire,
      * thread, and kind) is taken becomes `outdated`/`superseded` instead, newest first, so the newest wins.
@@ -698,6 +728,18 @@ const decodeRules = Schema.decodeUnknownEffect(Schema.Array(SquireRuleRow));
 const decodeBudgetUsage = Schema.decodeUnknownEffect(Schema.Array(SquireBudgetUsageRow));
 const decodeIds = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: Count })));
 const decodeCardIds = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ id: SquireCardId })));
+const decodeHeldCards = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      id: SquireCardId,
+      kind: SquireCardRow.fields.kind,
+      origin: SquireCardRow.fields.origin,
+    }),
+  ),
+);
+const decodeExpiresAt = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ expires_at: NullableText })),
+);
 const decodeCount = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ n: Count })));
 const decodeSecretRefs = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ secret_ref: Text })),
@@ -871,13 +913,14 @@ const make = Effect.gen(function* () {
           const events = yield* deleted(sql`DELETE FROM squire_event
             WHERE status IN ('delivered', 'dropped') AND created_at < ${cutoffs.eventsBefore}
               AND kind != 'pull-request-changed'`);
-          // Dismissed overlaps and findings, and resolved overlaps, are what
-          // stops them being raised again, so they stay.
+          // Dismissed overlaps and findings, resolved overlaps, and denials still
+          // in force are what stops them being raised again, so they stay.
           const cards = yield* deleted(sql`DELETE FROM squire_card
             WHERE status IN ('resolved', 'executed', 'dismissed', 'outdated')
               AND updated_at < ${cutoffs.cardsBefore}
               AND NOT (kind = 'overlap' AND status IN ('dismissed', 'resolved'))
-              AND NOT (status = 'dismissed' AND finding_key IS NOT NULL)`);
+              AND NOT (status = 'dismissed' AND finding_key IS NOT NULL)
+              AND NOT (resolution IS 'denied' AND expires_at IS NULL)`);
           // After the cards: a live card keeps its log rows, and the newest two
           // branch rows per thread still mark the overlap change boundary.
           const actionLog = yield* deleted(sql`DELETE FROM squire_action_log AS log
@@ -908,15 +951,18 @@ const make = Effect.gen(function* () {
       "openHeldCards",
       sql.withTransaction(
         Effect.gen(function* () {
-          const held = yield* sql`SELECT id FROM squire_card
+          const held = yield* sql`SELECT id, kind, origin FROM squire_card
             WHERE ${sql.literal(SQUIRE_CARD_LIVE)} AND status = 'held'
               AND (squire_id = ${squireId} OR owner_squire_id = ${squireId})
-            ORDER BY created_at DESC, rowid DESC`.pipe(Effect.flatMap(decodeCardIds));
+            ORDER BY created_at DESC, rowid DESC`.pipe(Effect.flatMap(decodeHeldCards));
           const opened: Array<SquireCardId> = [];
-          for (const { id } of held) {
+          for (const row of held) {
+            const { id } = row;
             // OR IGNORE skips a row the open-card indexes would reject.
+            const expiresAt = squireApprovalExpiresAt(row, updatedAt);
             const rows = yield* sql`UPDATE OR IGNORE squire_card
-              SET status = 'open', executes_at = NULL, updated_at = ${updatedAt}
+              SET status = 'open', executes_at = NULL, updated_at = ${updatedAt},
+                expires_at = ${expiresAt}
               WHERE id = ${id} AND status = 'held' RETURNING id`;
             if (rows.length > 0) {
               opened.push(id);
@@ -1110,6 +1156,39 @@ const make = Effect.gen(function* () {
         (outdated) => outdated.length > 0,
       ),
     openHeldCards,
+    expireDueApprovals: (now) =>
+      write(
+        "expireDueApprovals",
+        sql`UPDATE squire_card
+          SET status = 'outdated', resolution = 'expired', executes_at = NULL, updated_at = ${now}
+          WHERE ${sql.literal(SQUIRE_CARD_LIVE)} AND status = 'open'
+            AND expires_at IS NOT NULL AND expires_at <= ${now}
+          RETURNING id`.pipe(
+          Effect.flatMap(decodeCardIds),
+          Effect.map((rows) => rows.map((row) => row.id)),
+        ),
+        (ids) => ids.length > 0,
+      ),
+    earliestApprovalExpiryAt: read(
+      "earliestApprovalExpiryAt",
+      sql`SELECT min(expires_at) AS expires_at FROM squire_card
+        WHERE ${sql.literal(SQUIRE_CARD_LIVE)} AND status = 'open'`.pipe(
+        Effect.flatMap(decodeExpiresAt),
+        Effect.map((rows) => Option.fromNullishOr(rows[0]?.expires_at)),
+      ),
+    ),
+    clearDenials: ({ squireId, before, at }) =>
+      write(
+        "clearDenials",
+        sql`UPDATE squire_card SET expires_at = ${at}
+          WHERE squire_id = ${squireId} AND status = 'dismissed'
+            AND resolution = 'denied' AND expires_at IS NULL AND updated_at <= ${before}
+          RETURNING id`.pipe(
+          Effect.flatMap(decodeCardIds),
+          Effect.map((rows) => rows.length),
+        ),
+        (n) => n > 0,
+      ),
     insertBudgetUsage: (row) => insert("insertBudgetUsage", "squire_budget_usage", row),
     insertActionLog: (row) => insertReturningId("insertActionLog", "squire_action_log", row),
     listActionLog: ({ squireId, kinds, afterId, limit }) =>

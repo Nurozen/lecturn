@@ -13,6 +13,7 @@ import {
   type ProjectId,
   SquireEvidence,
   type SquireEventToggles,
+  type SquireId,
   type SquireThreadMarker,
   SquireTurnOutcome,
   type ThreadId,
@@ -121,6 +122,23 @@ export type SquireReactorEffect =
     }
   /** Drops the thread's deferred turn-finished rows of other runs. */
   | { readonly type: "run-started"; readonly threadId: ThreadId; readonly runId: RunId }
+  /**
+   * A run started on a home thread. Fires again for each later running update, so its
+   * work is bounded by `requestedAt`, which is the same on every firing.
+   */
+  | {
+      readonly type: "home-run-started";
+      readonly threadId: ThreadId;
+      readonly squireId: SquireId;
+      readonly runId: RunId;
+      readonly requestedAt: DateTime.Utc;
+    }
+  /** The user opened or caught up on a home thread. */
+  | {
+      readonly type: "home-visited";
+      readonly squireId: SquireId;
+      readonly at: DateTime.Utc;
+    }
   /** Re-evaluate the thread's `background` deferred rows against its pending tasks now. */
   | { readonly type: "background-work-ended"; readonly threadId: ThreadId }
   | {
@@ -225,6 +243,7 @@ const MARKER_EVENT_TYPES = new Set<OrchestrationV2DomainEvent["type"]>([
   "turn-item.updated",
   "run.background-work-cancelled",
   "thread.pull-request-link-updated",
+  "thread.visited",
 ]);
 
 const turnItemMayClassify = (event: OrchestrationV2DomainEvent) =>
@@ -389,6 +408,20 @@ function classifyRun(
   const run = event.payload;
   const marker = context.threadMarker;
   if (marker !== null) {
+    if (marker.role === "home" && (run.status === "starting" || run.status === "running")) {
+      return {
+        candidates: [],
+        effects: [
+          {
+            type: "home-run-started",
+            threadId: event.threadId,
+            squireId: marker.squireId,
+            runId: run.id,
+            requestedAt: run.requestedAt,
+          },
+        ],
+      };
+    }
     return event.type === "run.updated" && TERMINAL_RUN_STATUSES.has(run.status)
       ? {
           candidates: [],
@@ -619,6 +652,19 @@ export function classifySquireEvent(
         : NONE;
     case "thread.pull-request-link-updated":
       return classifyPullRequestLink(event, context);
+    case "thread.visited":
+      return context.threadMarker?.role === "home"
+        ? {
+            candidates: [],
+            effects: [
+              {
+                type: "home-visited",
+                squireId: context.threadMarker.squireId,
+                at: event.occurredAt,
+              },
+            ],
+          }
+        : NONE;
     case "thread.created":
       return {
         candidates: [],

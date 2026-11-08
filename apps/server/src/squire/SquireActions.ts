@@ -413,7 +413,11 @@ const make = Effect.gen(function* () {
         const opened = yield* repository.updateCard({
           id: card.id,
           fromStatuses,
-          patch: { status: "open", executes_at: null },
+          patch: {
+            status: "open",
+            executes_at: null,
+            expires_at: SquireRepository.squireApprovalExpiresAt(card, now),
+          },
           updatedAt: now,
         });
         if (Option.isNone(opened)) return Option.none<CardRow>();
@@ -1364,13 +1368,20 @@ const make = Effect.gen(function* () {
       });
     const card = found.value;
     if (card.status === "dismissed") return result(card);
+    // Dismissing a hold is its Undo window's cancel, not a verdict on the slot.
+    const isDenial = card.status === "open" && (card.kind === "steer" || card.kind === "proposal");
     const now = yield* nowIso;
     const lead = yield* repository.transaction(
       Effect.gen(function* () {
         const moved = yield* repository.updateCard({
           id: card.id,
           fromStatuses: ["open", "held"],
-          patch: { status: "dismissed", resolution: "dismissed", executes_at: null },
+          patch: {
+            status: "dismissed",
+            resolution: isDenial ? "denied" : "dismissed",
+            executes_at: null,
+            expires_at: null,
+          },
           updatedAt: now,
         });
         if (Option.isNone(moved)) return { moved, lead: Option.none<SquireId>() };

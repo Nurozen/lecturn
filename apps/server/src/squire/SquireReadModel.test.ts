@@ -1,8 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
+  EventId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RunId,
   SquireCardId,
   SquireId,
   SquireSnapshot,
@@ -13,16 +16,20 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SquireContainers from "./SquireContainers.ts";
+import { withSquireDispatchOrigin } from "./SquireDispatchOrigin.ts";
 import * as SquireReadModel from "./SquireReadModel.ts";
 import * as SquireRepository from "./SquireRepository.ts";
+import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import { createThread, grantRow, orchestratorLayer, squireRow } from "./testkit/scopeHarness.ts";
 
@@ -42,7 +49,10 @@ const lead = SquireId.make("squire:lead");
 const projectA = ProjectId.make("project:a");
 const threadA = ThreadId.make("thread:a");
 
-const withReadModel = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+const withReadModel = <A, E, R, RO = never>(
+  effect: Effect.Effect<A, E, R>,
+  extra: Layer.Layer<RO> = Layer.empty as Layer.Layer<never> as Layer.Layer<RO>,
+) =>
   Effect.gen(function* () {
     yield* TestClock.setTime(nowMs);
     return yield* effect;
@@ -50,6 +60,7 @@ const withReadModel = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.scoped,
     Effect.provide(
       SquireReadModel.layer.pipe(
+        Layer.provideMerge(extra),
         Layer.provideMerge(SquireScope.layer),
         Layer.provideMerge(SquireRepository.layer),
         Layer.provideMerge(SquireContainers.layerTest({ spaces: [], unknownProjectIds: [] })),
@@ -161,6 +172,124 @@ const revisionsOf = (id: SquireId) =>
   );
 
 describe("SquireReadModel", () => {
+  it.effect(
+    "lastMessageAt is the newest reply a quiet run did not write, refreshed when a home run ends",
+    () =>
+      withReadModel(
+        Effect.gen(function* () {
+          const repository = yield* repo;
+          const sink = yield* EventSink.EventSinkV2;
+          const homeThread = ThreadId.make("thread:home");
+          yield* seedSquires(squire(release, { home_thread_id: homeThread }));
+          yield* withSquireDispatchOrigin(createThread(homeThread, projectA, release));
+          const reply = (id: string, runId: string, ms: number) => {
+            const stamp = DateTime.makeUnsafe(nowMs + ms);
+            return {
+              id: EventId.make(`event:${id}`),
+              type: "message.updated" as const,
+              threadId: homeThread,
+              runId: RunId.make(runId),
+              occurredAt: stamp,
+              payload: {
+                createdBy: "agent" as const,
+                creationSource: "server" as const,
+                id: MessageId.make(id),
+                threadId: homeThread,
+                runId: RunId.make(runId),
+                nodeId: null,
+                role: "assistant" as const,
+                text: "Done.",
+                attachments: [],
+                streaming: false,
+                createdAt: stamp,
+                updatedAt: stamp,
+              },
+            };
+          };
+          yield* sink.write({ events: [reply("m:spoke", "run:spoke", 1_000)] });
+          yield* sink.write({ events: [reply("m:quiet", "run:quiet", 2_000)] });
+          yield* repository.insertActionLog(
+            logRow({ kind: "quiet.recorded", run_id: "run:quiet" }),
+          );
+          assert.strictEqual((yield* entryOf(release)).lastMessageAt, at(1_000));
+
+          const model = yield* readModel;
+          const events = yield* Queue.unbounded<KnownEvent>();
+          yield* model.subscribe.pipe(
+            Stream.filter(isKnown),
+            Stream.runForEach((event) => Queue.offer(events, event)),
+            Effect.forkScoped,
+          );
+          assert.strictEqual((yield* Queue.take(events)).type, "snapshot");
+          yield* sink.write({ events: [reply("m:new", "run:new", 3_000)] });
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("event:home-run-ended"),
+                type: "run.updated",
+                threadId: homeThread,
+                runId: RunId.make("run:new"),
+                occurredAt: DateTime.makeUnsafe(nowMs + 3_000),
+                payload: {
+                  id: RunId.make("run:new"),
+                  threadId: homeThread,
+                  ordinal: 1,
+                  providerInstanceId: ProviderInstanceId.make("codex-work"),
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make("codex-work"),
+                    model: "gpt-5.4",
+                  },
+                  providerThreadId: null,
+                  userMessageId: MessageId.make("message:run:new"),
+                  rootNodeId: null,
+                  activeAttemptId: null,
+                  status: "completed",
+                  requestedAt: DateTime.makeUnsafe(nowMs),
+                  startedAt: DateTime.makeUnsafe(nowMs),
+                  completedAt: DateTime.makeUnsafe(nowMs),
+                  checkpointId: null,
+                  contextHandoffId: null,
+                },
+              },
+            ],
+          });
+          const update = yield* Queue.take(events);
+          assert.strictEqual(update.type, "squire");
+          if (update.type !== "squire") return;
+          assert.strictEqual(update.entry.lastMessageAt, at(3_000));
+        }),
+      ),
+  );
+
+  it.effect("offers Always allow only where a row can still act on it", () => {
+    const offer = {
+      effect: "allow",
+      actionClass: "steer",
+      targetKind: "thread",
+      targetId: "thread:a",
+      text: "Always allow",
+      capReached: false,
+    } as const;
+    return withReadModel(
+      Effect.gen(function* () {
+        const repository = yield* repo;
+        const model = yield* readModel;
+        yield* seedSquires(squire(release));
+        const open = card();
+        const expired = card({ status: "outdated", resolution: "expired" });
+        const denied = card({ status: "dismissed", resolution: "denied" });
+        for (const row of [open, expired, denied]) yield* repository.insertCard(row);
+        const { items } = yield* model.itemsList({ squireId: release, scope: "all" });
+        const offerOf = (id: SquireCardId) =>
+          items.find((item) => item.id === id)?.allowRuleOffer?.text;
+        assert.strictEqual(offerOf(open.id), offer.text);
+        assert.strictEqual(offerOf(expired.id), offer.text);
+        assert.isUndefined(offerOf(denied.id));
+      }),
+      Layer.mock(SquireRules.SquireRules)({ offerFor: () => Effect.succeed(Option.some(offer)) }),
+    );
+  });
+
   it.effect("carries open rooms and rooms closed in the last week, not older ones", () =>
     withReadModel(
       Effect.gen(function* () {
@@ -370,11 +499,14 @@ describe("SquireReadModel", () => {
             (item) => item.kind !== "fyi" && item.status !== "held",
           );
           const releaseEntry = yield* entryOf(release);
-          assert.strictEqual(releaseEntry.openDecisionCount, decisions.length);
-          assert.strictEqual(releaseEntry.openDecisionCount, 3);
-          assert.strictEqual(releaseEntry.leadRaisedDecisionCount, 1);
-          // Holds are their own group in the view and never in the badge, but the view lists both.
-          assert.strictEqual(releaseEntry.held.length, 2);
+          assert.strictEqual(
+            releaseEntry.openDecisionCount,
+            decisions.filter((item) => item.squireId === release).length,
+          );
+          assert.strictEqual(releaseEntry.openDecisionCount, 2);
+          assert.notProperty(releaseEntry, "leadRaisedDecisionCount");
+          // An approval counts only where it renders; the Lead-raised hold sits in the Lead's chat.
+          assert.strictEqual(releaseEntry.held.length, 1);
 
           // The Lead's badge keeps only what the Lead raised, holds apart.
           const leadEntry = yield* entryOf(lead);
@@ -392,7 +524,6 @@ describe("SquireReadModel", () => {
           const after = yield* entryOf(release);
           assert.notStrictEqual(after.decisionRevision, before.decision);
           assert.strictEqual(after.openDecisionCount, 2);
-          assert.notProperty(after, "leadRaisedDecisionCount");
         }),
       ),
   );
@@ -673,16 +804,13 @@ describe("SquireReadModel", () => {
           ],
         );
 
-        // The Lead's badge counts only what the Lead raised. Release's view lists the
-        // Lead's overlap on its thread under "Needs a decision", so its badge counts it too and
-        // says so, letting a team total count it once.
+        // An approval counts only in the chat it renders in, the raiser's, so a team total
+        // needs no correction. The Lead's overlap still appears in Release's list.
         assert.strictEqual((yield* entryOf(lead)).openDecisionCount, 1);
-        assert.notProperty(yield* entryOf(lead), "leadRaisedDecisionCount");
         const releaseEntry = yield* entryOf(release);
-        assert.strictEqual(releaseEntry.openDecisionCount, 3);
-        assert.strictEqual(releaseEntry.leadRaisedDecisionCount, 1);
+        assert.strictEqual(releaseEntry.openDecisionCount, 2);
+        assert.notProperty(releaseEntry, "leadRaisedDecisionCount");
         assert.strictEqual(releaseEntry.countsByKind.overlap, 1);
-        assert.notProperty(yield* entryOf(billing), "leadRaisedDecisionCount");
 
         const missing = yield* model
           .itemsList({ squireId: SquireId.make("squire:gone"), scope: "open" })

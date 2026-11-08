@@ -253,9 +253,9 @@ const DEFINITIONS: Readonly<Record<string, SquireToolDefinition>> = {
   squire_notify: {
     name: "squire_notify",
     description:
-      "Push a message to the user when no card covers it, e.g. a thread waiting on them. Cards already push on their own.",
+      "Alert the user when no card covers it, e.g. a thread waiting on them: a push and a badge on your chat. Write what they need in your reply; this is only the headline. Cards already push on their own.",
     inputSchema: object(
-      { message: str("One or two sentences for the user."), threadId: threadIdProp },
+      { message: str("A short headline, a few words."), threadId: threadIdProp },
       ["message"],
     ),
   },
@@ -966,6 +966,7 @@ const make = Effect.gen(function* () {
             kinds: [plan.kind],
             statuses: ["open"],
           });
+    const origin = storedOrigin(ctx.run.origin);
     const columns = {
       title: plan.title,
       why: plan.why,
@@ -974,7 +975,11 @@ const make = Effect.gen(function* () {
         speakerVerified === undefined ? trigger : { ...trigger, speakerVerified },
       ),
       intent_json: plan.intent === null ? null : encodeSquireActionIntent(plan.intent),
-      origin: storedOrigin(ctx.run.origin),
+      origin,
+      expires_at:
+        plan.hold === null
+          ? SquireRepository.squireApprovalExpiresAt({ kind: plan.kind, origin }, ctx.now)
+          : null,
       steer_kind: plan.steerKind,
       rule_id: plan.ruleId,
       owner_squire_id: plan.owner ?? ctx.squire.id,
@@ -1096,6 +1101,31 @@ const make = Effect.gen(function* () {
     return { cardId, replacedCount, wakeLead };
   });
 
+  /** Whether the user denied this slot since they last wrote in this Squire's chat. */
+  const slotDenied = (ctx: Ctx, plan: CardPlan) =>
+    plan.kind === "fyi"
+      ? Effect.succeed(false)
+      : repository
+          .listCards({
+            squireId: ctx.squire.id,
+            kinds: [plan.kind],
+            statuses: ["dismissed"],
+            ...(plan.targetThreadId === null ? {} : { targetThreadId: plan.targetThreadId }),
+          })
+          .pipe(
+            Effect.map((cards) =>
+              cards.some(
+                (card) =>
+                  card.resolution === "denied" &&
+                  card.expires_at === null &&
+                  (plan.targetThreadId !== null ||
+                    (card.target_thread_id === null &&
+                      card.project_id === plan.projectId &&
+                      card.title === plan.title)),
+              ),
+            ),
+          );
+
   /**
    * One keyed transaction: `tool.called`, `decision.recorded`, then the card
    * and its rows. A duplicate committed meanwhile wins, and its result is returned.
@@ -1111,6 +1141,20 @@ const make = Effect.gen(function* () {
   ) {
     const written = yield* repository.transaction(
       Effect.gen(function* () {
+        if (yield* slotDenied(ctx, plan)) {
+          const result = refused(
+            "denied",
+            "The user denied this, so it was not raised. Do not raise it again until they write to you.",
+          );
+          yield* toolCalled(ctx, result, plan.targetThreadId);
+          yield* logRow(
+            ctx,
+            "decision.recorded",
+            { tool: ctx.tool, outcome: "refused", reason: "denied" },
+            { threadId: plan.targetThreadId },
+          );
+          return { result, wakeLead: null };
+        }
         // Admitted in the card's transaction, so per-sweep and per-day counts stay exact.
         let finding: Admitted | null = null;
         if (plan.finding !== undefined) {
