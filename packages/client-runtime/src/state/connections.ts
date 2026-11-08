@@ -17,6 +17,7 @@ import {
 import {
   createAtomCommandScheduler,
   createRuntimeCommand,
+  environmentSessionGenerationAtom,
   followStreamInEnvironment,
 } from "./runtime.ts";
 
@@ -139,6 +140,9 @@ export function createEnvironmentCatalogAtoms<R, E>(
     ),
   );
 
+  const sessionGenerationAtom = (environmentId: EnvironmentIdType) =>
+    environmentSessionGenerationAtom(runtime, environmentId);
+
   const register = createRuntimeCommand(runtime, {
     label: "environment-catalog:register",
     scheduler: commandScheduler,
@@ -218,6 +222,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
     networkStatusValueAtom,
     unlistedRelayEnvironmentIdsValueAtom,
     stateAtom,
+    sessionGenerationAtom,
     register,
     remove,
     removeRoute,

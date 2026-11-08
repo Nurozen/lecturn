@@ -1,5 +1,4 @@
 import { ProviderDriverKind } from "@lecturn/contracts";
-import { piClient } from "@lecturn/provider-pi/client";
 import { SCRIPTED_PROVIDER_EMBLEM } from "@lecturn/shared/providerEmblems";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -15,7 +14,9 @@ describe("providerDriverIcon", () => {
   });
 
   it("keeps package icons and leaves drivers without one to the caller's fallback", () => {
-    expect(providerDriverIcon(piClient.driverKind)).toBe(piClient.icon);
+    const pi = providerClients.get(ProviderDriverKind.make("pi"));
+    expect(pi?.icon).toBeDefined();
+    expect(providerDriverIcon(ProviderDriverKind.make("pi"))).toBe(pi?.icon);
     expect(providerDriverIcon(ProviderDriverKind.make("codex"))).toBeUndefined();
     expect(providerDriverIcon(undefined)).toBeUndefined();
   });

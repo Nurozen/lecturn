@@ -10,6 +10,8 @@ import * as RootStackReset from "../../lib/root-stack-reset";
 import * as AdaptiveWorkspaceContextModule from "./adaptive-workspace-context";
 import type * as AdaptiveWorkspaceLayoutModule from "./AdaptiveWorkspaceLayout";
 import * as DeferredNavigation from "./deferred-navigation";
+import * as FloatingWorkspaceTabsModule from "../workspace/floating-workspace-tabs";
+import * as WorkspacePresentationContext from "./workspace-presentation-context";
 import * as WorkspaceOverlayRoutes from "./workspace-overlay-routes";
 
 // The inspector loop only exists in compiled code: the React Compiler decides which closures and
@@ -34,6 +36,8 @@ const preferences = { value: { threadListFilters: undefined } };
 // Stable like the real atom's value, so it never changes the context value's identity.
 const noProjects: readonly never[] = [];
 const noInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+const enabledTabs = ["threads", "settings"] as const;
+const controlSizing = { scale: 1, fabSize: 56 };
 
 function Passthrough(props: { readonly children?: React.ReactNode }) {
   return <>{props.children}</>;
@@ -63,6 +67,13 @@ const stubModules: Record<string, unknown> = {
   "../../lib/layout": Layout,
   "./adaptive-workspace-context": AdaptiveWorkspaceContextModule,
   "./deferred-navigation": DeferredNavigation,
+  "./workspace-presentation-context": WorkspacePresentationContext,
+  "../settings/appearance/AppearancePreferencesProvider": { useAndroidFloatingTabs: () => false },
+  "../../state/use-selected-thread-worktree": { useThreadCwd: () => null },
+  "../../components/ui/useAndroidControlSizing": { useAndroidControlSizing: () => controlSizing },
+  "../workspace/navigation-tabs": { useEnabledNavigationTabs: () => enabledTabs },
+  "../workspace/floating-workspace-tabs": FloatingWorkspaceTabsModule,
+  "../settings/SettingsWorkspaceLayout": { SettingsWorkspaceLayout: Passthrough },
   "../../lib/uuid": { uuidv4: () => "uuid" },
   "../../state/atom-registry": { appAtomRegistry: { get: () => [] } },
   "../../state/entities": { useProjects: () => noProjects },
@@ -124,6 +135,7 @@ const stubModules: Record<string, unknown> = {
   "../workspace/AndroidWorkspaceSidebar": { AndroidWorkspaceSidebar: Passthrough },
   "../workspace/AndroidWorkspaceNavigation": {
     AndroidWorkspaceNavigation: () => null,
+    FloatingWorkspaceTabs: () => null,
     ANDROID_WORKSPACE_RAIL_WIDTH: 72,
   },
   "../workspace/workspace-detail-selection": {
@@ -174,7 +186,10 @@ const stubModules: Record<string, unknown> = {
     currentWorkspaceSelections: () => ({}),
     workspaceSelectionCheck: { thread: () => false, pullRequest: () => false },
   },
-  "../workspace/workspace-tab-navigation": { workspaceTabNavigationState },
+  "../workspace/workspace-tab-navigation": {
+    workspaceTabNavigationState,
+    workspaceTabColumns: () => false,
+  },
   "./workspace-overlay-routes": WorkspaceOverlayRoutes,
   "../../native/AndroidHingeObserver": { AndroidHingeObserver: () => null },
   "../../native/window-hinge-context": { WindowHingeContext: React.createContext(null) },
@@ -220,7 +235,12 @@ let root: Root;
 async function renderWorkspace(children: React.ReactNode) {
   await React.act(() =>
     root.render(
-      <layout.AdaptiveWorkspaceLayout pathname="/" workspaceRouteKey={undefined}>
+      <layout.AdaptiveWorkspaceLayout
+        pathname="/"
+        workspaceRouteKey={undefined}
+        workspaceRouteName={undefined}
+        workspaceRouteKeys={[]}
+      >
         {children}
       </layout.AdaptiveWorkspaceLayout>,
     ),

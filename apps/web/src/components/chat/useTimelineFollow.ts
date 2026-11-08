@@ -357,6 +357,16 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     });
   };
   const scrollToEndStable = useStableCallback(scrollToEnd);
+  // The list does not follow footer layout, so the resting composer cannot scroll it. Growth
+  // above the composer (a new notice) would cover the last rows instead.
+  const followedInsetRef = useRef(composerTimelineInset);
+  // oxlint-disable-next-line lecturn/react-effect-budget -- scrolls the list after its bottom inset grows
+  useLayoutEffect(() => {
+    const grew = composerTimelineInset > followedInsetRef.current;
+    followedInsetRef.current = composerTimelineInset;
+    if (grew && readCurrentFollow().mode === "following") scrollToEndStable();
+  }, [composerTimelineInset, readCurrentFollow, scrollToEndStable]);
+  // Lecturn: a docked drawer that grows re-pins even when the composer shrinks under it.
   useFollowEndWhenDrawerDocks({
     readOverlay: followStore.readComposerOverlay,
     inset: composerTimelineInset,
@@ -509,6 +519,12 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     composerRef.current?.restoreAfterTimelineReachedEnd();
   };
   const onToolOutputCollapsedAtEndStable = useStableCallback(onToolOutputCollapsedAtEnd);
+  // The list ignores footer layout, so a new queued turn or status line there would land
+  // under the composer. Follow it when the reader was following the end.
+  const onTimelineFooterGrow = () => {
+    if (readFollow().mode === "following") scrollToEndStable();
+  };
+  const onTimelineFooterGrowStable = useStableCallback(onTimelineFooterGrow);
 
   const onIsAtEndChange = (isAtEnd: boolean) => {
     const scroll = visitScroll();
@@ -586,6 +602,7 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     onTimelineAnchorReadyStable,
     onTimelineAnchorSizeChangedStable,
     onToolOutputCollapsedAtEndStable,
+    onTimelineFooterGrowStable,
     onIsAtEndChangeStable,
     anchorNewTurn,
     attachTimelineViewport,

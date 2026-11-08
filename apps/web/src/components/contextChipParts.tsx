@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { useAssetUrlState } from "~/assets/assetUrls";
-import { documentIconColorForFileName } from "~/pierre-icons";
+import { useClientSettings } from "~/hooks/useSettings";
+import { documentChipKindForFileName } from "~/pierre-icons";
 
 import { PULL_REQUEST_STATE_PRESENTATION } from "~/components/pullRequest/pullRequestIcons";
 import type { PullRequestContextDisplayState } from "~/lib/composerContextRecords";
@@ -182,9 +183,11 @@ export function ImageChipButton({
   disabled?: boolean | undefined;
   onPreviewError?: (() => void) | undefined;
 }) {
+  // The Lecturn look tints the chip with the image's average color; the new design uses its palette.
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const [sample, setSample] = useState<{ url: string; color: string | undefined }>();
   const [corsFailedUrl, setCorsFailedUrl] = useState<string>();
-  const accent = sample?.url === previewUrl ? sample?.color : undefined;
+  const accent = !redesign && sample?.url === previewUrl ? sample?.color : undefined;
   return (
     <ContextChip
       kind="image"
@@ -194,20 +197,30 @@ export function ImageChipButton({
       {...props}
     >
       {previewUrl ? (
-        <img
-          key={previewUrl}
-          crossOrigin={corsFailedUrl === previewUrl ? undefined : "anonymous"}
-          src={previewUrl}
-          alt=""
-          className="size-[1.17em] shrink-0 rounded-sm object-cover"
-          onError={() => {
-            if (corsFailedUrl === previewUrl) onPreviewError?.();
-            else setCorsFailedUrl(previewUrl);
-          }}
-          onLoad={(event) =>
-            setSample({ url: previewUrl, color: averageImageColor(event.currentTarget) })
-          }
-        />
+        redesign ? (
+          <img
+            key={previewUrl}
+            src={previewUrl}
+            alt=""
+            className="size-[1em] shrink-0 self-center rounded-sm object-cover"
+            onError={onPreviewError}
+          />
+        ) : (
+          <img
+            key={previewUrl}
+            crossOrigin={corsFailedUrl === previewUrl ? undefined : "anonymous"}
+            src={previewUrl}
+            alt=""
+            className="size-[1.17em] shrink-0 rounded-sm object-cover"
+            onError={() => {
+              if (corsFailedUrl === previewUrl) onPreviewError?.();
+              else setCorsFailedUrl(previewUrl);
+            }}
+            onLoad={(event) =>
+              setSample({ url: previewUrl, color: averageImageColor(event.currentTarget) })
+            }
+          />
+        )
       ) : (
         <ImageIcon />
       )}
@@ -243,15 +256,13 @@ export function FileChip(props: {
 }) {
   if (props.svgPreview && !props.unresolved) return <SvgFileChip {...props} />;
   const content = <FileChipContent {...props} />;
-  const accent = props.isVideo ? undefined : documentIconColorForFileName(props.name);
   const state = props.unresolved
     ? ("unresolved" as const)
     : props.error
       ? ("invalid" as const)
       : null;
   const attributes = {
-    kind: props.isVideo ? "video" : "file",
-    style: accent ? ({ "--context-chip-accent": accent } as CSSProperties) : undefined,
+    kind: props.isVideo ? "video" : (documentChipKindForFileName(props.name) ?? "file"),
     ...(state ? { state } : {}),
     "aria-label": [props.accessibleLabel, props.suffix].filter(Boolean).join(", "),
     "data-markdown-copy": props.copyMarkdown,
@@ -348,10 +359,13 @@ function FileChipContent(props: {
   isVideo: boolean;
   theme: "light" | "dark";
   suffix?: string | null;
+  unresolved?: boolean;
 }) {
   return (
     <>
-      {props.isVideo ? (
+      {props.unresolved ? (
+        <CircleDashedIcon />
+      ) : props.isVideo ? (
         <FilmIcon />
       ) : (
         <PierreEntryIcon pathValue={props.name} kind="file" theme={props.theme} />

@@ -366,6 +366,12 @@ jobs:
       - name: Test
         run: vp run --filter @lecturn/web test
 
+      # Browser tests run source modules; this boots the production chunk graph.
+      - name: Boot the built web client
+        run: |
+          vp run --filter @lecturn/web build
+          node apps/web/scripts/verify-built-boot.ts
+
   test_server:
     name: Release server tests ${{ matrix.shard }}
     needs: [preflight]

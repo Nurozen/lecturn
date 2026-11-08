@@ -120,7 +120,7 @@ function AudioChip(props: AudioPreviewProps) {
         style={{ width: `${duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0}%` }}
       />
       <ContextChipAction
-        className="ml-0 [&_svg]:size-[1.17em]"
+        className="ml-0 [&_svg]:size-[1.17em] redesign:[&_svg]:size-[1em]"
         aria-label={`${props.failed ? "Audio unavailable. " : ""}${action} ${props.name}`}
         disabled={loading}
         onClick={() => {
@@ -154,7 +154,7 @@ function AudioChip(props: AudioPreviewProps) {
           middleTruncateAttachmentName(props.name)
         )}
       </ContextChipLabel>
-      <span className="shrink-0 text-3xs text-current">
+      <span className="shrink-0 text-3xs text-current redesign:self-baseline">
         {props.failed
           ? "Unavailable"
           : loading

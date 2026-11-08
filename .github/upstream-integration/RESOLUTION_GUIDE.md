@@ -716,12 +716,11 @@ from upstream's side.
   (LegendList keeps stale row closures); no render-time ref writes.
   A `useEffectEvent` result never reaches a dependency (a `useFocusEffect`
   callback, a memoized gesture or value): React returns a new function every
-  render. `AdaptiveWorkspaceLayout` keeps ref-based inspector registration and
-  upstream's memoized pane derivations (325a7e2ae4, #21867); without both,
-  every screen with an inspector pane loops on "Maximum update depth". The
-  fork keeps queue reordering (upstream later deletes `QueueDragHandle`); its
-  gesture comes from a builder held in `useState` (upstream's
-  `SettingsDragHandle` pattern), rebuilt only when `disabled` changes.
+  render. `AdaptiveWorkspaceLayout` takes upstream's `useFocusEffect` inspector
+  registration (#25817) with its memoized pane derivations; the fork's compiled
+  loop tests in `AdaptiveWorkspaceLayout.test.tsx` guard the "Maximum update
+  depth" regression. Queue reordering follows upstream #25846 (removed for the
+  Send now row, web and mobile); the fork's only delta was a compiler fix.
 - **Mobile Git sheets.** Fork sections (Space repositories, Selected
   repository, project PRs with Watch, read-only) use upstream
   `ListSection`/`ListRow`; `SheetListRow`/`MetaCard`/`SheetGroupCard` are retired.
@@ -1379,6 +1378,52 @@ from upstream's side.
 - **Deps.** A lock regenerated from the fork stage resolves new transitive deps fresh: align
   them to upstream's versions where the fork has no reason to differ (`@napi-rs/canvas`
   1.0.13), then verify with `--frozen-lockfile`.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 58084690).**
+
+- **#25778 "the new design is the only design" (D1).** Lecturn keeps `redesignEnabled`
+  (default false), `data-redesign` set by appInit `startClientAppearance`, every `redesign:`
+  branch and `[data-redesign]` block, and the classic look as default. Resolve by reversing
+  #25778's hunks on the merged file; later new-design edits (#25066 chips, #24205 labels,
+  #25818) stay on the redesign side. The classic chip keeps its pill (`px-[0.5em]`,
+  `rounded-[0.5em]`, `text-[0.86em]` stay in the `shadcn/no-arbitrary-values` allow-list) and
+  image chips keep the average-color accent. `getStandardPaintedThemeColors(appearance,
+  redesign)` keeps both looks with the Lecturn palette (no upstream `#ebebed`).
+- **Settings regroup (#25651).** The Beta page is `/settings/labs`; its Beta section holds the
+  new-design row with Lecturn's opt-in copy. Fork pages join `SETTINGS_NAV_GROUPS`: Squires
+  under Agents, Connected apps and Relay under Connections. Stave stays last in General;
+  Connect publishing rows stay on Relay.
+- **Composer notices (#25401).** Thread state moves to the timeline end; fork Apps, feedback,
+  clone, usage and branch notices stay attached above the composer, and Squire notices keep
+  `ComposerBanner placement="floating"`. Provider registry (incl. GitHub Copilot) lives in
+  client-runtime `providerClients.ts`; mobile keeps only `getProviderIcon`.
+- **MCP action tools (D4: #25423, #25790, #25785).** Action tools carry `lecturn_*` names
+  (`lecturn_queue`, `lecturn_pending_request`, `lecturn_thread_transfer`,
+  `lecturn_thread_configure`); `lecturn_apps_list` stays its own tool inside `layerTools`; html
+  render, delegate/launch fork fields and Squire tools are unchanged. `agentContextBudget.json`
+  holds the fork measurement; raise it only with the `agent-context-increase` label.
+- **Queue reordering (#25846, D6).** Taken as upstream: no drag reordering, a Send now row.
+- **Sweep misses.** model-manifest `t3CodeRange` becomes `lecturnRange`; effect-acp
+  `_t3_unknown` becomes `_lecturn_unknown`; `EXPO_PUBLIC_T3_FLOATING_TABS` becomes
+  `EXPO_PUBLIC_LECTURN_FLOATING_TABS`; prompt-link tests keep owner `pingdotgg`.
+- **Evals (#24635).** Cases use fork tool names (`lecturn_*`), `lecturn-thread://` links and
+  `lecturn/` branches (map new cases per JSON line, URLs verbatim). `run.ts` advertises
+  `mcp__lecturn__*` tools; captured template names (`mcp__t3-code__*`, `<t3_code_runtime>`)
+  stay as captured until the templates are recaptured from Lecturn.
+- **Server.** Wakeup `application-active-reconnect` stays fork-only (embed token rotation:
+  reset at once, no resubscribe); upstream's long resume is `application-active-long`.
+  Alchemy 2.0.0-beta.84 moved providers to `@alchemy.run/{cloudflare,axiom,drizzle}`.
+- **Mobile root navigation (#25769) and flows.** Notification ownership gating, Live Activity
+  links and Squire home-thread suppression live in `installAgentNotificationNavigation`;
+  Connect onboarding's signed-in check in `connectOnboarding.ts`; launcher recents filter in
+  `appShortcutsRuntime.ts`. New-task fork rules (#25812) live in the provider and
+  `resolveNewTaskDraftWorkspace`/`useNewTaskProjectDefaults`; the remembered last project
+  (#24741) must be listed. The showcase service (#25816, #25857) keeps a per-scene render-signal
+  Map and consumes the scene request on readiness.
+- **Release CI.** #25928's desktop launch check is not wired until
+  `scripts/fixtures/desktop-launch` holds a Lecturn-ledger DB (upstream's fails the fork
+  migrator at `70_OrchestrationV2`); #25929's web boot check runs in `ci.yml` and `release.yml`.
+  OTA source maps upload with the optional secret `MOBILE_SOURCEMAPS_R2`.
 
 ## Recurring mechanical conflicts
 

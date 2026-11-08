@@ -27,7 +27,9 @@ import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog
 import { normalizeSecureRelayUrl } from "@lecturn/shared/relayUrl";
 import { fromJsonStringPretty } from "@lecturn/shared/schemaJson";
 import { fromYaml } from "@lecturn/shared/schemaYaml";
+import { injectLinuxArm64Sea } from "../../../scripts/lib/linux-arm64-sea.ts";
 import rootPackageJson from "../../../package.json" with { type: "json" };
+import * as HostProcess from "@lecturn/shared/HostProcess";
 import { resolveSpawnCommand } from "@lecturn/shared/shell";
 import { STAVE_PLATFORM_KEYS } from "@lecturn/shared/stave";
 import serverPackageJson from "../package.json" with { type: "json" };
@@ -234,17 +236,20 @@ const buildExeCmd = Command.make(
       const serverDir = path.join(repoRoot, "apps/server");
 
       yield* Effect.log("[cli] Building single-executable...");
+      const target = Option.getOrUndefined(config.target);
+      // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
+      const linuxArm64 =
+        !target &&
+        (yield* HostProcess.Platform) === "linux" &&
+        (yield* HostProcess.Architecture) === "arm64";
       const spawnCommand = yield* resolveSpawnCommand("vp", ["pack"]);
       yield* runCommand(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           cwd: serverDir,
           env: {
             ...process.env,
-            LECTURN_PACK_EXE: "1",
-            ...Option.match(config.target, {
-              onNone: () => ({}),
-              onSome: (target) => ({ LECTURN_PACK_EXE_TARGET: target }),
-            }),
+            LECTURN_PACK_EXE: linuxArm64 ? "bundle" : "1",
+            LECTURN_PACK_EXE_TARGET: target ?? "",
           },
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
@@ -258,13 +263,22 @@ const buildExeCmd = Command.make(
       if (specifiers.length > 0) {
         return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
       }
+      // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
+      if (linuxArm64) {
+        yield* injectLinuxArm64Sea({
+          bundlePath,
+          outputPath: path.join(serverDir, "dist-exe/lecturn"),
+          nodeVersion: rootPackageJson.engines.node,
+          verbose: config.verbose,
+        });
+      }
       yield* Effect.log(
         "[cli] Built dist-exe/lecturn (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
       );
     }),
 ).pipe(
   Command.withDescription(
-    `Build the server as a Node single-executable. Native builds require Node ${rootPackageJson.engines.node}; explicit cross-target builds need a Node 25.7+ host for --build-sea. The binary still resolves native packages from a node_modules tree beside it.`,
+    `Build the server as a Node single-executable. Native builds require Node ${rootPackageJson.engines.node}; explicit cross-target builds need a Node 25.7+ host for --build-sea. Linux ARM64 builds only on a Linux ARM64 host. The binary still resolves native packages from a node_modules tree beside it.`,
   ),
 );
 

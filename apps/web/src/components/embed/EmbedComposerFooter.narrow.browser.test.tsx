@@ -225,6 +225,8 @@ function EmbedComposer({ labels }: { labels: Labels }) {
 
 interface Labels {
   readonly model: string;
+  /** The trigger shows the model's short name (Codex drops the GPT family prefix). */
+  readonly shown: string;
   readonly effort: string;
   readonly access: string;
 }
@@ -243,8 +245,8 @@ async function renderAt(paneWidth: number, labels: Labels) {
 
 // Typical labels, and the longest RocketWright's pane showed: neither may wrap the footer
 // past two rows.
-const TYPICAL = { model: "Opus 5", effort: "High", access: "Supervised" };
-const LONGEST = { model: "GPT-6-Astra", effort: "Medium", access: "Full access" };
+const TYPICAL = { model: "Opus 5", shown: "Opus 5", effort: "High", access: "Supervised" };
+const LONGEST = { model: "GPT-6-Astra", shown: "6 Astra", effort: "Medium", access: "Full access" };
 
 const visibleText = (row: Element) =>
   Array.from(row.querySelectorAll<HTMLElement>("button")).map((button) =>
@@ -289,10 +291,11 @@ describe("EmbedComposerFooter in a narrow pane", () => {
       controlsRow.getBoundingClientRect().bottom,
     );
     const [model, effort, access] = visibleText(controlsRow);
-    expect(model).toBe(labels.model);
+    expect(model).toBe(labels.shown);
     expect(effort).toBe(labels.effort);
-    // Access gives way to its icon first; typical labels all fit at RocketWright's width.
-    expect(access).toBe(width === 352 && labels === TYPICAL ? labels.access : "");
+    // Access gives way to its icon first; with short model names every label fits at
+    // RocketWright's width.
+    expect(access).toBe(width === 352 ? labels.access : "");
     expect(visibleText(contextualRow)).toEqual(["Contextual · Off"]);
   });
 

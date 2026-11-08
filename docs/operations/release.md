@@ -41,7 +41,7 @@ This document covers the unified release workflow for stable and nightly desktop
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
 - Builds a self-contained CLI archive (`lecturn-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) for three targets, macOS arm64, Linux x64, and Windows x64, and attaches them to the GitHub Release with a `SHA256SUMS` file. Linux comes from `build_linux_cli`; macOS arm64 and Windows x64 are built in the same job as that target's desktop artifact. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS. The x64 desktop app is Electron and unaffected.
   - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`) plus the web client, resource monitor, native externals, and the platform's Stave binary at `stave/<platform>-<arch>/`, so unpacking it needs neither Node, npm, nor a compiler. The install scripts (`scripts/install.sh`, `scripts/install.ps1`) and desktop SSH environments on macOS arm64 and Linux x64 remotes download this archive and verify it against `SHA256SUMS`; other SSH remotes run `npx lecturn@<version>`, and the install scripts point other platforms at `npx lecturn`. The desktop WSL backend embeds the Linux archive. The boot service and `lecturn update` also install from these archives but stay disabled until `RuntimeReleaseArchivesPublished` (`apps/server/src/cloud/pinnedRuntime.ts`) is enabled for published Lecturn archives; until then they fail with an explicit unavailable error.
-  - The root `package.json` pins `engines.node` to the exact Node version used by development, CI and standalone executables. Keep it exact: cross-target builds download that version, and native executable builds reject a different host Node version. Runtime changes need a new Lecturn release version because installed runtimes are cached by that version.
+  - The root `package.json` pins `engines.node` to the exact Node version used by development, CI and standalone executables. Keep it exact: cross-target builds download that version, and native executable builds reject a different host Node version. TEMPORARY: Linux arm64 executables build only on a Linux arm64 host and are injected with postject, because Node's `--build-sea` output cannot load on 16 or 64 KiB page kernels. Revert when [nodejs/node#67048](https://github.com/nodejs/node/issues/67048) is fixed. Runtime changes need a new Lecturn release version because installed runtimes are cached by that version.
   - macOS archives are signed with the Developer ID certificate (`CSC_LINK`) and notarized when the Apple API secrets are present, and signed ad hoc otherwise. Windows executables use the installer's Azure Trusted Signing setup when its secrets are present and stay unsigned otherwise.
   - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
 - Publishes the CLI package (`apps/server`, npm package `lecturn`) with OIDC trusted publishing from the same workflow file:
@@ -111,9 +111,7 @@ Required `production` environment secrets:
 
 After changing a variable or secret, run the **Deploy Lecturn Connect relay** workflow manually from
 `main` with **force** unchecked. Alchemy compares the values the Worker reads and redeploys it when
-one changed. Check **force** only to redeploy resources with no detected change: a forced run also
-replaces the Postgres runtime role and its password
-([alchemy-run/alchemy#1832](https://github.com/alchemy-run/alchemy/issues/1832)).
+one changed. Check **force** only to redeploy resources with no detected change.
 
 The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
 are not bound into the relay Worker. The production deployment uses an Axiom personal access token,

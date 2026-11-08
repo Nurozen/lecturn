@@ -33,13 +33,16 @@ const variantColors: Record<ComposerBannerVariant, string> = {
     "[--chat-composer-attached-outline:color-mix(in_srgb,var(--warning)_28%,transparent)] [--chat-composer-attached-tint:color-mix(in_srgb,var(--warning)_8%,transparent)]",
 };
 
+// Lecturn: Squire notices stand alone as floating cards rather than joining the composer.
+type ComposerBannerPlacement = "attached" | "floating";
+
 function Surface({
   placement = "attached",
   variant = "default",
   className,
   ...props
 }: ComponentProps<"div"> & {
-  placement?: "attached" | "floating";
+  placement?: ComposerBannerPlacement;
   variant?: ComposerBannerVariant;
 }) {
   return (
@@ -59,38 +62,6 @@ function Surface({
         "before:shadow-composer dark:before:shadow-composer-dark",
         "dark:supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-composer-seam-above",
         "not-supports-[((backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px)))]:before:bg-(--chat-composer-attached-surface)",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-const peekBorder: Record<ComposerBannerVariant, string> = {
-  default: "border-(--chat-composer-attached-outline)",
-  error: "border-destructive/24",
-  info: "border-(--chat-composer-attached-outline)",
-  success: "border-(--chat-composer-attached-outline)",
-  warning: "border-warning/24",
-};
-
-function Peek({
-  className,
-  variant = "default",
-  ...props
-}: ComponentProps<"button"> & { variant?: ComposerBannerVariant }) {
-  return (
-    <button
-      type="button"
-      data-slot="composer-banner-peek"
-      className={cn(
-        surfaceColors,
-        neutralOutline,
-        "absolute inset-x-0 bottom-0 z-0 mx-auto h-3 w-[96%] cursor-pointer rounded-t-2xl border border-b-0 shadow-md redesign:shadow-none",
-        "bg-(--chat-composer-attached-surface)/(--glass-opacity) backdrop-blur-(--glass-blur) backdrop-saturate-(--glass-saturation)",
-        "not-supports-[((backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px)))]:bg-(--chat-composer-attached-surface)",
-        "transition-opacity duration-150 ease-out focus-visible:outline-2 focus-visible:outline-ring",
-        peekBorder[variant],
         className,
       )}
       {...props}
@@ -147,7 +118,7 @@ function Root({
   ...props
 }: ComponentProps<"div"> & {
   density?: "default" | "comfortable" | "spacious";
-  placement?: "attached" | "floating";
+  placement?: ComposerBannerPlacement;
   variant?: ComposerBannerVariant;
   width?: "fill" | "content";
 }) {
@@ -193,7 +164,7 @@ function Row({
     className: cn(
       "group/banner-row grid min-h-(--composer-banner-icon-column) w-full min-w-0 grid-cols-[var(--composer-banner-icon-column)_minmax(0,1fr)_auto] items-center gap-x-1 text-start",
       "not-has-[>[data-slot=composer-banner-actions]]:grid-cols-[var(--composer-banner-icon-column)_minmax(0,1fr)]",
-      "[&:is(button)]:cursor-pointer [&:is(button)]:rounded-md [&:is(button)]:focus-visible:outline-2 [&:is(button)]:focus-visible:-outline-offset-2 [&:is(button)]:focus-visible:outline-ring",
+      "[&:is(button)]:cursor-pointer [&:is(button)]:rounded-xl [&:is(button)]:hover:bg-foreground/5 [&:is(button)]:focus-visible:outline-2 [&:is(button)]:focus-visible:-outline-offset-2 [&:is(button)]:focus-visible:outline-ring",
       layout === "wrap-actions" &&
         "flex flex-wrap *:data-[slot=composer-banner-content]:max-w-[calc(100%-var(--composer-banner-icon-column)-var(--spacing))] *:data-[slot=composer-banner-content]:grow",
       layout === "approval" && "items-start gap-x-2 gap-y-3",
@@ -346,7 +317,6 @@ function Dismiss({ className, children, ...props }: ComponentProps<typeof Button
 
 export const ComposerBanner = {
   Surface,
-  Peek,
   Attachment,
   Dock,
   Column,

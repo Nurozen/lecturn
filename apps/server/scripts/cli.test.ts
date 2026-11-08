@@ -146,6 +146,7 @@ it("declares only runtime externals in a pack manifest, so a clean install never
     "node-pty",
     "playwright-core",
     "undici",
+    "zod",
   ]);
   assert.isFalse(
     Object.values(packed.dependencies).some(

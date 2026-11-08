@@ -1009,7 +1009,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     index={index}
                     slug={model.slug}
                     name={model.name}
-                    shortName={model.shortName}
                     subProvider={model.subProvider}
                     instanceId={model.instanceId}
                     driverKind={model.driverKind}
@@ -1025,8 +1024,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     }
                     showSelection={selectedModelKeys !== undefined || redesign}
                     showProvider={rowsMixProviders || Boolean(model.subProvider)}
-                    preferShortName={!isLocked}
-                    useTriggerLabel={false}
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}

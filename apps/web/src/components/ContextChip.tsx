@@ -5,35 +5,65 @@ import type * as React from "react";
 
 import { cn } from "~/lib/utils";
 
+// The Lecturn look is the bordered pill. Beta "New design" (data-redesign) gets the inline
+// chip without a pill through the redesign: classes, colored from the theme's chip palette.
 const contextChipVariants = cva(
-  "inline-flex h-[1.41em] max-w-full items-center gap-[0.33em] rounded-[0.5em] border px-[0.5em] align-middle font-medium text-[0.86em] leading-none [&_svg]:block [&_svg]:size-[1.17em] [&_svg]:shrink-0 [&_svg]:self-center [button&,a&,[data-popup-open]&]:cursor-pointer [button&,a&]:transition-colors [button&,a&]:motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground disabled:cursor-default",
+  "inline-flex h-[1.41em] max-w-full items-center gap-[0.33em] rounded-[0.5em] border px-[0.5em] align-middle font-medium [:root:not([data-redesign])_&]:text-[0.86em] leading-none [&_svg]:block [&_svg]:size-[1.17em] [&_svg]:shrink-0 [&_svg]:self-center [button&,a&,[data-popup-open]&]:cursor-pointer [button&,a&]:transition-colors [button&,a&]:motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground disabled:cursor-default redesign:h-auto redesign:gap-[0.2em] redesign:rounded-sm redesign:border-0 redesign:bg-transparent! redesign:px-0 redesign:align-baseline redesign:leading-[normal] redesign:text-(--context-chip-ink) redesign:[--context-chip-ink:var(--context-chip-accent)] redesign:[--document-icon-stroke:var(--context-chip-ink)] redesign:[&_svg]:size-[1em] redesign:focus-visible:outline-current",
   {
     defaultVariants: { kind: "neutral" },
     variants: {
       kind: {
-        neutral: "border-border/70 bg-accent/40 text-foreground",
-        image: "[--context-chip-accent:oklch(0.62_0.16_16)]",
-        video: "[--context-chip-accent:oklch(0.62_0.16_48)]",
-        file: "[--context-chip-accent:oklch(0.62_0.136_237)]",
-        mention: "[--context-chip-accent:oklch(0.62_0.11_215)]",
-        terminal: "[--context-chip-accent:oklch(0.62_0.134_163)]",
-        element: "[--context-chip-accent:oklch(0.62_0.134_70)]",
-        "preview-annotation": "[--context-chip-accent:oklch(0.62_0.134_70)]",
-        "review-comment": "[--context-chip-accent:oklch(0.62_0.16_292)]",
-        "pull-request": "[--context-chip-accent:oklch(0.62_0.16_277)]",
-        "pr-open": "[--context-chip-accent:oklch(0.62_0.134_163)]",
-        "pr-draft": "[--context-chip-accent:oklch(0.62_0.02_259)]",
-        "pr-merged": "[--context-chip-accent:oklch(0.62_0.16_292)]",
-        "pr-closed": "[--context-chip-accent:oklch(0.62_0.16_16)]",
-        skill: "[--context-chip-accent:oklch(0.62_0.16_322)]",
-        thread: "[--context-chip-accent:oklch(0.62_0.12_190)]",
-        citation: "[--context-chip-accent:oklch(0.62_0.16_259)]",
+        neutral:
+          "border-border/70 bg-accent/40 text-foreground redesign:[--context-chip-accent:currentColor]",
+        image:
+          "[--context-chip-accent:oklch(0.62_0.16_16)] redesign:[--context-chip-accent:var(--context-chip-image)]",
+        video:
+          "[--context-chip-accent:oklch(0.62_0.16_48)] redesign:[--context-chip-accent:var(--context-chip-video)]",
+        file: "[--context-chip-accent:oklch(0.62_0.136_237)] redesign:[--context-chip-accent:var(--context-chip-file)]",
+        mention:
+          "[--context-chip-accent:oklch(0.62_0.11_215)] redesign:[--context-chip-accent:var(--context-chip-mention)]",
+        terminal:
+          "[--context-chip-accent:oklch(0.62_0.134_163)] redesign:[--context-chip-accent:var(--context-chip-terminal)]",
+        element:
+          "[--context-chip-accent:oklch(0.62_0.134_70)] redesign:[--context-chip-accent:var(--context-chip-element)]",
+        "preview-annotation":
+          "[--context-chip-accent:oklch(0.62_0.134_70)] redesign:[--context-chip-accent:var(--context-chip-preview-annotation)]",
+        "review-comment":
+          "[--context-chip-accent:oklch(0.62_0.16_292)] redesign:[--context-chip-accent:var(--context-chip-review-comment)]",
+        "pull-request":
+          "[--context-chip-accent:oklch(0.62_0.16_277)] redesign:[--context-chip-accent:var(--context-chip-pull-request)]",
+        "pr-open":
+          "[--context-chip-accent:oklch(0.62_0.134_163)] redesign:[--context-chip-accent:var(--context-chip-pr-open)]",
+        "pr-draft":
+          "[--context-chip-accent:oklch(0.62_0.02_259)] redesign:[--context-chip-accent:var(--context-chip-pr-draft)]",
+        "pr-merged":
+          "[--context-chip-accent:oklch(0.62_0.16_292)] redesign:[--context-chip-accent:var(--context-chip-pr-merged)]",
+        "pr-closed":
+          "[--context-chip-accent:oklch(0.62_0.16_16)] redesign:[--context-chip-accent:var(--context-chip-pr-closed)]",
+        skill:
+          "[--context-chip-accent:oklch(0.62_0.16_322)] redesign:[--context-chip-accent:var(--context-chip-skill)]",
+        thread:
+          "[--context-chip-accent:oklch(0.62_0.12_190)] redesign:[--context-chip-accent:var(--context-chip-thread)]",
+        citation:
+          "[--context-chip-accent:oklch(0.62_0.16_259)] redesign:[--context-chip-accent:var(--context-chip-citation)]",
+        "doc-pdf":
+          "[--context-chip-accent:light-dark(#d52c36,#ff6762)] redesign:[--context-chip-accent:var(--context-chip-doc-pdf)]",
+        "doc-word":
+          "[--context-chip-accent:light-dark(#1a85d4,#69b1ff)] redesign:[--context-chip-accent:var(--context-chip-doc-word)]",
+        "doc-spreadsheet":
+          "[--context-chip-accent:light-dark(#199f43,#5ecc71)] redesign:[--context-chip-accent:var(--context-chip-doc-spreadsheet)]",
+        "doc-slides":
+          "[--context-chip-accent:light-dark(#d47628,#ffa359)] redesign:[--context-chip-accent:var(--context-chip-doc-slides)]",
+        "doc-epub":
+          "[--context-chip-accent:light-dark(#693acf,#9d6afb)] redesign:[--context-chip-accent:var(--context-chip-doc-epub)]",
         // The app's own accent: the host's primary inside an embed.
         "app-ref": "[--context-chip-accent:var(--primary)]",
       },
       state: {
-        unresolved: "border-dashed",
-        invalid: "",
+        unresolved:
+          "border-dashed redesign:data-[state=unresolved]:[--context-chip-accent:currentColor]",
+        invalid:
+          "redesign:data-[state=invalid]:[--context-chip-accent:var(--context-chip-invalid,var(--destructive-foreground))]",
       },
     },
     compoundVariants: [
@@ -55,6 +85,11 @@ const contextChipVariants = cva(
           "skill",
           "thread",
           "citation",
+          "doc-pdf",
+          "doc-word",
+          "doc-spreadsheet",
+          "doc-slides",
+          "doc-epub",
           "app-ref",
         ],
         className:
@@ -94,7 +129,10 @@ function ContextChip({ className, kind, state, render, ...props }: ContextChipPr
 function ContextChipLabel({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
-      className={cn("block min-w-0 self-center truncate leading-tight", className)}
+      className={cn(
+        "block min-w-0 self-baseline overflow-x-clip text-ellipsis whitespace-nowrap underline decoration-transparent decoration-1 underline-offset-[0.2em] transition-colors motion-reduce:transition-none [:is(button:enabled,a):hover>&]:decoration-current",
+        className,
+      )}
       data-slot="context-chip-label"
       {...props}
     />
@@ -104,7 +142,7 @@ function ContextChipLabel({ className, ...props }: React.ComponentProps<"span">)
 function ContextChipAction({ className, render, ...props }: useRender.ComponentProps<"button">) {
   const defaultProps = {
     className: cn(
-      "ml-[0.17em] inline-flex size-[1.17em] shrink-0 cursor-pointer items-center justify-center rounded-sm text-current transition-colors hover:bg-(--context-chip-accent,var(--color-foreground))/17 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-[0.85em]",
+      "ml-[0.17em] inline-flex size-[1.17em] shrink-0 cursor-pointer items-center justify-center rounded-sm text-current transition-colors hover:bg-(--context-chip-accent,var(--color-foreground))/17 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none redesign:size-[1em] [&_svg]:size-[0.85em]",
       className,
     ),
     "data-slot": "context-chip-action",
