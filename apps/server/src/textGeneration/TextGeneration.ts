@@ -79,8 +79,8 @@ export const makeTextGenerationFromRegistry = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
   sourceControl: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"],
 ): RoutedTextGeneration => ({
-  checkDecisionWriter: (input) =>
-    resolveInstance(registry, "checkDecisionWriter", input.modelSelection.instanceId).pipe(
+  checkDecisionWriter: Effect.fn("TextGeneration.checkDecisionWriter")(function (input) {
+    return resolveInstance(registry, "checkDecisionWriter", input.modelSelection.instanceId).pipe(
       Effect.flatMap(
         (textGeneration) =>
           textGeneration.checkDecisionWriter?.(input) ??
@@ -89,9 +89,10 @@ export const makeTextGenerationFromRegistry = (
             reason: "This provider does not support isolated Decisions writing.",
           }),
       ),
-    ),
-  generateDecisionNotes: (input) =>
-    resolveInstance(registry, "generateDecisionNotes", input.modelSelection.instanceId).pipe(
+    );
+  }),
+  generateDecisionNotes: Effect.fn("TextGeneration.generateDecisionNotes")(function (input) {
+    return resolveInstance(registry, "generateDecisionNotes", input.modelSelection.instanceId).pipe(
       Effect.flatMap(
         (textGeneration) =>
           textGeneration.generateDecisionNotes?.(input) ??
@@ -102,57 +103,79 @@ export const makeTextGenerationFromRegistry = (
             }),
           ),
       ),
-    ),
-  generateCommitMessage: (input) =>
-    resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
+    );
+  }),
+  generateCommitMessage: Effect.fn("TextGeneration.generateCommitMessage")(function (input) {
+    return resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
-    ),
-  generatePrContent: (input) =>
-    resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
+    );
+  }),
+  generatePrContent: Effect.fn("TextGeneration.generatePrContent")(function (input) {
+    return resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generatePrContent(input)),
-    ),
-  generateBranchName: (input) =>
-    resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
+    );
+  }),
+  generateBranchName: Effect.fn("TextGeneration.generateBranchName")(function (input) {
+    return resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
-    ),
-  generateContextualSummary: (input) =>
-    resolveInstance(registry, "generateContextualSummary", input.modelSelection.instanceId).pipe(
-      Effect.flatMap(
-        (generation) =>
-          generation.generateContextualSummary?.(input) ??
-          Effect.fail(
-            new TextGenerationError({
-              operation: "generateContextualSummary",
-              detail: "This provider does not support isolated Contextual summaries.",
-            }),
-          ),
-      ),
-    ),
+    );
+  }),
+  generateContextualSummary: Effect.fn("TextGeneration.generateContextualSummary")(
+    function (input) {
+      return resolveInstance(
+        registry,
+        "generateContextualSummary",
+        input.modelSelection.instanceId,
+      ).pipe(
+        Effect.flatMap(
+          (generation) =>
+            generation.generateContextualSummary?.(input) ??
+            Effect.fail(
+              new TextGenerationError({
+                operation: "generateContextualSummary",
+                detail: "This provider does not support isolated Contextual summaries.",
+              }),
+            ),
+        ),
+      );
+    },
+  ),
   // Fails rather than falling back, so callers can treat this error as "unsupported" and keep
   // the deterministic summary.
-  generateSquireTurnSummary: (input) =>
-    resolveInstance(registry, "generateSquireTurnSummary", input.modelSelection.instanceId).pipe(
-      Effect.flatMap(
-        (generation) =>
-          generation.generateSquireTurnSummary?.(input) ??
-          Effect.fail(
-            new TextGenerationError({
-              operation: "generateSquireTurnSummary",
-              detail: "This provider does not support isolated Squire summaries.",
-            }),
-          ),
-      ),
-    ),
-  generateWorkflowSummary: (input) =>
-    resolveInstance(registry, "generateWorkflowSummary", input.modelSelection.instanceId).pipe(
-      Effect.flatMap((textGeneration) => textGeneration.generateWorkflowSummary(input)),
-    ),
-  generateReviewGuide: (input) =>
-    resolveInstance(registry, "generateReviewGuide", input.modelSelection.instanceId).pipe(
+  generateSquireTurnSummary: Effect.fn("TextGeneration.generateSquireTurnSummary")(
+    function (input) {
+      return resolveInstance(
+        registry,
+        "generateSquireTurnSummary",
+        input.modelSelection.instanceId,
+      ).pipe(
+        Effect.flatMap(
+          (generation) =>
+            generation.generateSquireTurnSummary?.(input) ??
+            Effect.fail(
+              new TextGenerationError({
+                operation: "generateSquireTurnSummary",
+                detail: "This provider does not support isolated Squire summaries.",
+              }),
+            ),
+        ),
+      );
+    },
+  ),
+  generateWorkflowSummary: Effect.fn("TextGeneration.generateWorkflowSummary")(function (input) {
+    return resolveInstance(
+      registry,
+      "generateWorkflowSummary",
+      input.modelSelection.instanceId,
+    ).pipe(Effect.flatMap((textGeneration) => textGeneration.generateWorkflowSummary(input)));
+  }),
+  generateReviewGuide: Effect.fn("TextGeneration.generateReviewGuide")(function (input) {
+    return resolveInstance(registry, "generateReviewGuide", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateReviewGuide(input)),
-    ),
-  generateThreadTitle: (input) =>
-    resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+    );
+  }),
+  generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {
+    return resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) =>
         Effect.gen(function* () {
           const linkedContext =
@@ -166,7 +189,8 @@ export const makeTextGenerationFromRegistry = (
           return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
         }),
       ),
-    ),
+    );
+  }),
 });
 
 /** @public */

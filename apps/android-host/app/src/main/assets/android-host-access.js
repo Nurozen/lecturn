@@ -36,9 +36,15 @@
       const timer = setTimeout(() => finish(requestId, unavailable()), 90000);
       pending.set(requestId, { resolve, timer });
       try {
-        window.__lecturnNative.postMessage(
-          JSON.stringify({ protocolVersion: 2, requestId, method, threadId, payload }),
-        );
+        const message = JSON.stringify({
+          protocolVersion: 2,
+          requestId,
+          method,
+          threadId,
+          payload,
+        });
+        // oxlint-disable-next-line unicorn/require-post-message-target-origin -- The native WebView bridge takes one string.
+        window.__lecturnNative.postMessage(message);
       } catch {
         finish(requestId, unavailable());
       }

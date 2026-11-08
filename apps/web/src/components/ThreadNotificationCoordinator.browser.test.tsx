@@ -2,11 +2,13 @@ import { threadsForProjectsMode } from "@lecturn/client-runtime/state/app-projec
 import { WORKING_EXIT_GRACE_MS } from "@lecturn/client-runtime/state/thread-inbox";
 import { AppId, EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
+import type { AnyRouter } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { act, fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
+import { fakeTimers, stubGlobal } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   mode: "off" as ClientSettings["notificationMode"],
@@ -34,6 +36,7 @@ const state = vi.hoisted(() => ({
   close: vi.fn(),
   navigate: vi.fn(),
   sound: vi.fn(),
+  settingsListeners: new Set<() => void>(),
   notification: vi.fn(function (_title: string, options: NotificationOptions) {
     return Object.assign(new EventTarget(), { tag: options.tag, close: vi.fn() });
   }),
@@ -129,43 +132,64 @@ function mockThreads() {
   return [stableParent, child];
 }
 
-vi.mock(import("@effect/atom-react"), async (original) => ({
-  ...(await original()),
-  useAtomValue: (() => ({
-    status: state.live ? "live" : "disconnected",
-    snapshot: Option.some({ threads: mockThreads(), projects: mockProjects() }),
-  })) as never,
+// Read lazily by the mocks: their factories run before this module's own bindings exist.
+const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
+const environmentIdsAtom = Atom.make<ReadonlyArray<string>>(["env-1"]);
+// Made in the mock factories: a module export is read as soon as its module evaluates.
+const forkAtoms = vi.hoisted(() => ({
+  appStatuses: null as unknown as Atom.Writable<ReadonlyArray<unknown>>,
+  squireEnvironments: null as unknown as Atom.Writable<ReadonlyArray<unknown>>,
 }));
-vi.mock(import("@tanstack/react-router"), async (original) => ({
-  ...(await original()),
-  useNavigate: (() => state.navigate) as never,
-  useParams: (() => state.active) as never,
-}));
+let registry: AtomRegistry.AtomRegistry;
+
+vi.mock(import("../state/shell"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    environmentShell: {
+      ...actual.environmentShell,
+      stateValueAtom: ((id: string) => shellAtom(id)) as never,
+    },
+  };
+});
+vi.mock(import("../state/presentation"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    environmentSummaries: {
+      ...actual.environmentSummaries,
+      get environmentIdsAtom() {
+        return environmentIdsAtom as never;
+      },
+    },
+  };
+});
 vi.mock(import("../hooks/useSettings"), async (original) => ({
   ...(await original()),
-  useClientSettings: ((
-    select: (
-      settings: Pick<ClientSettings, "notificationMode" | "inAppNotificationsEnabled">,
-    ) => unknown,
-  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp })) as never,
-  getClientSettings: (() => ({ notificationMode: state.mode })) as never,
+  subscribeClientSettings: ((listener: () => void) => {
+    state.settingsListeners.add(listener);
+    return () => state.settingsListeners.delete(listener);
+  }) as never,
+  getClientSettings: (() => ({
+    notificationMode: state.mode,
+    inAppNotificationsEnabled: state.inApp,
+  })) as never,
 }));
-vi.mock(import("../state/environments"), async (original) => ({
-  ...(await original()),
-  useEnvironmentIds: (() => ["env-1"]) as never,
-}));
-vi.mock(import("../state/apps"), async (original) => ({
-  ...(await original()),
-  useAppStatuses: (() => state.appStatuses) as never,
-}));
-// A store, not a plain return: the compiled coordinator only re-renders Squire alerts when
-// their snapshot changes, as the real atom subscription would signal.
-const squireStore = vi.hoisted(() => ({
-  environments: [] as ReadonlyArray<unknown>,
-  listeners: new Set<() => void>(),
-}));
+vi.mock(import("../state/apps"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  forkAtoms.appStatuses = Atom.make<ReadonlyArray<unknown>>([]);
+  return { ...(await original()), readableAppStatusesAtom: forkAtoms.appStatuses as never };
+});
+vi.mock(import("../state/squires"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  forkAtoms.squireEnvironments = Atom.make<ReadonlyArray<unknown>>([]);
+  return {
+    ...(await original()),
+    readableSquireEnvironmentsAtom: forkAtoms.squireEnvironments as never,
+  };
+});
 function pushSquireNotifications(sequences: number[]) {
-  squireStore.environments = [
+  registry.set(forkAtoms.squireEnvironments, [
     {
       environmentId: "env-1",
       state: {
@@ -181,24 +205,12 @@ function pushSquireNotifications(sequences: number[]) {
         ],
       },
     },
-  ];
-  for (const listener of squireStore.listeners) listener();
+  ]);
 }
-vi.mock(import("../state/squires"), async (original) => {
-  const { useSyncExternalStore } = await import("react");
-  const subscribe = (listener: () => void) => {
-    squireStore.listeners.add(listener);
-    return () => squireStore.listeners.delete(listener);
-  };
-  return {
-    ...(await original()),
-    useSquireEnvironments: (() =>
-      useSyncExternalStore(subscribe, () => squireStore.environments)) as never,
-  };
-});
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
   playNotificationSound: state.sound,
+  unlockNotificationAudio: vi.fn(),
   setNotificationBadge: vi.fn(),
 }));
 vi.mock(import("./ui/toast"), async (original) => {
@@ -211,10 +223,10 @@ vi.mock(import("./ui/toast"), async (original) => {
 
 import { threadNotificationTag } from "../threadNotifications";
 import { useUiStateStore } from "../uiStateStore";
-import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
+import { startThreadNotifications } from "./ThreadNotificationCoordinator";
 
-// The mocked modules read `state`, so every test starts by resetting all of it. The first
-// render is left to the test because some tests change state before the coordinator mounts.
+// The mocked modules read `state`, so every test starts by resetting all of it. The service
+// starts on the first render, since some tests change state before it starts.
 function setup() {
   vi.clearAllMocks();
   Object.assign(state, {
@@ -237,10 +249,13 @@ function setup() {
     appProject: false,
     appStatuses: [],
   });
+  state.settingsListeners.clear();
   stableParent = null;
-  squireStore.environments = [];
-  useUiStateStore.setState({ sidebarMode: "projects", sidebarAppScopeKey: null });
   const stack = new AsyncDisposableStack();
+  registry = AtomRegistry.make();
+  const testRegistry = registry;
+  stack.defer(() => testRegistry.dispose());
+  useUiStateStore.setState({ sidebarMode: "projects", sidebarAppScopeKey: null });
   stack.use(
     vi
       .spyOn(document, "visibilityState", "get")
@@ -250,10 +265,25 @@ function setup() {
   stack.use(
     stubGlobal("Notification", Object.assign(state.notification, { permission: "granted" })),
   );
-  let screen: Screen | undefined;
+  const router = {
+    state: {
+      get matches() {
+        return [{ params: state.active }];
+      },
+    },
+    navigate: state.navigate,
+  } as unknown as AnyRouter;
+  let started = false;
   const renderCoordinator = async () => {
-    if (screen) await screen.rerender(<ThreadNotificationCoordinator />);
-    else screen = stack.use(await render(<ThreadNotificationCoordinator />));
+    testRegistry.set(forkAtoms.appStatuses, state.appStatuses);
+    testRegistry.set(shellAtom("env-1"), {
+      status: state.live ? "live" : "disconnected",
+      snapshot: Option.some({ threads: mockThreads(), projects: mockProjects() }),
+    });
+    if (!started) {
+      started = true;
+      stack.defer(startThreadNotifications(testRegistry, router));
+    }
   };
   return {
     render: renderCoordinator,
@@ -274,7 +304,7 @@ describe("squire notifications", () => {
     pushSquireNotifications([1]);
     await app.render();
     expect(state.add).not.toHaveBeenCalled();
-    await act(() => pushSquireNotifications([1, 2]));
+    pushSquireNotifications([1, 2]);
     expect(state.add).toHaveBeenCalledTimes(1);
     const toast = state.add.mock.calls[0]?.[0];
     expect(toast).toMatchObject({ title: "Lead", description: "1 item waits on you" });
@@ -355,11 +385,14 @@ describe("app thread notifications", () => {
       else state.completedAt = "2026-09-13T10:00:00.000Z";
       await app.render();
       await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
-      expect(state.notification).toHaveBeenCalledWith(title, {
-        body: "Fix the login form",
-        tag: threadNotificationTag(EnvironmentId.make("env-1"), ThreadId.make("thread-1")),
-        silent: true,
-      });
+      expect(state.notification).toHaveBeenCalledWith(
+        title,
+        expect.objectContaining({
+          body: "Fix the login form",
+          tag: threadNotificationTag(EnvironmentId.make("env-1"), ThreadId.make("thread-1")),
+          silent: true,
+        }),
+      );
       const notification = state.notification.mock.results[0]?.value as EventTarget;
       using _focus = vi.spyOn(window, "focus").mockImplementation(() => undefined);
       notification.dispatchEvent(new Event("click"));

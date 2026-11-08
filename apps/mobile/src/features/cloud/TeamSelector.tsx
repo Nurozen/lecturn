@@ -38,6 +38,7 @@ export function TeamSelector(props: { readonly accountId?: string | null } = {})
   const [error, setError] = useState(false);
   useEffect(() => {
     let disposed = false;
+    // oxlint-disable-next-line react/set-state-in-effect -- A new account or client clears the last load's failure as its teams request starts.
     setError(false);
     if (isSignedIn && userId) {
       try {

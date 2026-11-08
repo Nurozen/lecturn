@@ -137,24 +137,28 @@ const make = Effect.gen(function* () {
   return StaveProjectShells.of({
     decorate,
     list,
-    getById: (projectId) =>
-      projects
+    getById: Effect.fn("StaveProjectShells.getById")(function (projectId) {
+      return projects
         .getShell(projectId)
-        .pipe(Effect.mapError(fail("getById")), Effect.flatMap(decorateOne)),
-    getActiveByWorkspaceRoot: (workspaceRoot) =>
-      projects.findActiveByWorkspaceRoot(workspaceRoot).pipe(
-        Effect.mapError(fail("getActiveByWorkspaceRoot")),
-        Effect.flatMap((row) =>
-          Option.isNone(row)
-            ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-            : projects
-                .getShell(row.value.projectId)
-                .pipe(
-                  Effect.mapError(fail("getActiveByWorkspaceRoot")),
-                  Effect.flatMap(decorateOne),
-                ),
-        ),
-      ),
+        .pipe(Effect.mapError(fail("getById")), Effect.flatMap(decorateOne));
+    }),
+    getActiveByWorkspaceRoot: Effect.fn("StaveProjectShells.getActiveByWorkspaceRoot")(
+      function (workspaceRoot) {
+        return projects.findActiveByWorkspaceRoot(workspaceRoot).pipe(
+          Effect.mapError(fail("getActiveByWorkspaceRoot")),
+          Effect.flatMap((row) =>
+            Option.isNone(row)
+              ? Effect.succeed(Option.none<OrchestrationProjectShell>())
+              : projects
+                  .getShell(row.value.projectId)
+                  .pipe(
+                    Effect.mapError(fail("getActiveByWorkspaceRoot")),
+                    Effect.flatMap(decorateOne),
+                  ),
+          ),
+        );
+      },
+    ),
   });
 });
 

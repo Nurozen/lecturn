@@ -335,7 +335,7 @@ it.effect.each(["extensions", "legacy"] as const)(
       f.values.set(
         "decisions-funding-status",
         new TextEncoder().encode(
-          yield* Schema.encodeEffect(Schema.fromJsonString(ExtensionFundingStatusResult))({
+          yield* encodeStatus({
             ...active,
             featureId: "decisions",
             state: "revoked",

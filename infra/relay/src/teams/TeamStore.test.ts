@@ -58,10 +58,9 @@ describe.skipIf(!databaseUrl)("TeamStore PostgreSQL", () => {
     run(
       Effect.gen(function* () {
         const { store, organizationId, actorUserId } = yield* fixture;
-        const results = yield* Effect.all(
-          ["one", "two"].map((userId) =>
-            store.assignSeat({ organizationId, actorUserId, userId }).pipe(Effect.result),
-          ),
+        const results = yield* Effect.forEach(
+          ["one", "two"],
+          (userId) => store.assignSeat({ organizationId, actorUserId, userId }).pipe(Effect.result),
           { concurrency: "unbounded" },
         );
         expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);

@@ -138,8 +138,16 @@ const layerHttpPlatformNotSupported = Layer.succeed(HttpPlatform.HttpPlatform, {
     algorithms: new Set<HttpPlatform.CompressionAlgorithm>(),
     compressResponse: (response) => Effect.succeed(response),
   },
-  fileResponse: () => Effect.die("Relay API does not serve filesystem responses"),
-  fileWebResponse: () => Effect.die("Relay API does not serve file responses"),
+  fileResponse: Effect.fn("HttpPlatform.fileResponse")(function () {
+    return Effect.die("Relay API does not serve filesystem responses");
+  }),
+  fileWebResponse: Effect.fn("HttpPlatform.fileWebResponse")(function () {
+    return Effect.die("Relay API does not serve file responses");
+  }),
+});
+
+const teamsDisabled = Effect.fn("TeamBillingService.teamsDisabled")(function () {
+  return Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" }));
 });
 
 const layerRelayApi = Layer.mergeAll(
@@ -461,34 +469,49 @@ export const layer = Api.make(
             ),
           );
         return ManagedGatewayEnrollment.of({
-          enabledFor: (userId) =>
-            Effect.succeed(
+          enabledFor: Effect.fn("ManagedGateway.enabledFor")(function (userId) {
+            return Effect.succeed(
               gatewayConfig.enabled &&
                 (gatewayConfig.enforcementUsers.includes("*") ||
                   gatewayConfig.enforcementUsers.includes(userId)),
-            ),
-          get: ({ userId, environmentId }) => mappingFor(userId, environmentId),
-          registerPending: (input) =>
-            available(store.registerPending(input)).pipe(
+            );
+          }),
+          get: Effect.fn("ManagedGateway.get")(function ({ userId, environmentId }) {
+            return mappingFor(userId, environmentId);
+          }),
+          registerPending: Effect.fn("ManagedGateway.registerPending")(function (input) {
+            return available(store.registerPending(input)).pipe(
               Effect.map((mapping) => ({
                 ...mapping,
                 originDnsRecordId: mapping.originDnsRecordId ?? null,
               })),
-            ),
-          recordOriginDns: (input) => available(store.recordOriginDns(input)),
-          checkpointAllocation: (input) => available(store.checkpointAllocation(input)),
-          withAllocation: (input, effect) =>
-            store
+            );
+          }),
+          recordOriginDns: Effect.fn("ManagedGateway.recordOriginDns")(function (input) {
+            return available(store.recordOriginDns(input));
+          }),
+          checkpointAllocation: Effect.fn("ManagedGateway.checkpointAllocation")(function (input) {
+            return available(store.checkpointAllocation(input));
+          }),
+          withAllocation: Effect.fn("ManagedGateway.withAllocation")(function <A, E, R>(
+            input: Parameters<ManagedGatewayEnrollment["Service"]["withAllocation"]>[0],
+            effect: Effect.Effect<A, E, R>,
+          ) {
+            return store
               .withAllocation(input, effect)
-              .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) })),
+              .pipe(Effect.catchTags({ BillingError: () => Effect.fail(gatewayUnavailable()) }));
+          }),
           markReady: Effect.fn("ManagedGateway.markReady")(function* (input) {
             const mapping = yield* mappingFor(input.userId, input.environmentId);
             if (!mapping || mapping.deleting || mapping.generation !== input.generation)
               return false;
             return yield* available(store.markReady(mapping));
           }),
-          pause: (input) =>
-            available(store.pause(input)).pipe(Effect.map((mapping) => mapping !== undefined)),
+          pause: Effect.fn("ManagedGateway.pause")(function (input) {
+            return available(store.pause(input)).pipe(
+              Effect.map((mapping) => mapping !== undefined),
+            );
+          }),
           remove: Effect.fn("ManagedGateway.remove")(function* (input) {
             const mapping = yield* mappingFor(input.userId, input.environmentId);
             if (!mapping || mapping.generation !== input.generation) return false;
@@ -503,7 +526,9 @@ export const layer = Api.make(
               )) !== undefined
             );
           }),
-          finalizeRemove: (input) => available(store.finalizeRemove(input)),
+          finalizeRemove: Effect.fn("ManagedGateway.finalizeRemove")(function (input) {
+            return available(store.finalizeRemove(input));
+          }),
           sync,
         });
       }),
@@ -544,12 +569,21 @@ export const layer = Api.make(
           ),
         );
     const layerHookInbox = Layer.succeed(HookInbox.HookInbox, {
-      hold: ({ endpointKey, baseUrl, hook }) =>
-        hookInboxes.getByName(endpointKey).hold(hook, baseUrl).pipe(inboxCall("hold", endpointKey)),
-      wake: ({ endpointKey, baseUrl }) =>
-        hookInboxes.getByName(endpointKey).wake(baseUrl).pipe(inboxCall("wake", endpointKey)),
-      clear: ({ endpointKey }) =>
-        hookInboxes.getByName(endpointKey).clear().pipe(inboxCall("clear", endpointKey)),
+      hold: Effect.fn("HookInbox.hold")(function ({ endpointKey, baseUrl, hook }) {
+        return hookInboxes
+          .getByName(endpointKey)
+          .hold(hook, baseUrl)
+          .pipe(inboxCall("hold", endpointKey));
+      }),
+      wake: Effect.fn("HookInbox.wake")(function ({ endpointKey, baseUrl }) {
+        return hookInboxes
+          .getByName(endpointKey)
+          .wake(baseUrl)
+          .pipe(inboxCall("wake", endpointKey));
+      }),
+      clear: Effect.fn("HookInbox.clear")(function ({ endpointKey }) {
+        return hookInboxes.getByName(endpointKey).clear().pipe(inboxCall("clear", endpointKey));
+      }),
     });
 
     const relayTraceLayer = Layer.unwrap(
@@ -623,8 +657,8 @@ export const layer = Api.make(
               Effect.gen(function* () {
                 const runtime = yield* ManagedGatewayRuntime;
                 return {
-                  sync: (userId: string) =>
-                    runtime.sync(userId).pipe(
+                  sync: Effect.fn("TeamGatewaySync.sync")(function (userId: string) {
+                    return runtime.sync(userId).pipe(
                       Effect.mapError(
                         () =>
                           new TeamError({
@@ -632,28 +666,24 @@ export const layer = Api.make(
                             message: "Team connection update is pending. Please retry.",
                           }),
                       ),
-                    ),
+                    );
+                  }),
                 };
               }),
             ).pipe(Layer.provide(gatewayRuntimeLayer)),
           ),
         )
       : Layer.succeed(TeamBillingService, {
-          checkout: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          preview: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          confirm: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          reconcile: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          portal: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          receiveWebhook: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          closeOrganization: () =>
-            Effect.fail(new TeamError({ code: "unavailable", message: "Teams disabled" })),
-          processPending: () => Effect.void,
+          checkout: teamsDisabled,
+          preview: teamsDisabled,
+          confirm: teamsDisabled,
+          reconcile: teamsDisabled,
+          portal: teamsDisabled,
+          receiveWebhook: teamsDisabled,
+          closeOrganization: teamsDisabled,
+          processPending: Effect.fn("TeamBillingService.processPending")(function () {
+            return Effect.void;
+          }),
         });
 
     const layerRuntime = Layer.empty
@@ -689,10 +719,12 @@ export const layer = Api.make(
           FcmDeliveries.layer.pipe(
             Layer.provide(
               Layer.succeed(FcmDeliveryQueueSender.FcmDeliveryQueueSender, {
-                send: (body) =>
-                  fcmDeliveryQueueSender
-                    .send(body)
-                    .pipe(Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext)),
+                send: Effect.fn("FcmDeliveryQueueSender.send")(
+                  function* (body) {
+                    return yield* fcmDeliveryQueueSender.send(body);
+                  },
+                  Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                ),
               }),
             ),
             Layer.provideMerge(
@@ -778,9 +810,7 @@ export const layer = Api.make(
     // like every other internal request; a same-zone fetch would not reach them.
     const layerHookHttpClient = Layer.effect(
       HttpClient.HttpClient,
-      Effect.gen(function* () {
-        return yield* ManagedGatewayHttpClient;
-      }),
+      Effect.service(ManagedGatewayHttpClient),
     ).pipe(Layer.provide(gatewayHttpClientLayer));
 
     const layerApp = Layer.mergeAll(
@@ -942,14 +972,14 @@ export const layer = Api.make(
             );
           }
           // Independent deadlines keep provider outages from starving cutoff and health reporting.
-          yield* Effect.all(
-            tasks.map((task) =>
+          yield* Effect.forEach(
+            tasks,
+            (task) =>
               task.pipe(
                 Effect.catch(() =>
                   Effect.logWarning("An independent billing maintenance task failed"),
                 ),
               ),
-            ),
             { concurrency: "unbounded", discard: true },
           );
         }).pipe(Effect.provide(layerRuntime), (maintenance) =>

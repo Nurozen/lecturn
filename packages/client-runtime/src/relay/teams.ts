@@ -49,6 +49,12 @@ const SeatPreview = Schema.Struct({
   effectiveAt: Schema.Number,
 });
 export type TeamSeatPreview = typeof SeatPreview.Type;
+const decodeRedirectResult = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }));
+const decodeTeamList = Schema.decodeUnknownSync(
+  Schema.Struct({ organizations: Schema.Array(RelayTeamOrganization) }),
+);
+const decodeTeamDetail = Schema.decodeUnknownSync(TeamDetail);
+const decodeSeatPreview = Schema.decodeUnknownSync(SeatPreview);
 class TeamsRequestError extends Error {}
 
 export function createTeamsClient(options: {
@@ -89,9 +95,7 @@ export function createTeamsClient(options: {
   const path = (id: string, action = "") =>
     `/${encodeURIComponent(id)}${action ? `/${action}` : ""}`;
   async function redirect(id: string, action: "checkout" | "portal", body: unknown) {
-    const result = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(
-      await request(path(id, action), body),
-    );
+    const result = decodeRedirectResult(await request(path(id, action), body));
     const url = new URL(result.url);
     if (
       url.protocol !== "https:" ||
@@ -104,11 +108,8 @@ export function createTeamsClient(options: {
     return result.url;
   }
   return {
-    list: async () =>
-      Schema.decodeUnknownSync(
-        Schema.Struct({ organizations: Schema.Array(RelayTeamOrganization) }),
-      )(await request("")),
-    detail: async (id: string) => Schema.decodeUnknownSync(TeamDetail)(await request(path(id))),
+    list: async () => decodeTeamList(await request("")),
+    detail: async (id: string) => decodeTeamDetail(await request(path(id))),
     create: (name: string) => request("", { name }),
     invite: (id: string, email: string, role: "admin" | "member") =>
       request(path(id, "invite"), { email, role }),
@@ -125,7 +126,7 @@ export function createTeamsClient(options: {
       redirect(id, "checkout", { interval, seats }),
     portal: (id: string) => redirect(id, "portal", {}),
     previewSeats: async (id: string, seats: number) =>
-      Schema.decodeUnknownSync(SeatPreview)(await request(path(id, "seat-preview"), { seats })),
+      decodeSeatPreview(await request(path(id, "seat-preview"), { seats })),
     confirmSeats: (id: string, previewId: string) =>
       request(path(id, "seat-confirm"), { previewId }),
   };

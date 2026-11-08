@@ -333,7 +333,7 @@ describe("LiveToolClient", () => {
 const PNG_1PX =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-const registration = Schema.decodeUnknownSync(AppRegistration)({
+const registration = Schema.decodeSync(AppRegistration)({
   appId,
   name: "Example",
   iconDataUrl: PNG_1PX,
@@ -347,7 +347,7 @@ const registryLayer = () => {
   const config = ServerConfig.layerTest(process.cwd(), { prefix: "lecturn-live-tools-" });
   const projects = Layer.succeed(AppProjectService)({
     ensureWorkspace: () => Effect.die("unused"),
-    resolveAppForProject: () => Effect.succeed(Option.none()),
+    resolveAppForProject: () => Effect.succeedNone,
     listThreads: () => Effect.die("unused"),
     streamThreads: () => Stream.die("unused"),
     setThreadAppData: () => Effect.die("unused"),

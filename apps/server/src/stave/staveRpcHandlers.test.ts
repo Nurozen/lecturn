@@ -24,16 +24,14 @@ const decodeSagaStatus = Schema.decodeUnknownEffect(StaveSagaStatus);
 const readerLayer = Layer.mock(StaveWorkspaceReader)({
   invalidate: () => Effect.void,
   load: () =>
-    Effect.succeed(
-      Option.some({
-        spaceId: "s",
-        createdAt: "2026-09-01T00:00:00Z",
-        isSaga: true,
-        state: "live",
-        repos: [],
-        memories: [],
-      }),
-    ),
+    Effect.succeedSome({
+      spaceId: "s",
+      createdAt: "2026-09-01T00:00:00Z",
+      isSaga: true,
+      state: "live",
+      repos: [],
+      memories: [],
+    }),
 });
 
 describe("sagaRosterFromManifest", () => {
@@ -183,16 +181,14 @@ it.effect("does not resolve an archived saga root to a replacement live saga id"
         Layer.mock(StaveWorkspaceReader)({
           invalidate: () => Effect.void,
           load: () =>
-            Effect.succeed(
-              Option.some({
-                spaceId: "s",
-                isSaga: true,
-                state: "archived",
-                repos: [],
-                memories: [],
-                archiveBasename: "s",
-              }),
-            ),
+            Effect.succeedSome({
+              spaceId: "s",
+              isSaga: true,
+              state: "archived",
+              repos: [],
+              memories: [],
+              archiveBasename: "s",
+            }),
         }),
         Layer.mock(StaveCli)({ sagaStatus: () => Effect.die("must not read replacement live id") }),
       ),
@@ -564,16 +560,14 @@ it.effect("enriches saga members only with a uniquely verified enrolled incarnat
           Layer.mock(StaveWorkspaceReader)({
             invalidate: () => Effect.void,
             load: (root) =>
-              Effect.succeed(
-                Option.some({
-                  spaceId: root === "/selected/s" ? "s" : "a",
-                  createdAt: root === "/selected/s" ? readerSagaStamp : stamp,
-                  isSaga: root === "/selected/s",
-                  state: "live",
-                  repos: [],
-                  memories: [],
-                }),
-              ),
+              Effect.succeedSome({
+                spaceId: root === "/selected/s" ? "s" : "a",
+                createdAt: root === "/selected/s" ? readerSagaStamp : stamp,
+                isSaga: root === "/selected/s",
+                state: "live",
+                repos: [],
+                memories: [],
+              }),
           }),
           Layer.mock(StaveCli)({
             spaceStatus: () =>

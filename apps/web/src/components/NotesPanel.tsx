@@ -274,9 +274,11 @@ function SavedNotesPanel({
                           e.preventDefault();
                           const next = nextNoteIndex(index, e.key, rows.length);
                           setFocused(next);
-                          container.current
-                            ?.querySelectorAll<HTMLButtonElement>("[data-note-id] > button")
-                            [next]?.focus();
+                          const buttons =
+                            container.current?.querySelectorAll<HTMLButtonElement>(
+                              "[data-note-id] > button",
+                            );
+                          buttons?.[next]?.focus();
                         } else if (e.key === "e" && !pending) {
                           e.preventDefault();
                           setEditing(note.id);

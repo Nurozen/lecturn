@@ -479,6 +479,22 @@ it.layer(SqlitePersistence.layerMemory)("Contextual V2 turn hooks", (it) => {
     }),
   );
 
+  it.effect("/goal runs leave the packet queued for the next turn", () =>
+    Effect.gen(function* () {
+      const f = yield* harness();
+      const goal = turnInput("run-goal", "message-goal");
+      const goalInput = { ...goal, message: { ...goal.message, text: "/goal ship storage" } };
+      assert.isUndefined(yield* f.hooks.beforeTurnStart(goalInput));
+      assert.isNull(yield* f.queueState("run-goal"));
+      assert.equal(f.prepareCalls.length, 0);
+      yield* f.providerTurn("run-goal", "native-turn-goal");
+      yield* f.hooks.onRunTerminal(terminal("run-goal", "completed"));
+      assert.equal(f.receipts.length, 0);
+      const next = yield* f.hooks.beforeTurnStart(turnInput("run-after", "message-after"));
+      assert.include(next && "contextPrefix" in next ? next.contextPrefix : "", "Use SQLite");
+    }),
+  );
+
   it.effect("thread.create applies its contextual option after commit", () =>
     Effect.gen(function* () {
       const f = yield* harness();

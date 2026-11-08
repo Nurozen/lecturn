@@ -59,10 +59,18 @@ const publicReservation = (row: ReservationRow): ManagedReservation => ({
 });
 
 const disabled = ManagedReservations.of({
-  get: () => Effect.succeed(null),
-  reserve: () => Effect.succeed(null),
-  complete: () => Effect.succeed(true),
-  release: () => Effect.succeed(true),
+  get: Effect.fn("ManagedReservations.get")(function () {
+    return Effect.succeed(null);
+  }),
+  reserve: Effect.fn("ManagedReservations.reserve")(function () {
+    return Effect.succeed(null);
+  }),
+  complete: Effect.fn("ManagedReservations.complete")(function () {
+    return Effect.succeed(true);
+  }),
+  release: Effect.fn("ManagedReservations.release")(function () {
+    return Effect.succeed(true);
+  }),
 });
 
 export const make = Effect.fn("ManagedReservations.make")(function* (config: {

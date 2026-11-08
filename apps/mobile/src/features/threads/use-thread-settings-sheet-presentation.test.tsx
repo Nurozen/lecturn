@@ -17,8 +17,10 @@ const blur = vi.fn();
 const editorRef = { current: { focus, blur } as unknown as ComposerEditorHandle };
 
 function Probe({ focused }: { focused: boolean }) {
-  const state = useThreadSettingsSheetPresentation({ editorRef, isEditorFocused: focused });
+  const state = useThreadSettingsSheetPresentation({ editorRef, onPresent: () => undefined });
   useEffect(() => {
+    // The composer reports focus from its editor handlers; the probe reports it per render.
+    state.onEditorFocusChange(focused);
     presentation = state;
     expanded = focused || state.keepsComposerExpanded;
   }, [focused, state]);

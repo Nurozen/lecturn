@@ -849,7 +849,7 @@ describe("layerAutoPullPolicy", () => {
       }).pipe(
         Effect.provide(
           makePolicyLayer({
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeedNone,
             getShellSnapshot: () =>
               Effect.succeed(
                 shellSnapshot([
@@ -926,7 +926,7 @@ describe("layerAutoPullPolicy", () => {
     }).pipe(
       Effect.provide(
         makePolicyLayer({
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getActiveProjectByWorkspaceRoot: () => Effect.succeedNone,
           getShellSnapshot: () =>
             Effect.succeed(shellSnapshot([toShell(plainProject), toShell(staveProject)])),
         }),
@@ -949,7 +949,7 @@ describe("layerAutoPullPolicy", () => {
         Effect.flatMap((policy) => policy.isEnabled("/plain")),
         Effect.provide(
           makePolicyLayer({
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.some(plainProject)),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeedSome(plainProject),
             getShellSnapshot: () => Effect.fail(queryFailure),
           }),
         ),
@@ -1097,7 +1097,7 @@ describe("layerAutoPullPolicy", () => {
       Layer.provide(layerBackgroundPolicy(() => true)),
       Layer.provide(
         makePolicyLayer({
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getActiveProjectByWorkspaceRoot: () => Effect.succeedNone,
           getShellSnapshot: () => Effect.succeed(shellSnapshot([toShell(staveProject)])),
         }),
       ),

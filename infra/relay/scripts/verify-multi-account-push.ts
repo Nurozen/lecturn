@@ -146,19 +146,15 @@ async function main() {
             device_id: string;
           }>`SELECT user_id, device_id FROM relay_mobile_devices WHERE push_token=${`${prefix}-push`} AND push_to_start_token=${`${prefix}-start`}`;
       if (rows.length !== count)
-        return yield* Effect.fail(
-          new ProbeFailed({
-            message: `Expected ${count} retained registrations, got ${rows.length}`,
-          }),
-        );
+        return yield* new ProbeFailed({
+          message: `Expected ${count} retained registrations, got ${rows.length}`,
+        });
       if (count === 1) {
         const owners = yield* sql<{
           device_id: string;
         }>`SELECT device_id FROM relay_push_token_owners WHERE kind=${live ? "activity" : "push"} AND token=${`${prefix}-${live ? "activity" : "push"}`}`;
         if (owners[0]?.device_id !== rows[0]?.device_id)
-          return yield* Effect.fail(
-            new ProbeFailed({ message: "Token owner and recipient diverged" }),
-          );
+          return yield* new ProbeFailed({ message: "Token owner and recipient diverged" });
       }
     });
     yield* Effect.tryPromise(() =>

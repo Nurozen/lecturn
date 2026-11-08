@@ -63,6 +63,7 @@ export interface SeatInput extends TeamActor {
   userId: string;
 }
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const isTeamError = Schema.is(TeamError);
 const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => Math.floor(ms / 1000)));
 const unavailable = () =>
   new TeamError({ code: "unavailable", message: "Team service is temporarily unavailable" });
@@ -115,7 +116,7 @@ export const makeTeamStore = Effect.gen(function* () {
   const transaction = <A>(effect: Effect.Effect<A, TeamError>) =>
     sql
       .withTransaction(effect)
-      .pipe(Effect.mapError((error) => (Schema.is(TeamError)(error) ? error : unavailable())));
+      .pipe(Effect.mapError((error) => (isTeamError(error) ? error : unavailable())));
   const get = (organizationId: string) =>
     query(
       sql<

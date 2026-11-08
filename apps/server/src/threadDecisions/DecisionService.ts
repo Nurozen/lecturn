@@ -66,7 +66,7 @@ export const make = Effect.gen(function* () {
       });
       yield* sql`UPDATE decision_outbox SET published_revision = ${row.revision} WHERE project_id = ${row.project_id} AND published_revision < ${row.revision}`;
     }
-  }).pipe(Effect.catch(() => Effect.void));
+  }).pipe(Effect.ignore);
   yield* publish.pipe(Effect.repeat(Schedule.spaced("1 second")), Effect.forkScoped);
   const settings = Effect.fn("Decisions.settings")(function* (
     input: ThreadDecisionSettingsInput,

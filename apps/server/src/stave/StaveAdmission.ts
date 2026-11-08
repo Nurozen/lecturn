@@ -299,6 +299,8 @@ export const layer = Layer.effect(StaveAdmission, make());
 export const layerNoop = Layer.succeed(
   StaveAdmission,
   StaveAdmission.of({
-    check: () => Effect.void,
+    check: Effect.fn("StaveAdmission.check")(function () {
+      return Effect.void;
+    }),
   }),
 );

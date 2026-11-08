@@ -33,7 +33,6 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const LISTING_INSTANCE = ProviderInstanceId.make("claude-work");
-const OTHER_LISTING_INSTANCE = ProviderInstanceId.make("claude-personal");
 const PLAIN_INSTANCE = ProviderInstanceId.make("codex");
 const DISABLED_INSTANCE = ProviderInstanceId.make("claude-disabled");
 

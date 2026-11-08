@@ -333,19 +333,23 @@ const make = Effect.gen(function* () {
 
   return StaveOrchestration.of({
     getShellSnapshot,
-    getProjectShellById: (projectId) =>
-      shells.getById(projectId).pipe(Effect.mapError(fail("getProjectShellById"))),
-    getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
-      shells
+    getProjectShellById: Effect.fn("StaveOrchestration.getProjectShellById")(function (projectId) {
+      return shells.getById(projectId).pipe(Effect.mapError(fail("getProjectShellById")));
+    }),
+    getActiveProjectByWorkspaceRoot: Effect.fn(
+      "StaveOrchestration.getActiveProjectByWorkspaceRoot",
+    )(function (workspaceRoot) {
+      return shells
         .getActiveByWorkspaceRoot(workspaceRoot)
-        .pipe(Effect.mapError(fail("getActiveProjectByWorkspaceRoot"))),
+        .pipe(Effect.mapError(fail("getActiveProjectByWorkspaceRoot")));
+    }),
     getThreadShellById,
     listThreadLifecycleAnchorsByProjectId,
     getInferenceTurnPairs,
     dispatch,
     listSessions,
-    stopSession: ({ threadId }) =>
-      listSessions().pipe(
+    stopSession: Effect.fn("StaveOrchestration.stopSession")(function ({ threadId }) {
+      return listSessions().pipe(
         Effect.flatMap((live) =>
           Effect.forEach(
             live.filter((session) => session.threadId === threadId),
@@ -353,9 +357,10 @@ const make = Effect.gen(function* () {
             { discard: true },
           ),
         ),
-      ),
-    stopSessionsUnder: (root) =>
-      listSessions().pipe(
+      );
+    }),
+    stopSessionsUnder: Effect.fn("StaveOrchestration.stopSessionsUnder")(function (root) {
+      return listSessions().pipe(
         Effect.flatMap((live) =>
           Effect.forEach(
             live.filter((session) => session.cwd !== undefined && isUnder(root, session.cwd)),
@@ -363,7 +368,8 @@ const make = Effect.gen(function* () {
             { discard: true },
           ),
         ),
-      ),
+      );
+    }),
     drainThreadCleanup,
     latestSequence,
     streamEvents: (afterSequence) =>

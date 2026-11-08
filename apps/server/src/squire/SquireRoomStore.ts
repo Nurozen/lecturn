@@ -197,34 +197,46 @@ const make = Effect.gen(function* () {
     sql`room_id = ${roomId} AND member_kind = ${member.member_kind} AND member_id = ${member.member_id}`;
 
   return SquireRoomStore.of({
-    insertRoom: (row) =>
-      run("insertRoom", sql`INSERT INTO squire_room ${sql.insert(row)}`.pipe(Effect.asVoid)),
-    getRoom: (id) =>
-      run(
+    insertRoom: Effect.fn("SquireRoomStore.insertRoom")(function (row) {
+      return run("insertRoom", sql`INSERT INTO squire_room ${sql.insert(row)}`.pipe(Effect.asVoid));
+    }),
+    getRoom: Effect.fn("SquireRoomStore.getRoom")(function (id) {
+      return run(
         "getRoom",
         sql`SELECT * FROM squire_room WHERE id = ${id}`.pipe(
           Effect.flatMap(decodeRooms),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    getRoomByCreateRequestId: (requestId) =>
-      run(
-        "getRoomByCreateRequestId",
-        sql`SELECT * FROM squire_room WHERE create_request_id = ${requestId}`.pipe(
-          Effect.flatMap(decodeRooms),
-          Effect.map(Option.fromIterable),
-        ),
-      ),
-    listRooms: (filter = {}) =>
-      run(
+      );
+    }),
+    getRoomByCreateRequestId: Effect.fn("SquireRoomStore.getRoomByCreateRequestId")(
+      function (requestId) {
+        return run(
+          "getRoomByCreateRequestId",
+          sql`SELECT * FROM squire_room WHERE create_request_id = ${requestId}`.pipe(
+            Effect.flatMap(decodeRooms),
+            Effect.map(Option.fromIterable),
+          ),
+        );
+      },
+    ),
+    listRooms: Effect.fn("SquireRoomStore.listRooms")(function (filter = {}) {
+      return run(
         "listRooms",
         (filter.status === undefined
           ? sql`SELECT * FROM squire_room ORDER BY created_at, rowid`
           : sql`SELECT * FROM squire_room WHERE status = ${filter.status}
               ORDER BY created_at, rowid`
         ).pipe(Effect.flatMap(decodeRooms)),
-      ),
-    updateRoom: ({ id, patch, updatedAt, expectedRevision, fromStatuses }) => {
+      );
+    }),
+    updateRoom: Effect.fn("SquireRoomStore.updateRoom")(function ({
+      id,
+      patch,
+      updatedAt,
+      expectedRevision,
+      fromStatuses,
+    }) {
       const columns = Object.fromEntries(
         Object.entries({ ...patch, updated_at: updatedAt }).filter(
           ([column, value]) =>
@@ -244,64 +256,83 @@ const make = Effect.gen(function* () {
           Effect.flatMap(firstRoom),
         ),
       );
-    },
-    touchLastPost: ({ roomId, at }) =>
-      run(
+    }),
+    touchLastPost: Effect.fn("SquireRoomStore.touchLastPost")(function ({ roomId, at }) {
+      return run(
         "touchLastPost",
         sql`UPDATE squire_room SET last_post_at = ${at} WHERE id = ${roomId}`.pipe(Effect.asVoid),
-      ),
-    listMembers: (roomId) =>
-      run(
+      );
+    }),
+    listMembers: Effect.fn("SquireRoomStore.listMembers")(function (roomId) {
+      return run(
         "listMembers",
         sql`SELECT * FROM squire_room_member WHERE room_id = ${roomId} ORDER BY rowid`.pipe(
           Effect.flatMap(decodeMembers),
         ),
-      ),
-    listRoomsOf: ({ member, status }) =>
-      run(
+      );
+    }),
+    listRoomsOf: Effect.fn("SquireRoomStore.listRoomsOf")(function ({ member, status }) {
+      return run(
         "listRoomsOf",
         sql`SELECT room.* FROM squire_room AS room
           JOIN squire_room_member AS member ON member.room_id = room.id
           WHERE member.member_kind = ${member.member_kind} AND member.member_id = ${member.member_id}
             AND ${status === undefined ? sql`1 = 1` : sql`room.status = ${status}`}
           ORDER BY room.created_at, room.rowid`.pipe(Effect.flatMap(decodeRooms)),
-      ),
-    addMember: (row) =>
-      run(
+      );
+    }),
+    addMember: Effect.fn("SquireRoomStore.addMember")(function (row) {
+      return run(
         "addMember",
         sql`INSERT OR IGNORE INTO squire_room_member ${sql.insert(row)}`.pipe(
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
-    removeMember: ({ roomId, member }) =>
-      run(
+      );
+    }),
+    removeMember: Effect.fn("SquireRoomStore.removeMember")(function ({ roomId, member }) {
+      return run(
         "removeMember",
         sql`DELETE FROM squire_room_member WHERE ${memberWhere(roomId, member)}`.pipe(
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
-    advanceReadCursor: ({ roomId, member, to }) =>
-      run(
+      );
+    }),
+    advanceReadCursor: Effect.fn("SquireRoomStore.advanceReadCursor")(function ({
+      roomId,
+      member,
+      to,
+    }) {
+      return run(
         "advanceReadCursor",
         sql`UPDATE squire_room_member SET read_cursor = ${to}
           WHERE ${memberWhere(roomId, member)} AND read_cursor < ${to}`.pipe(
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
-    rewindReadCursor: ({ roomId, member, from, to }) =>
-      run(
+      );
+    }),
+    rewindReadCursor: Effect.fn("SquireRoomStore.rewindReadCursor")(function ({
+      roomId,
+      member,
+      from,
+      to,
+    }) {
+      return run(
         "rewindReadCursor",
         sql`UPDATE squire_room_member SET read_cursor = ${to}
           WHERE ${memberWhere(roomId, member)} AND read_cursor = ${from}`.pipe(
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
-    advanceUserSeenCursor: ({ roomId, to }) =>
-      run(
+      );
+    }),
+    advanceUserSeenCursor: Effect.fn("SquireRoomStore.advanceUserSeenCursor")(function ({
+      roomId,
+      to,
+    }) {
+      return run(
         "advanceUserSeenCursor",
         sql`UPDATE squire_room_member SET user_seen_cursor = ${to}
           WHERE room_id = ${roomId} AND member_kind = 'user'
@@ -309,9 +340,10 @@ const make = Effect.gen(function* () {
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
-    countOpenRoomsOf: (squireId) =>
-      run(
+      );
+    }),
+    countOpenRoomsOf: Effect.fn("SquireRoomStore.countOpenRoomsOf")(function (squireId) {
+      return run(
         "countOpenRoomsOf",
         sql`SELECT count(*) AS n FROM squire_room AS room
           JOIN squire_room_member AS member ON member.room_id = room.id
@@ -320,7 +352,8 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeCount),
           Effect.map((rows) => rows[0]?.n ?? 0),
         ),
-      ),
+      );
+    }),
     countOpenRooms: run(
       "countOpenRooms",
       sql`SELECT count(*) AS n FROM squire_room WHERE status = 'open'`.pipe(
@@ -328,8 +361,8 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.n ?? 0),
       ),
     ),
-    insertPost: (row) =>
-      run(
+    insertPost: Effect.fn("SquireRoomStore.insertPost")(function (row) {
+      return run(
         "insertPost",
         sql`INSERT OR IGNORE INTO squire_room_post ${sql.insert(row)} RETURNING id`.pipe(
           Effect.flatMap(decodeIds),
@@ -337,47 +370,61 @@ const make = Effect.gen(function* () {
             Option.map(Option.fromIterable(rows), (inserted) => SquireRoomPostId.make(inserted.id)),
           ),
         ),
-      ),
-    getPost: (id) =>
-      run(
+      );
+    }),
+    getPost: Effect.fn("SquireRoomStore.getPost")(function (id) {
+      return run(
         "getPost",
         sql`SELECT * FROM squire_room_post WHERE id = ${id}`.pipe(
           Effect.flatMap(decodePosts),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    getPostByKey: (messageKey) =>
-      run(
+      );
+    }),
+    getPostByKey: Effect.fn("SquireRoomStore.getPostByKey")(function (messageKey) {
+      return run(
         "getPostByKey",
         sql`SELECT * FROM squire_room_post WHERE message_key = ${messageKey}`.pipe(
           Effect.flatMap(decodePosts),
           Effect.map(Option.fromIterable),
         ),
-      ),
-    listPostsDesc: ({ roomId, before, limit }) =>
-      run(
+      );
+    }),
+    listPostsDesc: Effect.fn("SquireRoomStore.listPostsDesc")(function ({ roomId, before, limit }) {
+      return run(
         "listPostsDesc",
         sql`SELECT * FROM squire_room_post WHERE room_id = ${roomId}
           AND ${before === undefined ? sql`1 = 1` : sql`id < ${before}`}
           ORDER BY id DESC LIMIT ${limit}`.pipe(Effect.flatMap(decodePosts)),
-      ),
-    listPostsAfter: ({ roomId, after, through }) =>
-      run(
+      );
+    }),
+    listPostsAfter: Effect.fn("SquireRoomStore.listPostsAfter")(function ({
+      roomId,
+      after,
+      through,
+    }) {
+      return run(
         "listPostsAfter",
         sql`SELECT * FROM squire_room_post WHERE room_id = ${roomId} AND id > ${after}
           AND ${through === undefined ? sql`1 = 1` : sql`id <= ${through}`}
           ORDER BY id`.pipe(Effect.flatMap(decodePosts)),
-      ),
-    countPostsAfter: ({ roomId, after }) =>
-      run(
+      );
+    }),
+    countPostsAfter: Effect.fn("SquireRoomStore.countPostsAfter")(function ({ roomId, after }) {
+      return run(
         "countPostsAfter",
         sql`SELECT count(*) AS n FROM squire_room_post WHERE room_id = ${roomId} AND id > ${after}`.pipe(
           Effect.flatMap(decodeCount),
           Effect.map((rows) => rows[0]?.n ?? 0),
         ),
-      ),
-    setPostRouting: ({ id, routingJson, expectedRoutingJson }) =>
-      run(
+      );
+    }),
+    setPostRouting: Effect.fn("SquireRoomStore.setPostRouting")(function ({
+      id,
+      routingJson,
+      expectedRoutingJson,
+    }) {
+      return run(
         "setPostRouting",
         sql`UPDATE squire_room_post SET routing_json = ${routingJson}
           WHERE id = ${id} AND ${
@@ -388,22 +435,24 @@ const make = Effect.gen(function* () {
           Effect.andThen(changedRows),
           Effect.map((n) => n > 0),
         ),
-      ),
+      );
+    }),
     listPendingRoutingPosts: run(
       "listPendingRoutingPosts",
       sql`SELECT * FROM squire_room_post WHERE routing_json = ${PENDING_ROUTING_JSON}
         ORDER BY id`.pipe(Effect.flatMap(decodePosts)),
     ),
-    latestPostId: (roomId) =>
-      run(
+    latestPostId: Effect.fn("SquireRoomStore.latestPostId")(function (roomId) {
+      return run(
         "latestPostId",
         sql`SELECT ifnull(max(id), 0) AS n FROM squire_room_post WHERE room_id = ${roomId}`.pipe(
           Effect.flatMap(decodeCount),
           Effect.map((rows) => rows[0]?.n ?? 0),
         ),
-      ),
-    listRoomMateIds: (squireId) =>
-      run(
+      );
+    }),
+    listRoomMateIds: Effect.fn("SquireRoomStore.listRoomMateIds")(function (squireId) {
+      return run(
         "listRoomMateIds",
         sql`SELECT DISTINCT other.member_id FROM squire_room_member AS mine
           JOIN squire_room AS room ON room.id = mine.room_id AND room.status = 'open'
@@ -414,7 +463,8 @@ const make = Effect.gen(function* () {
           Effect.flatMap(decodeSquireIds),
           Effect.map((rows) => rows.map((row) => row.member_id)),
         ),
-      ),
+      );
+    }),
   });
 });
 

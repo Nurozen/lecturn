@@ -26,29 +26,59 @@ export const phoneManagedRelayLayer = Layer.effect(
         return current;
       }),
     );
+    // Forwarders retain the resolved relay client's own spans.
     return ManagedRelay.ManagedRelayClient.of({
       get relayUrl() {
         return phoneConnectAccount.getSnapshot().status?.relayUrl ?? "";
       },
-      listEnvironments: (input) => Effect.flatMap(client, (relay) => relay.listEnvironments(input)),
-      listDevices: (input) => Effect.flatMap(client, (relay) => relay.listDevices(input)),
-      createEnvironmentLinkChallenge: (input) =>
-        Effect.flatMap(client, (relay) => relay.createEnvironmentLinkChallenge(input)),
-      linkEnvironment: (input) => Effect.flatMap(client, (relay) => relay.linkEnvironment(input)),
-      unlinkEnvironment: (input) =>
-        Effect.flatMap(client, (relay) => relay.unlinkEnvironment(input)),
-      getEnvironmentStatus: (input) =>
-        Effect.flatMap(client, (relay) => relay.getEnvironmentStatus(input)),
-      connectEnvironment: (input) =>
-        Effect.flatMap(client, (relay) => relay.connectEnvironment(input)),
-      registerDevice: (input) => Effect.flatMap(client, (relay) => relay.registerDevice(input)),
-      unregisterDevice: (input) => Effect.flatMap(client, (relay) => relay.unregisterDevice(input)),
-      registerLiveActivity: (input) =>
-        Effect.flatMap(client, (relay) => relay.registerLiveActivity(input)),
-      getAgentActivitySnapshot: (input) =>
-        Effect.flatMap(client, (relay) => relay.getAgentActivitySnapshot(input)),
-      resetTokenCache: (accountId) =>
-        Effect.flatMap(client, (relay) => relay.resetTokenCache(accountId)),
+      listEnvironments: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.listEnvironments(input);
+      }),
+      listDevices: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.listDevices(input);
+      }),
+      createEnvironmentLinkChallenge: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.createEnvironmentLinkChallenge(input);
+      }),
+      linkEnvironment: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.linkEnvironment(input);
+      }),
+      unlinkEnvironment: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.unlinkEnvironment(input);
+      }),
+      getEnvironmentStatus: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.getEnvironmentStatus(input);
+      }),
+      connectEnvironment: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.connectEnvironment(input);
+      }),
+      registerDevice: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.registerDevice(input);
+      }),
+      unregisterDevice: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.unregisterDevice(input);
+      }),
+      registerLiveActivity: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.registerLiveActivity(input);
+      }),
+      getAgentActivitySnapshot: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.getAgentActivitySnapshot(input);
+      }),
+      resetTokenCache: Effect.fnUntraced(function* (accountId) {
+        const relay = yield* client;
+        return yield* relay.resetTokenCache(accountId);
+      }),
     });
   }),
 );

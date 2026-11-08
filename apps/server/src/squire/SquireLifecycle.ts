@@ -49,19 +49,18 @@ export const orSquireError =
   (operation: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, SquireError, R> =>
     effect.pipe(
-      Effect.catch((cause) =>
+      Effect.tapError((cause) =>
         isSquireError(cause)
-          ? Effect.fail(cause)
-          : Effect.logWarning("Squire operation failed", { operation, cause }).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new SquireError({
-                    code: "not_available",
-                    message: `Could not ${operation}. Try again.`,
-                  }),
-                ),
-              ),
-            ),
+          ? Effect.void
+          : Effect.logWarning("Squire operation failed", { operation, cause }),
+      ),
+      Effect.mapError((cause) =>
+        isSquireError(cause)
+          ? cause
+          : new SquireError({
+              code: "not_available",
+              message: `Could not ${operation}. Try again.`,
+            }),
       ),
     );
 

@@ -142,7 +142,7 @@ export const readGitHubAcceptanceEvidence = Effect.fn("readGitHubAcceptanceEvide
         message: "GitHub acceptance evidence was truncated or invalid.",
       });
     }
-    const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(response.body);
+    const value = yield* Schema.decodeEffect(Schema.fromJsonString(schema))(response.body);
     return { value, next: /rel="next"/.test(response.headers["link"] ?? "") };
   });
   const read = <S extends Schema.Top>(endpoint: string, schema: S) =>

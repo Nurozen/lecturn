@@ -150,7 +150,9 @@ export const serverLayer = (baseDir: string, options: HarnessOptions = {}) => {
   );
   const instances = options.instances ?? ALL_INSTANCES;
   const registry = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-    getInstance: (id) => Effect.succeed(instances.find((entry) => entry.instanceId === id)),
+    getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (id) {
+      return Effect.succeed(instances.find((entry) => entry.instanceId === id));
+    }),
     listInstances: Effect.succeed(instances),
     listUnavailable: Effect.succeed([]),
     streamChanges: Stream.empty,
@@ -162,8 +164,9 @@ export const serverLayer = (baseDir: string, options: HarnessOptions = {}) => {
       options.managedMcpConfig === true
         ? FileSystem.FileSystem.of({
             ...fs,
-            exists: (path) =>
-              path.endsWith("managed-mcp.json") ? Effect.succeed(true) : fs.exists(path),
+            exists: Effect.fn("FileSystem.exists")(function (path) {
+              return path.endsWith("managed-mcp.json") ? Effect.succeed(true) : fs.exists(path);
+            }),
           })
         : fs,
     ),
@@ -238,59 +241,59 @@ export const tempRoot = Effect.gen(function* () {
   return { root, baseDir: NodePath.join(root, "home") };
 });
 
-export const seedProject = (projectId: ProjectId, workspaceRoot: string) =>
-  Effect.gen(function* () {
-    const eventSink = yield* EventSink.EventSinkV2;
-    const now = yield* DateTime.now;
-    const commandId = CommandId.make(`project:create:${projectId}`);
-    const created = planProjectCommand({
-      command: { type: "project.create", commandId, projectId, title: projectId, workspaceRoot },
-      state: { project: undefined, workspaceOwner: undefined, appWorkspaceOwner: undefined },
-      eventId: EventId.make(`event:${commandId}`),
-      now,
-    });
-    yield* eventSink.commitProjectCommand({
-      commandId,
-      projectId,
-      commandType: "project.create",
-      acceptedAt: now,
-      event: Result.getOrThrow(created),
-    });
+export const seedProject = Effect.fn("seedProject")(function* (
+  projectId: ProjectId,
+  workspaceRoot: string,
+) {
+  const eventSink = yield* EventSink.EventSinkV2;
+  const now = yield* DateTime.now;
+  const commandId = CommandId.make(`project:create:${projectId}`);
+  const created = planProjectCommand({
+    command: { type: "project.create", commandId, projectId, title: projectId, workspaceRoot },
+    state: { project: undefined, workspaceOwner: undefined, appWorkspaceOwner: undefined },
+    eventId: EventId.make(`event:${commandId}`),
+    now,
   });
+  yield* eventSink.commitProjectCommand({
+    commandId,
+    projectId,
+    commandType: "project.create",
+    acceptedAt: now,
+    event: Result.getOrThrow(created),
+  });
+});
 
-export const deleteProject = (projectId: ProjectId) =>
-  Effect.gen(function* () {
-    const eventSink = yield* EventSink.EventSinkV2;
-    const projects = yield* ProjectStore.ProjectStoreV2;
-    const project = Option.getOrThrow(yield* projects.get(projectId));
-    const now = yield* DateTime.now;
-    const commandId = CommandId.make(`project:delete:${projectId}`);
-    const deleted = planProjectCommand({
-      command: { type: "project.delete", commandId, projectId },
-      state: { project, workspaceOwner: undefined, appWorkspaceOwner: undefined },
-      eventId: EventId.make(`event:${commandId}`),
-      now,
-    });
-    yield* eventSink.commitProjectCommand({
-      commandId,
-      projectId,
-      commandType: "project.delete",
-      acceptedAt: now,
-      event: Result.getOrThrow(deleted),
-    });
+export const deleteProject = Effect.fn("deleteProject")(function* (projectId: ProjectId) {
+  const eventSink = yield* EventSink.EventSinkV2;
+  const projects = yield* ProjectStore.ProjectStoreV2;
+  const project = Option.getOrThrow(yield* projects.get(projectId));
+  const now = yield* DateTime.now;
+  const commandId = CommandId.make(`project:delete:${projectId}`);
+  const deleted = planProjectCommand({
+    command: { type: "project.delete", commandId, projectId },
+    state: { project, workspaceOwner: undefined, appWorkspaceOwner: undefined },
+    eventId: EventId.make(`event:${commandId}`),
+    now,
   });
+  yield* eventSink.commitProjectCommand({
+    commandId,
+    projectId,
+    commandType: "project.delete",
+    acceptedAt: now,
+    event: Result.getOrThrow(deleted),
+  });
+});
 
 /** Every thread carrying this Squire's marker, live and archived. */
-export const markedThreads = (squireId: SquireId) =>
-  Effect.gen(function* () {
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const snapshot = yield* projections.getShellSnapshot();
-    const mine = (shell: OrchestrationV2ThreadShell) => shell.squire?.squireId === squireId;
-    return {
-      live: snapshot.threads.filter(mine),
-      archived: snapshot.archivedThreads.filter(mine),
-    };
-  });
+export const markedThreads = Effect.fn("markedThreads")(function* (squireId: SquireId) {
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const snapshot = yield* projections.getShellSnapshot();
+  const mine = (shell: OrchestrationV2ThreadShell) => shell.squire?.squireId === squireId;
+  return {
+    live: snapshot.threads.filter(mine),
+    archived: snapshot.archivedThreads.filter(mine),
+  };
+});
 
 export const workspacePath = (baseDir: string, squireId: SquireId) =>
   NodePath.join(baseDir, "userdata", "squires", squireId, "workspace");

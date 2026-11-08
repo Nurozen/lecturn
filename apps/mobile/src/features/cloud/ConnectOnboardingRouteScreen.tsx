@@ -6,8 +6,8 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 
 import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { useAuth } from "@clerk/expo";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useEffect, useState } from "react";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useState } from "react";
 import { Platform, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,23 +22,11 @@ import { TeamSelector } from "./TeamSelector";
 import { useConnectAccounts } from "./knownAccounts";
 import { hasCloudPublicConfig } from "./publicConfig";
 
+// Only reachable with cloud config: onboarding is requested after a Lecturn Connect
+// sign-in, and appLinking drops the deep link otherwise.
 export function ConnectOnboardingRouteScreen(
   props: StaticScreenProps<{ accountId?: string } | undefined>,
 ) {
-  const navigation = useNavigation();
-
-  // Without cloud config, deep links must exit to avoid an empty, undismissable sheet.
-  useEffect(() => {
-    if (hasCloudPublicConfig()) {
-      return;
-    }
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.dispatch(StackActions.replace("Home"));
-    }
-  }, [navigation]);
-
   return hasCloudPublicConfig() ? (
     <ConfiguredConnectOnboardingRouteScreen accountId={props.route.params?.accountId} />
   ) : null;

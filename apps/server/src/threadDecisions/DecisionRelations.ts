@@ -327,8 +327,9 @@ export const make = Effect.gen(function* () {
               expectedOccurrenceRevision: member.revision,
             })
             .pipe(
-              Effect.catch((error) =>
-                error.code === "stale-revision" ? Effect.void : Effect.fail(error),
+              Effect.catchIf(
+                (error) => error.code === "stale-revision",
+                () => Effect.void,
               ),
             );
         }

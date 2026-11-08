@@ -15,8 +15,9 @@ export const makeStaveAutoPullOwnerCheck = Effect.fn("makeStaveAutoPullOwnerChec
       while (true) {
         const resolved = yield* fs.realPath(candidate).pipe(
           Effect.asSome,
-          Effect.catch((error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeedNone,
           ),
         );
         if (Option.isSome(resolved)) {

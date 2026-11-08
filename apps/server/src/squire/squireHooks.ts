@@ -43,10 +43,9 @@ const runAll = <A>(
     hooks,
     (hook) =>
       hook(input).pipe(
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
-            : Effect.logWarning(message, { cause: Cause.pretty(cause) }),
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) => Effect.logWarning(message, { cause: Cause.pretty(cause) }),
         ),
       ),
     { discard: true },
@@ -56,10 +55,18 @@ const make = Effect.sync(() => {
   const summaryHooks: Array<SquireSummaryStoredHook> = [];
   const threadHooks: Array<SquireThreadChangedHook> = [];
   return SquireHooks.of({
-    onSummaryStored: (hook) => Effect.sync(() => void summaryHooks.push(hook)),
-    onThreadChanged: (hook) => Effect.sync(() => void threadHooks.push(hook)),
-    summaryStored: (stored) => runAll(summaryHooks, stored, "Squire summary hook failed"),
-    threadChanged: (threadId) => runAll(threadHooks, threadId, "Squire thread hook failed"),
+    onSummaryStored: Effect.fn("SquireHooks.onSummaryStored")(function (hook) {
+      return Effect.sync(() => void summaryHooks.push(hook));
+    }),
+    onThreadChanged: Effect.fn("SquireHooks.onThreadChanged")(function (hook) {
+      return Effect.sync(() => void threadHooks.push(hook));
+    }),
+    summaryStored: Effect.fn("SquireHooks.summaryStored")(function (stored) {
+      return runAll(summaryHooks, stored, "Squire summary hook failed");
+    }),
+    threadChanged: Effect.fn("SquireHooks.threadChanged")(function (threadId) {
+      return runAll(threadHooks, threadId, "Squire thread hook failed");
+    }),
   });
 });
 

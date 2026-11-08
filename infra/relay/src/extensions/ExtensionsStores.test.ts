@@ -24,6 +24,9 @@ import {
   SquireRoutingResult,
   type ContextualJudgment,
 } from "@lecturn/contracts";
+
+// @effect-diagnostics-next-line effectSucceedWithVoid:off - These optional results require undefined, not the wider void type.
+const succeedUndefined = Effect.succeed(undefined);
 const url = process.env.BILLING_TEST_DATABASE_URL;
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const validAllowance = Schema.is(ExtensionAllowance);
@@ -622,7 +625,7 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
               EXTENSIONS_DECISIONS_COHORT: "*",
             }),
             "https://fixture.invalid",
-            Effect.succeed(undefined),
+            succeedUndefined,
           );
           const rollback = yield* makeDecisionsService(
             parseDecisionsConfig({
@@ -1059,7 +1062,7 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
           const { usage } = yield* makeExtensionsService(
             squiresConfig,
             "https://fixture.invalid",
-            Effect.succeed(undefined),
+            succeedUndefined,
           );
           const input = (requestId: string) => ({
             principal: f.host,
@@ -1129,7 +1132,7 @@ describe.skipIf(!url)("Extensions PostgreSQL consent and shared ledger", () => {
             EXTENSIONS_REQUESTS_PER_MINUTE: "2",
           }),
           "https://fixture.invalid",
-          Effect.succeed(undefined),
+          succeedUndefined,
         );
         const input = (requestId: string) => ({
           principal: f.host,

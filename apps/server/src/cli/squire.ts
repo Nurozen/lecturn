@@ -121,11 +121,10 @@ const readJsonFile = Effect.fn("squire.readFixtureFile")(function* (file: string
     .pipe(Effect.mapError((cause) => new SquireFixtureFileError({ path: resolved, cause })));
   return {
     resolved,
-    json: yield* Option.match(decodeJson(text), {
-      onNone: () =>
-        Effect.fail(new SquireFixtureFileError({ path: resolved, cause: new Error("not JSON") })),
-      onSome: Effect.succeed,
-    }),
+    json: yield* Effect.fromOption(
+      decodeJson(text),
+      () => new SquireFixtureFileError({ path: resolved, cause: new Error("not JSON") }),
+    ),
   };
 });
 

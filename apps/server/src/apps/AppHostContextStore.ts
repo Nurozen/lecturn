@@ -41,18 +41,19 @@ export const layer = Layer.effect(
     const { hostContext } = yield* AppRuntimeState;
     return AppHostContextStore.of({
       // Empty text clears the entry: an app's way back out of a context it set.
-      set: (target, text) =>
-        Ref.update(hostContext, (entries) => {
+      set: Effect.fn("AppHostContextStore.set")(function (target, text) {
+        return Ref.update(hostContext, (entries) => {
           const next = new Map(entries);
           const key = hostContextKey(target);
           if (text.length === 0) next.delete(key);
           else next.set(key, text);
           return next;
-        }),
-      forTurn: (threadId, projectId) =>
-        Ref.get(hostContext).pipe(
-          Effect.map((entries) => hostContextForTurn(entries, threadId, projectId)),
-        ),
+        });
+      }),
+      forTurn: Effect.fn("AppHostContextStore.forTurn")(function* (threadId, projectId) {
+        const entries = yield* Ref.get(hostContext);
+        return hostContextForTurn(entries, threadId, projectId);
+      }),
     });
   }),
 );

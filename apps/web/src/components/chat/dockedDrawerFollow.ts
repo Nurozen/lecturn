@@ -25,14 +25,14 @@ function shouldFollowDockedDrawer(input: {
  * its end re-pins when a drawer docks or grows, after the grown inset commits.
  */
 export function useFollowEndWhenDrawerDocks(input: {
-  readonly overlay: HTMLElement | null;
+  readonly readOverlay: () => HTMLElement | null;
   readonly inset: number;
   readonly isFollowingEnd: () => boolean;
   readonly scrollToEnd: () => void;
 }) {
   const previousHeightRef = useRef(0);
-  const measure = useEffectEvent((overlay: HTMLElement | null) => {
-    const height = dockedDrawerHeight(overlay);
+  const measure = useEffectEvent(() => {
+    const height = dockedDrawerHeight(input.readOverlay());
     const follow = shouldFollowDockedDrawer({
       previousHeight: previousHeightRef.current,
       height,
@@ -41,8 +41,8 @@ export function useFollowEndWhenDrawerDocks(input: {
     previousHeightRef.current = height;
     if (follow) input.scrollToEnd();
   });
-  const { overlay, inset } = input;
+  const { inset } = input;
   useLayoutEffect(() => {
-    if (inset > 0) measure(overlay);
-  }, [overlay, inset]);
+    if (inset > 0) measure();
+  }, [inset]);
 }

@@ -553,7 +553,7 @@ const make = Effect.gen(function* () {
   const messageRow = (input: {
     readonly recipient: SquireId;
     readonly messageKey: string;
-    readonly payload: typeof SquireEvent.Type;
+    readonly payload: SquireEvent;
     readonly now: string;
     readonly deferUntil: string | null;
   }) =>

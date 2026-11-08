@@ -545,7 +545,7 @@ const make = Effect.gen(function* () {
         if (Result.isFailure(committed)) {
           return committed.failure instanceof CardMoved
             ? toOutdated(committed.failure.reason)
-            : yield* Effect.fail(committed.failure);
+            : yield* committed.failure;
         }
         yield* wake(committed.success);
         return applied;

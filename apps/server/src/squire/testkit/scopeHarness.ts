@@ -74,7 +74,9 @@ export const orchestratorLayer = Layer.mergeAll(
   Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-      getInstance: (id) => Effect.succeed(id === instanceId ? providerInstance : undefined),
+      getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (id) {
+        return Effect.succeed(id === instanceId ? providerInstance : undefined);
+      }),
       listInstances: Effect.succeed([providerInstance]),
       listUnavailable: Effect.succeed([]),
       streamChanges: Stream.empty,

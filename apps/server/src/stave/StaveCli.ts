@@ -1044,7 +1044,9 @@ export const make = Effect.fn("StaveCli.make")(function* () {
     version: method("version", buildStaveArgv.version, decodeStaveVersion)(undefined),
     configShow: method("config show", buildStaveArgv.configShow, decodeStaveConfigShow)(undefined),
     reposList: method("repos list", buildStaveArgv.reposList, decodeStaveReposList)(undefined),
-    spaceList: (input = {}) => spaceList(input),
+    spaceList: Effect.fn("StaveCli.spaceList")(function (input = {}) {
+      return spaceList(input);
+    }),
     spaceStatus: method("space status", buildStaveArgv.spaceStatus, decodeStaveSpaceStatus),
     sagaList: method("saga list", buildStaveArgv.sagaList, decodeStaveSagaList)(undefined),
     sagaStatus: method("saga status", buildStaveArgv.sagaStatus, decodeStaveSagaStatus),
@@ -1053,8 +1055,12 @@ export const make = Effect.fn("StaveCli.make")(function* () {
       buildStaveArgv.memoryProviders,
       decodeStaveMemoryProviders,
     )(undefined),
-    memoryList: (input = {}) => memoryList(input),
-    setup: (input = {}, stream) => setup(input, stream),
+    memoryList: Effect.fn("StaveCli.memoryList")(function (input = {}) {
+      return memoryList(input);
+    }),
+    setup: Effect.fn("StaveCli.setup")(function (input = {}, stream) {
+      return setup(input, stream);
+    }),
     reposAdd: method("repos add", buildStaveArgv.reposAdd, decodeStaveReposAddResult),
     spaceInit: method(
       "space init",

@@ -11,7 +11,6 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter";
 import * as AppToolApprovalRegistry from "../apps/AppToolApprovalRegistry.ts";
@@ -77,11 +76,9 @@ it.effect.each(["expired", "resolved"] as const)(
       (_input: ProviderAdapter.ProviderAdapterV2RuntimeRequestResponseInput) => Effect.void,
     );
     const getSession = vi.fn(() =>
-      Effect.succeed(
-        Option.some({
-          respondToRuntimeRequest,
-        } as never),
-      ),
+      Effect.succeedSome({
+        respondToRuntimeRequest,
+      } as never),
     );
     const projection = {
       runtimeRequests: [
@@ -195,9 +192,7 @@ it.effect(
     const respondToRuntimeRequest = vi.fn(
       (_input: ProviderAdapter.ProviderAdapterV2RuntimeRequestResponseInput) => Effect.void,
     );
-    const getSession = vi.fn(() =>
-      Effect.succeed(Option.some({ respondToRuntimeRequest } as never)),
-    );
+    const getSession = vi.fn(() => Effect.succeedSome({ respondToRuntimeRequest } as never));
     const layerTest = layerRuntimeRequestTest(
       projectionWithRuntimeRequest({
         ...resolvedRuntimeRequest(requestId, providerSessionId),

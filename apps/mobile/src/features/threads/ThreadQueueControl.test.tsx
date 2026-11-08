@@ -60,6 +60,7 @@ const unusedExport: unknown = new Proxy(() => unusedExport, {
   apply: () => unusedExport,
 });
 const unusedModules = [
+  "@lecturn/client-runtime/queued-run-edit",
   "@react-navigation/native",
   "@effect/atom-react",
   "effect/reactivity",

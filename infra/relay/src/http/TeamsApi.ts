@@ -218,7 +218,7 @@ export function teamsRoutes(routeConfig: TeamsRouteConfig) {
           return json({ message: "JSON required" }, 400);
         const payload = yield* request.json.pipe(Effect.mapError(invalid));
         const decode = <S extends Schema.Top>(schema: S) =>
-          Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(invalid));
+          Schema.decodeEffect(schema)(payload).pipe(Effect.mapError(invalid));
         if (!organizationId) {
           const { name } = yield* decode(Schema.Struct({ name: text }));
           yield* requireVerifiedIdentity(userId);

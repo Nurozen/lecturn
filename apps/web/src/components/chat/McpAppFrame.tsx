@@ -23,18 +23,20 @@ import { squireLinkAppPath } from "@lecturn/shared/promptLinks";
 import { LECTURN_MCP_APP_SERVER } from "@lecturn/shared/toolOutput";
 import { useRouter } from "@tanstack/react-router";
 import { Minimize2Icon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type ToggleEvent } from "react";
 import { flushSync } from "react-dom";
 
-import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
+import { useLongLivedAssetUrl } from "~/assets/longLivedAssetUrls";
 import { APP_VERSION } from "~/branding";
 import { isEmbedLocation } from "~/embed/embedAuth";
 import { useAppReferences } from "~/components/embed/AppReferencesContext";
 import { isConfirmDialogActive, requestConfirmDialog } from "~/confirmDialog";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
+import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
+import { useEnvironmentQuery } from "~/state/query";
 import { useTurnItemDetail } from "~/state/queries";
 import { mcpAppEnvironment } from "~/state/mcpApps";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -49,13 +51,25 @@ const commandFailure = (result: {
   );
 };
 
-const MIN_URL_LIFE_MS = 5 * 60_000;
 const fullscreenSupported =
   typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
 
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 // Exclude activation left by input elsewhere in Lecturn.
 const PAGE_ACTIVATION_MS = 5_000;
+
+// Frame input does not bubble here. An app can refocus itself, so focus
+// alone cannot exclude activation from input elsewhere in Lecturn.
+let lastPageInputAt = Number.NEGATIVE_INFINITY;
+if (typeof window !== "undefined") {
+  const note = () => {
+    lastPageInputAt = performance.now();
+  };
+  if (navigator.userActivation?.isActive) note();
+  for (const type of ["pointerdown", "pointerup", "touchend", "keydown"] as const) {
+    window.addEventListener(type, note, true);
+  }
+}
 
 function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
@@ -91,15 +105,22 @@ export function McpAppFrame(props: {
   const [displayMode, setDisplayMode] = useState<McpAppDisplayMode>("inline");
   const [closed, setClosed] = useState(false);
   const [documentGeneration, setDocumentGeneration] = useState(0);
-  useLayoutEffect(() => {
-    const box = boxRef.current;
-    if (!box) return;
+  // Closing and reopening replaces the box, which re-attaches this.
+  const attachBox = (box: HTMLDivElement) => {
+    boxRef.current = box;
     setWidth(box.clientWidth);
-    return observeResize(box, ([entry]) => {
+    const stopResize = observeResize(box, ([entry]) => {
       if (entry) setWidth(Math.round(entry.contentRect.width));
+      // Full screen reports the viewport, which can change height alone.
+      if (fullscreenSupported && box.matches(":popover-open")) {
+        hostRef.current?.updateHostContext();
+      }
     });
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Closing and reopening replaces the box.
-  }, [closed]);
+    return () => {
+      stopResize();
+      boxRef.current = null;
+    };
+  };
 
   const resource = {
     _tag: "attachment" as const,
@@ -109,27 +130,10 @@ export function McpAppFrame(props: {
     disposition: "inline" as const,
     renderIntent: "mcp-app" as const,
   };
-  const asset = useAssetUrlState(props.environmentId, resource);
-  const refreshAsset = useAssetUrlRefresh(props.environmentId, resource);
-  // Retain the URL to avoid reloads. Re-mint near expiry; frames cannot report failed loads.
+  // The frame keeps its first URL: a re-minted one would reload the app.
   const [src, setSrc] = useState<string | null>(null);
-  const [mintFailed, setMintFailed] = useState(false);
-  const minting = useRef(false);
-  const cachedUrl = asset._tag === "Success" ? asset.url : null;
-  const cachedExpiresAt = asset._tag === "Success" ? asset.expiresAt : 0;
-  useEffect(() => {
-    if (src !== null || cachedUrl === null || minting.current) return;
-    if (cachedExpiresAt - Date.now() > MIN_URL_LIFE_MS) {
-      // oxlint-disable-next-line react/set-state-in-effect -- Adopts the cached URL once it is known to last.
-      setSrc(cachedUrl);
-      return;
-    }
-    minting.current = true;
-    void refreshAsset().then(
-      (url) => (url === null ? setMintFailed(true) : setSrc(url)),
-      () => setMintFailed(true),
-    );
-  }, [src, cachedUrl, cachedExpiresAt, refreshAsset]);
+  const asset = useLongLivedAssetUrl(src === null ? props.environmentId : null, resource);
+  if (src === null && asset._tag === "Success") setSrc(asset.url);
 
   const detail = useTurnItemDetail({
     environmentId: props.environmentId,
@@ -146,16 +150,21 @@ export function McpAppFrame(props: {
 
   const callTool = useAtomCommand(mcpAppEnvironment.callTool, { reportFailure: false });
   const toolInfo = useAtomCommand(mcpAppEnvironment.toolInfo, { reportFailure: false });
+  const toolDefinition = useEnvironmentQuery(
+    mcpAppEnvironment.toolInfoQuery({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, itemId: props.itemId, name: app.tool },
+    }),
+  ).data?.tool;
   const readResource = useAtomCommand(mcpAppEnvironment.readResource, { reportFailure: false });
   const updateModelContext = useAtomCommand(mcpAppEnvironment.updateModelContext, {
     reportFailure: false,
   });
-  const [toolDefinition, setToolDefinition] = useState<unknown>(undefined);
   const appReferences = useAppReferences();
   const router = useRouter();
 
   // Read live values without rebuilding the host and losing the app session.
-  const live = {
+  const readLive = useStableCallback(() => ({
     theme,
     width,
     props,
@@ -167,79 +176,42 @@ export function McpAppFrame(props: {
     toolDefinition,
     appReferences,
     router,
-  };
+  }));
   const hostRef = useRef<McpAppHost | null>(null);
-  const latest = useRef(live);
-  useEffect(() => {
-    latest.current = live;
-  });
 
-  // Frame input does not bubble here. An app can refocus itself, so focus
-  // alone cannot exclude activation from input elsewhere in Lecturn.
-  const lastPageInputAt = useRef(Number.NEGATIVE_INFINITY);
-  useEffect(() => {
-    const note = () => {
-      lastPageInputAt.current = performance.now();
-    };
-    if (navigator.userActivation?.isActive) note();
-    const types = ["pointerdown", "pointerup", "touchend", "keydown"] as const;
-    for (const type of types) window.addEventListener(type, note, true);
-    return () => {
-      for (const type of types) window.removeEventListener(type, note, true);
-    };
-  }, []);
-
-  useEffect(() => {
-    const box = boxRef.current;
-    if (box === null || !fullscreenSupported) return;
-    const shown = box.matches(":popover-open");
-    if (displayMode === "fullscreen" && !shown) box.showPopover();
-    if (displayMode !== "fullscreen" && shown) box.hidePopover();
-    if (displayMode === "fullscreen") {
-      latest.current.props.onFullscreenChange?.(true);
-      return () => latest.current.props.onFullscreenChange?.(false);
-    }
-  }, [displayMode]);
   const [stepAsideFor, setStepAsideFor] = useState(props.awaitingUser);
   if (stepAsideFor !== props.awaitingUser) {
     setStepAsideFor(props.awaitingUser);
     if (props.awaitingUser === true) setDisplayMode("inline");
   }
-  useEffect(() => {
-    if (displayMode !== "fullscreen") return;
-    const leave = () => setDisplayMode("inline");
-    const onFocus = (event: FocusEvent) => {
-      if (event.target instanceof Node && !boxRef.current?.contains(event.target)) leave();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") leave();
-    };
-    const onResize = () => hostRef.current?.updateHostContext();
-    document.addEventListener("focusin", onFocus);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onResize);
+  // The box is in the top layer exactly while its full-screen chrome is
+  // mounted, so every way out of full screen (including the step-aside above,
+  // decided during render) closes the popover and releases the timeline pin.
+  const attachFullscreenChrome = (chrome: HTMLDivElement) => {
+    const box = chrome.parentElement;
+    if (box === null) return;
+    if (!box.matches(":popover-open")) box.showPopover();
+    readLive().props.onFullscreenChange?.(true);
     return () => {
-      document.removeEventListener("focusin", onFocus);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onResize);
+      if (box.matches(":popover-open")) box.hidePopover();
+      readLive().props.onFullscreenChange?.(false);
     };
-  }, [displayMode]);
+  };
+  // Light dismiss (Escape) closes the popover without React.
+  const onBoxToggle = (event: ToggleEvent<HTMLDivElement>) => {
+    if (event.newState === "closed") setDisplayMode("inline");
+  };
+  const onBoxBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (
+      displayMode === "fullscreen" &&
+      next instanceof Node &&
+      !event.currentTarget.contains(next)
+    ) {
+      setDisplayMode("inline");
+    }
+  };
 
-  useEffect(() => {
-    let cancelled = false;
-    void latest.current
-      .toolInfo({
-        environmentId: props.environmentId,
-        input: { threadId: props.threadId, itemId: props.itemId, name: app.tool },
-      })
-      .then((info) => {
-        if (cancelled || info._tag !== "Success") return;
-        if (info.value.tool !== undefined) setToolDefinition(info.value.tool);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.environmentId, props.threadId, props.itemId, app.tool]);
   // Navigation retains the frame window; reject second loads to prevent impersonation.
   const loads = useRef({ generation: 0, count: 0 });
   const onFrameLoad = () => {
@@ -253,10 +225,11 @@ export function McpAppFrame(props: {
     }
   };
 
-  useEffect(() => {
-    if (src === null) return;
+  // The host belongs to this frame element, which is replaced when the document is reopened.
+  const attachFrame = (frame: HTMLIFrameElement) => {
+    frameRef.current = frame;
     const hostContext = (): McpAppHostContext => {
-      const current = latest.current;
+      const current = readLive();
       return {
         theme: current.theme.appearance,
         styles: { variables: mcpAppStyleVariables(current.theme.variables) },
@@ -294,7 +267,7 @@ export function McpAppFrame(props: {
     };
     const target = () => frameRef.current?.contentWindow ?? null;
     const scope = () => {
-      const { environmentId, threadId, itemId } = latest.current.props;
+      const { environmentId, threadId, itemId } = readLive().props;
       return { environmentId, input: { threadId, itemId } };
     };
     const host = makeMcpAppHost({
@@ -305,7 +278,7 @@ export function McpAppFrame(props: {
       hostContext,
       callTool: async ({ name, arguments: args }) => {
         const { environmentId, input } = scope();
-        const info = await latest.current.toolInfo({ environmentId, input: { ...input, name } });
+        const info = await readLive().toolInfo({ environmentId, input: { ...input, name } });
         if (info._tag !== "Success") throw commandFailure(info);
         if (!info.value.callable) throw new McpAppHostRefusal("This app cannot call that tool.");
         if (!info.value.readOnly) {
@@ -314,7 +287,7 @@ export function McpAppFrame(props: {
           );
           if (approved !== true) throw new McpAppHostRefusal("Declined by the user.");
         }
-        const result = await latest.current.callTool({
+        const result = await readLive().callTool({
           environmentId,
           input: { ...input, name, arguments: args },
         });
@@ -323,7 +296,7 @@ export function McpAppFrame(props: {
       },
       readResource: async ({ uri }) => {
         const { environmentId, input } = scope();
-        const result = await latest.current.readResource({
+        const result = await readLive().readResource({
           environmentId,
           input: { ...input, uri },
         });
@@ -341,7 +314,7 @@ export function McpAppFrame(props: {
       ...(app.server === LECTURN_MCP_APP_SERVER
         ? {
             openAppRef: {
-              refPrefixes: () => latest.current.appReferences?.refPrefixes ?? [],
+              refPrefixes: () => readLive().appReferences?.refPrefixes ?? [],
               open: async (ref) => {
                 if (
                   document.activeElement !== frameRef.current ||
@@ -349,7 +322,7 @@ export function McpAppFrame(props: {
                 ) {
                   throw new McpAppHostRefusal("Links open only from a click in the app.");
                 }
-                const activate = latest.current.appReferences?.activate;
+                const activate = readLive().appReferences?.activate;
                 if (activate == null) {
                   throw new McpAppHostRefusal("This app has no link Lecturn can open.");
                 }
@@ -371,12 +344,12 @@ export function McpAppFrame(props: {
               }
               // Lecturn: a full-size card would cover the page the link opens.
               setDisplayMode("inline");
-              await latest.current.router.navigate({ href: squireLinkAppPath(link) });
+              await readLive().router.navigate({ href: squireLinkAppPath(link) });
             },
           }
         : {}),
       sendMessage: async (text) => {
-        const send = latest.current.props.onSendMessage;
+        const send = readLive().props.onSendMessage;
         if (send === undefined) throw new McpAppHostRefusal("Messages are not available here.");
         const approved = await ask(`Send this message from ${app.server}?\n${text}`);
         if (approved !== true) throw new McpAppHostRefusal("Declined by the user.");
@@ -384,12 +357,12 @@ export function McpAppFrame(props: {
       },
       updateModelContext: async (context) => {
         const { environmentId, input } = scope();
-        const result = await latest.current.updateModelContext({
+        const result = await readLive().updateModelContext({
           environmentId,
           input: {
             ...input,
             ...context,
-            conversationThreadId: latest.current.props.conversationThreadId,
+            conversationThreadId: readLive().props.conversationThreadId,
           },
         });
         if (result._tag !== "Success") throw commandFailure(result);
@@ -398,14 +371,15 @@ export function McpAppFrame(props: {
         const otherFullscreen = document.querySelector("[data-mcp-app-fullscreen]");
         if (
           mode === "fullscreen" &&
-          (document.activeElement !== frameRef.current ||
+          (!fullscreenSupported ||
+            document.activeElement !== frameRef.current ||
             !navigator.userActivation?.isActive ||
-            performance.now() - lastPageInputAt.current < PAGE_ACTIVATION_MS ||
-            latest.current.props.awaitingUser === true ||
+            performance.now() - lastPageInputAt < PAGE_ACTIVATION_MS ||
+            readLive().props.awaitingUser === true ||
             isConfirmDialogActive() ||
             (otherFullscreen !== null && otherFullscreen !== boxRef.current))
         ) {
-          return latest.current.displayMode;
+          return readLive().displayMode;
         }
         setDisplayMode(mode);
         return mode;
@@ -421,7 +395,7 @@ export function McpAppFrame(props: {
             bytes = file.bytes;
           } else {
             const { environmentId, input } = scope();
-            const read = await latest.current.readResource({
+            const read = await readLive().readResource({
               environmentId,
               input: { ...input, uri: file.uri },
             });
@@ -439,7 +413,7 @@ export function McpAppFrame(props: {
         }
       },
       onRequestTeardown: () => {
-        if (latest.current.displayMode === "fullscreen") {
+        if (readLive().displayMode === "fullscreen") {
           setDisplayMode("inline");
           return;
         }
@@ -447,7 +421,7 @@ export function McpAppFrame(props: {
       },
       onSizeChanged: (size) => {
         // Ignore fullscreen height when restoring inline sizing.
-        if (latest.current.displayMode === "fullscreen") return;
+        if (readLive().displayMode === "fullscreen") return;
         if (size.height !== undefined) setHeight(clampMcpAppHeight(size.height));
       },
     });
@@ -460,9 +434,9 @@ export function McpAppFrame(props: {
       window.removeEventListener("message", receive);
       void host.teardown();
       hostRef.current = null;
+      frameRef.current = null;
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A reopened document needs a new host.
-  }, [src, app, documentGeneration]);
+  };
 
   useEffect(() => {
     hostRef.current?.updateHostContext();
@@ -482,7 +456,6 @@ export function McpAppFrame(props: {
           size="xs"
           variant="ghost"
           onClick={() => {
-            minting.current = false;
             setSrc(null);
             setDocumentGeneration((value) => value + 1);
             setClosed(false);
@@ -499,9 +472,11 @@ export function McpAppFrame(props: {
     // Preserve inline row height during fullscreen to prevent timeline jumps.
     <div style={{ height }} data-testid="mcp-app-card">
       <div
-        ref={boxRef}
+        ref={attachBox}
         // Preserve the frame's parent to avoid reloads; the top layer escapes timeline containment.
-        {...(fullscreenSupported ? { popover: "manual" as const } : {})}
+        {...(fullscreenSupported
+          ? { popover: "auto" as const, onToggle: onBoxToggle, onBlur: onBoxBlur }
+          : {})}
         data-mcp-app-fullscreen={fullscreen ? "" : undefined}
         className={cn(
           "relative size-full overflow-hidden",
@@ -512,7 +487,10 @@ export function McpAppFrame(props: {
         )}
       >
         {fullscreen ? (
-          <div className="flex h-10 shrink-0 items-center justify-between border-border border-b px-3 text-sm">
+          <div
+            ref={attachFullscreenChrome}
+            className="flex h-10 shrink-0 items-center justify-between border-border border-b px-3 text-sm"
+          >
             <span className="truncate">{app.server}</span>
             <Button
               aria-label="Exit full screen"
@@ -530,7 +508,7 @@ export function McpAppFrame(props: {
           </p>
         ) : src !== null ? (
           <iframe
-            ref={frameRef}
+            ref={attachFrame}
             src={src}
             title={`${app.server} app`}
             // Omitting allow-same-origin isolates the app from the session.
@@ -540,7 +518,7 @@ export function McpAppFrame(props: {
             className={cn("block w-full border-0", fullscreen ? "min-h-0 flex-1" : "h-full")}
             style={{ colorScheme: theme.appearance }}
           />
-        ) : asset._tag === "Failure" || mintFailed ? (
+        ) : asset._tag === "Failure" ? (
           <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
             Unable to load the {app.server} app
           </p>

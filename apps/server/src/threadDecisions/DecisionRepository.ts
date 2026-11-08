@@ -759,16 +759,30 @@ export const make = Effect.gen(function* () {
     };
   });
   return DecisionRepository.of({
-    get: (input) => get(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    list: (input) => list(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    mutate: (input) => mutate(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    export: (input) => exportDecisions(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    createFromWriter: (input) =>
-      createFromWriter(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    addEvidence: (input) => addEvidence(input).pipe(sql.withTransaction, Effect.mapError(boundary)),
-    projectRevision: (projectId) => revision(projectId).pipe(Effect.mapError(boundary)),
-    bumpRevision: (projectId) =>
-      bump(projectId).pipe(sql.withTransaction, Effect.mapError(boundary)),
+    get: Effect.fn("DecisionRepository.get")(function (input) {
+      return get(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    list: Effect.fn("DecisionRepository.list")(function (input) {
+      return list(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    mutate: Effect.fn("DecisionRepository.mutate")(function (input) {
+      return mutate(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    export: Effect.fn("DecisionRepository.export")(function (input) {
+      return exportDecisions(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    createFromWriter: Effect.fn("DecisionRepository.createFromWriter")(function (input) {
+      return createFromWriter(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    addEvidence: Effect.fn("DecisionRepository.addEvidence")(function (input) {
+      return addEvidence(input).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
+    projectRevision: Effect.fn("DecisionRepository.projectRevision")(function (projectId) {
+      return revision(projectId).pipe(Effect.mapError(boundary));
+    }),
+    bumpRevision: Effect.fn("DecisionRepository.bumpRevision")(function (projectId) {
+      return bump(projectId).pipe(sql.withTransaction, Effect.mapError(boundary));
+    }),
   });
 });
 export const layer = Layer.effect(DecisionRepository, make);

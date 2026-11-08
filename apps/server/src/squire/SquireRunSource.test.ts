@@ -25,7 +25,6 @@ import type { ProviderInstance } from "@lecturn/provider-core/server/driver";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -260,22 +259,20 @@ const load = (
         }),
         Layer.mock(ProjectStore.ProjectStoreV2)({
           get: () =>
-            Effect.succeed(
-              Option.some({
-                projectId,
-                title: "billing-service",
-                workspaceRoot: "/repo/billing",
-                defaultModelSelection: null,
-                defaultThreadEnvMode: null,
-                autoPull: false,
-                faviconPath: null,
-                projectIcon: null,
-                scripts: [],
-                createdAt: "2026-10-01T00:00:00.000Z",
-                updatedAt: "2026-10-01T00:00:00.000Z",
-                deletedAt: null,
-              }),
-            ),
+            Effect.succeedSome({
+              projectId,
+              title: "billing-service",
+              workspaceRoot: "/repo/billing",
+              defaultModelSelection: null,
+              defaultThreadEnvMode: null,
+              autoPull: false,
+              faviconPath: null,
+              projectIcon: null,
+              scripts: [],
+              createdAt: "2026-10-01T00:00:00.000Z",
+              updatedAt: "2026-10-01T00:00:00.000Z",
+              deletedAt: null,
+            }),
         }),
         Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
           getInstance: () => Effect.succeed(provider ?? undefined),

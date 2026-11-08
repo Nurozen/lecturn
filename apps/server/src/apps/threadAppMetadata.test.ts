@@ -24,7 +24,6 @@ import type * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAda
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -44,6 +43,7 @@ import * as ThreadMessageIntake from "../orchestration-v2/ThreadMessageIntake.ts
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -117,8 +117,9 @@ const TestLayer = AppProjectService.layer.pipe(
     }),
   ),
   Layer.provideMerge(
-    Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeed(Option.none()) }),
+    Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
   ),
+  Layer.provideMerge(DocumentText.layer),
   Layer.provideMerge(
     Layer.merge(
       NodeServices.layer,

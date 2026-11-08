@@ -1,4 +1,4 @@
-import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages";
+import { acknowledgedThreadMessagesAtom } from "./acknowledged-thread-messages-atom";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import {
   CommandId,
@@ -110,9 +110,13 @@ vi.mock("./server", async () => {
 
 vi.mock("./git", () => ({ gitEnvironment: {} }));
 
-vi.mock("./threads", () => ({
-  threadEnvironment: {},
-}));
+vi.mock("./threads", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    threadEnvironment: {},
+    environmentThreadDetails: { threadAtom: Atom.family((_key: unknown) => Atom.make(null)) },
+  };
+});
 
 vi.mock("./use-atom-command", () => ({
   useAtomCommand: () => harness.sendCommand,

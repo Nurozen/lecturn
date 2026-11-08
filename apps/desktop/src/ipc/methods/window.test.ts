@@ -1,6 +1,4 @@
 import { assert, describe, it } from "@effect/vitest";
-import * as ElectronWindow from "../../electron/ElectronWindow.ts";
-import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
@@ -25,9 +23,13 @@ vi.mock("electron", () => ({
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
+import * as ElectronDialog from "../../electron/ElectronDialog.ts";
+import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import {
   getLocalEnvironmentBootstraps,
   getRelayTelemetryEnabled,
+  pickProjectFavicon,
   saveTextFile,
   probeRemoteEditors,
 } from "./window.ts";
@@ -211,7 +213,7 @@ describe("saveTextFile", () => {
           yield* Deferred.await(finish);
         }),
       );
-      const dialog = vi.fn(() => Effect.succeed(Option.some("/chosen/export.md")));
+      const dialog = vi.fn(() => Effect.succeedSome("/chosen/export.md"));
       const fiber = yield* saveTextFile
         .handler({ format: "markdown", content: "# Exact decision\nraw citation" })
         .pipe(
@@ -219,7 +221,7 @@ describe("saveTextFile", () => {
             Layer.mergeAll(
               Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
               Layer.mock(ElectronWindow.ElectronWindow)({
-                focusedMainOrFirst: Effect.succeed(Option.none()),
+                focusedMainOrFirst: Effect.succeedNone,
               }),
               FileSystem.layerNoop({ writeFileString }),
             ),
@@ -243,10 +245,10 @@ describe("saveTextFile", () => {
         Effect.provide(
           Layer.mergeAll(
             Layer.mock(ElectronDialog.ElectronDialog)({
-              saveFile: () => Effect.succeed(Option.none()),
+              saveFile: () => Effect.succeedNone,
             }),
             Layer.mock(ElectronWindow.ElectronWindow)({
-              focusedMainOrFirst: Effect.succeed(Option.none()),
+              focusedMainOrFirst: Effect.succeedNone,
             }),
             FileSystem.layerNoop({ writeFileString }),
           ),
@@ -264,10 +266,10 @@ describe("saveTextFile", () => {
           Effect.provide(
             Layer.mergeAll(
               Layer.mock(ElectronDialog.ElectronDialog)({
-                saveFile: () => Effect.succeed(Option.some("/chosen/export.json")),
+                saveFile: () => Effect.succeedSome("/chosen/export.json"),
               }),
               Layer.mock(ElectronWindow.ElectronWindow)({
-                focusedMainOrFirst: Effect.succeed(Option.none()),
+                focusedMainOrFirst: Effect.succeedNone,
               }),
               FileSystem.layerNoop({
                 writeFileString: () =>
@@ -304,7 +306,7 @@ describe("saveTextFile", () => {
           Layer.mergeAll(
             Layer.mock(ElectronDialog.ElectronDialog)({ saveFile: dialog }),
             Layer.mock(ElectronWindow.ElectronWindow)({
-              focusedMainOrFirst: Effect.succeed(Option.none()),
+              focusedMainOrFirst: Effect.succeedNone,
             }),
             FileSystem.layerNoop({}),
           ),
@@ -312,6 +314,78 @@ describe("saveTextFile", () => {
       );
       assert.strictEqual(result.status, "error");
       assert.strictEqual(dialog.mock.calls.length, 0);
+    }),
+  );
+});
+
+describe("pickProjectFavicon", () => {
+  const pickerLayer = (
+    pickFiles: () => Effect.Effect<Array<string>>,
+    settings?: DesktopAppSettings.DesktopSettings,
+  ) =>
+    Layer.mergeAll(
+      Layer.mock(ElectronDialog.ElectronDialog)({ pickFiles }),
+      Layer.mock(ElectronWindow.ElectronWindow)({
+        focusedMainOrFirst: Effect.succeedNone,
+      }),
+      DesktopAppSettings.layerTest(settings),
+    );
+
+  it.effect("opens a single-image picker from the project directory", () =>
+    Effect.gen(function* () {
+      const pickFiles = vi.fn(() => Effect.succeed(["/pictures/icon.png"]));
+      const result = yield* pickProjectFavicon
+        .handler("/project")
+        .pipe(Effect.provide(pickerLayer(pickFiles)));
+
+      assert.strictEqual(result, "/pictures/icon.png");
+      assert.deepEqual(pickFiles.mock.calls, [
+        [
+          {
+            owner: Option.none(),
+            defaultPath: Option.some("/project"),
+            multiple: false,
+            filters: [
+              {
+                name: "Images",
+                extensions: [
+                  "avif",
+                  "bmp",
+                  "gif",
+                  "ico",
+                  "heic",
+                  "heif",
+                  "jpeg",
+                  "jpg",
+                  "png",
+                  "svg",
+                  "tif",
+                  "tiff",
+                  "webp",
+                  "icns",
+                ],
+              },
+            ],
+          },
+        ],
+      ]);
+    }),
+  );
+
+  it.effect("does not open a picker while the local environment is off", () =>
+    Effect.gen(function* () {
+      const pickFiles = vi.fn(() => Effect.succeed(["/pictures/icon.png"]));
+      const result = yield* pickProjectFavicon.handler("/project").pipe(
+        Effect.provide(
+          pickerLayer(pickFiles, {
+            ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+            localEnvironmentEnabled: false,
+          }),
+        ),
+      );
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(pickFiles.mock.calls.length, 0);
     }),
   );
 });

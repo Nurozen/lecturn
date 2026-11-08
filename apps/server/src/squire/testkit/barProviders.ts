@@ -517,42 +517,44 @@ const recordingClaudeRunner = (recorder: BarProviderRecorder) =>
       const live = yield* ClaudeAdapterV2.ClaudeAgentSdkQueryRunner;
       return ClaudeAdapterV2.ClaudeAgentSdkQueryRunner.of({
         ...live,
-        open: (input) =>
-          Effect.gen(function* () {
-            const resumed = "resume" in input.options && input.options.resume !== undefined;
-            recorder.opens.push({
-              threadId: input.threadId,
-              kind: resumed ? (input.options.forkSession === true ? "fork" : "resume") : "start",
-              options: claudeOpenOptions(input.options),
-            });
-            const session = yield* live.open(input);
-            return {
-              ...session,
-              messages: session.messages.pipe(
-                Stream.tap((message) =>
-                  Effect.sync(() => {
-                    if (message.type === "system" && message.subtype === "init") {
-                      recorder.inits.push(
-                        claudeInit(input.threadId, message as unknown as Record<string, unknown>),
-                      );
-                    }
-                  }),
-                ),
+        open: Effect.fn("ClaudeAdapterV2.ClaudeAgentSdkQueryRunner.open")(function* (input) {
+          const resumed = "resume" in input.options && input.options.resume !== undefined;
+          recorder.opens.push({
+            threadId: input.threadId,
+            kind: resumed ? (input.options.forkSession === true ? "fork" : "resume") : "start",
+            options: claudeOpenOptions(input.options),
+          });
+          const session = yield* live.open(input);
+          return {
+            ...session,
+            messages: session.messages.pipe(
+              Stream.tap((message) =>
+                Effect.sync(() => {
+                  if (message.type === "system" && message.subtype === "init") {
+                    recorder.inits.push(
+                      claudeInit(input.threadId, message as unknown as Record<string, unknown>),
+                    );
+                  }
+                }),
               ),
-            };
-          }),
-        forkSession: (input) =>
-          live.forkSession(input).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                recorder.opens.push({
-                  threadId: input.threadId,
-                  kind: "fork",
-                  options: { forkSession: redact(input.options) },
-                });
-              }),
             ),
-          ),
+          };
+        }),
+        forkSession: Effect.fn("ClaudeAdapterV2.ClaudeAgentSdkQueryRunner.forkSession")(
+          function (input) {
+            return live.forkSession(input).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  recorder.opens.push({
+                    threadId: input.threadId,
+                    kind: "fork",
+                    options: { forkSession: redact(input.options) },
+                  });
+                }),
+              ),
+            );
+          },
+        ),
       });
     }),
   ).pipe(Layer.provide(ClaudeAdapterV2.layerQueryRunner));
@@ -565,8 +567,8 @@ const recordingCodexFactory = (recorder: BarProviderRecorder) =>
       const live = yield* CodexAdapterV2.CodexAppServerClientFactory;
       return CodexAdapterV2.CodexAppServerClientFactory.of({
         ...live,
-        open: (input) =>
-          Effect.suspend(() => {
+        open: Effect.fn("CodexAdapterV2.CodexAppServerClientFactory.open")(function (input) {
+          return Effect.suspend(() => {
             recorder.launches.push({
               threadId: input.threadId ?? null,
               providerSessionId: input.providerSessionId,
@@ -576,7 +578,8 @@ const recordingCodexFactory = (recorder: BarProviderRecorder) =>
             return live.open(input);
           }).pipe(
             Effect.map((client) => recordingCodexClient(client, input.threadId ?? null, recorder)),
-          ),
+          );
+        }),
       });
     }),
   ).pipe(Layer.provide(CodexAdapterV2.layerAppServerClientFactory));

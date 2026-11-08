@@ -157,8 +157,9 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
     while (true) {
       const acquired = yield* fileSystem.writeFileString(lockPath, owner, { flag: "wx" }).pipe(
         Effect.as(true),
-        Effect.catch((error) =>
-          error.reason._tag === "AlreadyExists" ? Effect.succeed(false) : Effect.fail(error),
+        Effect.catchIf(
+          (error) => error.reason._tag === "AlreadyExists",
+          () => Effect.succeed(false),
         ),
       );
       if (acquired) {

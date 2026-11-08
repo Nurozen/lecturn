@@ -310,7 +310,7 @@ describe("app bindings on projects", () => {
 
   it("adds no bytes to projects without an app", () => {
     const codec = OrchestrationProjectShell;
-    const encoded = Schema.encodeSync(codec)(Schema.decodeUnknownSync(codec)(shell));
+    const encoded = Schema.encodeSync(codec)(Schema.decodeSync(codec)(shell));
     expect(JSON.stringify(encoded)).toBe(JSON.stringify(shell));
   });
 

@@ -237,7 +237,7 @@ const make = Effect.gen(function* () {
   // run on, so the thread's own instance decides when it is known.
   const driverOf = (instanceId: ProviderInstanceId) =>
     Option.isNone(providerInstances)
-      ? Effect.succeed(undefined)
+      ? Effect.undefined
       : providerInstances.value
           .getInstance(instanceId)
           .pipe(Effect.map((instance) => instance?.driverKind));

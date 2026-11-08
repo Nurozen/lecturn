@@ -25,7 +25,7 @@ import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../../terminalUiStateStore";
-import { resolveAdjacentThreadId, useThreadJumpHintVisibility } from "../Sidebar.logic";
+import { resolveAdjacentThreadId, useThreadJumpHintsVisible } from "../Sidebar.logic";
 import type { AppsSidebarWorkspace } from "./AppsSidebar.logic";
 
 interface AppsNewThreadTargetState {
@@ -119,7 +119,6 @@ export function useAppsSidebarThreadJumps(input: {
 
   const shortcutModifiers = useShortcutModifierState();
   const terminalFocused = useTerminalFocus();
-  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const shouldShowHintsNow = shouldShowThreadJumpHintsForModifiers(shortcutModifiers, keybindings, {
     platform: navigator.platform,
     context: {
@@ -130,9 +129,7 @@ export function useAppsSidebarThreadJumps(input: {
       isDesktop: isElectron,
     },
   });
-  useEffect(() => {
-    updateThreadJumpHintsVisibility(shouldShowHintsNow);
-  }, [shouldShowHintsNow, updateThreadJumpHintsVisibility]);
+  const showThreadJumpHints = useThreadJumpHintsVisible(shouldShowHintsNow);
 
   if (!showThreadJumpHints) return null;
   const labels = new Map<string, string>();

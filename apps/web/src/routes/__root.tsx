@@ -8,14 +8,14 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { Check, Copy } from "lucide";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
-import { BrowserChromeThemeSync } from "../components/RootDocumentSync";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
+import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { cn } from "../lib/utils";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
 import { GUEST_PAGE_PATH } from "../guestPage";
@@ -25,7 +25,6 @@ import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isEmbedLocation } from "../embed/embedAuth";
 
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
-import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
 const loadAppShell = () => import("../components/AppShell");
@@ -67,6 +66,12 @@ export const Route = createRootRoute({
     }
 
     const authGateState = await resolveInitialServerAuthGateState();
+    if (authGateState.status === "authenticated") {
+      // Idempotent, so every navigation can ask for it. Imported here to keep it out of /embed.
+      void import("../observability/clientTracing").then(({ configureClientTracing }) =>
+        configureClientTracing(),
+      );
+    }
     if (
       authGateState.status === "authenticated" &&
       getDesktopSnapShotBridge() &&
@@ -103,7 +108,21 @@ function RootRouteNotFoundView() {
 }
 
 function RootRouteView() {
-  useEffect(() => installDesktopPasteAsText(window.desktopBridge, window), []);
+  const pathname = useLocation({ select: (location) => location.pathname });
+  // The embed shell renders its own toast surface.
+  if (isEmbedLocation({ pathname })) return <Outlet />;
+  // Above every branch: app services raise toasts for the whole page, so the surface they write to
+  // must not unmount when the root switches branches (for example /welcome to the app shell).
+  return (
+    <ToastProvider>
+      <AnchoredToastProvider>
+        <RootRouteBranch />
+      </AnchoredToastProvider>
+    </ToastProvider>
+  );
+}
+
+function RootRouteBranch() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
   // Once true, stays true: a visit to /welcome means the bootstrap already chose a route.
@@ -123,22 +142,12 @@ function RootRouteView() {
     pathname.startsWith("/connect/") ||
     pathname === "/connect-agent"
   ) {
-    return (
-      <>
-        <BrowserChromeThemeSync key={pathname} />
-        <Outlet />
-      </>
-    );
+    return <Outlet />;
   }
 
   // Handle links before onboarding redirects lose them.
   if (hostedPromptLinkLanding !== null) {
-    return (
-      <>
-        <BrowserChromeThemeSync key={pathname} />
-        {hostedPromptLinkLanding}
-      </>
-    );
+    return hostedPromptLinkLanding;
   }
 
   if (
@@ -146,12 +155,7 @@ function RootRouteView() {
     authGateState.status !== "authenticated" &&
     authGateState.status !== "hosted-static"
   ) {
-    return (
-      <>
-        <BrowserChromeThemeSync key={pathname} />
-        <Outlet />
-      </>
-    );
+    return <Outlet />;
   }
 
   return (

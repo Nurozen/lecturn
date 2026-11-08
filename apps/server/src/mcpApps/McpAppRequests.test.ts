@@ -103,7 +103,7 @@ function makeLayer(input: {
                         } as SquireRepository.SquireCardRow),
                   ),
                 getSquire: () =>
-                  Effect.succeed(Option.some({ lifecycle: "ready" } as SquireRepository.SquireRow)),
+                  Effect.succeedSome({ lifecycle: "ready" } as SquireRepository.SquireRow),
               }),
               Layer.mock(SquireActions.SquireActions)({
                 act: (request) =>

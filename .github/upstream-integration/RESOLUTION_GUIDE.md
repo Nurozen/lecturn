@@ -1170,7 +1170,8 @@ from upstream's side.
   - Apps is a `NAVIGATION_TAB_ORDER` section. Four sections plus Settings fill the native
     slots; a fifth turns on customization and overflow.
   - Fork new-task routes live on the root stack under `new/...`; `replaceNewTaskFlowWithThread`
-    replaces the flow with the thread, also from `AddProjectScreen`.
+    replaces the flow with the thread from the Stave, import and session-import screens.
+    `AddProjectScreen` opens its draft through upstream `useOpenNewTaskDraft` (#25468).
   - Not taken: `THREAD_SIDEBAR_ROW_LAYOUT` and `ComposerModelControl`. The model tray stays
     under the composer on threads and drafts. The inferred project stays draft-free, Contextual
     moves to the compact row and draft dock, and pending rows keep the glass card.
@@ -1296,6 +1297,13 @@ from upstream's side.
   diff colors and the sans stack keep the Lecturn values (no Inter by default), and the new
   values sit in `:root:where([data-redesign])` blocks next to `:root`, so the Lecturn palette
   and user themes still win.
+- **#25324 New design on by default (lead decision D1).** Lecturn does not take it:
+  `redesignEnabled` decodes to `false` in `packages/contracts/src/settings.ts`, and the Beta row
+  keeps its opt-in copy ("Try the new design: ..."). Redesign palette (canvas and surface)
+  overrides never go in `html.dark[data-redesign]` (upstream's diff-icon blocks there are fine):
+  light values sit in `:root:where([data-redesign])` before the Lecturn palette, and the opt-in
+  true black in `:root.dark:where([data-redesign]):not([data-theme-id])` after it. With the
+  toggle off, `:root`, `.dark` and `[data-app-sidebar]` custom properties equal fork main's.
 - **#24850 instructions.** Take upstream's short sections with Lecturn names; keep the
   `lecturn-thread://` link rule, Squire and connected-app overrides, and the ACP-only MCP
   fallback (skipped on Squire homes). Codex connected-app instructions travel as
@@ -1335,6 +1343,42 @@ from upstream's side.
   merge base) take upstream's newer file with `package.json`, `allowBuilds` and the lock.
   `docs/operations/development.md` omits upstream's GitCafe mirror section;
   `mobile-screens-fork.md` follows the committed tarball's tag on the repo that has it.
+- **Docs (#25451).** Lecturn does not ship upstream's `docs/user/faq.md` (upstream voice and
+  hosts, store links, pricing and single-account advice that contradict Lecturn Connect).
+  Delete it again if upstream edits it, and keep its link out of `README.md`.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream 560ddb14).**
+
+- **Rewritten fork files.** `Sidebar.tsx`, `SidebarThreadRow.tsx` and `ChatView.tsx` resolve
+  from stage `:2` with upstream's diff ported in; a 3-way re-merge splices upstream hunks into
+  fork-only regions. The sidebar's per-environment frontier paging (`partShelves`) is fork.
+- **Web app services (#25233, #25461).** Notification and toast coordinators start in
+  `appInit`. Fork notification features (Squire alerts, app thread titles, listing filter) live
+  in `startThreadNotifications` through registry-readable atoms (`readableAppStatusesAtom`,
+  `readableSquireEnvironmentsAtom`); fork root hosts stay in `AppShell.tsx`.
+- **#25475 second account note.** Shown, never blocking, and without upstream's FAQ link.
+- **PR list restore (#25364).** The fork merge picks a deterministic owner for duplicate rows,
+  so `restorePullRequestList` keeps each pull request's newest kept row before merging.
+- **Mobile cloud accounts (#25150).** `MultiAccountCloudAuthBridge` owns account transitions;
+  upstream's single-account `features/cloud/cloudAccountService.ts` is not taken. The
+  client-runtime `relay/cloudAccountService.ts` is kept for upstream parity (only its test uses it).
+  `CloudAuthProvider` takes upstream's module-level config check and no-config deactivate.
+- **Mobile thread rows (#25415).** The title leads at full width (2 lines). The fork status
+  cluster (queued, pin, Woke or stage badge, time) starts the meta line, never beside the title;
+  account and app markers and fork selection colors stay.
+- **Mobile thread settings (#25468).** The existing-thread sheet takes route params only; the
+  fork Contextual control renders in `ExistingThreadSettingsRouteScreen`.
+- **Server.** Provider-parsed slash commands (`/compact`, Codex/Claude `/goal`) go without the
+  fork `contextPrefix`. `ResourceCleanupService.cleanupAttachments` keeps the fork's
+  `(ids, threadId)` signature: upstream tests pass a thread id and `SqlitePersistence.layerMemory`.
+- **Effect lint (#25099).** Fork relay services reuse the file's span prefix
+  (`ManagedGateway.*`); disabled stubs share one module-level `Effect.fn`; pure forwarders use
+  `Effect.fnUntraced`. Mocks typed `Effect<X | undefined>` hoist one suppressed
+  `succeedUndefined` per test file. `scripts/effect-budget.json` keeps upstream's value for
+  upstream files unless the fork has more effects there.
+- **Deps.** A lock regenerated from the fork stage resolves new transitive deps fresh: align
+  them to upstream's versions where the fork has no reason to differ (`@napi-rs/canvas`
+  1.0.13), then verify with `--frozen-lockfile`.
 
 ## Recurring mechanical conflicts
 

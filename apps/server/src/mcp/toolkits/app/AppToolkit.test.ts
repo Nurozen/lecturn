@@ -160,22 +160,20 @@ const layerRuntimePolicyFor = (supportedRuntimeModes?: ReadonlyArray<RuntimeMode
     Layer.provide(
       Layer.mock(ProjectStore.ProjectStoreV2)({
         get: () =>
-          Effect.succeed(
-            Option.some({
-              projectId,
-              title: "Counters",
-              workspaceRoot,
-              defaultModelSelection: null,
-              defaultThreadEnvMode: null,
-              autoPull: false,
-              faviconPath: null,
-              projectIcon: null,
-              scripts: [],
-              createdAt: "2026-10-25T12:00:00.000Z",
-              updatedAt: "2026-10-25T12:00:00.000Z",
-              deletedAt: null,
-            }),
-          ),
+          Effect.succeedSome({
+            projectId,
+            title: "Counters",
+            workspaceRoot,
+            defaultModelSelection: null,
+            defaultThreadEnvMode: null,
+            autoPull: false,
+            faviconPath: null,
+            projectIcon: null,
+            scripts: [],
+            createdAt: "2026-10-25T12:00:00.000Z",
+            updatedAt: "2026-10-25T12:00:00.000Z",
+            deletedAt: null,
+          }),
       }),
     ),
   );

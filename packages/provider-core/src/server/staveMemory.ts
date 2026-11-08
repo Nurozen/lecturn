@@ -34,7 +34,11 @@ export class StaveMemoryWiring extends Context.Service<
 >()("@lecturn/provider-core/server/staveMemory/StaveMemoryWiring") {}
 
 /** A wiring that never finds a memory entry (tests, Stave disabled). */
-export const noop = StaveMemoryWiring.of({ resolve: () => Effect.succeed({ state: "absent" }) });
+export const noop = StaveMemoryWiring.of({
+  resolve: Effect.fn("StaveMemoryWiring.resolve")(function () {
+    return Effect.succeed({ state: "absent" });
+  }),
+});
 export const layerNoop = Layer.succeed(StaveMemoryWiring, noop);
 
 /** Resolves the Stave memory MCP entry for a session's working directory. */

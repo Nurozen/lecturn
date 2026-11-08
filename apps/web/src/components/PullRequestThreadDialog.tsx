@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   readCachedPullRequestResolution,
@@ -108,17 +108,6 @@ export function PullRequestThreadDialog({
   const sourceControlPresentation = getSourceControlPresentation(gitStatus?.sourceControlProvider);
   const terminology = sourceControlPresentation.terminology;
   const SourceControlIcon = sourceControlPresentation.Icon;
-
-  useEffect(() => {
-    if (!open) return;
-    const frame = window.requestAnimationFrame(() => {
-      referenceInputRef.current?.focus();
-      referenceInputRef.current?.select();
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [open]);
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);
@@ -245,7 +234,14 @@ export function PullRequestThreadDialog({
         }
       }}
     >
-      <DialogPopup className="max-w-xl">
+      <DialogPopup
+        className="max-w-xl"
+        initialFocus={() => {
+          referenceInputRef.current?.focus();
+          referenceInputRef.current?.select();
+          return false;
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center">
             <SourceControlIcon className="me-2 size-4" />

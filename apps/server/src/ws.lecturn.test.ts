@@ -74,7 +74,7 @@ it.effect("re-sends the config snapshot when a switch change alters the descript
       Stream.empty,
       {
         resolveAvailableEditors: () => Effect.succeed([]),
-        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+        resolveFileManagerRevealKind: () => Effect.undefined,
       },
       // The switch replays its value on subscribe, then each change.
       Stream.make(off, on, on),

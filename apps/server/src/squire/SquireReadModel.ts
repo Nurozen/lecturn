@@ -63,7 +63,7 @@ export class SquireReadModel extends Context.Service<
   SquireReadModel,
   {
     /** `snapshot` first, then per-Squire `squire`, `squire-removed`, `lead`, and `room` updates. */
-    readonly subscribe: Stream.Stream<typeof SquireSubscribeEvent.Type, SquireError>;
+    readonly subscribe: Stream.Stream<SquireSubscribeEvent, SquireError>;
     readonly itemsList: (
       input: typeof SquireItemsListInput.Type,
     ) => Effect.Effect<typeof SquireItemsListResult.Type, SquireError>;

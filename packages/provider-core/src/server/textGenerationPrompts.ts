@@ -590,10 +590,11 @@ export function buildDecisionNotesPrompt(
 export const ContextualSummaryOutput = Schema.Struct({
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(600)),
 });
+const decodeContextualSummaryMessage = Schema.decodeSync(
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(12000)),
+);
 export function buildContextualSummaryPrompt(input: { message: string }) {
-  const message = Schema.decodeUnknownSync(
-    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(12000)),
-  )(input.message);
+  const message = decodeContextualSummaryMessage(input.message);
   return {
     prompt: [
       "Explain the supplied Contextual evidence to the user in one or two friendly, concise sentences.",

@@ -3,12 +3,13 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { LECTURN_LEGAL_NOTICES } from "@lecturn/shared/legalNotices";
 import Constants from "expo-constants";
 import { settlePromise } from "@lecturn/client-runtime/state/runtime";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { useDeadlinePassed } from "../../lib/clock";
 import {
   type AppUpdateCheckState,
   isAppUpdateCheckAvailable,
@@ -39,7 +40,14 @@ export function SettingsAboutRouteScreen() {
 
 function AppSettingsSection() {
   const [showLegalNotices, setShowLegalNotices] = useState(false);
-  const [updateState, setUpdateState] = useState<AppUpdateCheckState>("idle");
+  const [checkState, setCheckState] = useState<{
+    readonly state: AppUpdateCheckState;
+    // "Up to date" is a confirmation that fades back to idle.
+    readonly settledUntil: number | null;
+  }>({ state: "idle", settledUntil: null });
+  const confirmationExpired = useDeadlinePassed(checkState.settledUntil);
+  const updateState =
+    checkState.state === "current" && confirmationExpired ? "idle" : checkState.state;
   const updateInFlight = useRef(false);
   const hiddenUpdateTapCount = useRef(0);
 
@@ -52,12 +60,6 @@ function AppSettingsSection() {
   const busy =
     updateState === "checking" || updateState === "downloading" || updateState === "restarting";
 
-  useEffect(() => {
-    if (updateState !== "current") return;
-    const timer = setTimeout(() => setUpdateState("idle"), 3000);
-    return () => clearTimeout(timer);
-  }, [updateState]);
-
   async function checkForUpdate() {
     // disabled updates next render; the ref blocks same-frame double taps.
     if (updateInFlight.current) return;
@@ -67,7 +69,11 @@ function AppSettingsSection() {
       runAppUpdateCheck({
         applyMode: "immediate",
         onFailure: (message) => Dialog.alert("Update failed", message),
-        onStateChange: setUpdateState,
+        onStateChange: (state) =>
+          setCheckState({
+            state,
+            settledUntil: state === "current" ? Date.now() + 3000 : null,
+          }),
       }),
     );
     updateInFlight.current = false;

@@ -31,6 +31,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -65,7 +66,7 @@ import {
   limitSidebarCollisionToScope,
   restrictBelowSidebarLabel,
 } from "../Sidebar.drag";
-import { SidebarDragLifecycle, SidebarPointerSensor } from "../Sidebar.pointer";
+import { SidebarPointerSensor } from "../Sidebar.pointer";
 import { createSidebarListMotion } from "../Sidebar.motion";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
@@ -247,11 +248,14 @@ export function SidebarDragScope(props: {
     sensorRef.current = sensor;
   };
   const cancelDrag = () => sensorRef.current?.cancel();
+  // Search unmounts this scope while the Sidebar stays; its rows are gone, so a drag can never drop.
+  const cancelDragOnUnmount = useEffectEvent(cancelDrag);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      cancelDragOnUnmount();
     };
   }, []);
   const canonical = new Map(
@@ -429,6 +433,7 @@ export function SidebarDragScope(props: {
       key: activeKey,
       sourceSection: section,
       section: target.section,
+      // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
       occurredAt: new Date().toISOString(),
       clearsSnooze: plan.kind !== "reorder-pinned",
       order: plan.kind === "settle" ? null : plan.order,
@@ -548,6 +553,7 @@ export function SidebarDragScope(props: {
         const section = sectionOf(key);
         if (!props.enabled || hold || !section || section === "working" || !draggableKeys.has(key))
           return;
+        // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
         const occurredAt = new Date().toISOString();
         suspend();
         labelTopRef.current = null;
@@ -634,7 +640,6 @@ export function SidebarDragScope(props: {
       }
       onDragEnd={end}
     >
-      <SidebarDragLifecycle onUnmount={cancelDrag} />
       <SortableContext items={items.map(sidebarListItemId)} strategy={strategy}>
         <SidebarDragProvider
           enabledKeys={new Set(enabledIds)}

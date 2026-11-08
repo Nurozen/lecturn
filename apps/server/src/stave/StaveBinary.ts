@@ -456,10 +456,14 @@ export const layerFixed = (
     StaveBinary,
     StaveBinary.of({
       resolve: Effect.succeed(resolution),
-      resolveForPath: () => Effect.succeed(resolution),
+      resolveForPath: Effect.fn("StaveBinary.resolveForPath")(function () {
+        return Effect.succeed(resolution);
+      }),
       resolveRunnable: Effect.succeed(resolution),
       features: Effect.succeed(features),
-      featuresFor: () => Effect.succeed(features),
+      featuresFor: Effect.fn("StaveBinary.featuresFor")(function () {
+        return Effect.succeed(features);
+      }),
       invalidate: Effect.void,
     }),
   );

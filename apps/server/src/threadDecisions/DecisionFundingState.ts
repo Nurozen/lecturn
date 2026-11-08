@@ -24,8 +24,9 @@ export function decisionFundingState(secrets: ServerSecretStore["Service"]) {
   return {
     mutex,
     status: read(DECISION_FUNDING_STATUS).pipe(
-      Effect.flatMap((value) =>
-        value === null ? read("extensions-decisions-status") : Effect.succeed(value),
+      Effect.filterOrElse(
+        (value) => !(value === null),
+        (_value) => read("extensions-decisions-status"),
       ),
     ),
     revoked: Effect.all([read(DECISION_FUNDING_REVOKED), read(previousExtensionStop)]).pipe(

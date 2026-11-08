@@ -28,7 +28,6 @@ import { readLocalApi } from "~/localApi";
 import { useAppEmbedContext } from "../../state/apps";
 import { useThreadShell } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
-import { serverEnvironment } from "../../state/server";
 import { canShareWithGuestAtom, isGuestShareableThread } from "./guestShareAvailability";
 import { useAtomValue } from "@effect/atom-react";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";

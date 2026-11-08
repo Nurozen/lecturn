@@ -21,6 +21,7 @@ export const EnvironmentTeamPolicy = Schema.Struct({
 export class TeamPolicyError extends Schema.TaggedError<TeamPolicyError>()("TeamPolicyError", {
   message: Schema.String,
 }) {}
+const isTeamPolicyError = Schema.is(TeamPolicyError);
 export class TeamPolicy extends Context.Service<
   TeamPolicy,
   {
@@ -91,7 +92,7 @@ export const TeamPolicyLive = Layer.effect(
         return response;
       },
       Effect.mapError((cause) =>
-        Schema.is(TeamPolicyError)(cause)
+        isTeamPolicyError(cause)
           ? cause
           : new TeamPolicyError({
               message:

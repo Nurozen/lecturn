@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { SagaWorkbenchInferenceResult, SagaWorkbenchWorkflow } from "./sagaWorkbench.ts";
 
 const decodeResult = Schema.decodeUnknownSync(SagaWorkbenchInferenceResult);
+const decodeWorkflow = Schema.decodeUnknownSync(SagaWorkbenchWorkflow);
 
 describe("Saga workbench inference", () => {
   it("accepts one bounded summary, phase and confidence", () => {
@@ -36,6 +37,6 @@ describe("Saga workbench inference", () => {
       completedAt: null,
       summary: null,
     };
-    expect(Schema.decodeUnknownSync(SagaWorkbenchWorkflow)(previous)).toEqual(previous);
+    expect(decodeWorkflow(previous)).toEqual(previous);
   });
 });

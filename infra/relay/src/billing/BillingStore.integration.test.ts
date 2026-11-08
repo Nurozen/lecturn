@@ -24,8 +24,9 @@ describe.skipIf(!databaseUrl)("BillingStore PostgreSQL", () => {
       Effect.gen(function* () {
         const store = yield* makeBillingStore;
         const user = `test-${yield* operationId}`;
-        const results = yield* Effect.all(
-          [store.acquire(user, 1000), store.acquire(user, 1000)].map(Effect.result),
+        const results = yield* Effect.forEach(
+          [store.acquire(user, 1000), store.acquire(user, 1000)],
+          Effect.result,
           { concurrency: "unbounded" },
         );
         expect(results.filter((r) => r._tag === "Success")).toHaveLength(1);

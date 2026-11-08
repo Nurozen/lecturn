@@ -117,85 +117,83 @@ export const statusOf = (
  * An in-memory registry with one app. Each published status event resolves
  * its Deferred once the subscriber has handled it and asked for the next.
  */
-export const makeFakeApps = (input: {
+export const makeFakeApps = Effect.fn("makeFakeApps")(function* (input: {
   readonly registration: AppRegistration;
   readonly workspaceRoot: string;
   readonly cachedHeadless?: ReadonlyArray<McpSchema.Tool>;
   readonly cachedLive?: ReadonlyArray<McpSchema.Tool>;
-}) =>
-  Effect.gen(function* () {
-    const state = yield* Ref.make<AppStatus["state"]>("granted");
-    const ceiling = yield* Ref.make<AppRuntimeCeiling>(null);
-    const cache = yield* Ref.make<AppCachedTools>({
-      headless: Option.fromNullishOr(input.cachedHeadless),
-      live: Option.fromNullishOr(input.cachedLive),
-    });
-    const cacheWrites: Array<{
-      readonly tier: AppToolTier;
-      readonly names: ReadonlyArray<string>;
-    }> = [];
-    const statusEvents = yield* Queue.unbounded<{
-      readonly event: AppStatusStreamEvent;
-      readonly handled: Deferred.Deferred<void>;
-    }>();
+}) {
+  const state = yield* Ref.make<AppStatus["state"]>("granted");
+  const ceiling = yield* Ref.make<AppRuntimeCeiling>(null);
+  const cache = yield* Ref.make<AppCachedTools>({
+    headless: Option.fromNullishOr(input.cachedHeadless),
+    live: Option.fromNullishOr(input.cachedLive),
+  });
+  const cacheWrites: Array<{
+    readonly tier: AppToolTier;
+    readonly names: ReadonlyArray<string>;
+  }> = [];
+  const statusEvents = yield* Queue.unbounded<{
+    readonly event: AppStatusStreamEvent;
+    readonly handled: Deferred.Deferred<void>;
+  }>();
 
-    const registry = Layer.mock(AppRegistryService)({
-      get: (appId) =>
-        Effect.all([Ref.get(state), Ref.get(ceiling)]).pipe(
-          Effect.map(([current, runtimeCeiling]) =>
-            appId === input.registration.appId
-              ? Option.some({
-                  status: { ...statusOf(input.registration, current), runtimeCeiling },
-                  registration: input.registration,
-                })
-              : Option.none(),
-          ),
-        ),
-      cachedTools: () => Ref.get(cache),
-      setCachedTools: (_appId, tier, definitions) =>
-        Effect.sync(() =>
-          cacheWrites.push({ tier, names: definitions.map((tool) => tool.name) }),
-        ).pipe(
-          Effect.andThen(
-            Ref.update(cache, (current) => ({ ...current, [tier]: Option.some(definitions) })),
-          ),
-        ),
-      streamStatus: Stream.fromQueue(statusEvents).pipe(
-        Stream.flatMap(({ event, handled }) =>
-          Stream.concat(
-            Stream.make(event),
-            Stream.fromEffect(Deferred.succeed(handled, undefined)).pipe(Stream.drain),
-          ),
-        ),
-      ),
-    });
-
-    const projects = Layer.mock(AppProjectService)({
-      resolveAppForProject: (projectId) =>
-        Effect.succeed(
-          projectId === fixtureProjectId
-            ? Option.some({ appId: input.registration.appId, workspaceRoot: input.workspaceRoot })
+  const registry = Layer.mock(AppRegistryService)({
+    get: (appId) =>
+      Effect.all([Ref.get(state), Ref.get(ceiling)]).pipe(
+        Effect.map(([current, runtimeCeiling]) =>
+          appId === input.registration.appId
+            ? Option.some({
+                status: { ...statusOf(input.registration, current), runtimeCeiling },
+                registration: input.registration,
+              })
             : Option.none(),
         ),
-    });
-
-    const publishStatus = (next: AppStatus["state"]) =>
-      Effect.gen(function* () {
-        yield* Ref.set(state, next);
-        const handled = yield* Deferred.make<void>();
-        yield* Queue.offer(statusEvents, {
-          event: { type: "upsert", app: statusOf(input.registration, next) },
-          handled,
-        });
-        yield* Deferred.await(handled);
-      });
-
-    return {
-      layer: Layer.merge(registry, projects),
-      cacheWrites,
-      cache,
-      state,
-      ceiling,
-      publishStatus,
-    };
+      ),
+    cachedTools: () => Ref.get(cache),
+    setCachedTools: (_appId, tier, definitions) =>
+      Effect.sync(() =>
+        cacheWrites.push({ tier, names: definitions.map((tool) => tool.name) }),
+      ).pipe(
+        Effect.andThen(
+          Ref.update(cache, (current) => ({ ...current, [tier]: Option.some(definitions) })),
+        ),
+      ),
+    streamStatus: Stream.fromQueue(statusEvents).pipe(
+      Stream.flatMap(({ event, handled }) =>
+        Stream.concat(
+          Stream.make(event),
+          Stream.fromEffect(Deferred.succeed(handled, undefined)).pipe(Stream.drain),
+        ),
+      ),
+    ),
   });
+
+  const projects = Layer.mock(AppProjectService)({
+    resolveAppForProject: (projectId) =>
+      Effect.succeed(
+        projectId === fixtureProjectId
+          ? Option.some({ appId: input.registration.appId, workspaceRoot: input.workspaceRoot })
+          : Option.none(),
+      ),
+  });
+
+  const publishStatus = Effect.fn("publishStatus")(function* (next: AppStatus["state"]) {
+    yield* Ref.set(state, next);
+    const handled = yield* Deferred.make<void>();
+    yield* Queue.offer(statusEvents, {
+      event: { type: "upsert", app: statusOf(input.registration, next) },
+      handled,
+    });
+    yield* Deferred.await(handled);
+  });
+
+  return {
+    layer: Layer.merge(registry, projects),
+    cacheWrites,
+    cache,
+    state,
+    ceiling,
+    publishStatus,
+  };
+});

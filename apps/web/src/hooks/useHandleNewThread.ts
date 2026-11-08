@@ -1,4 +1,4 @@
-import { useComposerHandleContext } from "../composerHandleContext";
+import { type ComposerHandleRef, useComposerHandleContext } from "../composerHandleContext";
 import {
   scopedProjectKey,
   scopeProjectRef,
@@ -13,7 +13,7 @@ import { projectsForProjectsMode } from "@lecturn/client-runtime/state/app-proje
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import { toastManager } from "../components/ui/toast";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@lecturn/contracts";
-import { useRouter } from "@tanstack/react-router";
+import { type AnyRouter, useRouter } from "@tanstack/react-router";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
@@ -51,7 +51,7 @@ import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
-import { useClientSettings } from "./useSettings";
+import { getClientSettings } from "./useSettings";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 
@@ -90,9 +90,19 @@ export function readThreadCarrySources(routeTarget: ThreadRouteTarget | null) {
 }
 
 export function useNewThreadHandler() {
-  const composerHandleRef = useComposerHandleContext();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const router = useRouter();
+  return createNewThreadHandler(useRouter(), useComposerHandleContext());
+}
+
+export type NewThreadHandler = ReturnType<typeof createNewThreadHandler>;
+
+/**
+ * `composerHandleRef` is the composer in view, when the caller renders inside
+ * its context; reusing a visible empty draft focuses it.
+ */
+export function createNewThreadHandler(
+  router: AnyRouter,
+  composerHandleRef: ComposerHandleRef | null = null,
+) {
   const getCurrentRouteTarget = () => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
@@ -109,6 +119,7 @@ export function useNewThreadHandler() {
     },
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
+    const projectGroupingSettings = selectProjectGroupingSettings(getClientSettings());
     // Read at call time; status pushes replace the config map and would recreate every sidebar handler.
     const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
     const targetServerSettings =

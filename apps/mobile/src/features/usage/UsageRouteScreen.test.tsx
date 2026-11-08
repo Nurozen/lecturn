@@ -15,6 +15,10 @@ const ui = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  AccessibilityInfo: {
+    addEventListener: () => ({ remove() {} }),
+    isReduceMotionEnabled: () => Promise.resolve(false),
+  },
   ActivityIndicator: () => null,
   Platform: { OS: "android" },
   View: ({ children }: { children: ReactNode }) => children,

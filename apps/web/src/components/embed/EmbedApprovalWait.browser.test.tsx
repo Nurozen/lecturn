@@ -228,7 +228,6 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
       contentInsetEndAdjustment={0}
       liveFollowEnabled
       onIsAtEndChange={() => {}}
-      onManualNavigation={() => {}}
       timelineEntries={timelineEntries}
     />
   );

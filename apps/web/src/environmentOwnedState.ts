@@ -75,6 +75,5 @@ export function clearEnvironmentOwnedState(environmentId: EnvironmentId): void {
     byProjectKey: withoutEnvironment(state.byProjectKey, environmentId),
     projectKeyByThreadKey: withoutEnvironment(state.projectKeyByThreadKey, environmentId),
     pendingVisitsByThreadKey: withoutEnvironment(state.pendingVisitsByThreadKey, environmentId),
-    pendingTitlesByThreadKey: withoutEnvironment(state.pendingTitlesByThreadKey, environmentId),
   }));
 }

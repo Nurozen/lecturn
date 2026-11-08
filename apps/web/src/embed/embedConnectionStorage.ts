@@ -16,19 +16,26 @@ const MEMORY_CATALOG_BACKEND = {
   write: () => Effect.void,
 };
 
+const noCacheEntry = Effect.fn("EmbedConnectionStorage.noCacheEntry")(function () {
+  return Effect.succeedNone;
+});
+const noCacheWrite = Effect.fn("EmbedConnectionStorage.noCacheWrite")(function () {
+  return Effect.void;
+});
+
 const NO_CACHE = Persistence.EnvironmentCacheStore.of({
-  loadShell: () => Effect.succeedNone,
-  saveShell: () => Effect.void,
-  loadThread: () => Effect.succeedNone,
-  saveThread: () => Effect.void,
-  removeThread: () => Effect.void,
-  loadServerConfig: () => Effect.succeedNone,
-  saveServerConfig: () => Effect.void,
-  loadVcsRefs: () => Effect.succeedNone,
-  saveVcsRefs: () => Effect.void,
-  removeVcsRefs: () => Effect.void,
-  clearVcsRefs: () => Effect.void,
-  clear: () => Effect.void,
+  loadShell: noCacheEntry,
+  saveShell: noCacheWrite,
+  loadThread: noCacheEntry,
+  saveThread: noCacheWrite,
+  removeThread: noCacheWrite,
+  loadServerConfig: noCacheEntry,
+  saveServerConfig: noCacheWrite,
+  loadVcsRefs: noCacheEntry,
+  saveVcsRefs: noCacheWrite,
+  removeVcsRefs: noCacheWrite,
+  clearVcsRefs: noCacheWrite,
+  clear: noCacheWrite,
 });
 
 /**

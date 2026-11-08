@@ -53,6 +53,7 @@ import * as PreviewManager from "../../preview/Manager.ts";
 import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
+import * as DocumentText from "../../provider/DocumentText.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as PullRequestReviewGuideService from "../../pullRequest/PullRequestReviewGuideService.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
@@ -137,7 +138,7 @@ const layerRouteStubs = Layer.mergeAll(
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
-  Layer.mock(PreviewBrowser.PreviewBrowser)({ installed: Effect.succeed(Option.none()) }),
+  Layer.mock(PreviewBrowser.PreviewBrowser)({ installed: Effect.succeedNone }),
 );
 
 /**
@@ -166,6 +167,7 @@ export const barLayer = (baseDir: string, options: BarHarnessOptions = {}) =>
       const served = HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
         Layer.provide(PreviewAutomationBroker.layer),
         Layer.provide(layerRouteStubs),
+        Layer.provide(DocumentText.layer.pipe(Layer.provide(NodeServices.layer))),
         Layer.provide(layerEnvironment),
       );
       // The registry is exposed too, so a test can issue or resolve credentials.
@@ -194,32 +196,36 @@ const required = <I, S>(tag: Context.Key<I, S>) =>
   );
 
 /** Names the switch-on services for `body`, so its type can ask for them. */
-const withSquireServices = <A, E, R>(body: Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const actions = yield* required(SquireActions.SquireActions);
-    const clock = yield* required(SquireClock.SquireClock);
-    const delivery = yield* required(SquireDelivery.SquireDelivery);
-    const reactor = yield* required(SquireReactor.SquireReactor);
-    return yield* body.pipe(
-      Effect.provideService(SquireActions.SquireActions, actions),
-      Effect.provideService(SquireClock.SquireClock, clock),
-      Effect.provideService(SquireDelivery.SquireDelivery, delivery),
-      Effect.provideService(SquireReactor.SquireReactor, reactor),
-    );
-  });
+const withSquireServices = Effect.fn("withSquireServices")(function* <A, E, R>(
+  body: Effect.Effect<A, E, R>,
+) {
+  const actions = yield* required(SquireActions.SquireActions);
+  const clock = yield* required(SquireClock.SquireClock);
+  const delivery = yield* required(SquireDelivery.SquireDelivery);
+  const reactor = yield* required(SquireReactor.SquireReactor);
+  return yield* body.pipe(
+    Effect.provideService(SquireActions.SquireActions, actions),
+    Effect.provideService(SquireClock.SquireClock, clock),
+    Effect.provideService(SquireDelivery.SquireDelivery, delivery),
+    Effect.provideService(SquireReactor.SquireReactor, reactor),
+  );
+});
 
 /** Runs `body` against a fresh bar layer in a fresh temp Lecturn home. */
-export const withBarHarness = <A, E>(
-  body: Effect.Effect<A, E, BarSquireServices | Scope.Scope>,
-  options: BarHarnessOptions = {},
-) =>
-  Effect.gen(function* () {
+export const withBarHarness = Effect.fn("withBarHarness")(
+  function* <A, E>(
+    body: Effect.Effect<A, E, BarSquireServices | Scope.Scope>,
+    options: BarHarnessOptions = {},
+  ) {
     const { baseDir } = yield* tempRoot;
     return yield* withSquireServices(body).pipe(
       Effect.scoped,
       Effect.provide(barLayer(baseDir, options)),
     );
-  }).pipe(Effect.scoped, Effect.orDie);
+  },
+  Effect.scoped,
+  Effect.orDie,
+);
 
 // ── Running a scenario ──
 
@@ -244,26 +250,28 @@ const fixturesService = Effect.map(
 );
 
 /** One gold scenario: start the server's reactors, `loadSetup`, `inject` each event, then `drainThrough` each. */
-export const runBarScenario = (scenario: SquireFixtureScenario, options: BarRunOptions = {}) =>
-  Effect.gen(function* () {
-    yield* ServerRuntimeStartup.startLecturnReactors;
-    const fixtures = yield* fixturesService;
-    const loaded = yield* fixtures.loadSetup(scenario.setup, {
-      ...(options.fake === undefined ? {} : { fake: options.fake }),
-      ...(options.provider === undefined || options.provider === "scripted"
-        ? {}
-        : { providerInstanceId: barInstanceId(options.provider) }),
-    });
-    if (options.pauseLead === true) yield* fixtures.pauseLeadForHarness;
-    const sequences: Array<number> = [];
-    for (const event of scenario.events) sequences.push(yield* fixtures.inject(event));
-    for (const sequence of sequences) yield* fixtures.drainThrough(sequence);
-    return {
-      squireId: loaded.squireId,
-      homeThreadId: loaded.homeThreadId!,
-      projects: loaded.projects,
-    } satisfies BarLoaded;
+export const runBarScenario = Effect.fn("runBarScenario")(function* (
+  scenario: SquireFixtureScenario,
+  options: BarRunOptions = {},
+) {
+  yield* ServerRuntimeStartup.startLecturnReactors;
+  const fixtures = yield* fixturesService;
+  const loaded = yield* fixtures.loadSetup(scenario.setup, {
+    ...(options.fake === undefined ? {} : { fake: options.fake }),
+    ...(options.provider === undefined || options.provider === "scripted"
+      ? {}
+      : { providerInstanceId: barInstanceId(options.provider) }),
   });
+  if (options.pauseLead === true) yield* fixtures.pauseLeadForHarness;
+  const sequences: Array<number> = [];
+  for (const event of scenario.events) sequences.push(yield* fixtures.inject(event));
+  for (const sequence of sequences) yield* fixtures.drainThrough(sequence);
+  return {
+    squireId: loaded.squireId,
+    homeThreadId: loaded.homeThreadId!,
+    projects: loaded.projects,
+  } satisfies BarLoaded;
+});
 
 // ── Timeline ──
 
@@ -297,132 +305,131 @@ export interface BarTimelineOptions extends BarRunOptions {
 /** `squireActionMessageId`'s prefix: every message a held action or accept sends. */
 const ACTION_MESSAGE_PREFIX = "message:squire-action:";
 
-const actionMessagesIn = (threadIds: Iterable<ThreadId>) =>
-  Effect.gen(function* () {
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const sent: Array<OrchestrationV2ConversationMessage> = [];
-    for (const threadId of threadIds) {
-      const { messages } = yield* projections.getThreadRecords(threadId, ["messages"], {
-        messageRoles: ["user"],
-      });
-      sent.push(...messages.filter((message) => message.id.startsWith(ACTION_MESSAGE_PREFIX)));
-    }
-    return sent;
-  });
+const actionMessagesIn = Effect.fn("actionMessagesIn")(function* (threadIds: Iterable<ThreadId>) {
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const sent: Array<OrchestrationV2ConversationMessage> = [];
+  for (const threadId of threadIds) {
+    const { messages } = yield* projections.getThreadRecords(threadId, ["messages"], {
+      messageRoles: ["user"],
+    });
+    sent.push(...messages.filter((message) => message.id.startsWith(ACTION_MESSAGE_PREFIX)));
+  }
+  return sent;
+});
 
 const cardTargets = (cards: ReadonlyArray<SquireRepository.SquireCardRow>) =>
   new Set(cards.flatMap((card) => (card.target_thread_id === null ? [] : [card.target_thread_id])));
 
 /** A mark at the current test or live clock: sends so far and pending holds. */
-export const barMark = (loaded: BarLoaded, index: number, action: BarTimelineMark["action"]) =>
-  Effect.gen(function* () {
-    const repository = yield* SquireRepository.SquireRepository;
-    const cards = yield* repository.listCards({ squireId: loaded.squireId });
-    return {
-      index,
-      action,
-      at: DateTime.formatIso(yield* DateTime.now),
-      actionMessages: (yield* actionMessagesIn(cardTargets(cards))).length,
-      held: cards.flatMap((card) =>
-        card.status === "held" && card.executes_at !== null
-          ? [{ cardId: card.id, executesAt: card.executes_at }]
-          : [],
-      ),
-    } satisfies BarTimelineMark;
-  });
+export const barMark = Effect.fn("barMark")(function* (
+  loaded: BarLoaded,
+  index: number,
+  action: BarTimelineMark["action"],
+) {
+  const repository = yield* SquireRepository.SquireRepository;
+  const cards = yield* repository.listCards({ squireId: loaded.squireId });
+  return {
+    index,
+    action,
+    at: DateTime.formatIso(yield* DateTime.now),
+    actionMessages: (yield* actionMessagesIn(cardTargets(cards))).length,
+    held: cards.flatMap((card) =>
+      card.status === "held" && card.executes_at !== null
+        ? [{ cardId: card.id, executesAt: card.executes_at }]
+        : [],
+    ),
+  } satisfies BarTimelineMark;
+});
 
 /**
  * Lets everything the clock and the last step started finish, without sleeping, until no new application event
  * appears. The server's own clock fiber may run the same hold concurrently; the action locks and status
  * compare-and-set make that one execution.
  */
-export const barSettle = (squireId: SquireId) =>
-  Effect.gen(function* () {
-    const clock = yield* SquireClock.SquireClock;
-    const reactor = yield* SquireReactor.SquireReactor;
-    const delivery = yield* SquireDelivery.SquireDelivery;
-    const events = yield* OrchestrationEventStore.OrchestrationEventStore;
-    const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
-    const repository = yield* SquireRepository.SquireRepository;
-    const fixtures = yield* fixturesService;
-    const drainWorker = Option.isSome(worker) ? Effect.asVoid(worker.value.drain()) : Effect.void;
-    yield* clock.runDue;
-    for (;;) {
-      const head = yield* events.latestApplicationSequence;
-      yield* drainWorker;
-      yield* reactor.drainThrough(head);
-      yield* delivery.drain;
-      // Deferred rows wait for the clock; only rows already on their way are awaited.
-      const inFlight = yield* repository.listEventsByStatus({
-        squireId,
-        statuses: ["pending", "batched"],
-      });
-      for (const row of inFlight) yield* fixtures.drainThrough(row.id);
-      if (inFlight.length === 0 && (yield* events.latestApplicationSequence) === head) return;
-    }
-  });
+export const barSettle = Effect.fn("barSettle")(function* (squireId: SquireId) {
+  const clock = yield* SquireClock.SquireClock;
+  const reactor = yield* SquireReactor.SquireReactor;
+  const delivery = yield* SquireDelivery.SquireDelivery;
+  const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+  const worker = yield* Effect.serviceOption(EffectWorker.OrchestrationEffectWorkerV2);
+  const repository = yield* SquireRepository.SquireRepository;
+  const fixtures = yield* fixturesService;
+  const drainWorker = Option.isSome(worker) ? Effect.asVoid(worker.value.drain()) : Effect.void;
+  yield* clock.runDue;
+  for (;;) {
+    const head = yield* events.latestApplicationSequence;
+    yield* drainWorker;
+    yield* reactor.drainThrough(head);
+    yield* delivery.drain;
+    // Deferred rows wait for the clock; only rows already on their way are awaited.
+    const inFlight = yield* repository.listEventsByStatus({
+      squireId,
+      statuses: ["pending", "batched"],
+    });
+    for (const row of inFlight) yield* fixtures.drainThrough(row.id);
+    if (inFlight.length === 0 && (yield* events.latestApplicationSequence) === head) return;
+  }
+});
 
 /**
  * One timeline step in the current server lifetime, then `barSettle`. `advance` moves the test clock (a live clock
  * refuses it); `undo` presses Undo on every pending hold as the user would. `restart` needs the lifetime boundary
  * `withBarTimeline` owns.
  */
-export const applyBarTimelineStep = (
+export const applyBarTimelineStep = Effect.fn("applyBarTimelineStep")(function* (
   loaded: BarLoaded,
   step: SquireFixtureTimelineAction,
   index: number,
-) =>
-  Effect.gen(function* () {
-    const fixtures = yield* fixturesService;
-    switch (step.action) {
-      case "restart":
-        return yield* Effect.die(new Error("restart is a lifetime boundary: use withBarTimeline"));
-      case "undo": {
-        const repository = yield* SquireRepository.SquireRepository;
-        const actions = yield* SquireActions.SquireActions;
-        const held = yield* repository.listCards({
-          squireId: loaded.squireId,
-          statuses: ["held"],
-        });
-        if (held.length === 0) return yield* Effect.die(new Error("undo: no pending hold"));
-        const undone = yield* actions.act({
-          requestId: `bar:undo:${index}`,
-          cardIds: held.map((card) => card.id),
-          action: "undo",
-        });
-        const refused = undone.results.filter((result) => result.error !== null);
-        if (refused.length > 0) {
-          return yield* Effect.die(new Error(`undo refused: ${JSON.stringify(refused)}`));
-        }
-        break;
+) {
+  const fixtures = yield* fixturesService;
+  switch (step.action) {
+    case "restart":
+      return yield* Effect.die(new Error("restart is a lifetime boundary: use withBarTimeline"));
+    case "undo": {
+      const repository = yield* SquireRepository.SquireRepository;
+      const actions = yield* SquireActions.SquireActions;
+      const held = yield* repository.listCards({
+        squireId: loaded.squireId,
+        statuses: ["held"],
+      });
+      if (held.length === 0) return yield* Effect.die(new Error("undo: no pending hold"));
+      const undone = yield* actions.act({
+        requestId: `bar:undo:${index}`,
+        cardIds: held.map((card) => card.id),
+        action: "undo",
+      });
+      const refused = undone.results.filter((result) => result.error !== null);
+      if (refused.length > 0) {
+        return yield* Effect.die(new Error(`undo refused: ${JSON.stringify(refused)}`));
       }
-      default:
-        yield* fixtures.timeline(step);
+      break;
     }
-    yield* barSettle(loaded.squireId);
-  });
+    default:
+      yield* fixtures.timeline(step);
+  }
+  yield* barSettle(loaded.squireId);
+});
 
 /** What the server does at startup for held actions: reconcile, then arm the clock. */
-const barRestart = (loaded: BarLoaded) =>
-  Effect.gen(function* () {
-    // Forks reconcile-then-clock as the server does; the explicit calls make it deterministic.
-    yield* ServerRuntimeStartup.startLecturnReactors;
-    yield* (yield* SquireActions.SquireActions).reconcileStartup;
-    yield* barSettle(loaded.squireId);
-  });
+const barRestart = Effect.fn("barRestart")(function* (loaded: BarLoaded) {
+  // Forks reconcile-then-clock as the server does; the explicit calls make it deterministic.
+  yield* ServerRuntimeStartup.startLecturnReactors;
+  yield* (yield* SquireActions.SquireActions).reconcileStartup;
+  yield* barSettle(loaded.squireId);
+});
 
 /**
  * A `restart` closes the server lifetime, moves the test clock by the downtime, and builds a fresh bar layer over
  * the same Lecturn home and database. After a restart the in-memory fake script and the fixture's main-Squire
  * pointer are gone, so a later step cannot deliver a scripted turn or `seedUsage` (none of 08-11 does).
  */
-export const withBarTimeline = <A, E>(
-  scenario: SquireFixtureScenario,
-  observe: (run: BarTimelineRun) => Effect.Effect<A, E, BarSquireServices | Scope.Scope>,
-  options: BarTimelineOptions = {},
-  harness: BarHarnessOptions = {},
-) =>
-  Effect.gen(function* () {
+export const withBarTimeline = Effect.fn("withBarTimeline")(
+  function* <A, E>(
+    scenario: SquireFixtureScenario,
+    observe: (run: BarTimelineRun) => Effect.Effect<A, E, BarSquireServices | Scope.Scope>,
+    options: BarTimelineOptions = {},
+    harness: BarHarnessOptions = {},
+  ) {
     const { baseDir } = yield* tempRoot;
     const timeline = options.timeline ?? scenario.timeline ?? [];
     const marks: Array<BarTimelineMark> = [];
@@ -457,7 +464,10 @@ export const withBarTimeline = <A, E>(
         yield* TestClock.adjust(Duration.seconds(step.downtimeSeconds));
       index = restart + 1;
     }
-  }).pipe(Effect.scoped, Effect.orDie);
+  },
+  Effect.scoped,
+  Effect.orDie,
+);
 
 // ── Effects ──
 
@@ -541,148 +551,147 @@ const stringOr = (value: unknown, fallback: string) =>
  * updates the open card in place and logs another `card.created` row with the same `card_id`, so cards are counted
  * as distinct `card_id`s, never as rows.
  */
-export const barObserve = (squireId: SquireId) =>
-  Effect.gen(function* () {
-    const repository = yield* SquireRepository.SquireRepository;
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const projects = yield* ProjectStore.ProjectStoreV2;
-    const rows = yield* repository.listActionLog({ squireId, limit: 10_000 });
-    const counts = Object.fromEntries(BAR_EFFECTS.map((name) => [name, 0])) as BarEffectCounts;
-    const cardsSeen = new Map<string, "steer" | "proposal">();
-    const decisions: Array<{ tool: string; reason: string | null }> = [];
-    const heldThreads = new Set<ThreadId>();
-    let deliveredEvents = 0;
-    for (const row of rows) {
-      const data = dataOf(row);
-      switch (row.kind) {
-        case "card.created":
-          if ((data.kind === "steer" || data.kind === "proposal") && row.card_id !== null) {
-            cardsSeen.set(row.card_id, data.kind);
-          }
-          break;
-        case "action.held":
-          counts.action_held += 1;
-          if (row.thread_id !== null) heldThreads.add(row.thread_id);
-          break;
-        case "action.executed":
-          if (data.action === "steer") counts.steer_sent += 1;
-          if (data.action === "create_thread") counts.thread_created += 1;
-          break;
-        case "notification.pushed":
-          counts.notification_pushed += 1;
-          break;
-        case "quiet.recorded":
-          counts.quiet_recorded += 1;
-          break;
-        case "event.received":
-          deliveredEvents += 1;
-          break;
-        case "decision.recorded":
-          decisions.push({
-            tool: stringOr(data.tool, ""),
-            reason: typeof data.reason === "string" ? data.reason : null,
-          });
-          break;
-      }
+export const barObserve = Effect.fn("barObserve")(function* (squireId: SquireId) {
+  const repository = yield* SquireRepository.SquireRepository;
+  const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const projects = yield* ProjectStore.ProjectStoreV2;
+  const rows = yield* repository.listActionLog({ squireId, limit: 10_000 });
+  const counts = Object.fromEntries(BAR_EFFECTS.map((name) => [name, 0])) as BarEffectCounts;
+  const cardsSeen = new Map<string, "steer" | "proposal">();
+  const decisions: Array<{ tool: string; reason: string | null }> = [];
+  const heldThreads = new Set<ThreadId>();
+  let deliveredEvents = 0;
+  for (const row of rows) {
+    const data = dataOf(row);
+    switch (row.kind) {
+      case "card.created":
+        if ((data.kind === "steer" || data.kind === "proposal") && row.card_id !== null) {
+          cardsSeen.set(row.card_id, data.kind);
+        }
+        break;
+      case "action.held":
+        counts.action_held += 1;
+        if (row.thread_id !== null) heldThreads.add(row.thread_id);
+        break;
+      case "action.executed":
+        if (data.action === "steer") counts.steer_sent += 1;
+        if (data.action === "create_thread") counts.thread_created += 1;
+        break;
+      case "notification.pushed":
+        counts.notification_pushed += 1;
+        break;
+      case "quiet.recorded":
+        counts.quiet_recorded += 1;
+        break;
+      case "event.received":
+        deliveredEvents += 1;
+        break;
+      case "decision.recorded":
+        decisions.push({
+          tool: stringOr(data.tool, ""),
+          reason: typeof data.reason === "string" ? data.reason : null,
+        });
+        break;
     }
-    const cards: Array<BarCard> = [];
-    for (const [cardId, kind] of cardsSeen) {
-      if (kind === "steer") counts.card_created += 1;
-      else counts.proposal_created += 1;
-      const card = Option.getOrThrow(yield* repository.getCard(SquireCardId.make(cardId)));
-      // The latest `card.created` row for the card carries its current caption.
-      const created = rows.filter((row) => row.kind === "card.created" && row.card_id === cardId);
-      const caption = dataOf(created.at(-1)!).caption;
-      const payload = JSON.parse(card.payload_json) as LogData;
-      let target: BarCard["target"];
-      if (kind === "steer") {
-        const threadId = card.target_thread_id;
-        const shell = threadId === null ? null : yield* orchestrator.getThreadShell(threadId);
-        target = shell?.title ?? String(threadId);
-      } else {
-        const projectId = stringOr(payload.projectId, "");
-        const project = yield* projects.get(projectId as ProjectId);
-        target = {
-          newThread: true,
-          project: Option.isSome(project) ? project.value.title : projectId,
-          provider: stringOr(payload.provider, ""),
-        };
-      }
-      cards.push({
-        kind,
-        target,
-        caption: typeof caption === "string" ? caption : null,
-        text: stringOr(kind === "steer" ? payload.steer : payload.firstPrompt, ""),
-        origin: card.origin,
-      });
+  }
+  const cards: Array<BarCard> = [];
+  for (const [cardId, kind] of cardsSeen) {
+    if (kind === "steer") counts.card_created += 1;
+    else counts.proposal_created += 1;
+    const card = Option.getOrThrow(yield* repository.getCard(SquireCardId.make(cardId)));
+    // The latest `card.created` row for the card carries its current caption.
+    const created = rows.filter((row) => row.kind === "card.created" && row.card_id === cardId);
+    const caption = dataOf(created.at(-1)!).caption;
+    const payload = JSON.parse(card.payload_json) as LogData;
+    let target: BarCard["target"];
+    if (kind === "steer") {
+      const threadId = card.target_thread_id;
+      const shell = threadId === null ? null : yield* orchestrator.getThreadShell(threadId);
+      target = shell?.title ?? String(threadId);
+    } else {
+      const projectId = stringOr(payload.projectId, "");
+      const project = yield* projects.get(projectId as ProjectId);
+      target = {
+        newThread: true,
+        project: Option.isSome(project) ? project.value.title : projectId,
+        provider: stringOr(payload.provider, ""),
+      };
     }
-    const executions = rows.flatMap((row): Array<BarExecution> => {
-      if (row.kind !== "action.executed") return [];
-      const data = dataOf(row);
-      return [
-        {
-          cardId: row.card_id,
-          action: stringOr(data.action, ""),
-          threadId: typeof data.threadId === "string" ? data.threadId : null,
-          dispatchMode: typeof data.dispatchMode === "string" ? data.dispatchMode : null,
-          attempt: typeof data.attempt === "number" ? data.attempt : null,
-          executionKey: row.execution_key,
-        },
-      ];
+    cards.push({
+      kind,
+      target,
+      caption: typeof caption === "string" ? caption : null,
+      text: stringOr(kind === "steer" ? payload.steer : payload.firstPrompt, ""),
+      origin: card.origin,
     });
-    const usage = yield* repository.listBudgetUsage({
-      squireId,
-      since: "1970-01-01T00:00:00.000Z",
-    });
-    const allCards = yield* repository.listCards({ squireId });
-    const targetIds = cardTargets(allCards);
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const targets: Array<BarObserved["targets"][number]> = [];
-    for (const threadId of targetIds) {
-      const { providerSessions, runs } = yield* projections.getThreadRecords(threadId, [
-        "providerSessions",
-        "runs",
-      ]);
-      // `auto` only where the session steers natively without cancelling tools.
-      const steers = providerSessions.some(
-        (session) =>
-          session.capabilities.turns.supportsActiveSteering &&
-          session.capabilities.turns.activeSteeringInterruptsTools !== true,
-      );
-      targets.push({
-        threadId,
-        d12Mode: steers ? "auto" : "queue",
-        interruptedRuns: runs.filter((run) => run.status === "interrupted").length,
-      });
-    }
-    const heldTargets: Array<string> = [];
-    for (const threadId of heldThreads) {
-      heldTargets.push((yield* orchestrator.getThreadShell(threadId))?.title ?? threadId);
-    }
-    const squire = yield* repository.getSquire(squireId);
-    return {
-      effects: { ...counts, cards },
-      deliveredEvents,
-      decisions,
-      logKinds: rows.map((row) => row.kind),
-      homeThreadId: Option.isSome(squire) ? squire.value.home_thread_id : null,
-      heldTargets,
-      executions,
-      executionBudgetRows: usage.flatMap((row) =>
-        row.execution_key === null
-          ? []
-          : [{ kind: row.kind, threadId: row.thread_id, executionKey: row.execution_key }],
-      ),
-      actionMessages: (yield* actionMessagesIn(targetIds)).map((message) => ({
-        id: message.id,
-        threadId: message.threadId,
-        createdBy: message.createdBy,
-        senderThreadId: message.senderThreadId,
-        createdAt: DateTime.formatIso(message.createdAt),
-      })),
-      targets,
-    } satisfies BarObserved;
+  }
+  const executions = rows.flatMap((row): Array<BarExecution> => {
+    if (row.kind !== "action.executed") return [];
+    const data = dataOf(row);
+    return [
+      {
+        cardId: row.card_id,
+        action: stringOr(data.action, ""),
+        threadId: typeof data.threadId === "string" ? data.threadId : null,
+        dispatchMode: typeof data.dispatchMode === "string" ? data.dispatchMode : null,
+        attempt: typeof data.attempt === "number" ? data.attempt : null,
+        executionKey: row.execution_key,
+      },
+    ];
   });
+  const usage = yield* repository.listBudgetUsage({
+    squireId,
+    since: "1970-01-01T00:00:00.000Z",
+  });
+  const allCards = yield* repository.listCards({ squireId });
+  const targetIds = cardTargets(allCards);
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const targets: Array<BarObserved["targets"][number]> = [];
+  for (const threadId of targetIds) {
+    const { providerSessions, runs } = yield* projections.getThreadRecords(threadId, [
+      "providerSessions",
+      "runs",
+    ]);
+    // `auto` only where the session steers natively without cancelling tools.
+    const steers = providerSessions.some(
+      (session) =>
+        session.capabilities.turns.supportsActiveSteering &&
+        session.capabilities.turns.activeSteeringInterruptsTools !== true,
+    );
+    targets.push({
+      threadId,
+      d12Mode: steers ? "auto" : "queue",
+      interruptedRuns: runs.filter((run) => run.status === "interrupted").length,
+    });
+  }
+  const heldTargets: Array<string> = [];
+  for (const threadId of heldThreads) {
+    heldTargets.push((yield* orchestrator.getThreadShell(threadId))?.title ?? threadId);
+  }
+  const squire = yield* repository.getSquire(squireId);
+  return {
+    effects: { ...counts, cards },
+    deliveredEvents,
+    decisions,
+    logKinds: rows.map((row) => row.kind),
+    homeThreadId: Option.isSome(squire) ? squire.value.home_thread_id : null,
+    heldTargets,
+    executions,
+    executionBudgetRows: usage.flatMap((row) =>
+      row.execution_key === null
+        ? []
+        : [{ kind: row.kind, threadId: row.thread_id, executionKey: row.execution_key }],
+    ),
+    actionMessages: (yield* actionMessagesIn(targetIds)).map((message) => ({
+      id: message.id,
+      threadId: message.threadId,
+      createdBy: message.createdBy,
+      senderThreadId: message.senderThreadId,
+      createdAt: DateTime.formatIso(message.createdAt),
+    })),
+    targets,
+  } satisfies BarObserved;
+});
 
 // The scripted provider and Codex name a call `lecturn.<tool>`; Claude, `mcp__lecturn__<tool>`.
 const LECTURN_TOOL_PREFIX = /^(?:lecturn\.|mcp__lecturn__)/u;
@@ -701,20 +710,17 @@ const NATIVE_TOOL_ITEMS = new Set([
  * shell, edit, or read) by its provider name or item type, so a caller can
  * check that only allowlisted tools were called.
  */
-export const barToolCalls = (homeThreadId: ThreadId) =>
-  Effect.gen(function* () {
-    const projection = yield* (yield* Orchestrator.OrchestratorV2).getThreadProjection(
-      homeThreadId,
-    );
-    return projection.turnItems.flatMap((item) => {
-      if (item.type === "dynamic_tool" && item.toolName !== null) {
-        return [
-          { name: item.toolName.replace(LECTURN_TOOL_PREFIX, ""), args: item.input as unknown },
-        ];
-      }
-      return NATIVE_TOOL_ITEMS.has(item.type) ? [{ name: `native:${item.type}`, args: item }] : [];
-    });
+export const barToolCalls = Effect.fn("barToolCalls")(function* (homeThreadId: ThreadId) {
+  const projection = yield* (yield* Orchestrator.OrchestratorV2).getThreadProjection(homeThreadId);
+  return projection.turnItems.flatMap((item) => {
+    if (item.type === "dynamic_tool" && item.toolName !== null) {
+      return [
+        { name: item.toolName.replace(LECTURN_TOOL_PREFIX, ""), args: item.input as unknown },
+      ];
+    }
+    return NATIVE_TOOL_ITEMS.has(item.type) ? [{ name: `native:${item.type}`, args: item }] : [];
   });
+});
 
 // ── Judging against gold ──
 

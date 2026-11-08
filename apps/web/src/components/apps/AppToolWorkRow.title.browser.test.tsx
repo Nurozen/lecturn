@@ -182,7 +182,6 @@ async function renderTimeline(embedded: boolean, width: number) {
       contentInsetEndAdjustment={0}
       liveFollowEnabled
       onIsAtEndChange={() => {}}
-      onManualNavigation={() => {}}
       timelineEntries={deriveTimelineEntriesFromVisibleTurnItems({
         visibleTurnItems,
         optimisticMessages: [],
