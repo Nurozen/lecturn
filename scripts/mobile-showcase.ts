@@ -1149,44 +1149,57 @@ async function allowIosNotificationsUntilReady(udid: string, ready: Promise<void
 }
 
 async function presentIosLockScreen(udid: string): Promise<void> {
-  await runAxe(udid, ["button", "lock"]);
-  const deadline = Date.now() + 15_000;
-  while (!(await iosSimulatorLocked(udid))) {
-    if (Date.now() > deadline) throw new Error(`Simulator ${udid} did not lock.`);
-    await delay(500);
+  // A wake press that lands after the display already lit unlocks the device
+  // instead (hosted run 42429542509 captured the thread list), so verify the
+  // device is still locked and present the lock screen again once if not.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await runAxe(udid, ["button", "lock"]);
+    const deadline = Date.now() + 15_000;
+    while (!(await iosSimulatorLocked(udid))) {
+      if (Date.now() > deadline) throw new Error(`Simulator ${udid} did not lock.`);
+      await delay(500);
+    }
+    const alert = showcaseAgentAlert();
+    await new Promise<void>((resolve, reject) => {
+      const child = NodeChildProcess.execFile(
+        "xcrun",
+        ["simctl", "push", udid, ANDROID_PACKAGE, "-"],
+        { cwd: REPO_ROOT },
+        (error) => (error ? reject(error) : resolve()),
+      );
+      child.stdin?.end(
+        JSON.stringify({
+          aps: { alert: { title: alert.title, body: alert.body }, sound: "default" },
+        }),
+      );
+    });
+    await wakeIosLockScreen(udid);
+    // The first Live Activity on the lock screen asks to keep allowing them.
+    await delay(2_000);
+    await runAxe(udid, ["tap", "--label", "Allow"]).catch(() => undefined);
+    if (await iosSimulatorLocked(udid)) return;
   }
-  const alert = showcaseAgentAlert();
-  await new Promise<void>((resolve, reject) => {
-    const child = NodeChildProcess.execFile(
-      "xcrun",
-      ["simctl", "push", udid, ANDROID_PACKAGE, "-"],
-      { cwd: REPO_ROOT },
-      (error) => (error ? reject(error) : resolve()),
-    );
-    child.stdin?.end(
-      JSON.stringify({
-        aps: { alert: { title: alert.title, body: alert.body }, sound: "default" },
-      }),
-    );
-  });
-  await wakeIosLockScreen(udid);
-  // The first Live Activity on the lock screen asks to keep allowing them.
-  await delay(2_000);
-  await runAxe(udid, ["tap", "--label", "Allow"]).catch(() => undefined);
+  throw new Error(`Simulator ${udid} unlocked while presenting the lock screen.`);
 }
 
 /**
  * The alert usually wakes the display, but not always. A home press on a dark
- * display only wakes it, so press only after a screenshot proves it is dark;
- * pressing on a lit lock screen would unlock the device instead.
+ * display only wakes it, so press only after screenshots prove it stayed dark;
+ * pressing on a lit lock screen would unlock the device instead. On a loaded
+ * host the display can take several seconds to light after a press.
  */
 async function wakeIosLockScreen(udid: string): Promise<void> {
   const probe = NodePath.join(NodeOS.tmpdir(), `lecturn-showcase-wake-${udid}.png`);
+  const lit = async () => {
+    await runCommand("xcrun", ["simctl", "io", udid, "screenshot", probe]);
+    return !pngIsBlack(await NodeFSP.readFile(probe));
+  };
   try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await delay(2_000);
-      await runCommand("xcrun", ["simctl", "io", udid, "screenshot", probe]);
-      if (!pngIsBlack(await NodeFSP.readFile(probe))) return;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      for (let check = 0; check < 4; check += 1) {
+        await delay(2_000);
+        if (await lit()) return;
+      }
       await runAxe(udid, ["button", "home"]);
     }
     throw new Error(`Simulator ${udid} lock screen stayed dark.`);
