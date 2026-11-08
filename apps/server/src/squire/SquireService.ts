@@ -54,7 +54,7 @@ import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
-import { retireOutOfScope } from "./squireScopeCascade.ts";
+import { handOverOrDropQueuedEvents, retireOutOfScope } from "./squireScopeCascade.ts";
 import { isSquireThread } from "./squireThread.ts";
 import { touchUserActivity } from "./squireUserActivity.ts";
 
@@ -729,7 +729,7 @@ const make = Effect.gen(function* () {
               // pause reaches it on resume, and its holds become recommendations
               // it no longer executes.
               if (input.status === "paused") {
-                yield* repository.dropQueuedEvents(row.id);
+                yield* handOverOrDropQueuedEvents(repository, scope, row.id);
                 const opened = yield* repository.openHeldCards({
                   squireId: row.id,
                   updatedAt: now,

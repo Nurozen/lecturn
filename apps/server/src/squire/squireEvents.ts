@@ -12,7 +12,7 @@ import {
   RunId,
   type ProjectId,
   SquireEvidence,
-  type SquireEventToggles,
+  SquireEventToggles,
   type SquireId,
   type SquireThreadMarker,
   SquireTurnOutcome,
@@ -28,9 +28,10 @@ import {
 } from "@lecturn/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type { SquireEventRow } from "./SquireRepository.ts";
+import type { SquireEventRow, SquireRow } from "./SquireRepository.ts";
 
 /** The thread events the reactor turns into `squire_event` rows. */
 export type SquireThreadEventKind =
@@ -123,15 +124,13 @@ export type SquireReactorEffect =
   /** Drops the thread's deferred turn-finished rows of other runs. */
   | { readonly type: "run-started"; readonly threadId: ThreadId; readonly runId: RunId }
   /**
-   * A run started on a home thread. Fires again for each later running update, so its
-   * work is bounded by `requestedAt`, which is the same on every firing.
+   * The user wrote in a home thread, starting a run or steering one. An item can update
+   * again, so the work is bounded by `at`, which stays the same when it does.
    */
   | {
-      readonly type: "home-run-started";
-      readonly threadId: ThreadId;
+      readonly type: "home-user-message";
       readonly squireId: SquireId;
-      readonly runId: RunId;
-      readonly requestedAt: DateTime.Utc;
+      readonly at: DateTime.Utc;
     }
   /** The user opened or caught up on a home thread. */
   | {
@@ -249,6 +248,7 @@ const MARKER_EVENT_TYPES = new Set<OrchestrationV2DomainEvent["type"]>([
 const turnItemMayClassify = (event: OrchestrationV2DomainEvent) =>
   event.type !== "turn-item.updated" ||
   event.payload.type === "secret_request" ||
+  event.payload.type === "user_message" ||
   turnItemUpdateCanEndBackgroundWork(event.payload);
 
 /**
@@ -283,6 +283,11 @@ const THREAD_EVENT_KINDS = new Set<string>([
 export function isSummaryBearing(kind: string): kind is SquireThreadEventKind {
   return THREAD_EVENT_KINDS.has(kind);
 }
+
+const decodeToggles = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEventToggles));
+const DEFAULT_TOGGLES = Schema.decodeSync(SquireEventToggles)({});
+export const squireEventTogglesOf = (row: Pick<SquireRow, "events_json">) =>
+  Option.getOrElse(decodeToggles(row.events_json), () => DEFAULT_TOGGLES);
 
 export function squireEventToggle(
   kind: SquireThreadEventKind,
@@ -408,20 +413,6 @@ function classifyRun(
   const run = event.payload;
   const marker = context.threadMarker;
   if (marker !== null) {
-    if (marker.role === "home" && (run.status === "starting" || run.status === "running")) {
-      return {
-        candidates: [],
-        effects: [
-          {
-            type: "home-run-started",
-            threadId: event.threadId,
-            squireId: marker.squireId,
-            runId: run.id,
-            requestedAt: run.requestedAt,
-          },
-        ],
-      };
-    }
     return event.type === "run.updated" && TERMINAL_RUN_STATUSES.has(run.status)
       ? {
           candidates: [],
@@ -566,8 +557,23 @@ function classifyTurnItem(
   event: DomainEvent<"turn-item.updated">,
   context: SquireClassifyContext,
 ): SquireClassification {
-  if (context.threadMarker !== null) return NONE;
   const item = event.payload;
+  if (context.threadMarker !== null) {
+    return context.threadMarker.role === "home" &&
+      item.type === "user_message" &&
+      item.createdBy === "user"
+      ? {
+          candidates: [],
+          effects: [
+            {
+              type: "home-user-message",
+              squireId: context.threadMarker.squireId,
+              at: item.startedAt ?? item.updatedAt,
+            },
+          ],
+        }
+      : NONE;
+  }
   const secret = item.type === "secret_request" ? classifySecretRequest(event, item) : NONE;
   return turnItemUpdateCanEndBackgroundWork(item)
     ? {

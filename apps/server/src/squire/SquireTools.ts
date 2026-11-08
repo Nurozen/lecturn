@@ -1101,30 +1101,42 @@ const make = Effect.gen(function* () {
     return { cardId, replacedCount, wakeLead };
   });
 
-  /** Whether the user denied this slot since they last wrote in this Squire's chat. */
-  const slotDenied = (ctx: Ctx, plan: CardPlan) =>
-    plan.kind === "fyi"
-      ? Effect.succeed(false)
-      : repository
-          .listCards({
-            squireId: ctx.squire.id,
-            kinds: [plan.kind],
-            statuses: ["dismissed"],
-            ...(plan.targetThreadId === null ? {} : { targetThreadId: plan.targetThreadId }),
-          })
-          .pipe(
-            Effect.map((cards) =>
-              cards.some(
-                (card) =>
-                  card.resolution === "denied" &&
-                  card.expires_at === null &&
-                  (plan.targetThreadId !== null ||
-                    (card.target_thread_id === null &&
-                      card.project_id === plan.projectId &&
-                      card.title === plan.title)),
-              ),
-            ),
-          );
+  /**
+   * Inside the raising transaction: the refusal for a slot the user denied since they last
+   * wrote in this Squire's chat, with its decision row. The caller records `tool.called`.
+   */
+  const deniedRefusal: SquireToolKit["deniedRefusal"] = Effect.fn("SquireTools.deniedRefusal")(
+    function* (ctx, slot) {
+      const cards = yield* repository.listCards({
+        squireId: ctx.squire.id,
+        kinds: [slot.kind],
+        statuses: ["dismissed"],
+        ...(slot.targetThreadId === null ? {} : { targetThreadId: slot.targetThreadId }),
+      });
+      const denied = cards.some(
+        (card) =>
+          card.resolution === "denied" &&
+          card.expires_at === null &&
+          (slot.targetThreadId !== null ||
+            (card.target_thread_id === null &&
+              card.project_id === slot.projectId &&
+              card.title === slot.title)),
+      );
+      if (!denied) return Option.none();
+      yield* logRow(
+        ctx,
+        "decision.recorded",
+        { tool: ctx.tool, outcome: "refused", reason: "denied" },
+        { threadId: slot.targetThreadId },
+      );
+      return Option.some(
+        refused(
+          "denied",
+          "The user denied this, so it was not raised. Do not raise it again until they write to you.",
+        ),
+      );
+    },
+  );
 
   /**
    * One keyed transaction: `tool.called`, `decision.recorded`, then the card
@@ -1133,7 +1145,9 @@ const make = Effect.gen(function* () {
   const commitCard = Effect.fn("SquireTools.commitCard")(function* (
     ctx: Ctx,
     plan: CardPlan,
-    decision: Record<string, unknown>,
+    decision:
+      | Record<string, unknown>
+      | ((written: { readonly replacedCount: number }) => Record<string, unknown>),
     describe: (written: { readonly cardId: SquireCardId; readonly replacedCount: number }) => {
       readonly text: string;
       readonly structuredContent: Record<string, unknown>;
@@ -1141,19 +1155,12 @@ const make = Effect.gen(function* () {
   ) {
     const written = yield* repository.transaction(
       Effect.gen(function* () {
-        if (yield* slotDenied(ctx, plan)) {
-          const result = refused(
-            "denied",
-            "The user denied this, so it was not raised. Do not raise it again until they write to you.",
-          );
-          yield* toolCalled(ctx, result, plan.targetThreadId);
-          yield* logRow(
-            ctx,
-            "decision.recorded",
-            { tool: ctx.tool, outcome: "refused", reason: "denied" },
-            { threadId: plan.targetThreadId },
-          );
-          return { result, wakeLead: null };
+        if (plan.kind !== "fyi") {
+          const denied = yield* deniedRefusal(ctx, { ...plan, kind: plan.kind });
+          if (Option.isSome(denied)) {
+            yield* toolCalled(ctx, denied.value, plan.targetThreadId);
+            return { result: denied.value, wakeLead: null };
+          }
         }
         // Admitted in the card's transaction, so per-sweep and per-day counts stay exact.
         let finding: Admitted | null = null;
@@ -1184,7 +1191,7 @@ const make = Effect.gen(function* () {
         yield* logRow(
           ctx,
           "decision.recorded",
-          { tool: ctx.tool, ...decision },
+          { tool: ctx.tool, ...(typeof decision === "function" ? decision(card) : decision) },
           { threadId: plan.targetThreadId, cardId: card.cardId },
         );
         return { result, wakeLead: card.wakeLead };
@@ -1709,8 +1716,18 @@ const make = Effect.gen(function* () {
         push: true,
         logData: { source: "notify" },
       },
-      { outcome: "pushed", level: decision.level, reason: decision.reason },
-      () => ({ text: "Sent to the user.", structuredContent: { outcome: "pushed" } }),
+      ({ replacedCount }) => ({
+        outcome: replacedCount > 0 ? "updated" : "pushed",
+        level: decision.level,
+        reason: decision.reason,
+      }),
+      ({ replacedCount }) =>
+        replacedCount > 0
+          ? {
+              text: "Updated the alert already open for this thread. The user was not pushed again.",
+              structuredContent: { outcome: "updated" },
+            }
+          : { text: "Sent to the user.", structuredContent: { outcome: "pushed" } },
     );
   });
 
@@ -1718,6 +1735,14 @@ const make = Effect.gen(function* () {
     ctx: Ctx,
     args: typeof QuietArgs.Type,
   ) {
+    if (ctx.run.origin === "user") {
+      return yield* refuse(
+        ctx,
+        "user-turn",
+        "The user wrote to you, so reply to them. Quiet is for events that need nothing.",
+        { decision: {} },
+      );
+    }
     const threadId =
       args.threadId !== undefined && (yield* readable(ctx, args.threadId)) ? args.threadId : null;
     const result = ok("Recorded: no action.", { outcome: "quiet" });
@@ -1977,6 +2002,7 @@ const make = Effect.gen(function* () {
     refuse,
     logRow,
     commit,
+    deniedRefusal,
     batchEvents,
     decodeArgs,
     holdUntil,

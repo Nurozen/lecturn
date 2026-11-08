@@ -394,6 +394,11 @@ export class SquireRepository extends Context.Service<
     readonly dropDeferredEvents: (squireId: SquireId, at?: string) => Result<number>;
     /** Every row the Squire has not been sent yet (deferred or pending) is dropped: a pause. */
     readonly dropQueuedEvents: (squireId: SquireId) => Result<number>;
+    /** False when the row left the queue, or its new owner already holds that event. */
+    readonly reassignQueuedEvent: (input: {
+      readonly id: number;
+      readonly squireId: SquireId;
+    }) => Result<boolean>;
     readonly insertCard: (row: SquireCardInsert) => Result<void>;
     readonly getCard: (id: SquireCardId) => Result<Option.Option<SquireCardRow>>;
     /** Every given filter must match; an empty `statuses` or `kinds` matches nothing. Oldest first. */
@@ -1108,6 +1113,14 @@ const make = Effect.gen(function* () {
           WHERE squire_id = ${squireId} AND status IN ('deferred', 'pending')
           RETURNING id`.pipe(Effect.map((rows) => rows.length)),
         (dropped) => dropped > 0,
+      ),
+    reassignQueuedEvent: ({ id, squireId }) =>
+      write(
+        "reassignQueuedEvent",
+        sql`UPDATE OR IGNORE squire_event SET squire_id = ${squireId}
+          WHERE id = ${id} AND status IN ('deferred', 'pending')
+          RETURNING id`.pipe(Effect.map((rows) => rows.length > 0)),
+        (moved) => moved,
       ),
     insertCard: (row) => insert("insertCard", "squire_card", row),
     getCard: (id) =>

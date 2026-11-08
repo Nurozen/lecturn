@@ -20,6 +20,7 @@ import * as SquireContainers from "./SquireContainers.ts";
 import * as SquireRepository from "./SquireRepository.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
+import { handOverOrDropQueuedEvents, retireOutOfScope } from "./squireScopeCascade.ts";
 import {
   createThread,
   dispatchThread,
@@ -66,6 +67,84 @@ const seed = (
   });
 
 describe("SquireScope", () => {
+  it.effect("queued thread events go to the next owner at a pause, an exclusion, or a delete", () =>
+    withScope(
+      Effect.gen(function* () {
+        const scope = yield* SquireScope.SquireScope;
+        const repository = yield* SquireRepository.SquireRepository;
+        const off = SquireId.make("squire:toggled-off");
+        yield* seed(
+          [
+            squireRow(release, { created_at: "2026-11-01T00:00:00.000Z" }),
+            squireRow(off, {
+              created_at: "2026-11-02T00:00:00.000Z",
+              events_json: '{"turnFinished":false}',
+            }),
+            squireRow(billing, { created_at: "2026-11-03T00:00:00.000Z" }),
+          ],
+          [
+            grantRow(release, "project", projectA),
+            grantRow(off, "project", projectA),
+            grantRow(billing, "project", projectA),
+          ],
+        );
+        const threadId = ThreadId.make("thread:handover");
+        yield* createThread(threadId, projectA);
+        const event = (
+          stateKey: string,
+          kind: string,
+          thread: ThreadId | null = threadId,
+        ): Omit<SquireRepository.SquireEventRow, "id"> => ({
+          squire_id: release,
+          thread_id: thread,
+          kind,
+          state_key: stateKey,
+          payload_json: null,
+          status: "pending",
+          defer_reason: null,
+          not_before: "2026-11-01T00:00:00.000Z",
+          batch_id: null,
+          created_at: "2026-11-01T00:00:00.000Z",
+        });
+        yield* repository.insertEvent(event("run-1", "turn-finished"));
+        yield* repository.insertEvent(event("voice-1", "voice-note", null));
+        yield* handOverOrDropQueuedEvents(repository, scope, release);
+        const queued = yield* repository.listEvents({
+          statuses: ["pending", "dropped"],
+        });
+        assert.deepStrictEqual(
+          queued.map((row) => [row.state_key, row.squire_id, row.status]).toSorted(),
+          [
+            ["run-1", billing, "pending"],
+            ["voice-1", release, "dropped"],
+          ],
+        );
+
+        // An exclusion hands over; a duplicate at the new owner is dropped.
+        yield* repository.insertEvent(event("run-2", "turn-finished"));
+        yield* repository.insertEvent(event("run-3", "turn-finished"));
+        yield* repository.insertEvent({ ...event("run-3", "turn-finished"), squire_id: billing });
+        yield* repository.insertGrant(grantRow(release, "exclusion", threadId));
+        yield* retireOutOfScope(repository, scope, {
+          squireId: release,
+          now: "2026-11-01T00:00:00.000Z",
+        });
+        const after = yield* repository.listEvents({ statuses: ["pending", "dropped"] });
+        assert.deepStrictEqual(
+          after
+            .filter((row) => row.state_key === "run-2" || row.state_key === "run-3")
+            .map((row) => [row.state_key, row.squire_id, row.status])
+            .toSorted(),
+          [
+            ["run-2", billing, "pending"],
+            ["run-3", billing, "pending"],
+            ["run-3", release, "dropped"],
+          ],
+        );
+      }),
+    ),
+  );
+
   it.effect("tracks threads created in a granted project after the grant", () =>
     withScope(
       Effect.gen(function* () {

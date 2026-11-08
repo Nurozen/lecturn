@@ -39,7 +39,7 @@ import {
 } from "./squireActionIntent.ts";
 import * as SquireDelivery from "./SquireDelivery.ts";
 import { writeLeadItemEvent } from "./squireLeadItems.ts";
-import { retireOutOfScope } from "./squireScopeCascade.ts";
+import { handOverOrDropQueuedEvents, retireOutOfScope } from "./squireScopeCascade.ts";
 import { orSquireError } from "./SquireLifecycle.ts";
 import * as squirePolicy from "./squirePolicy.ts";
 import * as SquirePolicyLock from "./SquirePolicyLock.ts";
@@ -370,7 +370,7 @@ const make = Effect.gen(function* () {
     squireId: SquireId,
     now: string,
   ) {
-    yield* repository.dropQueuedEvents(squireId);
+    yield* handOverOrDropQueuedEvents(repository, scope, squireId);
     let lead = Option.none<SquireId>();
     for (const cardId of yield* repository.openHeldCards({ squireId, updatedAt: now })) {
       const card = yield* repository.getCard(cardId);
@@ -886,6 +886,13 @@ const make = Effect.gen(function* () {
       ctx,
       null,
       Effect.gen(function* () {
+        const denied = yield* kit.deniedRefusal(ctx, {
+          kind: "proposal",
+          targetThreadId: null,
+          projectId: null,
+          title: checked.title,
+        });
+        if (Option.isSome(denied)) return { result: denied.value };
         yield* repository.insertCard({
           id: cardId,
           squire_id: ctx.squire.id,
@@ -911,6 +918,15 @@ const make = Effect.gen(function* () {
           escalate_at: null,
           opened_at: null,
           executes_at: executesAt,
+          expires_at: held
+            ? null
+            : SquireRepository.squireApprovalExpiresAt(
+                {
+                  kind: "proposal",
+                  origin: ctx.run.origin === "unknown" ? "event" : ctx.run.origin,
+                },
+                ctx.now,
+              ),
           attempt: held ? 1 : 0,
           command_id: held ? squireActionCommandId("execute", cardId, 1) : null,
           execution_key: null,

@@ -117,9 +117,11 @@ and its rule offer stays savable. An approval the user or a voice note started n
 
 Deny is dismiss on an open approval. The slot (thread and kind, or project and title for a proposal
 with no thread) is refused until the user next writes in that Squire's chat. That message closes the
-Squire's open approvals and ends its denials, bounded by the run's `requestedAt`, because a run's
-updates repeat and its own new cards are newer. A denial is in force while its card's `expires_at`
-is null; ending it stamps that column, so the history row keeps reading Denied.
+Squire's open approvals and ends its denials, and it can be a steer into a running turn, so the
+trigger is the user's `user_message` item, bounded by its time so cards raised after it survive. It
+writes no Lead event: the user just settled those items where the Lead would report them. A denial
+is in force while its card's `expires_at` is null; ending it stamps that column, so the history row
+keeps reading Denied.
 
 **Holds are not items.** A held Auto action is a `squire_card` in `held` status, outside the
 one-open-card index, so it never replaces an open card for the same thread and kind. The read model

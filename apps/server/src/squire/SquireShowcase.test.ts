@@ -302,7 +302,7 @@ describe("showcase page", () => {
     );
     const overlap = data.items.find((item) => item.id === "card:o");
     assert.strictEqual(overlap?.owner, "Release");
-    assert.strictEqual(overlap?.link, "lecturn://squires/env-1/squire-a?item=card%3Ao");
+    assert.strictEqual(overlap?.link, "lecturn://squires/env-1/lead");
     assert.isNull(
       SquireShowcase.buildShowcaseData(
         baseInput({ cards: [cardRow("card:q", "squire-a" as SquireId, { kind: "question" })] }),

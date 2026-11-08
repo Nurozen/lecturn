@@ -441,6 +441,24 @@ describe("squire_close_room", () => {
 });
 
 describe("squire_open_room refusals", () => {
+  it.effect("a background room proposal expires, and denying it closes the slot", () =>
+    withCast((cast) =>
+      Effect.gen(function* () {
+        const raised = yield* openRoom(cast);
+        assert.isFalse(raised.isError, raised.text);
+        const [card] = yield* (yield* repo).listCards({ squireId: cast.lead.squireId });
+        assert.strictEqual(card!.status, "open");
+        assert.isNotNull(card!.expires_at);
+        yield* Effect.flatMap(actions, (service) =>
+          service.act({ requestId: "deny-room", cardIds: [card!.id], action: "dismiss" }),
+        );
+        const again = yield* openRoom(cast);
+        assert.isTrue(again.isError);
+        assert.include(again.text, "denied");
+      }),
+    ),
+  );
+
   const refusedWith = (result: SquireToolResult, reason: string) => {
     assert.isTrue(result.isError, result.text);
     assert.strictEqual(structured(result).reason, reason, result.text);

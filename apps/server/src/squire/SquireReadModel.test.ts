@@ -207,12 +207,25 @@ describe("SquireReadModel", () => {
             };
           };
           yield* sink.write({ events: [reply("m:spoke", "run:spoke", 1_000)] });
+          // One batch notified and stayed quiet on another thread: it spoke.
+          yield* repository.insertActionLog(
+            logRow({ kind: "quiet.recorded", run_id: "run:spoke" }),
+          );
+          yield* repository.insertActionLog(
+            logRow({
+              kind: "tool.called",
+              run_id: "run:spoke",
+              data_json: '{"tool":"squire_notify"}',
+            }),
+          );
           yield* sink.write({ events: [reply("m:quiet", "run:quiet", 2_000)] });
           yield* repository.insertActionLog(
             logRow({ kind: "quiet.recorded", run_id: "run:quiet" }),
           );
           assert.strictEqual((yield* entryOf(release)).lastMessageAt, at(1_000));
 
+          // The user steers this later run, so its stay-quiet cannot hide the reply.
+          yield* repository.insertActionLog(logRow({ kind: "quiet.recorded", run_id: "run:new" }));
           const model = yield* readModel;
           const events = yield* Queue.unbounded<KnownEvent>();
           yield* model.subscribe.pipe(
@@ -222,6 +235,19 @@ describe("SquireReadModel", () => {
           );
           assert.strictEqual((yield* Queue.take(events)).type, "snapshot");
           yield* sink.write({ events: [reply("m:new", "run:new", 3_000)] });
+          yield* sink.write({
+            events: [
+              {
+                ...reply("m:steer", "run:new", 2_900),
+                payload: {
+                  ...reply("m:steer", "run:new", 2_900).payload,
+                  createdBy: "user" as const,
+                  creationSource: "web" as const,
+                  role: "user" as const,
+                },
+              },
+            ],
+          });
           yield* sink.write({
             events: [
               {

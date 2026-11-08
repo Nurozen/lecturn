@@ -50,3 +50,20 @@ export const SQUIRE_TOOL_NAMES = {
 } as const satisfies Record<SquireRole, ReadonlyArray<string>>;
 
 export type SquireToolName = (typeof SQUIRE_TOOL_NAMES)[SquireRole][number];
+
+/** A run that called one of these put something in front of the user. Mirrors the clients' list. */
+export const SQUIRE_SPEAKING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "squire_notify",
+  "squire_recommend_steer",
+  "squire_send_steer",
+  "squire_propose_thread",
+  "squire_create_thread",
+  "squire_propose_room",
+  "squire_open_room",
+  "squire_propose_squire",
+  "squire_raise_overlap",
+  "squire_pause",
+  "squire_resume",
+  "squire_rescope",
+  "squire_forward_item",
+]);

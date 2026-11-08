@@ -294,6 +294,25 @@ describe("SquireSweep", () => {
     }).pipe(Effect.provide(sweepLayer())),
   );
 
+  it.effect("a lapsed finding for the same head stays lapsed", () =>
+    Effect.gen(function* () {
+      yield* seed();
+      yield* standardShells();
+      const repository = yield* SquireRepository.SquireRepository;
+      yield* findWork;
+      const admission = yield* raise("card:finding-lapsed", idle);
+      assert.isTrue(admission.ok);
+      yield* repository.updateCard({
+        id: SquireCardId.make("card:finding-lapsed"),
+        fromStatuses: ["open"],
+        patch: { status: "outdated", resolution: "expired" },
+        updatedAt: NOW,
+      });
+      const again = yield* admit(idle);
+      assert.strictEqual(!again.ok && again.reason, "finding-outdated");
+    }).pipe(Effect.provide(sweepLayer())),
+  );
+
   it.effect("admits at most 3 findings per sweep and 6 per day, only for candidates", () =>
     Effect.gen(function* () {
       yield* seed({ sweep_json: JSON.stringify({ findingsPerSweep: 1, findingsPerDay: 2 }) });

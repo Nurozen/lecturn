@@ -14,7 +14,6 @@ import {
   SquireCardId,
   SquireCardPayload,
   SquireCardTrigger,
-  SquireEventToggles,
   type SquireId,
   type SquireTurnSummary,
   ThreadId,
@@ -69,6 +68,7 @@ import {
   scheduleSquireEvent,
   squireClassifyNeeds,
   squireEventToggle,
+  squireEventTogglesOf,
   squireInterruptActor,
   squirePullRequestRevision,
   squirePullRequestStates,
@@ -143,8 +143,6 @@ const isFixtureProject = (
 
 const encodePayload = Schema.encodeSync(SquireEventPayloadJson);
 const decodePayload = Schema.decodeUnknownOption(SquireEventPayloadJson);
-const decodeToggles = Schema.decodeUnknownOption(Schema.fromJsonString(SquireEventToggles));
-const DEFAULT_TOGGLES = Schema.decodeSync(SquireEventToggles)({});
 const decodeModel = Schema.decodeUnknownOption(Schema.fromJsonString(ModelSelection));
 const encodeTrigger = Schema.encodeSync(Schema.fromJsonString(SquireCardTrigger));
 const decodeTrigger = Schema.decodeUnknownOption(Schema.fromJsonString(SquireCardTrigger));
@@ -163,8 +161,7 @@ const THREAD_CHANGE_EVENTS: ReadonlySet<string> = new Set([
   "thread.metadata-updated",
 ]);
 
-const togglesOf = (row: SquireRepository.SquireRow) =>
-  Option.getOrElse(decodeToggles(row.events_json), () => DEFAULT_TOGGLES);
+const togglesOf = squireEventTogglesOf;
 
 // Ignored events are re-read harmlessly after a restart, so the cursor is
 // written after each event that did work and only every so often otherwise.
@@ -307,11 +304,13 @@ const make = Effect.gen(function* () {
   ) {
     const threadId = candidates[0]?.threadId;
     if (threadId === undefined) return;
-    const owner = yield* scope.ownerOf(threadId);
-    if (Option.isNone(owner)) return;
     if (shell !== null && (yield* isFixtureProject(config, projects, shell.projectId))) return;
-    const interested = (yield* repository.listSquires).filter((row) => row.id === owner.value);
-    if (interested.length === 0) return;
+    const squires = new Map((yield* repository.listSquires).map((row) => [row.id, row]));
+    const owners = new Map<
+      SquireEventCandidate["kind"],
+      Option.Option<SquireRepository.SquireRow>
+    >();
+    const interested = new Map<SquireId, SquireRepository.SquireRow>();
     const createdAt = yield* nowIso;
     const inserted: Array<InsertedRow> = [];
     for (const candidate of candidates) {
@@ -320,9 +319,19 @@ const make = Effect.gen(function* () {
         candidate.kind === "pull-request-changed" && shell?.latestRunId
           ? { ...candidate.payload, runId: shell.latestRunId }
           : candidate.payload;
-      for (const squire of interested) {
+      const toggle = squireEventToggle(candidate.kind);
+      let owner = owners.get(candidate.kind);
+      if (owner === undefined) {
+        const id = yield* scope.ownerOf(threadId, (squireId) => {
+          const row = squires.get(squireId);
+          return row !== undefined && togglesOf(row)[toggle];
+        });
+        owner = Option.flatMap(id, (found) => Option.fromNullishOr(squires.get(found)));
+        owners.set(candidate.kind, owner);
+      }
+      for (const squire of Option.toArray(owner)) {
+        interested.set(squire.id, squire);
         const toggles = togglesOf(squire);
-        if (!toggles[squireEventToggle(candidate.kind)]) continue;
         const schedule = scheduleSquireEvent(candidate.timing, toggles);
         const id = yield* repository.insertTriggerEvent({
           squire_id: squire.id,
@@ -364,7 +373,7 @@ const make = Effect.gen(function* () {
     }
     if (immediate.length > 0) yield* promote(immediate);
     for (const { key, ids } of bySummary.values()) {
-      yield* ensureThenPromote(key, interested, ids);
+      yield* ensureThenPromote(key, [...interested.values()], ids);
     }
   });
 
@@ -728,6 +737,7 @@ const make = Effect.gen(function* () {
     patchOf: (card: SquireRepository.SquireCardRow) => SquireRepository.SquireCardPatch,
     now: string,
     reason: string,
+    options: { readonly quiet?: boolean } = {},
   ) =>
     repository
       .transaction(
@@ -744,6 +754,7 @@ const make = Effect.gen(function* () {
             moved.push(updated.value);
             if (updated.value.status === "outdated") yield* logHoldCancelled(card, reason, now);
           }
+          if (options.quiet === true) return Option.none<SquireId>();
           return yield* writeLeadItemsResolved(repository, moved, now);
         }),
       )
@@ -840,15 +851,14 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * The user's message answers what was waiting in that Squire's chat: its approvals close and its
-   * denials end. Holds keep their Undo window, and anything this run raised is newer than `requestedAt`.
+   * The user's message answers what was waiting in that Squire's chat: its approvals close, with
+   * no Lead event because the user just settled them here, and its denials end. Holds keep their
+   * Undo window, and a card raised after the message is newer than `at`.
    */
-  const onHomeRunStarted = Effect.fnUntraced(function* (
-    effect: Extract<SquireReactorEffect, { readonly type: "home-run-started" }>,
+  const onHomeUserMessage = Effect.fnUntraced(function* (
+    effect: Extract<SquireReactorEffect, { readonly type: "home-user-message" }>,
   ) {
-    const message = yield* projections.getRunMessage(effect.threadId, effect.runId);
-    if (message?.createdBy !== "user") return;
-    const requestedMs = DateTime.toEpochMillis(effect.requestedAt);
+    const atMs = DateTime.toEpochMillis(effect.at);
     const approvals = yield* repository.listCards({
       squireId: effect.squireId,
       kinds: ["steer", "proposal"],
@@ -856,17 +866,18 @@ const make = Effect.gen(function* () {
     });
     const now = yield* nowIso;
     yield* moveCards(
-      approvals.filter((card) => Date.parse(card.updated_at) <= requestedMs),
+      approvals.filter((card) => Date.parse(card.updated_at) <= atMs),
       () => ({ status: "outdated", resolution: "outdated", executes_at: null }),
       now,
       "the user wrote in the chat",
+      { quiet: true },
     );
     yield* repository.clearDenials({
       squireId: effect.squireId,
-      before: DateTime.formatIso(effect.requestedAt),
+      before: DateTime.formatIso(effect.at),
       at: now,
     });
-    yield* closeReadFyis(effect.squireId, effect.requestedAt);
+    yield* closeReadFyis(effect.squireId, effect.at);
   });
 
   /** A new state for the same PR obsoletes cards raised for one it no longer holds. */
@@ -1214,8 +1225,8 @@ const make = Effect.gen(function* () {
         return onRequestResolved(effect.threadId, effect.requestId, questionSettledBy(stored));
       case "run-started":
         return onRunStarted(effect.threadId, effect.runId);
-      case "home-run-started":
-        return onHomeRunStarted(effect);
+      case "home-user-message":
+        return onHomeUserMessage(effect);
       case "home-visited":
         return closeReadFyis(effect.squireId, effect.at);
       case "background-work-ended":

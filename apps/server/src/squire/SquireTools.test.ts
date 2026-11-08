@@ -202,6 +202,37 @@ const steerArgs = {
 };
 
 describe("SquireTools", () => {
+  it.effect("a user-started turn cannot stay quiet", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* homeRun(home.homeThreadId, "user");
+        const refused = yield* callTool(home, "squire_stay_quiet", { reason: "Nothing to do." });
+        assert.isTrue(refused.isError);
+        assert.strictEqual(count(yield* logOf(home.squireId), "quiet.recorded"), 0);
+      }),
+    ),
+  );
+
+  it.effect("a notify that replaces an open alert says it pushed nothing", () =>
+    withSquire((home) =>
+      Effect.gen(function* () {
+        yield* setPermissions(home.squireId, { notify: "on" });
+        yield* homeRun(home.homeThreadId, "event");
+        const first = yield* callTool(home, "squire_notify", {
+          message: "Waiting on you.",
+          threadId: tracked,
+        });
+        assert.strictEqual(first.text, "Sent to the user.");
+        const second = yield* callTool(home, "squire_notify", {
+          message: "Still waiting.",
+          threadId: tracked,
+        });
+        assert.include(second.text, "not pushed again");
+        assert.strictEqual(count(yield* logOf(home.squireId), "notification.pushed"), 1);
+      }),
+    ),
+  );
+
   it("decodes a steer without steerKind as other", () => {
     const decoded = decodeSteerArgs(steerArgs);
     assert.strictEqual(decoded.steerKind, "other");

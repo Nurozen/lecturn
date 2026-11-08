@@ -482,6 +482,24 @@ describe("Lead control in every Manage Squires cell (P8, P17.6)", () => {
     ),
   );
 
+  it.effect("a background control proposal expires, and denying it closes the slot", () =>
+    withTeam((team) =>
+      Effect.gen(function* () {
+        yield* setManage(team, "recommend");
+        const pause = cardIdOf(yield* leadCall(team, "squire_pause", { squireId: team.research }));
+        assert.isNotNull((yield* cardOf(pause)).expires_at);
+        yield* dismiss(pause);
+        assert.strictEqual((yield* cardOf(pause)).resolution, "denied");
+        const again = yield* leadCall(team, "squire_pause", {
+          squireId: team.research,
+          reason: "still noisy",
+        });
+        assert.isTrue(again.isError);
+        assert.include(again.text, "denied");
+      }),
+    ),
+  );
+
   it.effect("Recommend refuses forwards outside the target's scope", () =>
     withTeam((team) =>
       Effect.gen(function* () {

@@ -59,6 +59,7 @@ export type SquireSweepRefusal =
   | "not-a-sweep"
   | "not-a-candidate"
   | "finding-dismissed"
+  | "finding-outdated"
   | "already-raised"
   | "sweep-findings-reached"
   | "daily-findings-reached";
@@ -537,6 +538,10 @@ const make = Effect.gen(function* () {
     const same = findings.filter((card) => card.finding_key === findingKey);
     if (same.some((card) => card.status === "dismissed")) {
       return refusal("finding-dismissed", "The user already dismissed this finding.");
+    }
+    // Expiry, like a dismissal, is the user passing on this state of the thread.
+    if (same.some((card) => card.status === "outdated")) {
+      return refusal("finding-outdated", "This finding already came up and lapsed.");
     }
     if (same.some((card) => (OPEN_STATUSES as ReadonlyArray<string>).includes(card.status))) {
       return refusal("already-raised", "This finding is already in the queue.");

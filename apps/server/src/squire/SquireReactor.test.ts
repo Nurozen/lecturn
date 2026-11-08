@@ -685,9 +685,10 @@ describe("SquireReactor stops and scope", () => {
       ),
   );
 
-  it.effect("only the owner gets a row, and a toggle it turned off falls back to nobody", () =>
+  it.effect("an event goes to the closest tracker with its toggle on, or nobody", () =>
     runIn(() =>
       Effect.gen(function* () {
+        const repository = yield* SquireRepository.SquireRepository;
         yield* setup([
           squireRow(release, { events_json: '{"turnFinished":false}' }),
           squireRow(billing),
@@ -695,7 +696,19 @@ describe("SquireReactor stops and scope", () => {
         const { drain } = yield* startReactor;
         yield* finishRun(RunId.make("run:1"), "completed", yield* DateTime.now);
         yield* drain;
-        assert.deepStrictEqual(yield* rows, []);
+        assert.deepStrictEqual(
+          (yield* rows).map((row) => [row.squire_id, row.state_key]),
+          [[billing, "run:1"]],
+        );
+
+        yield* repository.updateSquire({
+          id: billing,
+          patch: { events_json: '{"turnFinished":false}' },
+          updatedAt: DateTime.formatIso(yield* DateTime.now),
+        });
+        yield* finishRun(RunId.make("run:2"), "completed", yield* DateTime.now);
+        yield* drain;
+        assert.lengthOf(yield* rows, 1);
       }),
     ),
   );
@@ -762,6 +775,7 @@ describe("SquireReactor stops and scope", () => {
 });
 
 describe("SquireReactor home-thread attention", () => {
+  const leadId = SquireId.make("squire:lead");
   const fyi = (id: string, overrides: Partial<SquireRepository.SquireCardRow> = {}) =>
     openCard(id, {
       kind: "fyi",
@@ -781,11 +795,29 @@ describe("SquireReactor home-thread attention", () => {
       repository.getCard(SquireCardId.make(id)).pipe(Effect.map(Option.getOrThrow)),
     );
 
-  it.effect("a user message there closes approvals and FYIs and ends denials, not holds", () =>
+  const userItem = (
+    runId: RunId,
+    createdBy: OrchestrationV2Actor,
+    now: DateTime.Utc,
+    inputIntent: "turn_start" | "steer" = "turn_start",
+  ) =>
+    itemEvent(home, now, {
+      id: `item:${runId}:${inputIntent}`,
+      runId,
+      type: "user_message",
+      messageId: MessageId.make(`message:${runId}:${inputIntent}`),
+      createdBy,
+      creationSource: "web",
+      inputIntent,
+      text: "carry on",
+      attachments: [],
+    });
+
+  it.effect("a user message there closes approvals and FYIs and ends denials, quietly", () =>
     runIn(() =>
       Effect.gen(function* () {
         const repository = yield* SquireRepository.SquireRepository;
-        yield* setup();
+        yield* setup([squireRow(release), squireRow(leadId, { role: "lead" })]);
         yield* createHome;
         const now = yield* DateTime.now;
         const later = DateTime.formatIso(DateTime.add(now, { minutes: 1 }));
@@ -801,29 +833,24 @@ describe("SquireReactor home-thread attention", () => {
         yield* repository.insertCard(denied("card:denied-newer", later));
         const { drain } = yield* startReactor;
 
-        // A wake run is not the user writing.
-        const wake = RunId.make("run:wake");
-        yield* write([
-          userMessage(home, wake, "agent", now),
-          runEvent(home, wake, "running", now, "run.created"),
-        ]);
+        // A delivered wake is not the user writing.
+        const run = RunId.make("run:wake");
+        yield* write([userItem(run, "agent", now)]);
         yield* drain;
         assert.strictEqual((yield* cardOf("card:approval")).status, "open");
 
-        const user = RunId.make("run:user");
-        yield* write([
-          userMessage(home, user, "user", now),
-          runEvent(home, user, "running", now, "run.created"),
-        ]);
+        // The user steers the running wake turn: no new run, the item is the only trace.
+        yield* write([userItem(run, "user", now, "steer")]);
         yield* drain;
         assert.strictEqual((yield* cardOf("card:approval")).status, "outdated");
         assert.strictEqual((yield* cardOf("card:fyi")).status, "dismissed");
-        // Raised after the message was sent: this run's own card stays.
+        // Raised after the message: a card this turn raised stays.
         assert.strictEqual((yield* cardOf("card:raised")).status, "open");
         assert.strictEqual((yield* cardOf("card:held")).status, "held");
         assert.isNotNull((yield* cardOf("card:denied")).expires_at);
         assert.strictEqual((yield* cardOf("card:denied")).resolution, "denied");
         assert.isNull((yield* cardOf("card:denied-newer")).expires_at);
+        assert.deepStrictEqual(yield* leadItemRows, []);
       }),
     ),
   );

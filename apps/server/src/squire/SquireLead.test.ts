@@ -373,6 +373,32 @@ describe("SquireLeadOnboarding.open", () => {
 });
 
 describe("squire_propose_squire", () => {
+  it.effect("a Lead proposal from a background turn expires, and denying it closes the slot", () =>
+    withLead((lead) =>
+      Effect.gen(function* () {
+        yield* homeRun(lead.homeThreadId, "event");
+        const raised = yield* callTool(
+          lead,
+          "squire_propose_squire",
+          proposal("Release", "billing-service"),
+        );
+        assert.isFalse(raised.isError, raised.text);
+        const repository = yield* SquireRepository.SquireRepository;
+        const [card] = yield* repository.listCards({ squireId: lead.squireId });
+        assert.isNotNull(card!.expires_at);
+        const actions = yield* need(SquireActions.SquireActions);
+        yield* actions.act({ requestId: "deny", cardIds: [card!.id], action: "dismiss" });
+        const again = yield* callTool(
+          lead,
+          "squire_propose_squire",
+          proposal("Release", "billing-service", { reason: "still useful" }),
+        );
+        assert.isTrue(again.isError);
+        assert.include(again.text, "denied");
+      }),
+    ),
+  );
+
   it.effect("raises recommend-only proposals by whole project that never wake the Lead", () =>
     withLead((lead) =>
       Effect.gen(function* () {

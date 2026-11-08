@@ -124,13 +124,11 @@ const itemActions = (card: SquireRepository.SquireCardRow): ReadonlyArray<Showca
   }
 };
 
-/** The app's deep link to the item in its owner's queue (`promptLinkAppPath`). */
+/** The app's deep link to the raiser's chat, where the approval renders (`promptLinkAppPath`). */
 const itemLink = (environmentId: EnvironmentId | null, card: SquireRepository.SquireCardRow) =>
   environmentId === null
     ? null
-    : `lecturn://squires/${encodeURIComponent(environmentId)}/${encodeURIComponent(
-        card.owner_squire_id,
-      )}?item=${encodeURIComponent(card.id)}`;
+    : `lecturn://squires/${encodeURIComponent(environmentId)}/${encodeURIComponent(card.squire_id)}`;
 
 /**
  * The map's file column, ordered by the mean position of the threads that touch each file

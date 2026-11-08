@@ -94,13 +94,13 @@ export class SquireScope extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<boolean, SquireScopeError>;
     /**
-     * The one Squire a thread's events go to: the active tracker with the most specific grant
-     * (thread, then saga, space, project), oldest first on a tie. Other trackers keep reading the
-     * thread and acting when asked; they just are not woken by it. A paused owner hands over at
-     * the next event.
+     * Who a thread's events go to: the active tracker with the most specific grant (thread, saga,
+     * space, project), oldest first on a tie. `accepts` narrows the choice, so an event goes to the
+     * closest tracker that wants its kind. Other trackers keep reading and acting when asked.
      */
     readonly ownerOf: (
       threadId: ThreadId,
+      accepts?: (squireId: SquireId) => boolean,
     ) => Effect.Effect<Option.Option<SquireId>, SquireScopeError>;
     /**
      * Squires whose project, Stave space, or saga grant holds the project,
@@ -224,7 +224,7 @@ const make = Effect.gen(function* () {
   );
 
   const ownerOf: SquireScope["Service"]["ownerOf"] = Effect.fn("SquireScope.ownerOf")(
-    function* (threadId) {
+    function* (threadId, accepts) {
       const shell = yield* trackableShell(threadId);
       if (shell === null) return Option.none<SquireId>();
       const { squires } = yield* loadIndex;
@@ -236,7 +236,7 @@ const make = Effect.gen(function* () {
       let closest = Number.POSITIVE_INFINITY;
       // Creation order, so only a strictly closer grant displaces the oldest.
       for (const squire of squires) {
-        if (!squire.active) continue;
+        if (!squire.active || accepts?.(squire.id) === false) continue;
         const rank = ownershipRank(squire.grants, target);
         if (rank === null || rank >= closest) continue;
         closest = rank;

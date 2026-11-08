@@ -631,7 +631,45 @@ describe("Squire threads (P1.4, P3.2, D9)", () => {
     expect(effects(request("command", "resolved"), onHome)).toEqual([]);
   });
 
-  it("a Squire-thread run terminal finalizes; a start reports the user message's run", () => {
+  it("a home thread's user_message from the user is the close-on-message trigger", () => {
+    const at = DateTime.makeUnsafe("2026-11-01T12:00:00.000Z");
+    const item = (createdBy: "user" | "agent") =>
+      stored({
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: at,
+        payload: {
+          id: "item:user" as OrchestrationV2TurnItem["id"],
+          threadId,
+          runId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "completed",
+          title: null,
+          startedAt: at,
+          completedAt: at,
+          updatedAt: at,
+          type: "user_message",
+          messageId: MessageId.make("message:user"),
+          createdBy,
+          creationSource: "web",
+          inputIntent: "steer",
+          text: "carry on",
+          attachments: [],
+        },
+      });
+    expect(effects(item("user"), onHome)).toEqual([
+      { type: "home-user-message", squireId: home.squireId, at },
+    ]);
+    expect(effects(item("agent"), onHome)).toEqual([]);
+    expect(squireClassifyNeeds(item("user")).threadMarker).toBe(true);
+  });
+
+  it("a Squire-thread run terminal finalizes; a start does not", () => {
     for (const status of [
       "completed",
       "failed",
@@ -643,15 +681,7 @@ describe("Squire threads (P1.4, P3.2, D9)", () => {
         { type: "squire-run-ended", threadId, squire: home, runId, status },
       ]);
     }
-    const started = effects(runUpdated("running"), onHome);
-    expect(started).toEqual([
-      expect.objectContaining({
-        type: "home-run-started",
-        threadId,
-        squireId: home.squireId,
-        runId,
-      }),
-    ]);
+    expect(effects(runUpdated("running"), onHome)).toEqual([]);
     expect(effects(runUpdated("waiting"), onHome)).toEqual([]);
   });
 });

@@ -55,6 +55,7 @@ import * as SquireRules from "./SquireRules.ts";
 import * as SquireScope from "./SquireScope.ts";
 import * as SquireSwitch from "./SquireSwitch.ts";
 import { toRule } from "./SquireTools.ts";
+import { SQUIRE_SPEAKING_TOOL_NAMES } from "./squireToolNames.ts";
 
 /**
  * Reads never write. The always-on stream carries compact snapshots only; evidence, card bodies, and logs are fetched
@@ -482,6 +483,37 @@ const make = Effect.gen(function* () {
     };
   });
 
+  /** The clients' rule: stayed quiet, raised and notified nothing, and the user did not write in it. */
+  const quietRunsOf = Effect.fnUntraced(function* (
+    squireId: SquireId,
+    homeThreadId: ThreadId,
+    runIds: ReadonlyArray<RunId>,
+  ) {
+    const logged = yield* repository.listActionLogForRuns({
+      squireId,
+      kinds: ["quiet.recorded", "tool.called"],
+      runIds,
+    });
+    const quiet = new Set(
+      logged.flatMap((row) => (row.kind === "quiet.recorded" ? [row.run_id] : [])),
+    );
+    for (const row of logged) {
+      const tool = row.kind === "tool.called" ? logData(row).tool : undefined;
+      if (typeof tool === "string" && SQUIRE_SPEAKING_TOOL_NAMES.has(tool))
+        quiet.delete(row.run_id);
+    }
+    const candidates = runIds.filter((runId) => quiet.has(runId));
+    if (candidates.length === 0) return quiet;
+    const { messages } = yield* projections.getThreadRecords(homeThreadId, ["messages"], {
+      messageRoles: ["user"],
+      messageRunIds: candidates,
+    });
+    for (const message of messages) {
+      if (message.createdBy === "user") quiet.delete(message.runId);
+    }
+    return quiet;
+  });
+
   /** The newest message a run that stayed quiet did not write; re-read only when a home run ends. */
   const lastMessageAtOf = Effect.fnUntraced(function* (squire: Squire, homeRunsVersion: number) {
     const homeThreadId = squire.homeThreadId;
@@ -494,12 +526,9 @@ const make = Effect.gen(function* () {
       homeThreadId,
       RECENT_ASSISTANT_MESSAGES,
     );
-    const quiet = yield* repository.listActionLogForRuns({
-      squireId: squire.id,
-      kinds: ["quiet.recorded"],
-      runIds: [...new Set(messages.flatMap((message) => message.runId ?? []))],
-    });
-    const quietRuns = new Set(quiet.map((row) => row.run_id));
+    const quietRuns = yield* quietRunsOf(squire.id, homeThreadId, [
+      ...new Set(messages.flatMap((message) => message.runId ?? [])),
+    ]);
     const at = messages.find(
       (message) => message.runId === null || !quietRuns.has(message.runId),
     )?.updatedAt;
