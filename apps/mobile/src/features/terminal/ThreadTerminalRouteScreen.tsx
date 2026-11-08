@@ -70,6 +70,7 @@ import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnection
 import { TerminalSurface, type TerminalSurfaceHandle } from "./NativeTerminalSurface";
 import { getMobileTerminalTheme } from "./terminalTheme";
 import { terminalDebugLog } from "./terminalDebugLog";
+import { hasTerminalSceneContent } from "./terminalShowcaseReadiness";
 import { useTerminalExitNavigation } from "./useTerminalExitNavigation";
 import {
   useInitialTerminalLaunchLocation,
@@ -552,7 +553,11 @@ function ThreadTerminal(props: {
   useShowcaseSceneRendered(
     "terminal",
     themeId,
-    terminal.version !== 0 && (terminal.buffer.length > 0 || terminal.output.retainedBytes > 0),
+    hasTerminalSceneContent({
+      version: terminal.version,
+      buffer: terminal.buffer,
+      output: terminal.output,
+    }),
   );
 
   const cwd = terminal.summary?.cwd ?? selectedThreadProject?.workspaceRoot ?? null;
