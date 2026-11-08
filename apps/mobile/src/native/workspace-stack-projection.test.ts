@@ -10,7 +10,6 @@ import {
   projectWorkspaceStack,
   partitionStackPresentations,
   reconcileStackScreens,
-  workspaceDockHidden,
   type CollapsedSplitColumn,
 } from "./workspace-stack-projection";
 
@@ -83,29 +82,6 @@ describe("workspace router projection", () => {
       overlays: [],
     });
     expect(state.routes[0]).toBe(thread);
-  });
-});
-
-describe("phone workspace dock", () => {
-  const phone = { usesSplitView: false, verticalBarEdge: "none" } as const;
-
-  it("hides under a thread opened over the Usage page, so it cannot cover the composer", () => {
-    // A notification opens the thread by link, which leaves the Usage tab selected.
-    const projection = projectWorkspaceStack(history([home, thread]), () => false);
-    expect(workspaceDockHidden(projection, { ...phone, rootVisible: false })).toBe(true);
-  });
-
-  it("stays on the root page, while it reappears, and beside columns or a vertical bar", () => {
-    const pushed = projectWorkspaceStack(history([home, thread]), () => false);
-    const root = projectWorkspaceStack(history([home]), () => false);
-    expect(workspaceDockHidden(root, { ...phone, rootVisible: true })).toBe(false);
-    expect(workspaceDockHidden(pushed, { ...phone, rootVisible: true })).toBe(false);
-    expect(workspaceDockHidden(pushed, { ...phone, usesSplitView: true, rootVisible: false })).toBe(
-      false,
-    );
-    expect(
-      workspaceDockHidden(pushed, { ...phone, verticalBarEdge: "left", rootVisible: false }),
-    ).toBe(false);
   });
 });
 

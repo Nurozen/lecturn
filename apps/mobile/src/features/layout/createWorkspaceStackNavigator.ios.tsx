@@ -37,7 +37,7 @@ import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { WorkspaceTabsProvider, useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { WorkspaceNativeTabs } from "../workspace/WorkspaceNativeTabs.ios";
-import { workspaceUsesColumns } from "../workspace/workspace-tabs-state";
+import { workspaceStackChrome } from "../workspace/workspace-tabs-state";
 import { isSettingsRoute, settingsOpenIn } from "../settings/settings-navigation";
 import { workspaceRoutesOf } from "./workspace-overlay-routes";
 import { setNativelyPoppingWorkspaceRoute } from "../workspace/workspace-detail-selection";
@@ -64,7 +64,6 @@ import {
   projectWorkspaceStack,
   partitionStackPresentations,
   reconcileStackScreens,
-  workspaceDockHidden,
   type CollapsedSplitColumn,
 } from "../../native/workspace-stack-projection";
 import {
@@ -513,7 +512,15 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
   const descriptors = props.descriptors;
   const baseRoute = { key: `${props.state.key}:workspace`, name: "Workspace" };
   const visibleRoute = projection.detail.at(-1) ?? primaryRoute;
-  const workspacePage = !workspaceUsesColumns(workspace.state.selectedTab, workspace.settingsOpen);
+  const chrome = workspaceStackChrome({
+    selectedTab: workspace.state.selectedTab,
+    settingsOpen: workspace.settingsOpen,
+    nativeColumns: props.nativeColumns,
+    detailCount: projection.detail.length,
+    rootVisible: primaryVisible,
+    usesSplitView: layout.usesSplitView,
+    verticalBarEdge: metrics?.verticalBarEdge ?? "none",
+  });
   const baseDescriptor: Descriptor = {
     ...primaryDescriptor,
     navigation: props.descriptors[visibleRoute.key]!.navigation,
@@ -521,14 +528,8 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
     route: visibleRoute,
     options: { headerShown: false },
     render: () => (
-      <WorkspaceNativeTabs
-        hidden={workspaceDockHidden(projection, {
-          rootVisible: primaryVisible,
-          usesSplitView: layout.usesSplitView,
-          verticalBarEdge: metrics?.verticalBarEdge ?? "none",
-        })}
-      >
-        {props.nativeColumns && !workspacePage ? (
+      <WorkspaceNativeTabs hidden={chrome.dockHidden}>
+        {chrome.columns ? (
           <WorkspaceColumns
             {...props}
             descriptors={descriptors}

@@ -9,6 +9,7 @@ import {
   workspaceSearchBottomClearance,
   workspaceDockBottomClearance,
   workspaceUsesColumns,
+  workspaceStackChrome,
 } from "./workspace-tabs-state";
 
 describe("compact list clearance", () => {
@@ -56,6 +57,34 @@ describe("workspace root navigation", () => {
     expect(workspaceUsesColumns("usage", true)).toBe(true);
     expect(workspaceUsesColumns("threads")).toBe(true);
     expect(workspaceUsesColumns("pullRequests")).toBe(true);
+  });
+
+  const phone = {
+    settingsOpen: false,
+    nativeColumns: false,
+    usesSplitView: false,
+    verticalBarEdge: "none",
+  } as const;
+
+  it("hides the phone dock under a thread a notification opened over the Usage page", () => {
+    const chrome = workspaceStackChrome({
+      ...phone,
+      selectedTab: "usage",
+      detailCount: 1,
+      rootVisible: false,
+    });
+    expect(chrome).toEqual({ columns: false, dockHidden: true });
+  });
+
+  it("keeps the dock on a tab's root page, while it reappears, and beside a vertical bar", () => {
+    const usage = { ...phone, selectedTab: "usage", detailCount: 1 } as const;
+    expect(workspaceStackChrome({ ...usage, detailCount: 0, rootVisible: true }).dockHidden).toBe(
+      false,
+    );
+    expect(workspaceStackChrome({ ...usage, rootVisible: true }).dockHidden).toBe(false);
+    expect(
+      workspaceStackChrome({ ...usage, verticalBarEdge: "left", rootVisible: false }).dockHidden,
+    ).toBe(false);
   });
 
   it("keeps the registered defaults while customization is unavailable", () => {
