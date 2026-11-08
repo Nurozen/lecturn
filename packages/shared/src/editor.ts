@@ -1,4 +1,5 @@
 import type { EDITORS } from "@lecturn/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -8,6 +9,12 @@ import * as HostProcess from "./HostProcess.ts";
 import { isCommandAvailable } from "./shell.ts";
 
 type Editor = (typeof EDITORS)[number];
+
+/** Machine-wide macOS app folders scanned after `$HOME/Applications`; tests swap in temp roots. */
+export const MacSystemApplicationRoots = Context.Reference<ReadonlyArray<string>>(
+  "@lecturn/shared/editor/MacSystemApplicationRoots",
+  { defaultValue: () => ["/Applications"] },
+);
 
 const installNames: Partial<Record<Editor["id"], ReadonlyArray<string>>> = {
   vscode: ["Visual Studio Code"],
@@ -49,7 +56,10 @@ export const resolveEditorCommand = Effect.fn("editor.resolveEditorCommand")(fun
   const candidates: string[] = [];
 
   if (platform === "darwin") {
-    const roots = [...(home ? [path.join(home, "Applications")] : []), "/Applications"];
+    const roots = [
+      ...(home ? [path.join(home, "Applications")] : []),
+      ...(yield* MacSystemApplicationRoots),
+    ];
     for (const root of roots) {
       // JetBrains Toolbox appends versions to bundle names; accept exact and versioned names.
       const entries = yield* fs.readDirectory(root).pipe(Effect.orElseSucceed(() => []));
