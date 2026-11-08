@@ -1340,11 +1340,8 @@ async function captureIos(
         }
       }
     } else {
-      // A request that times out while the host is starved leaves the scene on a
-      // sticky error (for example "Could not check terminal access"), which the
-      // app's render signal rightly never reports, or on a stall screen it does
-      // report. Leaving and re-entering the scene mounts it again and retries.
-      // The agent-activity scene stages a Live Activity, so it only waits.
+      // A starved host can leave a scene undrawn or on a stall screen; re-entering
+      // remounts it and retries. agent-activity stages a Live Activity, so it only waits.
       let reentries = 0;
       while (true) {
         const ready = await waitForScene(scene === "agent-activity" ? 300_000 : 120_000).then(
