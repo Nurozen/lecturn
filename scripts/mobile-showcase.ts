@@ -1073,6 +1073,18 @@ async function collectIosDiagnostics(udid: string, label: string): Promise<void>
   await record("host.txt", commandOutput("ps", ["-axo", "pid,pcpu,rss,command", "-r"]));
 }
 
+// Error states a scene can settle on when a request timed out on a starved host.
+const SHOWCASE_STALL_TEXTS = [
+  "Reconnecting",
+  "Could not check terminal access",
+  "Review unavailable",
+  "timed out after",
+] as const;
+
+export function showcaseStallText(accessibilityTree: string): string | null {
+  return SHOWCASE_STALL_TEXTS.find((text) => accessibilityTree.includes(text)) ?? null;
+}
+
 export function screenshotsMatch(first: Uint8Array, second: Uint8Array): boolean {
   const a = PNG.sync.read(Buffer.from(first));
   const b = PNG.sync.read(Buffer.from(second));
@@ -1357,6 +1369,12 @@ async function captureIos(
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
     await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
+    const stall = showcaseStallText(
+      await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(() => ""),
+    );
+    if (stall !== null) {
+      throw new Error(`iOS showcase scene '${scene}' shows a stall screen ("${stall}").`);
+    }
     const destination = NodePath.join(
       showcaseCaptureDirectory(outputDirectory, capture),
       `${scene}.png`,
@@ -1732,6 +1750,7 @@ async function main(): Promise<void> {
     readonly environmentId: string;
     readonly label: string;
     readonly port: number;
+    readonly start: () => NodeChildProcess.ChildProcess;
   }> = [];
   let metro: NodeChildProcess.ChildProcess | null = null;
   const iosCleanups: IosCaptureCleanup[] = [];
@@ -1777,14 +1796,9 @@ async function main(): Promise<void> {
       await seedShowcaseEnvironment({ baseDir, projectIds: environment.projectIds });
       // Legacy fixture threads are imported into V2 during server startup.
       await stopProcess(server);
-      const seededServer = startShowcaseServer(
-        baseDir,
-        workspaceRoot,
-        port,
-        shellPath,
-        labelProbeDirectory,
-      );
-      showcaseServers.push(seededServer);
+      const start = () =>
+        startShowcaseServer(baseDir, workspaceRoot, port, shellPath, labelProbeDirectory);
+      showcaseServers.push(start());
       await waitForPort(port, `${environment.label} seeded server`);
       // The server begins listening before the ServerEnvironment layer
       // persists the environment id, so poll rather than read once.
@@ -1792,7 +1806,7 @@ async function main(): Promise<void> {
         NodePath.join(baseDir, "userdata", "environment-id"),
         `${environment.label} environment id`,
       );
-      showcaseEnvironments.push({ baseDir, environmentId, label: environment.label, port });
+      showcaseEnvironments.push({ baseDir, environmentId, label: environment.label, port, start });
     }
 
     if (!options.skipMetro) {
@@ -1804,7 +1818,17 @@ async function main(): Promise<void> {
       ]);
     }
 
-    for (const capture of captures) {
+    for (const [captureIndex, capture] of captures.entries()) {
+      // A showcase server that served earlier devices can stop answering late in
+      // a long hosted run (iPad /api/auth/session timeouts in runs 42420789069
+      // and 42425290074). Each device starts against freshly started servers.
+      if (captureIndex > 0) {
+        await Promise.all(showcaseServers.splice(0).map((server) => stopProcess(server)));
+        for (const environment of showcaseEnvironments) {
+          showcaseServers.push(environment.start());
+          await waitForPort(environment.port, `${environment.label} server`);
+        }
+      }
       const pairingHost = capture.device.platform === "ios" ? "127.0.0.1" : "10.0.2.2";
       const issuePairingUrls = () =>
         Promise.all(
