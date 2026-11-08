@@ -23,6 +23,27 @@ export function workspaceUsesColumns(tab: WorkspaceTab, settingsOpen = false) {
   return settingsOpen || tab !== "usage";
 }
 
+/** How the iOS workspace stack shows the selected tab above its pushed pages. */
+export function workspaceStackChrome(input: {
+  readonly selectedTab: WorkspaceTab;
+  readonly settingsOpen: boolean;
+  readonly nativeColumns: boolean;
+  readonly detailCount: number;
+  readonly rootVisible: boolean;
+  readonly usesSplitView: boolean;
+  readonly verticalBarEdge: "none" | "left" | "right";
+}) {
+  return {
+    columns: input.nativeColumns && workspaceUsesColumns(input.selectedTab, input.settingsOpen),
+    // The phone dock belongs to the root page, so a pushed page hides it on every tab.
+    dockHidden:
+      input.detailCount > 0 &&
+      !input.rootVisible &&
+      !input.usesSplitView &&
+      input.verticalBarEdge === "none",
+  };
+}
+
 export interface WorkspaceTabState {
   readonly query: string;
   readonly searchMode: WorkspaceSearchMode;
