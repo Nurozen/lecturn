@@ -80,6 +80,7 @@ import {
   squireScopeLine,
   squireSettledLabel,
   squireSidebarState,
+  squireApprovalControls,
   squireApprovalEntries,
   squireAllowRuleInput,
   runSquireAlwaysAllow,
@@ -1709,7 +1710,7 @@ describe("squireApprovalEntries", () => {
   const card = (
     id: string,
     overrides: Partial<
-      Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution">
+      Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution" | "fyiSource">
     > = {},
   ) => ({
     id,
@@ -1718,6 +1719,19 @@ describe("squireApprovalEntries", () => {
     squireId: squire,
     createdAt: at,
     ...overrides,
+  });
+
+  it("keeps an open inactivity check, the one FYI whose answer matters", () => {
+    const rows = [
+      card("check", { kind: "fyi", fyiSource: "inactivity" }),
+      card("news", { kind: "fyi", fyiSource: "summary" }),
+      card("answered", { kind: "fyi", fyiSource: "inactivity", status: "resolved" }),
+    ];
+    expect(
+      squireApprovalEntries(rows, { squireId: squire, isLead: false, chatFirst: true }).map(
+        (entry) => entry.row.id,
+      ),
+    ).toEqual(["check"]);
   });
 
   it("orders a chat's rows oldest first, leaving FYIs and holds out", () => {
@@ -1775,6 +1789,84 @@ describe("squireApprovalEntries", () => {
         (entry) => entry.row.id,
       ),
     ).toEqual(["lead-raised"]);
+  });
+});
+
+describe("squireApprovalControls", () => {
+  const offer: SquireRuleOffer = {
+    effect: "allow",
+    actionClass: "steer",
+    targetKind: "thread",
+    targetId: "thread-1",
+    text: "Research may auto-send review-feedback steers",
+    capReached: false,
+  };
+  const base = {
+    id: "card-1" as SquireCardId,
+    squireId: "squire-a" as SquireId,
+    createdAt: at,
+    status: "open" as const,
+    resolution: undefined,
+  };
+  const entry = (
+    patch: Partial<SquireCardRow> & Pick<SquireCardRow, "kind">,
+    phase: "open" | "sending" | "closed" = "open",
+    expired = false,
+  ) => ({
+    row: { ...base, ...patch },
+    createdAt: at,
+    phase,
+    outcome: phase === "closed" ? (expired ? "Expired" : "Sent") : null,
+    expired,
+  });
+
+  it("gives an open approval Allow once and Deny, with Always allow only if a rule can apply", () => {
+    expect(squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }), null)).toEqual({
+      allow: "Allow once",
+      alwaysAllow: true,
+      deny: "Deny",
+      inactivity: false,
+      allowNextTime: false,
+    });
+    expect(squireApprovalControls(entry({ kind: "steer" }), null).alwaysAllow).toBe(false);
+  });
+
+  it("names a Squire or room proposal's own accept", () => {
+    const proposal = (type: string) =>
+      squireApprovalControls(entry({ kind: "proposal" }), { type } as never).allow;
+    expect(proposal("squire-proposal")).toBe("Accept");
+    expect(proposal("room-proposal")).toBe("Open room");
+    expect(proposal("thread-proposal")).toBe("Allow once");
+  });
+
+  it("answers a question in place and offers an overlap only Dismiss", () => {
+    expect(squireApprovalControls(entry({ kind: "question" }), null)).toMatchObject({
+      allow: null,
+      deny: "Dismiss",
+    });
+    expect(squireApprovalControls(entry({ kind: "overlap" }), null)).toMatchObject({
+      allow: null,
+      deny: "Dismiss",
+    });
+  });
+
+  it("gives the inactivity check its Keep and Pause", () => {
+    expect(
+      squireApprovalControls(entry({ kind: "fyi", fyiSource: "inactivity" }), null),
+    ).toMatchObject({ inactivity: true, allow: null, deny: null });
+  });
+
+  it("offers Always allow next time only on an expired approval a rule could cover", () => {
+    expect(
+      squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }, "closed", true), null),
+    ).toMatchObject({ allowNextTime: true, allow: null, deny: null });
+    expect(
+      squireApprovalControls(entry({ kind: "steer" }, "closed", true), null).allowNextTime,
+    ).toBe(false);
+    expect(
+      squireApprovalControls(entry({ kind: "steer", allowRuleOffer: offer }, "closed"), null)
+        .allowNextTime,
+    ).toBe(false);
   });
 });
 

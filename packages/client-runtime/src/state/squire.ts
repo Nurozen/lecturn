@@ -1825,12 +1825,16 @@ export interface SquireApprovalEntry<Row> {
 
 /**
  * The rows a Squire's chat shows inline, oldest first, at the time they were raised. Holds wait
- * on nobody and keep their banner; FYIs no longer render. On a chat-first server a row belongs
+ * on nobody and keep their banner; FYIs no longer render, save an open inactivity check. On a
+ * chat-first server a row belongs
  * to the chat of the Squire that raised it. Older servers list the Lead's combined queue, so
  * the Lead keeps only what it raised while a Squire keeps what its list already holds.
  */
 export function squireApprovalEntries<
-  Row extends Pick<SquireCardRow, "kind" | "status" | "squireId" | "createdAt" | "resolution">,
+  Row extends Pick<
+    SquireCardRow,
+    "kind" | "status" | "squireId" | "createdAt" | "resolution" | "fyiSource"
+  >,
 >(
   rows: ReadonlyArray<Row>,
   chat: {
@@ -1841,7 +1845,9 @@ export function squireApprovalEntries<
 ): ReadonlyArray<SquireApprovalEntry<Row>> {
   const entries: Array<SquireApprovalEntry<Row>> = [];
   for (const row of rows) {
-    if (row.kind === "fyi" || row.status === "held") continue;
+    // The inactivity check is an FYI only in name: unanswered, automation pauses.
+    if (row.kind === "fyi" && !(row.fyiSource === "inactivity" && row.status === "open")) continue;
+    if (row.status === "held") continue;
     const phase = SQUIRE_APPROVAL_PHASE[row.status];
     if (phase === undefined) continue;
     if ((chat.chatFirst || chat.isLead) && row.squireId !== chat.squireId) continue;
@@ -1867,6 +1873,59 @@ export function squireAllowRuleInput(row: SquireAllowRuleRow) {
   const offer = row.allowRuleOffer;
   if (offer === undefined || offer.effect !== "allow" || offer.capReached) return null;
   return squireOfferRuleInput(offer, "offer", row);
+}
+
+export interface SquireApprovalControls {
+  /** "Allow once", or a proposal's own verb; null where a row takes no accept. */
+  readonly allow: string | null;
+  readonly alwaysAllow: boolean;
+  /** "Deny" on an approval, "Dismiss" on a question or overlap; null once closed. */
+  readonly deny: string | null;
+  /** The inactivity check's Keep and Pause. */
+  readonly inactivity: boolean;
+  /** "Always allow next time" on an expired approval a rule could have covered. */
+  readonly allowNextTime: boolean;
+}
+
+const SQUIRE_PROPOSAL_ALLOW_LABEL: Readonly<Record<string, string>> = {
+  "squire-proposal": "Accept",
+  "room-proposal": "Open room",
+};
+
+/** The buttons a chat row offers. `payload` is null while the card loads; labels fall back. */
+export function squireApprovalControls(
+  entry: SquireApprovalEntry<SquireAllowRuleRow & Pick<SquireCardRow, "kind" | "fyiSource">>,
+  payload: SquireKnownPayload | null,
+): SquireApprovalControls {
+  const { row } = entry;
+  const closed = {
+    allow: null,
+    alwaysAllow: false,
+    deny: null,
+    inactivity: false,
+    allowNextTime: false,
+  };
+  if (entry.phase !== "open") {
+    return {
+      ...closed,
+      allowNextTime: entry.expired && squireAllowRuleInput(row) !== null,
+    };
+  }
+  switch (row.kind) {
+    case "fyi":
+      return { ...closed, inactivity: row.fyiSource === "inactivity" };
+    case "question":
+    case "overlap":
+      return { ...closed, deny: "Dismiss" };
+    case "steer":
+    case "proposal":
+      return {
+        ...closed,
+        allow: SQUIRE_PROPOSAL_ALLOW_LABEL[payload?.type ?? ""] ?? "Allow once",
+        alwaysAllow: squireAllowRuleInput(row) !== null,
+        deny: "Deny",
+      };
+  }
 }
 
 export type SquireApprovalResult =
