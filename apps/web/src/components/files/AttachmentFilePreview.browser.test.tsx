@@ -32,6 +32,23 @@ import BinaryViewer from "./BinaryViewer";
 import { decodeImagePreview } from "./decodeImagePreview";
 import type { BinaryWorkerResult } from "./binaryPreviewProtocol";
 
+// The conversion worker and cold viewer chunks can outlast waitFor's window on a loaded CI runner,
+// so tests await the worker's first reply and then poll only for the render it causes.
+function firstWorkerReply() {
+  let resolve = () => {};
+  const promise = new Promise<void>((settle) => (resolve = settle));
+  const stub = stubGlobal(
+    "Worker",
+    class extends Worker {
+      constructor(...args: ConstructorParameters<typeof Worker>) {
+        super(...args);
+        this.addEventListener("message", () => resolve(), { once: true });
+      }
+    },
+  );
+  return { replied: promise, [Symbol.dispose]: () => stub[Symbol.dispose]() };
+}
+
 // Real worker imports and WASM initialization can exceed waitFor's default second
 // when the full browser project runs concurrently on CI.
 describe("bounded binary previews", () => {
@@ -495,15 +512,16 @@ describe("large text preview recovery", () => {
       expect(workers).toHaveLength(1);
       state(`${changed}#updated`, "two");
       await screen.rerender(preview("file-edit"));
+      // The prefetched first screen paints before the worker starts, so wait for the worker itself.
+      await vi.waitFor(() => expect(workers).toHaveLength(2));
       await vi.waitFor(() => expect(screen.container.textContent).toContain("changed"));
-      expect(workers).toHaveLength(2);
       await screen.rerender(preview("file-edit", 1));
       await vi.waitFor(() => expect(workers).toHaveLength(3));
       await vi.waitFor(() => expect(screen.container.textContent).toContain("changed"));
       state(`${original}#legacy`);
       await screen.rerender(preview("legacy-edit", 1));
+      await vi.waitFor(() => expect(workers).toHaveLength(4));
       await vi.waitFor(() => expect(screen.container.textContent).toContain("original"));
-      expect(workers).toHaveLength(4);
       assetUrlState.mockReturnValue({ _tag: "Failure" });
       await screen.rerender(preview("legacy-edit", 1));
       expect(screen.container.textContent).toContain("Unable to load file preview.");
@@ -1861,6 +1879,10 @@ it.each([60, 100])("renders all %i pages of a table-heavy Word report", async (p
   // Binary media must not consume the document's markup budget.
   archive.file("word/media/image.png", new Uint8Array(2_500_000));
   const file = await archive.generateAsync({ type: "blob", compression: "DEFLATE" });
+  // Unsized, the page list never scrolls and every page counts as near, so the engine
+  // paints all of them; a viewport keeps painting to the pages the scroll reaches.
+  const container = document.createElement("div");
+  container.style.cssText = "display:flex;flex-direction:column;width:640px;height:700px";
   await using screen = await render(
     <AttachmentFilePreview
       name="report.docx"
@@ -1868,6 +1890,7 @@ it.each([60, 100])("renders all %i pages of a table-heavy Word report", async (p
       file={file}
       sizeBytes={file.size}
     />,
+    { container },
   );
   await vi.waitFor(() => expect(screen.container.textContent).toMatch(/\d+ pages/), {
     timeout: 30_000,
@@ -2481,6 +2504,9 @@ it("mounts a bounded set of saved notebook outputs as the reader scrolls", async
     })),
   };
   const file = new Blob([JSON.stringify(notebook)]);
+  // The viewer's lazy chunk pulls in the markdown renderer, the largest cold import here.
+  await import("./NotebookPreview");
+  using worker = firstWorkerReply();
   await using screen = await render(
     <div style={{ display: "flex", height: 400, width: 600 }}>
       <AttachmentFilePreview
@@ -2491,6 +2517,7 @@ it("mounts a bounded set of saved notebook outputs as the reader scrolls", async
       />
     </div>,
   );
+  await worker.replied;
   await vi.waitFor(() =>
     expect(screen.container.querySelectorAll("iframe").length).toBeGreaterThan(0),
   );
@@ -2636,6 +2663,7 @@ it.each(["rtf", "epub", "ods"] as const)(
     } finally {
       worker.terminate();
     }
+    using viewerWorker = firstWorkerReply();
     await using screen = await render(
       <div style={{ display: "flex", height: 400, width: 600 }}>
         <AttachmentFilePreview
@@ -2646,6 +2674,7 @@ it.each(["rtf", "epub", "ods"] as const)(
         />
       </div>,
     );
+    await viewerWorker.replied;
     await vi.waitFor(() => {
       if (kind === "ods") {
         expect(screen.container.textContent).toContain("North");
