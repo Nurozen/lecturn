@@ -644,7 +644,7 @@ from upstream's side.
 - Fork `@module X` tags and "Name - ..." header lines were dropped where a module header had
   to fit the cap; upstream carries almost none. Long fork design-spec headers (Squire
   companion rig/emblem/fx, embed-host e2e scenario steps) were compressed to four lines; if
-  that spec text is wanted, it belongs in `docs/dev/`, not code.
+  that spec text is wanted, it belongs in `docs/internals/`, not code.
 - `apps/server/src/stave/StaveError.ts`: the host error-code table comment is gone; the
   codes live in `STAVE_HOST_ERROR_CODES` in contracts.
 - Mechanical resolution: translate base and theirs T3->Lecturn before diff3 so fork-renamed

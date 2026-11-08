@@ -341,9 +341,9 @@ export class SquireRepository extends Context.Service<
       readonly to: string;
     }) => Result<boolean>;
     /**
-     * Also closes open rooms left with fewer than 2 Squire members. Summaries are shared, so they stay with their
-     * payer cleared; room posts are the room's log, so they stay too. The caller deletes the returned secrets from
-     * the secret store. Idempotent.
+     * Deletes the Squire and its rows in one transaction and closes open rooms left with fewer than 2 Squire
+     * members. Summaries are shared, so they stay with their payer cleared; room posts are the room's log, so they
+     * stay too. The caller deletes the returned secrets from the secret store. Idempotent.
      */
     readonly deleteSquireRows: (
       id: SquireId,

@@ -1,7 +1,8 @@
 /**
  * Always on, so a home thread listed by a switch-off or pre-Squire client stays guarded. Default deny: only
  * `SquireDispatchOrigin` runs arbitrary commands on a marked thread; anyone else may read, send with the thread's
- * own model, answer a request, and stop. It also re-checks a held execution's trigger under the target's command lock.
+ * own model, answer a request, and stop. It also re-checks a held execution's or an accept's trigger under the
+ * target's command lock.
  */
 import {
   CommandId,
