@@ -252,3 +252,21 @@ production data.
 Without it, uploads are skipped with a warning and stacks stay minified. Each ingest request is one
 `relay.mobile_telemetry.ingest` span; `relay.mobile_telemetry.outcome` is `forwarded`,
 `rate_limited`, `body_too_large`, `upstream_unavailable`, or `upstream_timeout`.
+
+### Enabling mobile telemetry
+
+The relay side is off until the GitHub Actions variable `MOBILE_TELEMETRY_ENABLED` is `true`.
+Off, the deploy creates none of the above (mobile datasets, ingest token, dashboard and monitors,
+the R2 bucket, its upload token and the rate limit binding), and `/v1/mobile/observe` answers 404,
+which Observe treats as final: the app drops the batch without retrying or showing anything. To
+turn it on:
+
+1. In the Cloudflare dashboard, confirm R2 is enabled on the account and the token behind the
+   `CLOUDFLARE_API_TOKEN` secret has **Workers R2 Storage: Edit** and **Account API Tokens: Edit**.
+2. Confirm the Axiom plan allows `otel:logs:v1` and `otel:metrics:v1` datasets.
+3. Set `MOBILE_TELEMETRY_ENABLED=true` (repository or `production` environment variable), then
+   run Deploy Lecturn Connect relay and check its log shows only creates for the new resources.
+4. Set `MOBILE_SOURCEMAPS_R2` from the deploy's state, as described above.
+
+Setting it back to `false` makes the next deploy delete those resources. Empty the prod source
+maps bucket first: R2 will not delete a non-empty bucket, and that would fail the deploy.

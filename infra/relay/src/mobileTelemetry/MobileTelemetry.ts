@@ -337,3 +337,13 @@ export const layerApi = HttpApiBuilder.group(
     return handlers.handleRaw("ingest", ({ request, params }) => telemetry.handle(request, params));
   }),
 );
+
+/**
+ * The route while `MOBILE_TELEMETRY_ENABLED` is off: 404 without reading the body.
+ * expo-observe treats a 404 as final and drops the batch, so apps neither retry nor surface it.
+ */
+export const layerApiDisabled = HttpApiBuilder.group(RelayApi, "mobileTelemetry", (handlers) =>
+  handlers.handleRaw("ingest", () =>
+    Effect.succeed(errorResponse(404, "mobile_telemetry_disabled")),
+  ),
+);

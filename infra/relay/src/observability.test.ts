@@ -1,5 +1,6 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -11,7 +12,7 @@ import type { OtlpTracer } from "effect/observability";
 
 import * as EnvironmentConnector from "./environments/EnvironmentConnector.ts";
 import { reportBillingHealth, traceBillingMaintenance } from "./billing/BillingHealthTelemetry.ts";
-import { makeRelayTraceLayer } from "./observability.ts";
+import { makeRelayTraceLayer, whenMobileTelemetryEnabled } from "./observability.ts";
 
 interface ExportedRequest {
   readonly authorization: string | undefined;
@@ -143,3 +144,31 @@ it.effect("flushes scheduled billing health with numeric attributes before retur
     expect(Number(attributes["billing.health.deleted_renewals"])).toBe(0);
   }).pipe(Effect.provide(NodeHttpServer.layerTest), Effect.scoped),
 );
+
+describe("whenMobileTelemetryEnabled", () => {
+  const run = (env: Record<string, string>) =>
+    Effect.gen(function* () {
+      let created = 0;
+      const result = yield* whenMobileTelemetryEnabled(
+        Effect.sync(() => {
+          created += 1;
+          return "mobile-resources";
+        }),
+      );
+      return { result, created };
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))));
+
+  it.effect("creates no mobile telemetry resources unless MOBILE_TELEMETRY_ENABLED is true", () =>
+    Effect.gen(function* () {
+      expect(yield* run({})).toEqual({ result: undefined, created: 0 });
+      expect(yield* run({ MOBILE_TELEMETRY_ENABLED: "false" })).toEqual({
+        result: undefined,
+        created: 0,
+      });
+      expect(yield* run({ MOBILE_TELEMETRY_ENABLED: "true" })).toEqual({
+        result: "mobile-resources",
+        created: 1,
+      });
+    }),
+  );
+});

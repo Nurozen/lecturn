@@ -51,6 +51,8 @@ jobs:
       ALCHEMY_TELEMETRY_DISABLED: "1"
       # Flags default off; production rollout requires reviewed configuration.
       TEAMS_ENABLED: ${{ vars.TEAMS_ENABLED || 'false' }}
+      # Mobile crash telemetry: R2 bucket, upload token and Axiom datasets. See relay-observability.md.
+      MOBILE_TELEMETRY_ENABLED: ${{ vars.MOBILE_TELEMETRY_ENABLED || 'false' }}
       STRIPE_TEAM_MONTHLY_PRICE_ID: ${{ vars.STRIPE_TEAM_MONTHLY_PRICE_ID }}
       STRIPE_TEAM_ANNUAL_PRICE_ID: ${{ vars.STRIPE_TEAM_ANNUAL_PRICE_ID }}
       STRIPE_TEAM_PORTAL_CONFIGURATION_ID: ${{ vars.STRIPE_TEAM_PORTAL_CONFIGURATION_ID }}

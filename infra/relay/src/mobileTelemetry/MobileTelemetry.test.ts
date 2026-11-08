@@ -46,6 +46,8 @@ interface Harness {
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>;
   /** The source maps bucket, by key. */
   readonly objects?: Readonly<Record<string, string>>;
+  /** Serve the route as a deploy without `MOBILE_TELEMETRY_ENABLED` does. */
+  readonly disabled?: boolean;
 }
 
 const makeHarness = (options: Harness = {}) => {
@@ -95,7 +97,11 @@ const makeHarness = (options: Harness = {}) => {
   const httpEffect = HttpRouter.toHttpEffect(
     Layer.mergeAll(
       HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.mobileTelemetry)).pipe(
-        Layer.provide(MobileTelemetry.layerApi.pipe(Layer.provide(layerTelemetry))),
+        Layer.provide(
+          options.disabled
+            ? MobileTelemetry.layerApiDisabled
+            : MobileTelemetry.layerApi.pipe(Layer.provide(layerTelemetry)),
+        ),
         Layer.provide([NodeServices.layer, NodeHttpPlatform.layer, Etag.layerWeak]),
       ),
       RelayHttpApi.layerNotFoundRoute,
@@ -377,6 +383,34 @@ describe("MobileTelemetry", () => {
       yield* Fiber.join(first);
       expect(yield* Fiber.join(second)).toMatchObject({ key: "second" });
       expect(secondSawFirstDone).toBe(true);
+    }),
+  );
+
+  it.effect("answers 404 without reading or forwarding the body while disabled", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({ disabled: true });
+      let bodyRead = false;
+      const unreadBody = new Request(ingest("logs", "{}"), {
+        body: new ReadableStream<Uint8Array>({
+          pull: (controller) => {
+            bodyRead = true;
+            controller.close();
+          },
+        }),
+        duplex: "half",
+      } as RequestInit);
+      for (const request of [unreadBody, ingest("metrics", "{}"), ingest("traces", "{}")]) {
+        const response = yield* harness.send(request);
+        // expo-observe drops a batch on 404; 429/502/503/504 would make it retry.
+        expect(response.status).toBe(404);
+        expect(
+          response.body._tag === "Uint8Array"
+            ? decodeJson(new TextDecoder().decode(response.body.body))
+            : undefined,
+        ).toEqual({ error: "mobile_telemetry_disabled" });
+      }
+      expect(bodyRead).toBe(false);
+      expect(harness.sent).toEqual([]);
     }),
   );
 });

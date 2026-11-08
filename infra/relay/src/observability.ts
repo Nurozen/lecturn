@@ -6,6 +6,7 @@ import * as Axiom from "@alchemy.run/axiom";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Output from "alchemy/Output";
 import * as Cause from "effect/Cause";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -31,6 +32,64 @@ const relayRecentSpansQuery = (dataset: string) =>
     `| order by _time desc`,
     `| limit 200`,
   ].join("\n");
+
+/**
+ * Deploy-time switch for mobile crash telemetry, off by default. Off, the relay creates
+ * none of its resources (Axiom logs and metrics datasets, ingest token, dashboard and monitors,
+ * R2 source maps bucket and upload token) or Worker bindings, and `/v1/mobile/observe` answers
+ * 404, which expo-observe treats as final and drops. Turning it on is this one variable.
+ */
+export const mobileTelemetryEnabled = Config.Boolean("MOBILE_TELEMETRY_ENABLED").pipe(
+  Config.withDefault(false),
+);
+
+export const whenMobileTelemetryEnabled = Effect.fn("whenMobileTelemetryEnabled")(function* <
+  A,
+  E,
+  R,
+>(effect: Effect.Effect<A, E, R>) {
+  return (yield* mobileTelemetryEnabled) ? yield* effect : undefined;
+});
+
+// expo-observe data, forwarded by src/mobileTelemetry. Mobile spans share the traces dataset.
+const MobileTelemetryObservability = Effect.fn("MobileTelemetryObservability")(function* (
+  traces: Axiom.Dataset,
+) {
+  const { stage } = yield* Alchemy.Stack;
+  const mobileLogs = yield* Axiom.Dataset("MobileLogsDataset", {
+    name: relayResourceNameForStage("lecturn-mobile-logs", stage),
+    kind: "otel:logs:v1",
+    description: "Lecturn mobile app errors, crashes, and log events from expo-observe.",
+    retentionDays: 30,
+    useRetentionPeriod: true,
+  });
+  const mobileMetrics = yield* Axiom.Dataset("MobileMetricsDataset", {
+    name: relayResourceNameForStage("lecturn-mobile-metrics", stage),
+    kind: "otel:metrics:v1",
+    description: "Lecturn mobile app startup and update metrics from expo-observe.",
+    retentionDays: 30,
+    useRetentionPeriod: true,
+  });
+  const mobileTelemetryIngestToken = yield* Axiom.ApiToken("MobileTelemetryAxiomIngestToken", {
+    name: relayResourceNameForStage("lecturn-mobile-telemetry-ingest", stage),
+    description: "Owned by Alchemy. Scoped ingest token the relay forwards mobile telemetry with.",
+    datasetCapabilities: Output.map(
+      Output.all(traces.name, mobileLogs.name, mobileMetrics.name),
+      (datasets) =>
+        Object.fromEntries(datasets.map((dataset) => [dataset, { ingest: ["create" as const] }])),
+    ),
+  });
+
+  const mobileSourceMaps = yield* Cloudflare.R2.Bucket("MobileSourceMapsBucket", {
+    name: mobileSourceMapsBucketName(stage),
+    // R2 refuses to delete a non-empty bucket, which would half tear down every non-prod stage.
+    forceDestroy: stage !== "prod",
+  });
+
+  yield* MobileMonitoring(mobileLogs, traces);
+
+  return { mobileLogs, mobileMetrics, mobileTelemetryIngestToken, mobileSourceMaps } as const;
+});
 
 export const RelayObservability = Effect.gen(function* () {
   const { stage } = yield* Alchemy.Stack;
@@ -72,36 +131,7 @@ export const RelayObservability = Effect.gen(function* () {
     })),
   });
 
-  // expo-observe data, forwarded by src/mobileTelemetry. Mobile spans share the traces dataset.
-  const mobileLogs = yield* Axiom.Dataset("MobileLogsDataset", {
-    name: relayResourceNameForStage("lecturn-mobile-logs", stage),
-    kind: "otel:logs:v1",
-    description: "Lecturn mobile app errors, crashes, and log events from expo-observe.",
-    retentionDays: 30,
-    useRetentionPeriod: true,
-  });
-  const mobileMetrics = yield* Axiom.Dataset("MobileMetricsDataset", {
-    name: relayResourceNameForStage("lecturn-mobile-metrics", stage),
-    kind: "otel:metrics:v1",
-    description: "Lecturn mobile app startup and update metrics from expo-observe.",
-    retentionDays: 30,
-    useRetentionPeriod: true,
-  });
-  const mobileTelemetryIngestToken = yield* Axiom.ApiToken("MobileTelemetryAxiomIngestToken", {
-    name: relayResourceNameForStage("lecturn-mobile-telemetry-ingest", stage),
-    description: "Owned by Alchemy. Scoped ingest token the relay forwards mobile telemetry with.",
-    datasetCapabilities: Output.map(
-      Output.all(traces.name, mobileLogs.name, mobileMetrics.name),
-      (datasets) =>
-        Object.fromEntries(datasets.map((dataset) => [dataset, { ingest: ["create" as const] }])),
-    ),
-  });
-
-  const mobileSourceMaps = yield* Cloudflare.R2.Bucket("MobileSourceMapsBucket", {
-    name: mobileSourceMapsBucketName(stage),
-    // R2 refuses to delete a non-empty bucket, which would half tear down every non-prod stage.
-    forceDestroy: stage !== "prod",
-  });
+  const mobileTelemetry = yield* whenMobileTelemetryEnabled(MobileTelemetryObservability(traces));
 
   yield* Axiom.View("RelayRecentSpansView", {
     name: relayResourceNameForStage(relayPhysicalName("lecturn-relay-recent-spans", stage), stage),
@@ -111,17 +141,14 @@ export const RelayObservability = Effect.gen(function* () {
   });
 
   yield* RelayMonitoring(traces);
-  yield* MobileMonitoring(mobileLogs, traces);
 
   return {
     traces,
     workerIngestToken,
     mobileIngestToken,
     clientIngestToken,
-    mobileLogs,
-    mobileMetrics,
-    mobileTelemetryIngestToken,
-    mobileSourceMaps,
+    /** Undefined unless `MOBILE_TELEMETRY_ENABLED` is set for the deploy. */
+    mobileTelemetry,
   } as const;
 });
 
