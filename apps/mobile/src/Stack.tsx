@@ -151,7 +151,7 @@ import {
   isWorkspaceOverlayRoute,
   registerPresentedRoutes,
 } from "./features/layout/workspace-overlay-routes";
-import { ShowcaseReadyMarker } from "./features/showcase/ShowcaseCaptureCoordinator";
+import { ShowcaseReadyMarker, ShowcaseTabBridge } from "./features/showcase/ShowcaseCaptureCoordinator";
 import {
   SettingsLegalDocumentCloseHeaderButton,
   SettingsLegalDocumentExternalHeaderButton,
@@ -552,6 +552,8 @@ function RootStackLayout(props: {
         <SettingsEnvironmentFilterProvider open={settingsOpen}>
           <WorkspaceConnectionStatusProvider>
             <AndroidWorkspaceTabsProvider state={props.state}>
+              {/* Capture-only: publishes the tab state for the apps/pulls/usage-tab scenes. */}
+              <ShowcaseTabBridge />
               <AdaptiveWorkspaceLayout
                 pathname={workspaceLocation.pathname}
                 workspaceRouteKey={workspaceLocation.routeKey}

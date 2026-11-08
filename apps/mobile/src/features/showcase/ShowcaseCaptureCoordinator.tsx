@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { Appearance, Keyboard, View } from "react-native";
 import {
   CommonActions,
@@ -56,6 +56,128 @@ import { retryShowcaseOperation } from "./showcaseRetry";
 import { stageShowcaseAgentActivity } from "./stageShowcaseAgentActivity";
 import { settingsNavigationState } from "../settings/settings-navigation";
 import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
+import { setComposerDraftText } from "../../state/use-composer-drafts";
+
+// Capture-only (not for merge): reset-based capture scenes ported onto the imperative coordinator.
+const SHOWCASE_LONG_DRAFT = [
+  "Before we ship the remote handoff, tighten the composer and the review flow:",
+  "1. Keep the expanding editor above its toolbar while the draft grows.",
+  "2. Open review on Changes and keep the section the reader picked.",
+  "3. Make the first send leave Starting as soon as the run is accepted.",
+  "4. Let queued edits finish when their run starts, wherever the reader is.",
+  "Then run the mobile suite and summarize anything that still looks off.",
+].join("\n");
+
+type ShowcaseTabs = { readonly selectedTab: string; readonly dispatch: (action: never) => void };
+let showcaseTabs: ShowcaseTabs | null = null;
+const showcaseTabListeners = new Set<() => void>();
+
+/** Capture-only: publishes the workspace tab state, which lives in React context. */
+export function ShowcaseTabBridge() {
+  const tabs = useWorkspaceTabs();
+  const selectedTab = tabs?.state.selectedTab ?? null;
+  const dispatch = tabs?.dispatch;
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_SHOWCASE !== "1") return;
+    showcaseTabs =
+      dispatch && selectedTab ? { selectedTab, dispatch: dispatch as (action: never) => void } : null;
+    for (const listener of showcaseTabListeners) listener();
+    return () => {
+      showcaseTabs = null;
+    };
+  }, [dispatch, selectedTab]);
+  return null;
+}
+
+type CaptureFlowContext = {
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly rootState: NavigationState;
+};
+const homeAnd =
+  (routes: (c: CaptureFlowContext) => ReadonlyArray<{ name: string; params?: object }>) =>
+  (c: CaptureFlowContext): NavigationAction =>
+    CommonActions.reset({ index: routes(c).length, routes: [{ name: "Home" }, ...routes(c)] as never });
+const settingsPage =
+  (page?: string) =>
+  (c: CaptureFlowContext): NavigationAction =>
+    CommonActions.reset(settingsNavigationState(c.rootState, page as never) as never);
+const threadRoute = (c: CaptureFlowContext) => ({
+  name: "Thread",
+  params: { environmentId: c.environmentId, threadId: SHOWCASE_THREAD_ID },
+});
+const draftRoute = (c: CaptureFlowContext) => ({
+  name: "Thread",
+  params: { draft: { environmentId: c.environmentId, projectId: c.projectId, title: "Lecturn" } },
+});
+const stamp = "2026-01-15T12:00:00.000Z";
+const CAPTURE_FLOWS: Partial<Record<string, (c: CaptureFlowContext) => NavigationAction>> = {
+  settings: settingsPage(),
+  "settings-end": settingsPage(),
+  "settings-search": settingsPage(),
+  "settings-back": settingsPage("SettingsEnvironments"),
+  "settings-select": settingsPage("SettingsEnvironments"),
+  "settings-appearance": settingsPage("SettingsAppearance"),
+  "settings-notifications": settingsPage("SettingsNotifications"),
+  "settings-threads": settingsPage("SettingsThreads"),
+  "settings-threads-end": settingsPage("SettingsThreads"),
+  "settings-providers": settingsPage("SettingsProviderAccounts"),
+  "settings-about": settingsPage("SettingsAbout"),
+  "settings-navigation": settingsPage("SettingsNavigation"),
+  "settings-projects": settingsPage("SettingsProjectOverview"),
+  usage: settingsPage("SettingsUsage"),
+  apps: homeAnd(() => []),
+  pulls: homeAnd(() => []),
+  "usage-tab": homeAnd(() => []),
+  "thread-open": homeAnd(() => []),
+  "thread-back": homeAnd(() => []),
+  "composer-open": homeAnd(() => []),
+  "composer-long": homeAnd((c) => [threadRoute(c)]),
+  draft: homeAnd((c) => [draftRoute(c)]),
+  "draft-long": homeAnd((c) => [draftRoute(c)]),
+  "app-threads": homeAnd(() => [{ name: "AppThreads", params: { appId: "com.showcase.sample" } }]),
+  "git-sheet": homeAnd((c) => [threadRoute(c), { name: "GitOverview", params: threadRoute(c).params }]),
+  "pull-request": homeAnd((c) => [
+    {
+      name: "PullRequest",
+      params: {
+        environmentId: c.environmentId,
+        projectId: c.projectId,
+        repository: "moonbase/lecturn",
+        number: 42,
+        initialSummary: {
+          provider: "github",
+          host: "github.com",
+          projectId: c.projectId,
+          projectTitle: "Lecturn",
+          repository: "moonbase/lecturn",
+          number: 42,
+          title: "Keep the remote handoff in sync",
+          url: "https://github.com/moonbase/lecturn/pull/42",
+          author: null,
+          headBranch: "feature/remote-handoff",
+          baseBranch: "main",
+          state: "open",
+          isDraft: false,
+          mergeability: "mergeable",
+          additions: 120,
+          deletions: 18,
+          createdAt: stamp,
+          updatedAt: stamp,
+          viewerReviewRequested: true,
+          labels: [],
+        },
+      },
+    },
+  ]),
+};
+const CAPTURE_TABS: Partial<Record<string, string>> = {
+  apps: "apps",
+  pulls: "pullRequests",
+  "usage-tab": "usage",
+};
+const SETTINGS_FLOW = (scene: string) => scene === "usage" || scene.startsWith("settings");
 
 const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 // Native launch requests (pairing links, scene switches) have no change event.
@@ -141,6 +263,8 @@ export function installShowcaseCapture(
   let agentActivity: Run | null = null;
   let lastNavigation: ShowcaseNavigationTarget | null = null;
   let readiness: { key: string; cancel: () => void } | null = null;
+  let flowDispatched: ShowcaseSceneRequest | null = null;
+  let longDraftKey: string | null = null;
   const isCancelled = (run?: Run) => () => disposed || run?.cancelled === true;
 
   const devMenu = requireOptionalNativeModule<{
@@ -323,9 +447,26 @@ export function installShowcaseCapture(
 
     const navigationReady = rootNavigationRef.isReady();
     const rootState = navigationReady ? rootNavigationRef.getRootState() : undefined;
-    const scene = rootState
+    const routeScene = rootState
       ? showcaseSceneOnScreen(requestedScene, pathnameFromState(rootState))
       : null;
+    const captureFlow = requestedScene === null ? undefined : CAPTURE_FLOWS[requestedScene];
+    const scene =
+      captureFlow !== undefined && flowDispatched === request && request !== null
+        ? requestedScene
+        : routeScene;
+
+    if (showcaseThread) {
+      const wantsLongDraft = requestedScene === "composer-long" || requestedScene === "composer-open";
+      const draftKey = `${String(showcaseThread.environmentId)}:${SHOWCASE_THREAD_ID}`;
+      if (wantsLongDraft && longDraftKey !== draftKey) {
+        setComposerDraftText(draftKey, SHOWCASE_LONG_DRAFT);
+        longDraftKey = draftKey;
+      } else if (!wantsLongDraft && longDraftKey !== null) {
+        setComposerDraftText(longDraftKey, "");
+        longDraftKey = null;
+      }
+    }
 
     if (
       requestedScene !== null &&
@@ -334,9 +475,34 @@ export function installShowcaseCapture(
       showcaseThread &&
       rootState
     ) {
+      if (captureFlow !== undefined) {
+        if (flowDispatched !== request) {
+          flowDispatched = request;
+          rootNavigationRef.dispatch(
+            captureFlow({
+              environmentId: String(showcaseThread.environmentId),
+              projectId: String(showcaseThread.projectId),
+              rootState,
+            }),
+          );
+          const tabs = showcaseTabs;
+          const tab = CAPTURE_TABS[requestedScene];
+          if (tab !== undefined) tabs?.dispatch({ type: "select", tab } as never);
+          else if (!SETTINGS_FLOW(requestedScene)) {
+            tabs?.dispatch({ type: "select", tab: "threads" } as never);
+          }
+          if (requestedScene === "settings-search") {
+            tabs?.dispatch({ type: "search", tab: "settings" } as never);
+            tabs?.dispatch({ type: "query", query: "appear", tab: "settings" } as never);
+            tabs?.dispatch({ type: "expand", tab: "settings" } as never);
+          }
+        }
+      }
       const navigation = { requestedScene, scene, thread: showcaseThread };
       // Arriving forgets the target, so leaving the scene before it is ready navigates back.
-      if (scene === requestedScene) {
+      if (captureFlow !== undefined) {
+        lastNavigation = null;
+      } else if (scene === requestedScene) {
         lastNavigation = null;
       } else if (shouldNavigateToShowcaseScene(lastNavigation, navigation)) {
         lastNavigation = navigation;
@@ -404,6 +570,10 @@ export function installShowcaseCapture(
     appAtomRegistry.subscribe(workspaceConnections.environmentsAtom, evaluate),
     subscribeToShowcaseRenderSignal(evaluate),
     rootNavigationRef.addListener("state", evaluate),
+    (() => {
+      showcaseTabListeners.add(evaluate);
+      return () => showcaseTabListeners.delete(evaluate);
+    })(),
   ];
   const appearanceSubscription = Appearance.addChangeListener(evaluate);
   const pollTimer = setInterval(evaluate, NATIVE_POLL_MS);

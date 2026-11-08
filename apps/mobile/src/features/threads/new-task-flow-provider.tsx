@@ -541,7 +541,10 @@ export function NewTaskFlowProvider(
       : {}),
     projectId: selectedProject?.id ?? null,
     now: modelSelectionNow,
-  }).selection;
+  }).selection ??
+    (process.env.EXPO_PUBLIC_SHOWCASE === "1"
+      ? ({ instanceId: "codex", model: "gpt-5.4" } as never)
+      : null);
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null;

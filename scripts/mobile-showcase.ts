@@ -1362,6 +1362,7 @@ async function captureIos(
   await NodeFSP.writeFile(scenePath, firstScene);
   await launchShowcaseApp(false);
   for (const [sceneIndex, scene] of capture.scenes.entries()) {
+   try {
     if (sceneIndex > 0) await NodeFSP.rm(readyPath, { force: true });
     await NodeFSP.writeFile(scenePath, scene);
     const waitForScene = (timeoutMs?: number) => {
@@ -1428,7 +1429,116 @@ async function captureIos(
       }
     }
     if (scene === "agent-activity") await presentIosLockScreen(simulator.udid);
-    await delay(scene === "review" ? Math.max(config.settleDelayMs, 8_000) : config.settleDelayMs);
+    if ((scene as string) === "thread-open" || (scene as string) === "composer-open") {
+      // Capture-only: tap the showcase thread row by its accessibility frame.
+      const ui = await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(() => "");
+      let frame: { x: number; y: number; width: number; height: number } | null = null;
+      const walk = (node: unknown): void => {
+        if (frame !== null || node === null || typeof node !== "object") return;
+        if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+        const record = node as Record<string, unknown>;
+        const label = typeof record.AXLabel === "string" ? record.AXLabel : "";
+        const f = record.frame as { x: number; y: number; width: number; height: number } | undefined;
+        if (label.includes("Make remote coding feel local") && f && f.height < 200) { frame = f; return; }
+        for (const value of Object.values(record)) if (typeof value === "object") walk(value);
+      };
+      try { walk(JSON.parse(ui)); } catch { /* not JSON */ }
+      NodeProcess.stdout.write(`ios row tap ${scene} frame=${JSON.stringify(frame)}\n`);
+      const target = frame as { x: number; y: number; width: number; height: number } | null;
+      if (target !== null) {
+        await runAxe(simulator.udid, ["tap", "-x", String(Math.round(target.x + target.width / 2)), "-y", String(Math.round(target.y + target.height / 2))]).catch((error: unknown) =>
+          NodeProcess.stdout.write(`ios row tap failed: ${String(error)}\n`),
+        );
+        await delay(10_000);
+      }
+    }
+    // Capture-only (batch-98882808): AXe drivers for draft typing and Settings search/select/back.
+    const iosNodes = async (): Promise<Array<Record<string, unknown>>> => {
+      const ui = await commandOutput(iosAxe(), ["describe-ui", "--udid", simulator.udid]).catch(() => "");
+      const out: Array<Record<string, unknown>> = [];
+      const walk = (node: unknown): void => {
+        if (node === null || typeof node !== "object") return;
+        if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+        out.push(node as Record<string, unknown>);
+        for (const value of Object.values(node as Record<string, unknown>)) if (typeof value === "object") walk(value);
+      };
+      try { walk(JSON.parse(ui)); } catch { /* not JSON */ }
+      return out;
+    };
+    const iosKind = (n: Record<string, unknown>) => `${String(n.type ?? "")} ${String(n.role ?? "")} ${String(n.role_description ?? "")}`;
+    const iosTapNode = async (n: Record<string, unknown> | undefined, what: string) => {
+      const f = n?.frame as { x: number; y: number; width: number; height: number } | undefined;
+      NodeProcess.stdout.write(`ios ${scene} ${what} frame=${JSON.stringify(f ?? null)} kind=${n ? iosKind(n) : "none"}\n`);
+      if (!f) return false;
+      await runAxe(simulator.udid, ["tap", "-x", String(Math.round(f.x + f.width / 2)), "-y", String(Math.round(f.y + f.height / 2))]).catch((error: unknown) =>
+        NodeProcess.stdout.write(`ios ${scene} tap failed: ${String(error)}\n`));
+      await delay(2_000);
+      return true;
+    };
+    const iosSwipeBack = async () => {
+      const nodes = await iosNodes();
+      const back = nodes.find((n) => {
+        const f = n.frame as { x: number; y: number; width: number; height: number } | undefined;
+        return f !== undefined && f.x < 90 && f.y > 40 && f.y < 200 && f.width < 120 && /Button/.test(iosKind(n));
+      });
+      if (await iosTapNode(back, "back-button")) { await delay(1_500); return; }
+      await runAxe(simulator.udid, ["gesture", "swipe-from-left-edge"]).catch(async (error: unknown) => {
+        NodeProcess.stdout.write(`ios ${scene} gesture failed: ${String(error)}; swipe\n`);
+        await runAxe(simulator.udid, ["swipe", "--start-x", "4", "--start-y", "500", "--end-x", "360", "--end-y", "500", "--duration", "0.4"]).catch(() => undefined);
+      });
+      await delay(3_000);
+    };
+    if ((scene as string) === "draft-long") {
+      const fields = (await iosNodes()).filter((n) => /TextArea|TextView|TextField/.test(iosKind(n)) && !/Search/.test(iosKind(n)));
+      const field = fields.sort((a, b) => ((b.frame as { y: number } | undefined)?.y ?? 0) - ((a.frame as { y: number } | undefined)?.y ?? 0))[0];
+      if (await iosTapNode(field, "composer")) {
+        await runAxe(simulator.udid, ["type", "Plan the offline launch checklist for the remote handoff, keep the composer above the keyboard while the draft grows, open review on Changes, then summarize anything that still looks off before the beta goes out this week"]).catch((error: unknown) =>
+          NodeProcess.stdout.write(`ios draft-long type failed: ${String(error)}\n`));
+        await delay(4_000);
+      }
+    }
+    if ((scene as string) === "settings-search") {
+      let nodes = await iosNodes();
+      NodeProcess.stdout.write(`ios settings-search labels=${JSON.stringify(nodes.map((n) => `${String(n.AXLabel ?? "")}|${iosKind(n).trim()}`).filter((l) => !l.startsWith("|")).slice(0, 40))}\n`);
+      if (!nodes.some((n) => /SearchField/.test(iosKind(n)))) {
+        const button = nodes.find((n) => /Button/.test(iosKind(n)) && /search/i.test(String(n.AXLabel ?? "")));
+        if (await iosTapNode(button, "search-button")) nodes = await iosNodes();
+      }
+      const field = nodes.find((n) => /SearchField/.test(iosKind(n))) ?? nodes.find((n) => /TextField/.test(iosKind(n)) && /Search/i.test(`${String(n.AXLabel ?? "")} ${String(n.AXValue ?? "")} ${String(n.placeholder ?? "")}`));
+      if (await iosTapNode(field, "search")) {
+        await runAxe(simulator.udid, ["type", "appear"]).catch(() => undefined);
+        await delay(3_000);
+      }
+    }
+    if ((scene as string) === "settings-back" || (scene as string) === "settings-select") {
+      await iosSwipeBack();
+      if ((scene as string) === "settings-select") {
+        const rows = (await iosNodes()).filter((n) => String(n.AXLabel ?? "").startsWith("Appearance") && ((n.frame as { height: number } | undefined)?.height ?? 999) < 150);
+        await iosTapNode(rows[0], "appearance-row");
+        await delay(4_000);
+      }
+    }
+    if ((scene as string).endsWith("-end")) {
+      // Capture-only: scroll the page to its end.
+      for (let i = 0; i < 4; i += 1) {
+        await runAxe(simulator.udid, ["swipe", "--start-x", "220", "--start-y", "760", "--end-x", "220", "--end-y", "220", "--duration", "0.3"]).catch((error: unknown) =>
+          NodeProcess.stdout.write(`ios ${scene} swipe failed: ${String(error)}\n`));
+        await delay(800);
+      }
+      await delay(2_000);
+    }
+    const iosTabLabel = ({ apps: "Apps", pulls: "PRs", "usage-tab": "Usage" } as Record<string, string>)[scene];
+    if (iosTabLabel !== undefined) {
+      await runAxe(simulator.udid, ["tap", "--label", iosTabLabel]).catch((error: unknown) =>
+        NodeProcess.stdout.write(`ios tab tap ${iosTabLabel} failed: ${String(error)}\n`),
+      );
+      await delay(3_000);
+    }
+    await delay(
+      scene === "review" || (scene as string) === "composer-long"
+        ? Math.max(config.settleDelayMs, scene === "review" ? 8_000 : 10_000)
+        : config.settleDelayMs,
+    );
     const stall = await iosStallText(simulator.udid, scene);
     if (stall !== null) {
       throw new Error(`iOS showcase scene '${scene}' shows a stall screen ("${stall}").`);
@@ -1460,7 +1570,17 @@ async function captureIos(
     // The app reports a scene ready once its route is current, but on a loaded
     // host the native push can still be drawing the previous screen.
     const previousScene = capture.scenes[sceneIndex - 1];
-    if (previousScene !== undefined && previousScene !== "agent-activity") {
+    const previousPath =
+      previousScene === undefined
+        ? null
+        : NodePath.join(showcaseCaptureDirectory(outputDirectory, capture), `${previousScene}.png`);
+    const previousExists =
+      previousPath !== null &&
+      (await NodeFSP.access(previousPath).then(
+        () => true,
+        () => false,
+      ));
+    if (previousExists && previousScene !== undefined && previousScene !== "agent-activity") {
       const previous = await NodeFSP.readFile(
         NodePath.join(showcaseCaptureDirectory(outputDirectory, capture), `${previousScene}.png`),
       );
@@ -1478,6 +1598,16 @@ async function captureIos(
     }
     if (scene === "agent-activity") await unlockIosSimulator(simulator.udid);
     await finalizeCapture(destination, capture.device);
+   } catch (error) {
+    if (sceneIndex === 0) throw error;
+    NodeProcess.stdout.write(
+      `SHOWCASE-SCENE-FAILED ${capture.device.id} ${scene}: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    await NodeFSP.rm(
+      NodePath.join(showcaseCaptureDirectory(outputDirectory, capture), `${scene}.png`),
+      { force: true },
+    );
+   }
   }
 }
 
@@ -1603,7 +1733,7 @@ async function normalizeAndroidEmulator(
 async function waitForAndroidShowcaseScene(
   serial: string,
   scene: ShowcaseScene,
-  timeoutMs = 90_000,
+  timeoutMs = 300_000, // capture-only: first dev-client bundle takes ~65s on 4 vCPU
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1720,7 +1850,123 @@ async function captureAndroid(
       await snoozeAndroidSystemNotifications(serial);
       await runAdb(serial, ["shell", "cmd", "statusbar", "expand-notifications"]);
     }
-    await delay(Math.max(config.settleDelayMs, scene === "review" ? 8_000 : 5_000));
+    await delay(
+      Math.max(
+        config.settleDelayMs,
+        scene === "review" ? 8_000 : (scene as string) === "composer-long" ? 10_000 : 5_000,
+      ),
+    );
+    if ((scene as string) === "settings-back") {
+      // Capture-only: Android Back from the Settings page.
+      await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"]);
+      await delay(3_000);
+    }
+    if ((scene as string) === "settings-select") {
+      // Capture-only: tap a Settings list row; a phone shows the page, so go Back to the list first.
+      const dump = () =>
+        Promise.race([
+          adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+          delay(30_000).then(() => ""),
+        ]);
+      const find = (xml: string) =>
+        /text="Appearance"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml) ??
+        /text="Notifications"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
+      let match = find(await dump());
+      let pressedBack = false;
+      if (!match) {
+        await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"]);
+        pressedBack = true;
+        await delay(3_000);
+        match = find(await dump());
+      }
+      const bounds = match ? match.slice(1).map(Number) : null;
+      NodeProcess.stdout.write(
+        `settings-select back=${pressedBack} row=${match?.[0]?.slice(0, 24) ?? "none"} bounds=${JSON.stringify(bounds)}\n`,
+      );
+      if (bounds) {
+        const x = Math.round((bounds[0]! + bounds[2]!) / 2);
+        const y = Math.round((bounds[1]! + bounds[3]!) / 2);
+        await runAdb(serial, ["shell", "input", "tap", String(x), String(y)]);
+      }
+      await delay(4_000);
+    }
+    if (["thread-open", "thread-back", "decisions-back", "pr-watch-back"].includes(scene as string)) {
+      // Capture-only: open a fixture thread from the list on screen, then Back for *-back.
+      const xml = await Promise.race([
+        adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+        delay(30_000).then(() => ""),
+      ]);
+      const match =
+        /text="((?:Make remote coding feel local|Put the command center in your pocket|Make Suspense transitions buttery|Ship the offline launch)[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(
+          xml,
+        );
+      const bounds = match ? match.slice(2).map(Number) : null;
+      NodeProcess.stdout.write(
+        `${scene} row=${JSON.stringify(match?.[1] ?? null)} bounds=${JSON.stringify(bounds)}\n`,
+      );
+      if (bounds) {
+        const x = Math.round((bounds[0]! + bounds[2]!) / 2);
+        const y = Math.round((bounds[1]! + bounds[3]!) / 2);
+        await runAdb(serial, ["shell", "input", "tap", String(x), String(y)]);
+        await delay(6_000);
+        if ((scene as string).endsWith("-back")) {
+          await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"]);
+          await delay(3_000);
+        }
+      }
+    }
+    if ((scene as string).endsWith("-end")) {
+      // Capture-only: scroll the page to its end.
+      const size = /(\d+)x(\d+)/.exec(await adbOutput(serial, ["shell", "wm", "size"]).catch(() => "")) ?? null;
+      const w = size ? Number(size[1]) : 1080;
+      const h = size ? Number(size[2]) : 1920;
+      NodeProcess.stdout.write(`${scene} swipe in ${w}x${h}\n`);
+      for (let i = 0; i < 4; i += 1) {
+        await runAdb(serial, ["shell", "input", "swipe", String(Math.round(w * 0.6)), String(Math.round(h * 0.75)), String(Math.round(w * 0.6)), String(Math.round(h * 0.25)), "300"]);
+        await delay(800);
+      }
+      await delay(2_000);
+    }
+    if ((scene as string) === "draft-long") {
+      // Capture-only (batch-98882808): type a long draft into the new-task composer.
+      const xml = await Promise.race([
+        adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+        delay(30_000).then(() => ""),
+      ]);
+      const nodes = [...xml.matchAll(/<node [^>]*>/g)].map((m) => m[0]);
+      const field =
+        nodes.find((n) => /(?:hint|text)="Ask anything"/.test(n)) ??
+        [...nodes].reverse().find((n) => n.includes('class="android.widget.EditText"'));
+      const b = field ? /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(field)?.slice(1).map(Number) ?? null : null;
+      NodeProcess.stdout.write(`draft-long field=${JSON.stringify(b)}\n`);
+      if (b) {
+        await runAdb(serial, ["shell", "input", "tap", String(Math.round((b[0]! + b[2]!) / 2)), String(Math.round((b[1]! + b[3]!) / 2))]);
+        await delay(2_000);
+        const words = "Plan the offline launch checklist for the remote handoff, keep the composer above the keyboard while the draft grows, open review on Changes, then summarize anything that still looks off before the beta goes out this week".split(" ");
+        for (let i = 0; i < words.length; i += 8) {
+          const chunk = (i > 0 ? " " : "") + words.slice(i, i + 8).join(" ");
+          await runAdb(serial, ["shell", "input", "text", chunk.replace(/ /g, "%s")]);
+          await delay(800);
+        }
+        await delay(4_000);
+      }
+    }
+    if ((scene as string) === "drafts-swipe") {
+      // Capture-only: open the swipe action on the first unsent row.
+      const xml = await Promise.race([
+        adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+        delay(30_000).then(() => ""),
+      ]);
+      const match =
+        /(?:text|content-desc)="[^"]*Ship the offline[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
+      const bounds = match ? match.slice(1).map(Number) : null;
+      const y = bounds ? Math.round((bounds[1]! + bounds[3]!) / 2) : 910;
+      const right = bounds ? bounds[2]! - 10 : 900;
+      const left = bounds ? bounds[0]! : 250;
+      NodeProcess.stdout.write(`drafts-swipe bounds=${JSON.stringify(bounds)} y=${y} ${right}->${left}\n`);
+      await runAdb(serial, ["shell", "input", "swipe", String(right), String(y), String(left), String(y), "450"]);
+      await delay(1_500);
+    }
     const destination = NodePath.join(
       showcaseCaptureDirectory(outputDirectory, capture),
       `${scene}.png`,

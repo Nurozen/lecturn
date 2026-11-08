@@ -34,6 +34,16 @@ on:
           - ember
           - iris
           - all
+      scenes:
+        description: "Capture-only: space-separated android scene filter (empty = all device scenes)"
+        required: false
+        default: ""
+        type: string
+      ios_devices:
+        description: "Capture-only: iOS --device flags"
+        required: false
+        default: "--device iphone-6.9 --device iphone-6.5"
+        type: string
 
 permissions:
   contents: read
@@ -52,7 +62,7 @@ jobs:
     timeout-minutes: ${{ inputs.theme == 'all' && 360 || 150 }}
     env:
       # The hosted image's Xcode has no iPhone Duo simulator; capture Duo locally.
-      SHOWCASE_IOS_DEVICES: --device iphone-6.9 --device iphone-6.5 --device ipad-13
+      SHOWCASE_IOS_DEVICES: ${{ inputs.ios_devices || '--device iphone-6.9 --device iphone-6.5' }}
       LECTURN_SHOWCASE_DIAGNOSTICS_DIR: ${{ github.workspace }}/artifacts/ios-diagnostics
     steps:
       - name: Checkout
@@ -81,6 +91,26 @@ jobs:
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
+      - name: Vendor enriched-markdown grammars (capture-only)
+        run: |
+          d=$(node -p "require('path').dirname(require.resolve('react-native-enriched-markdown/package.json',{paths:['apps/mobile']}))")
+          ok=0
+          for i in $(seq 1 12); do
+            out=$(cd "$d" && npm run postinstall 2>&1) || true
+            if ! echo "$out" | grep -q "WARNING: vendor-grammars"; then ok=1; echo "grammars ok (attempt $i)"; break; fi
+            echo "attempt $i: vendor-grammars failed"; sleep 30
+          done
+          [ $ok = 1 ]
+
+      - name: Retry enriched-markdown native assets (capture-only)
+        run: |
+          d=$(node -p "require('path').dirname(require.resolve('react-native-enriched-markdown/package.json',{paths:['apps/mobile']}))")
+          for i in $(seq 1 10); do
+            if [ -d "$d/ios/vendor/RaTeX.xcframework" ] && ls -a "$d/ios/vendor" | grep -q stamp; then echo "assets ok"; break; fi
+            (cd "$d" && npm run postinstall) || true
+            sleep 20
+          done
+
       - name: Install AXe
         # Locks the simulator and answers the notification prompt for the
         # agent-activity scene.
@@ -89,14 +119,14 @@ jobs:
         run: |
           brew tap cameroncooke/axe
           if brew commands | grep -qx trust; then brew trust --formula cameroncooke/axe/axe; fi
-          brew install cameroncooke/axe/axe
+          for i in $(seq 1 15); do brew install cameroncooke/axe/axe && break; sleep 60; done
           axe --version
 
       - name: Capture iOS showcase
-        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES $(for s in ${{ inputs.scenes }}; do printf -- "--scene %s " "$s"; done) --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
 
       - name: Validate App Store Connect assets
-        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: pnpm screenshots:mobile $SHOWCASE_IOS_DEVICES $(for s in ${{ inputs.scenes }}; do printf -- "--scene %s " "$s"; done) --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
 
       - name: Upload iOS diagnostics
         if: failure()
@@ -119,10 +149,9 @@ jobs:
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet
     if: inputs.platform == 'all' || inputs.platform == 'android'
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    # Capturing every palette multiplies the device matrix by six, and only the
-    # one native build is shared between them.
-    timeout-minutes: ${{ inputs.theme == 'all' && 300 || 60 }}
+    # capture-only (not for merge): GitHub-hosted 4 vCPU runner, APK built before the emulator boots.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     env:
       LECTURN_SHOWCASE_ANDROID_ABI: x86_64
     steps:
@@ -168,6 +197,32 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Vendor enriched-markdown grammars (capture-only)
+        run: |
+          d=$(node -p "require('path').dirname(require.resolve('react-native-enriched-markdown/package.json',{paths:['apps/mobile']}))")
+          ok=0
+          for i in $(seq 1 12); do
+            out=$(cd "$d" && npm run postinstall 2>&1) || true
+            if ! echo "$out" | grep -q "WARNING: vendor-grammars"; then ok=1; echo "grammars ok (attempt $i)"; break; fi
+            echo "attempt $i: vendor-grammars failed"; sleep 30
+          done
+          [ $ok = 1 ]
+
+      - name: Build debug APK (before emulator boot)
+        working-directory: apps/mobile
+        env:
+          APP_VARIANT: production
+          EXPO_NO_GIT_STATUS: "1"
+          LECTURN_SHOWCASE_CAPTURE_BUILD: "1"
+          NODE_ENV: development
+        run: |
+          pnpm exec expo prebuild --clean --platform android
+          cd android
+          for i in $(seq 1 15); do ./gradlew --version && break; sleep 60; done
+          for i in $(seq 1 8); do ./gradlew app:assembleDebug -PreactNativeArchitectures=x86_64 && break; sleep 60; done
+          ./gradlew --stop
+          ls -la app/build/outputs/apk/debug/app-debug.apk
+
       - name: Capture Android showcase
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -176,13 +231,22 @@ jobs:
           arch: x86_64
           profile: pixel_7_pro
           avd-name: Pixel_10_Pro
-          cores: 8
+          cores: 3
           ram-size: 4096M
           disable-animations: false
-          script: pnpm screenshots:mobile --platform android --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
+          script: adb shell settings put global hide_error_dialogs 1; pnpm screenshots:mobile --platform android --device pixel --device android-tablet-10 --skip-build $(for s in ${{ inputs.scenes }}; do printf -- "--scene %s " "$s"; done) --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" || { mkdir -p artifacts/android-diag; adb exec-out screencap -p > artifacts/android-diag/screen.png; adb shell dumpsys activity activities > artifacts/android-diag/activities.txt 2>&1; adb logcat -d -b crash > artifacts/android-diag/logcat-crash.txt 2>&1; adb logcat -d -v threadtime > artifacts/android-diag/logcat-full.txt 2>&1; grep -E "AndroidRuntime|ReactNativeJS|ReactNative|Expo|expo|FATAL|libc|DEBUG|Hermes|SoLoader|unknown:|E/" artifacts/android-diag/logcat-full.txt > artifacts/android-diag/logcat-filtered.txt; tail -n 2000 artifacts/android-diag/logcat-full.txt > artifacts/android-diag/logcat-tail.txt; exit 1; }
+
+      - name: Upload Android diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-diagnostics
+          path: artifacts/android-diag/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Validate Google Play assets
-        run: pnpm screenshots:mobile --platform android --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
+        run: pnpm screenshots:mobile --platform android --device pixel --device android-tablet-10 $(for s in ${{ inputs.scenes }}; do printf -- "--scene %s " "$s"; done) --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}" --validate-only
 
       - name: Upload Android screenshots
         if: always()

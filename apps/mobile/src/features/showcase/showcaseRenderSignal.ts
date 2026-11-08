@@ -89,6 +89,8 @@ export function isShowcaseNativeContentReady(input: {
   readonly themeId: MobileThemeId;
   readonly renderSignal: ShowcaseRenderSignal | null;
 }): boolean {
-  if (!CONTENT_SIGNALED_SCENES.has(input.scene)) return true;
-  return input.renderSignal?.get(input.scene) === input.themeId;
+  // Capture-only: composer-long is the thread scene with a long draft.
+  const signalScene = input.scene === "composer-long" ? "thread" : input.scene;
+  if (!CONTENT_SIGNALED_SCENES.has(signalScene)) return true;
+  return input.renderSignal?.get(signalScene) === input.themeId;
 }

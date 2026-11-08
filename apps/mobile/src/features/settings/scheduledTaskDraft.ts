@@ -245,7 +245,11 @@ export function createDraft(
     projectId,
     modelSelection,
     modelSelectionIsExplicit: false,
-    schedule: DEFAULT_SCHEDULE,
+    // Capture-only: the showcase opens a new task already set to "On webhook".
+    schedule:
+      process.env.EXPO_PUBLIC_SHOWCASE === "1"
+        ? { ...DEFAULT_SCHEDULE, mode: "webhook" }
+        : DEFAULT_SCHEDULE,
     workspace: "worktree",
     baseRef: "main",
     checkoutPath: "",

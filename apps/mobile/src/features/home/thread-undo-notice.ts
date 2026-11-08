@@ -43,7 +43,10 @@ export function showThreadUndoNotice(options: UndoNotice) {
     },
   };
   notify();
-  expiry = setTimeout(dismissThreadUndoNotice, 5_000);
+  expiry = setTimeout(
+    dismissThreadUndoNotice,
+    process.env.EXPO_PUBLIC_SHOWCASE === "1" ? 600_000 : 5_000,
+  );
 }
 
 export function useThreadUndoNotice() {
