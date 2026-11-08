@@ -1,17 +1,7 @@
 /**
- * StaveAdmission - Effect service that fences mutations which would break a
- * Stave space's invariants, consulted before a command or RPC is dispatched.
- *
- * A Stave project is a project whose workspace root carries a `.stave.yaml`
- * manifest (as reported by `StaveWorkspaceReader`). Threads in a space always
- * run in the space root, so the worktree rule refuses every intent that would
- * create or bind a per-thread worktree there: `thread.create` /
- * `thread.meta.update` with a non-null `worktreePath`, a bootstrap turn start
- * that prepares a worktree, a fork that would inherit a worktree, and the
- * worktree-producing git RPCs. Thread creation and turn start also check
- * current incarnation and lifecycle leases, even for local threads.
- *
- * @module StaveAdmission
+ * Threads in a Stave space always run in the space root, so every intent that would create or bind
+ * a per-thread worktree there is refused, including worktree-producing git RPCs. Thread creation
+ * and turn start also check current incarnation and lifecycle leases, even for local threads.
  */
 import type { ProjectId } from "@lecturn/contracts";
 import * as FileSystem from "effect/FileSystem";
@@ -122,7 +112,7 @@ export const intentUsesWorktree = (input: StaveAdmissionInput): boolean =>
   input.prepareWorktree === true ||
   (input.worktreePath !== undefined && input.worktreePath !== null);
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("StaveAdmission.make")(function* () {
   const reader = yield* StaveWorkspaceReader;
 

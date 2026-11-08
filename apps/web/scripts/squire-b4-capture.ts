@@ -1,15 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - standalone dev capture script, no Effect runtime.
 /**
- * B4 lab capture for the Squire companion port. Serves the dev-only lab page
- * (scripts/squire-lab/) with Vite's JS API and the v5 baseline with a read-only static server,
- * drives both with Playwright, and writes everything to artifacts/squire-bar/b4/lab/.
- *
  *   node apps/web/scripts/squire-b4-capture.ts [--only=indicators,figures,gestures,seams,attentive,settle,oracle,gold] [--headless]
- *
- * Peak frames come from a virtual frame clock injected before page scripts: requestAnimationFrame
- * and performance.now pass through until frozen, then advance only on demand. Both the port
- * (companionClock reads those globals per call) and v5 (raw rAF) step identically, so a peak
- * found by sampling debugState.pose every frame can be replayed and screenshotted exactly.
+ * A virtual frame clock (rAF + performance.now, frozen then stepped on demand) drives both the
+ * port and the v5 baseline identically, so a peak found by sampling debugState.pose replays and
+ * screenshots exactly. Writes to artifacts/squire-bar/b4/lab/.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

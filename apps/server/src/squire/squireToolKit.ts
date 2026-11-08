@@ -1,10 +1,6 @@
 /**
- * The seam feature layers use to add Squire role tools without editing
- * `SquireTools`: a handler gets the call's context and the kit, whose keyed
- * writes stay idempotent (card, hold, and log rows commit with `tool.called` in one
- * transaction). Handlers register into `SquireToolRegistry` when their layer
- * is built, so layer order does not matter.
- *
+ * The kit's keyed writes stay idempotent: card, hold, and log rows commit with `tool.called` in one transaction.
+ * Handlers register into `SquireToolRegistry` when their layer is built, so layer order does not matter.
  * @module squire/squireToolKit
  */
 import type {

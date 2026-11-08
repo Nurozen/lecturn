@@ -71,8 +71,7 @@ export function makeAggregateState(input: {
     if (input.terminalState !== null) {
       return terminalAggregateState(input.terminalState);
     }
-    // The newly-terminal alert rules key off the previously delivered
-    // aggregate, so replays repaint this without buzzing.
+    // Alerts compare with the delivered aggregate; replays must repaint without buzzing.
     const recentTerminal = input.activeStates
       .filter((state) => isRecentTerminalState(state, input.nowMs))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

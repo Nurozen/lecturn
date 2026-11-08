@@ -1,32 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - The sentinel homes and the recording proxy are plain files and processes the test owns.
 /**
- * S0a2 for OpenCode 1.x: a Squire home and probe on the real
- * `opencode` binary. Spends a few free OpenCode Zen requests (no login), so it
- * runs only with SQUIRE_S0A2_PROVIDER=opencode; SQUIRE_BAR_MODEL picks the
- * model (default opencode/big-pickle).
- *
- * Every model request goes through a recording proxy, run with Bun because
- * Zen serves its free models only to OpenCode's own TLS client. The proxy
- * also serves the model catalog that points OpenCode at it, and Lecturn's
- * MCP server (one `squire_note` tool). The temp user home carries a global
- * config with an MCP server and an instruction file, a global AGENTS.md, a
- * plugin, skills in every location OpenCode reads, `~/.claude/CLAUDE.md`,
- * and `~/.opencode`; the scratch repo carries AGENTS.md, CLAUDE.md, a project
- * config with its own MCP server, and project skills.
- *
- * - home start: lists only Lecturn's tool, no sentinel, nothing asked;
- *   a shell, write, and read request has nothing to run with;
- * - home resume: a new session over the same native session, same surface;
- * - control: an ordinary thread on the same homes loads every sentinel;
- * - probe: a native fork of the control, no MCP server and no tool.
- *
- * Zen's free models refuse a request without OpenCode's own tools ("Free
- * usage limit reached"), so with no login the Squire turns end failed; the
- * recorded requests are the evidence. With an `opencode auth login` for the
- * OpenCode provider (Zen or Go) and a paid SQUIRE_BAR_MODEL, the turns
- * complete and the replies show the refusals too.
- *
- * Evidence goes to artifacts/squire-bar/s0a2/opencode/.
+ * S0a2 for OpenCode 1.x: a Squire home and probe on the real `opencode` binary, through a Bun
+ * recording proxy (Zen serves free models only to OpenCode's TLS client). Runs only with
+ * SQUIRE_S0A2_PROVIDER=opencode. Without a login Zen refuses tool-less requests, so Squire turns
+ * fail and the recorded requests are the evidence (artifacts/squire-bar/s0a2/opencode/).
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

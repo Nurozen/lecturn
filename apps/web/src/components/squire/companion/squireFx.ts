@@ -1,20 +1,8 @@
 /*
- * Painted-in light effects for <squire-rig>, ported from v5 `squire-fx.js`. The rig creates one
- * controller per element and drives configure / update / trigger / destroy. FX draw only inside
- * the layer groups the rig hands over; every coordinate below is in stage units (1122 x 1402).
- *
- * Ambient effects (blink, glints, twinkles, travellers, motes, flutter) are pure functions of
- * rig time and frame.seed, so a setPose frame (frame.hold) is reproducible per seed. Live
- * frames fade ambient effects toward rest over frame.settle (the runtime's settle-to-still);
- * rest frames (still, reduced motion, offscreen refresh) show rest values. Travellers and the
- * palette tint integrate dt while live. Bursts from trigger() run on the companion clock and
- * are dropped on any non-live frame.
- *
- * Attentive is steady: the head halo and chest aura hold constant values once the
- * attentive blend is full, and v5's attentive beacon ring and lift sparkles are gone.
- *
- * Cost: transforms / opacity on small vector shapes, blend modes on small clipped shapes, and
- * one budgeted filter (pennant flutter, clipped to the pennant, updated at <= 30 Hz).
+ * Painted-in light effects for <squire-rig>, ported from v5 `squire-fx.js`; coordinates are
+ * stage units (1122 x 1402). Ambient effects are pure functions of rig time and frame.seed, so
+ * setPose frames reproduce per seed; trigger() bursts drop on any non-live frame. Budget: one
+ * filter (pennant flutter, clipped, <= 30 Hz).
  */
 import { companionClock } from "./companionClock";
 import {
@@ -204,20 +192,14 @@ const HANDS: Readonly<Record<RigEquipment, Vec2>> = {
   none: [820, 1030],
 };
 
-// Landmarks are stage units measured on renders of the v5 parts. Per-item keys: focal (bursts,
-// motes fallback), core [x, y, r] (item light), hotspot [x, y, r] (white-paint warm-up), motes
-// [cx, cy, rx, ry], glint (nod sparkle), arrive (exchange sparkle target), hands (exchange bloom
-// centre), plus item-specific: helmet star/poly/sweep; lance tip/blade/sweep/pole/pennant/
-// flutter*/ripple*; astrolabe ring/pointer; grimoire stars; armillary rings; none palm/wisp.
+// Landmarks are stage units measured on renders of the v5 parts. Shared per-item keys: focal,
+// core/hotspot [x, y, r], motes [cx, cy, rx, ry], glint, arrive, hands; item-specific keys
+// cover helmet, lance, astrolabe, grimoire, armillary and none.
 export const SQUIRE_FX_LANDMARKS: SquireFxLandmarks = {
-  // Eyes (stage units, outer corner left -> inner corner right).
-  //   T  top edge of the painted upper-lid band: lid skin covers from here down.
-  //   O  centre of the lash band when open (the moving lid edge starts here).
-  //   D  lower boundary of the opening (outset ~1u): the lower lid rises to meet the lid.
-  //   closed: corners of the closed lid line and its sag; hook = the painted wing tip the
-  //   closed line curls into (kept visible). opening/iris drive the gaze shift; sclera is
-  //   the sampled eye-white ramp (top under the lid -> bottom). shift = how far below the
-  //   cheek skin that fills the closed lid is sampled from the head image itself.
+  // Eyes (outer corner left -> inner corner right): T top of the upper-lid band, O lash-band
+  // centre when open, D lower boundary of the opening. closed: lid line, sag and hook (the wing
+  // tip it curls into). sclera: sampled eye-white ramp; shift: how far below the cheek skin
+  // filling the closed lid is sampled.
   eyes: {
     female: {
       T: [
@@ -1452,12 +1434,9 @@ class SquireFxController implements FxController {
     this.glanceGlint = this.bedded(
       this.sparkleGlyph(root, { display: "none", "data-fx": "glance-glint" }),
     );
-    // The look lands on the item as a second glint, arriving as a short tapered flick: a full
-    // sightline read as a laser or a stick at panel size, and one leaving the eye crosses the
-    // face on its way down to the item.
-    // The landing glint sits on a warm bloom, so the item visibly lights where the look lands.
-    // Both live in the front layer: the head layer paints under the item art. Stage space is
-    // close enough to head space here, where the head is turned only a few degrees.
+    // The look lands on the item as a short tapered flick plus a glint on a warm bloom (a full
+    // sightline reads as a laser at panel size). Both live in the front layer because the head
+    // layer paints under the item art.
     const front = this.root.front;
     this.glanceLanding = this.el("g", { display: "none", "data-fx": "glance-landing" }, front);
     this.el("circle", { r: 1.7, fill: `url(#${this.id("warm")})` }, this.glanceLanding);

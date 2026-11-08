@@ -1,10 +1,7 @@
 /**
- * A Squire's page is published locked (`lockedHtmlRenderDocument`). Every
- * probe below runs on an ordinary page and on a locked page at once, each
- * aimed at its own listener: the ordinary page reaching its listener proves
- * the probe works, and the locked page must reach nothing. Pages are served
- * with the asset route's headers and shown through the real `HtmlRenderFrame`,
- * or opened as the top document, as mobile and older clients show them.
+ * A Squire's page is published locked. Each probe runs on an ordinary page (proves the probe
+ * works) and a locked page (must reach nothing) at once, served with the asset route's
+ * headers via the real `HtmlRenderFrame` or as the top document, as mobile and older clients show it.
  */
 import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import {

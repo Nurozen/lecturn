@@ -1,11 +1,18 @@
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@lecturn/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent } from "react";
 
-import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
-import { parseChangeRequestUrl, type ChangeRequestLink } from "@lecturn/shared/changeRequestUrl";
-import { sourceControlRepositorySelector } from "@lecturn/shared/sourceControl";
+import {
+  changeRequestLinkHost,
+  findChangeRequestTarget,
+  resolvePullRequestPreviewTarget,
+  type ChangeRequestTarget,
+} from "@lecturn/client-runtime/change-request-links";
+import {
+  sourceControlClients,
+  type ChangeRequestLink,
+} from "@lecturn/client-runtime/source-control-clients";
 
 import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
@@ -18,90 +25,6 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProjects, useProjects } from "../state/entities";
 import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
 import { usePrimaryEnvironmentId } from "../state/environments";
-
-export {
-  parseChangeRequestUrl,
-  type ChangeRequestLink,
-  gitHubPullRequestBrowserUrl,
-  pullRequestCandidateUrlFromReferenceAutolink,
-  matchesLinkedPullRequestUrl,
-  changeRequestRepositoryUrl,
-} from "@lecturn/shared/changeRequestUrl";
-
-/** The host the panel and the page read the change request on; a Forgejo port stays on it. */
-function changeRequestLinkHost(link: ChangeRequestLink): string {
-  return link.authority ?? link.host.toLowerCase();
-}
-export interface ChangeRequestTarget {
-  readonly project: EnvironmentProject;
-  readonly repository: string;
-  readonly host: string;
-}
-
-export function findChangeRequestTarget(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): ChangeRequestTarget | undefined {
-  for (const project of projects) {
-    // Every editable checkout a project holds: a Stave workspace has one per repository.
-    const matches = resolveProjectGitTargets({ project }).flatMap((target) => {
-      const identity = target.repositoryIdentity;
-      if (
-        !identity?.provider ||
-        !sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link)
-      ) {
-        return [];
-      }
-      const repository =
-        identity.displayName ??
-        (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
-      const selector = sourceControlRepositorySelector(identity) ?? repository ?? link.repository;
-      return [{ project, repository: selector, host: changeRequestLinkHost(link) }];
-    });
-    // Multiple checkouts of the same remote cannot identify the intended checkout.
-    if (matches.length === 1) return matches[0];
-  }
-  return undefined;
-}
-
-export function findProjectForChangeRequest(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): EnvironmentProject | undefined {
-  return findChangeRequestTarget(projects, link)?.project;
-}
-
-export function resolvePullRequestPreviewTarget({
-  environmentId,
-  projects,
-  pullRequestsEnabled,
-  url,
-}: {
-  environmentId: EnvironmentId | null;
-  projects: ReadonlyArray<EnvironmentProject>;
-  pullRequestsEnabled: boolean;
-  url: string;
-}): { environmentId: EnvironmentId; input: PullRequestRef } | null {
-  if (!pullRequestsEnabled || environmentId === null) return null;
-  const parsed = parseChangeRequestUrl(url);
-  if (parsed === null) return null;
-  // The matched checkout carries the repository selector, so a Stave workspace with several
-  // repositories previews the one the link points at.
-  const target = findChangeRequestTarget(
-    projects.filter((candidate) => candidate.environmentId === environmentId),
-    parsed,
-  );
-  if (target === undefined) return null;
-  return {
-    environmentId,
-    input: {
-      projectId: target.project.id,
-      host: target.host,
-      repository: target.repository,
-      number: parsed.number,
-    },
-  };
-}
 
 export function usePullRequestPreviewTarget(environmentId: EnvironmentId | null, url: string) {
   const projects = useProjects();
@@ -125,7 +48,7 @@ export function findProjectOnChangeRequestHost(
 function findChangeRequestHostTarget(
   projects: ReadonlyArray<EnvironmentProject>,
   link: ChangeRequestLink,
-): ChangeRequestTarget | undefined {
+): ChangeRequestTarget<EnvironmentProject> | undefined {
   const own = findChangeRequestTarget(projects, link);
   if (own !== undefined) return own;
   // Each host's definition decides whether a checkout lends its credentials host-wide; Azure's
@@ -144,7 +67,7 @@ function findChangeRequestHostTarget(
     : { project, repository: link.repository, host: changeRequestLinkHost(link) };
 }
 
-export function shouldOpenPullRequestExternally(
+function shouldOpenPullRequestExternally(
   event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey"> &
     Partial<Pick<MouseEvent<HTMLElement>, "button">>,
 ): boolean {
@@ -175,14 +98,12 @@ export function useOpenChangeRequestLink(
     const allProjects = readProjects();
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
-    const parsed = parseChangeRequestUrl(targetUrl);
-    if (parsed === null) return false;
+    const parsed = sourceControlClients.parseChangeRequestUrl(targetUrl)?.link;
+    if (parsed === undefined) return false;
     const reads = (environmentId: string) =>
       serverConfigs.get(environmentId as EnvironmentId)?.environment.capabilities.pullRequests ===
       true;
-    // Beside a thread the panel reads on that thread's environment, so a project from another
-    // one could not be read there whatever its remote says: two environments can hold the same
-    // repository, and handing the panel the wrong one's id opens a surface that never loads.
+    // Matching remotes do not make project ids usable outside the panel thread's environment.
     const projects = resolvedThreadRef
       ? allProjects.filter((project) => project.environmentId === resolvedThreadRef.environmentId)
       : targetEnvironmentId
@@ -271,9 +192,7 @@ export function useOpenPrLink(threadRef?: ScopedThreadRef) {
     const openInBrowser = shouldOpenPullRequestExternally(event);
     const isAnchor =
       event.currentTarget instanceof HTMLAnchorElement && event.currentTarget.href.length > 0;
-    // A real link already knows how to cmd/ctrl/middle-click. Leave its default
-    // action alone so the browser (or Electron's window-open handler) opens
-    // the host. Buttons have no href, so they still go through openExternal.
+    // Native links handle modified clicks; buttons still need openExternal.
     if (openInBrowser && isAnchor) return false;
 
     event.preventDefault();

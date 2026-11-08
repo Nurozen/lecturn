@@ -1,5 +1,5 @@
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import {
-  pullRequestHostOf,
   type EnvironmentId,
   type EnvironmentMachineKind,
   type ProjectId,
@@ -97,8 +97,10 @@ export function projectPullRequestRepository(
       return false;
     return (
       reference.host === undefined ||
-      pullRequestHostOf(identity, identity.provider as SourceControlProviderKind) ===
-        reference.host.toLowerCase()
+      sourceControlClients.changeRequestHost(
+        identity,
+        identity.provider as SourceControlProviderKind,
+      ) === reference.host.toLowerCase()
     );
   });
   return matches.length === 1 ? matches[0] : undefined;

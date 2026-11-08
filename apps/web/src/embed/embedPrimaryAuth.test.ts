@@ -87,7 +87,7 @@ describe("embed primary auth", { concurrent: false }, () => {
       const call = fetchMock.mock.calls[0];
       if (call === undefined) throw new Error("No ticket request");
       const ticketRequest = new Request(call[0], call[1]);
-      expect(new URL(ticketRequest.url).pathname).toBe("/api/auth/websocket-ticket");
+      expect(new URL(ticketRequest.url).pathname).toBe("/api/auth/websocket-ticket/rpc");
       expect(ticketRequest.credentials).toBe("omit");
       expect(ticketRequest.headers.get("authorization")).toBe("Bearer embed-token");
       const url = new URL(socketUrl);

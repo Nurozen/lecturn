@@ -25,7 +25,7 @@ import {
   type PendingBackgroundWorkTask,
   turnItemUpdateCanEndBackgroundWork,
 } from "@lecturn/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
@@ -171,7 +171,9 @@ export interface SquireClassifyContext {
   /** {@link squireInterruptActor} over the run's turn items; null when there is no interrupt request. */
   readonly interruptedBy: OrchestrationV2Actor | null;
   /** The thread's pending background tasks when the reactor reads the completed run. */
-  readonly pendingBackgroundTasks: ReadonlyArray<Pick<PendingBackgroundWorkTask, "kind">>;
+  readonly pendingBackgroundTasks: ReadonlyArray<
+    Pick<PendingBackgroundWorkTask, "kind" | "awaited">
+  >;
 }
 
 type DomainEvent<T extends OrchestrationV2DomainEvent["type"]> = Extract<

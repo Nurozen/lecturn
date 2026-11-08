@@ -1,13 +1,7 @@
 /**
- * `squire_publish_showcase`: the Lead's snapshot page. Data comes
- * from stored items, summaries, and PR snapshots at publish time and is
- * injected as one JSON block into the versioned template; the Lead never
- * writes markup and the page reads nothing afterwards. The result carries the
- * same `lecturnMcpApp` envelope connected-app cards do, with the document
- * captured as an attachment, so the card survives restarts and copies.
- *
- * The tool declares no `_meta.ui.resourceUri` and /mcp never serves the
- * template: a declared resource makes Codex try to read it.
+ * Data is injected at publish time as one JSON block into the versioned template; the Lead never writes markup and
+ * the page reads nothing afterwards. The document is captured as an attachment so the card survives restarts.
+ * The tool declares no `_meta.ui.resourceUri` and /mcp never serves the template: Codex would try to read it.
  */
 import {
   SQUIRE_LEAD_COMPANION,

@@ -267,11 +267,9 @@ const startup = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const previewPasskeys = yield* PreviewPasskeys.PreviewPasskeys;
 
-  // Waiting here would hide the macOS window during a slow .zprofile/.zshrc.
-  // Parent-owned SSH/editor actions still need their own hydrated environment;
-  // the backend independently shares its discovery across all providers
-  // (DesktopBackendConfiguration only claims shellEnvironmentPrepared off macOS).
-  // Linux still needs shell-derived desktop/session settings before Electron ready.
+  // Waiting here would hide the macOS window during a slow .zprofile/.zshrc; the backend
+  // does its own discovery (DesktopBackendConfiguration claims shellEnvironmentPrepared
+  // only off macOS). Linux needs shell-derived session settings before Electron ready.
   if (environment.platform !== "darwin") {
     yield* shellEnvironment.installIntoProcess;
   } else {
@@ -349,11 +347,7 @@ const scopedProgram = Effect.scoped(
     const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
 
     yield* Effect.addFinalizer(() =>
-      // Stop every backend in the pool, not just the primary. The
-      // electronApp.quit() path can race ahead of the layer-scope
-      // cascade, so leaving the WSL instance for its parent scope
-      // finalizer means it gets hard-killed by the OS instead of
-      // receiving SIGTERM + grace.
+      // Quit can outrun layer finalizers; stop pooled backends here so they receive SIGTERM before OS teardown.
       stopAllPoolInstances().pipe(
         Effect.ensuring(rendererHistory.shutdown),
         Effect.ensuring(shutdown.markComplete),

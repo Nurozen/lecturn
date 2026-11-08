@@ -1,9 +1,7 @@
 /**
- * `frame-ancestors` for the static web app. Only the static HTML
- * handler sets it: asset and attachment routes serve the MCP App and document
- * frames Lecturn's own clients embed, so a policy there would break them.
- * Electron hosts load `/embed` top-level, where `frame-ancestors` never
- * applies, so they need no declared origin.
+ * `frame-ancestors` for the static web app, set only by the static HTML handler: asset and
+ * attachment routes serve frames Lecturn's own clients embed, so a policy there would break them.
+ * Electron hosts load `/embed` top-level, where `frame-ancestors` never applies.
  */
 import type { AppStatus } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";

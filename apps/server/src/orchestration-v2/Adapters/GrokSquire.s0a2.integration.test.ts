@@ -1,21 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Live harness: local HTTP fakes and evidence files.
 /**
- * S0a2 for Grok: a Squire home and probe on the real `grok agent
- * stdio`. Spends provider tokens, so it runs only with
- * SQUIRE_S0A2_PROVIDER=grok and an installed, signed-in `grok`.
- *
- * The user's side is a temp HOME whose `.grok` holds a copy of the real
- * login plus sentinels: a user MCP server that logs when spawned, a skill,
- * AGENTS.md and a rule asking for a sentinel word, and Claude-compat files
- * under HOME. The scratch cwd carries project sentinels too. Every model
- * request goes through a recording proxy (GROK_MODELS_BASE_URL), so the
- * evidence is what Grok actually sent: its tool list and its context.
- *
- * - home start: one turn calls a Squire tool, then asks for a shell command,
- *   a file write, and a read outside the workspace;
- * - home resume: a new process loads the same session;
- * - probe start: a fresh session with no server (portable fork shape).
- * Evidence goes to artifacts/squire-bar/s0a2/grok/.
+ * S0a2 for Grok: a Squire home and probe on the real `grok agent stdio`. Spends tokens, so it runs
+ * only with SQUIRE_S0A2_PROVIDER=grok and a signed-in `grok`. A temp HOME holds the login plus user
+ * and project sentinels; a recording proxy (GROK_MODELS_BASE_URL) captures what Grok sent. Covers
+ * home start, home resume and probe start; evidence goes to artifacts/squire-bar/s0a2/grok/.
  */
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";

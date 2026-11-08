@@ -50,12 +50,9 @@ export type ThreadImportDispatchResult =
     };
 
 /**
- * The single-session import path every web entry point shares, without toasts
- * or navigation: mint the thread id, dispatch `thread.import`, wait for the
- * new thread's shell row. Like a new thread, the import carries the viewed
- * thread's runtime and interaction mode, so importing from a restricted thread
- * never yields a full-access one. The server materializes nothing on a refused
- * import, so there is no client-side compensation.
+ * Shared by every web entry point, without toasts or navigation. Carries the viewed thread's
+ * runtime and interaction mode, so importing from a restricted thread never yields a
+ * full-access one. A refused import materializes nothing server-side.
  */
 export function useDispatchThreadImport() {
   const importThreadCommand = useAtomCommand(threadEnvironment.import, { reportFailure: false });

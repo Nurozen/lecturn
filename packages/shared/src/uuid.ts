@@ -17,11 +17,9 @@ function parseUuidBytes(uuid: string): Uint8Array {
 }
 
 /**
- * Deterministic RFC 4122 version-5 uuid: sha1 of the namespace uuid's bytes
- * followed by the utf-8 name, with the version and variant bits set, rendered
- * as lowercase hex. The same (namespace, name) pair always yields the same id,
- * which makes derived ids (copied attachments, forked rows) idempotent across
- * retries.
+ * Deterministic RFC 4122 version-5 uuid (sha1 of the namespace bytes then the utf-8 name, version
+ * and variant bits set, lowercase hex), so derived ids (copied attachments, forked rows) are
+ * idempotent across retries.
  */
 export function uuidV5(namespace: string, name: string): string {
   const digest = NodeCrypto.createHash("sha1")

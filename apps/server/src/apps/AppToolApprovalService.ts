@@ -1,17 +1,8 @@
 /**
- * Raises a connected-app tool approval inside the calling provider turn and
- * waits for the user's answer.
- *
- * The request is an ordinary `permission` request with a `live` capability on
- * the calling session, so clients that predate connected apps still decode
- * and render it. `connectedAppTool` is what routes the answer back here
- * instead of to the adapter (`RuntimeRequestService`).
- *
- * Every way a request can end is a committed `runtime-request.updated`: the
- * answer, an interrupt or Stop of the run (which cancels the run's pending
- * requests), expiry, the app being revoked or removed, and its ceiling being
- * lowered to one that refuses the call. The call reads its outcome from that
- * event, so it ends exactly when the card does.
+ * Raises a connected-app tool approval as an ordinary `permission` request with a `live`
+ * capability, so clients that predate connected apps still render it; `connectedAppTool` routes the
+ * answer here, not to the adapter. Every ending (answer, interrupt or Stop, expiry, revoke, lowered
+ * ceiling) is a committed `runtime-request.updated`, so the call ends exactly when the card does.
  */
 import {
   type AppId,
@@ -292,11 +283,9 @@ const make = Effect.gen(function* () {
       .pipe(Effect.ignore);
 
   /**
-   * The request records for the thread's running turn, or undefined when the
-   * thread has none. A gated call outside one has nobody to show the request
-   * to. The caller's session id is not compared with the turn's: a toolkit
-   * call carries its MCP credential's id, which is per thread and outlives
-   * provider sessions, so it never equals the provider session id.
+   * The request records for the thread's running turn, or undefined when it has none. The caller's
+   * session id is not compared with the turn's: a toolkit call carries its MCP credential's
+   * per-thread id, which never equals the provider session id.
    */
   const buildRequest = Effect.fnUntraced(function* (
     context: AppToolApprovalContext,

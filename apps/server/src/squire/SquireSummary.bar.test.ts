@@ -1,8 +1,5 @@
-// The summary gold. The stub half runs in CI: the model is replaced
-// by the gold's own model-written fields, so everything else the pipeline
-// produces must match gold exactly. The live half runs only with
-// SQUIRE_BAR_PROVIDER set (claudeAgent or codex) and writes artifacts for
-// the critics; it spends provider tokens.
+// The stub half runs in CI with the model replaced by gold's own model-written fields, so everything else must match
+// gold exactly. The live half spends provider tokens and runs only with SQUIRE_BAR_PROVIDER=claudeAgent|codex.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {

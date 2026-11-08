@@ -1,17 +1,10 @@
 import type { ThreadEnvMode } from "@lecturn/contracts";
 
 /**
- * Canonical priority order for a project's default thread env mode:
- * forced mode > per-project setting > checked-in lecturn.json > global server setting.
- *
- * `forcedMode` is set when the project's environment dictates the mode (for
- * example a Stave space, whose repos are already worktrees) and the user must
- * not be offered a different default.
- *
- * An explicit composer pick outranks all of these; callers apply it before
- * consulting the defaults. Web resolves the sources imperatively at draft
- * creation, mobile reactively — both must route through this function so the
- * platforms cannot disagree on the order.
+ * Default thread env mode priority: forced mode (e.g. a Stave space, whose repos are already
+ * worktrees) > per-project setting > checked-in lecturn.json > global server setting. Callers
+ * apply an explicit composer pick first. Web and mobile both route through here so the platforms
+ * cannot disagree on the order.
  */
 export function resolveDefaultThreadEnvMode(sources: {
   readonly forcedMode?: ThreadEnvMode | null | undefined;
@@ -25,11 +18,9 @@ export function resolveDefaultThreadEnvMode(sources: {
 }
 
 /**
- * True once the resolved default can no longer change: an explicit pick, a
- * forced mode, or a source that outranks lecturn.json decided, or the file read
- * settled. While false, nothing may persist the provisional default (for
- * example into a draft's workspace selection) — it could differ from the
- * final value.
+ * True once the resolved default can no longer change: an explicit pick, a forced mode, or a
+ * source that outranks lecturn.json decided, or the file read settled. While false, nothing may
+ * persist the provisional default (e.g. into a draft's workspace selection).
  */
 export function isDefaultThreadEnvModeSettled(sources: {
   readonly explicitMode: ThreadEnvMode | undefined;

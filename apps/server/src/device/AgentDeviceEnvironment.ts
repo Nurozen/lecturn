@@ -1,10 +1,7 @@
 /**
- * Spawn-time environment that puts the pinned `agent-device` CLI on a provider
- * subprocess's PATH. A provider's environment is fixed when it spawns, so the
- * session manager resolves this before opening a session whose credential has
- * the `device` capability and stores it on the thread's MCP provider session;
- * adapters apply it with `withAgentDeviceEnvironment`. Per-host configuration
- * still comes from `device_open`; this only installs the local launcher.
+ * Puts the pinned `agent-device` CLI on a provider's PATH. A provider's environment is fixed at
+ * spawn, so the session manager resolves this before opening a `device`-capable session. Per-host
+ * configuration still comes from `device_open`; this only installs the local launcher.
  */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";

@@ -1,5 +1,6 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
-import { resolveThreadReferenceCopyTarget } from "@lecturn/shared/threadReference";
+import { Platform } from "react-native";
+import { resolveThreadReferenceCopyTarget } from "@lecturn/client-runtime/thread-reference";
 import {
   createContext,
   use,
@@ -14,6 +15,10 @@ import {
 } from "react";
 
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import {
+  firstWorkspaceDetailOpen,
+  workspaceHasColumns,
+} from "../workspace/workspace-selection-store";
 import { LecturnKeyboardCommands } from "../../native/LecturnKeyboardCommands";
 import { useProject, useThreadShell } from "../../state/entities";
 import { resolveThreadPullRequestRef } from "../../state/thread-pr-presentation";
@@ -163,6 +168,9 @@ export function HardwareKeyboardCommandProvider({
         return;
       }
       if (command === "back") {
+        // Beside a visible list, the first detail page has nothing to go back to.
+        if (Platform.OS === "ios" && workspaceHasColumns() && firstWorkspaceDetailOpen(navigation))
+          return;
         if (navigation.canGoBack()) {
           navigation.goBack();
         } else {

@@ -104,11 +104,9 @@ export const makeCopilotAcpRuntime = Effect.fn("CopilotAcpSupport.makeCopilotAcp
 export const COPILOT_CANCELLED_STREAM_GRACE = Duration.seconds(1);
 
 /**
- * Copilot resolves a cancelled prompt, then keeps streaming the reply it had
- * already generated, with no end marker. This wrapper drops the session
- * updates that follow a cancelled prompt response until the next prompt opens
- * with `usage_update` (Copilot sends it before any of that prompt's output),
- * or until a short grace after that prompt is dispatched.
+ * Copilot resolves a cancelled prompt, then keeps streaming its reply with no end marker. Drop
+ * updates after a cancelled prompt until the next prompt opens with `usage_update` (sent before
+ * any of its output), or a short grace after that prompt is dispatched.
  */
 export const withCopilotCancelledStreamDiscard = Effect.fn(
   "CopilotAcpSupport.withCopilotCancelledStreamDiscard",

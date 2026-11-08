@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * A client that is not an app pays at most 2% more shell bytes per
- * update once the fixture app (Embed Host) is registered and its history
- * imported. Both worlds run the same workload on the same non-app threads
- * through the real shell subscription, and every item the client receives is
- * measured as it is encoded for the wire.
+ * A non-app client pays at most 2% more shell bytes per update once the fixture app (Embed Host) is
+ * registered and its history imported. Both worlds run the same workload through the real shell
+ * subscription, measuring every item as encoded for the wire.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

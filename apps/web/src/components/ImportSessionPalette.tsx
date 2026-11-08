@@ -116,11 +116,9 @@ export function ExternalSessionSubtitle(props: {
 }
 
 /**
- * Live content of the palette's import-session view. Lists every
- * import-capable instance once per scope (no search term: the palette filters
- * `sessionGroups` client-side, so typing never reaches the server) and leaves
- * `trailingGroups` and `notes` outside that filter. Inactive while `scope` is
- * null.
+ * Lists every import-capable instance once per scope with no search term: the palette
+ * filters `sessionGroups` client-side, so typing never reaches the server. `trailingGroups`
+ * and `notes` stay outside that filter. Inactive while `scope` is null.
  */
 export function useImportSessionPalette(input: {
   readonly scope: ImportSessionScope | null;

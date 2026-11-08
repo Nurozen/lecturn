@@ -197,7 +197,7 @@ const toolsJson = (tools: ReadonlyArray<McpSchema.Tool> | null) =>
 
 const iso = (value: DateTime.Utc | null) => (value === null ? null : DateTime.formatIso(value));
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 

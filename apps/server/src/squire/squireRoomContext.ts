@@ -1,11 +1,6 @@
 /**
- * Room context: a member that was not woken gets its unseen
- * posts on its next delivered batch, at most 20 posts or 4,000 characters per
- * room (newest kept) plus a count of older ones, and its read cursor advances
- * in that batch's transaction; a batch the orchestrator refuses rewinds it in
- * the transaction that drops the batch. The Lead gets the same for its rooms.
- *
- * Plain functions over the stores, because `SquireDelivery` sits below
+ * The read cursor advances in the delivered batch's transaction; a batch the orchestrator refuses rewinds it in the
+ * transaction that drops the batch. Plain functions over the stores, because `SquireDelivery` sits below
  * `SquireRooms` in the layer.
  */
 import {

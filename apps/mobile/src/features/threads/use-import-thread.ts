@@ -76,14 +76,9 @@ export type ImportThreadAttempt =
   | { readonly ok: false; readonly message: string | null };
 
 /**
- * Imports an external provider session as a new thread and resolves to its
- * outcome without alerting, so a bulk import can report failures together.
- * Mirrors `useForkThread`: mint the thread id, dispatch once per session, read
- * failures from a message table. The session fixes the provider instance, so
- * the thread starts on that instance's model, while the caller supplies the
- * modes its entry point offers (see `resolveImportThreadModes`) and the
- * instance clamps the interaction mode it cannot honor. A refused import
- * materializes nothing server-side, so there is nothing to compensate.
+ * Resolves to the outcome without alerting, so a bulk import can report failures together.
+ * The caller supplies the modes (see `resolveImportThreadModes`) and the instance clamps
+ * one it cannot honor. A refused import materializes nothing server-side.
  */
 export function useImportThreadAttempt(): (
   input: ImportThreadInput,

@@ -1,16 +1,8 @@
 /**
- * Some ACP agents (Grok) report an MCP call's completion without its result,
- * so an app tool row would lose its card and summary. Lecturn's own `/mcp`
- * served that call, in the same process, so it keeps what it returned for a
- * short while and the adapter fills the row from it.
- *
- * A served result is matched to a call by thread, tool and arguments, and only
- * if it was served after the agent announced the call, so a result from an
- * earlier call (or an earlier provider on the thread) never fills a later one.
- *
- * `/mcp` cannot tell which calls come from such an agent, so it records every
- * app tool result; media blocks are dropped first, since they would pin
- * megabytes per entry for a fill that needs the card and summary.
+ * Some ACP agents (Grok) report an MCP call's completion without its result, so Lecturn's `/mcp`
+ * keeps app tool results briefly for the adapter to fill the row. A result matches a call by
+ * thread, tool and arguments, and only if served after the agent announced the call. `/mcp`
+ * records every app tool result but drops media blocks, which would pin megabytes per entry.
  */
 
 export interface ServedAppToolCall {

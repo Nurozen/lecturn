@@ -4,7 +4,6 @@
  * than the tools, so raising a card never waits on GitHub. The excerpt lives only on the card
  * (`squire.item.get`); relay, push, and notch payloads carry rows, never evidence.
  */
-import { detectSourceControlProviderFromGitRemoteUrl } from "@lecturn/shared/git";
 import { visibleThreadPullRequests } from "@lecturn/shared/threadPullRequests";
 import {
   type SquireCardId,
@@ -29,6 +28,7 @@ import * as Stream from "effect/Stream";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { FIXTURE_PULL_REQUEST_HOST } from "../orchestration-v2/PullRequestSyncReactor.ts";
 import { PullRequestProviderRegistry } from "../pullRequest/PullRequestProviderRegistry.ts";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import { pullRequestEvidence } from "./SquireCardDetail.ts";
 import * as SquireRepository from "./SquireRepository.ts";
@@ -353,7 +353,7 @@ const make = Effect.gen(function* () {
       }
       return;
     }
-    if (detectSourceControlProviderFromGitRemoteUrl(link.url)?.kind !== "github") return;
+    if (sourceControlDefinitions.recognizeRemote(link.url)?.kind !== "github") return;
     const read = yield* source
       .read({
         cwd: shell.worktreePath ?? "",

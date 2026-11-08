@@ -1,13 +1,7 @@
 /**
- * `squireFake`: the scripted provider plus a per-thread script registry.
- * The fixture route writes a Squire home thread's scripts keyed by event kind;
- * each turn on that thread runs the script for the kind it was woken by.
- *
- * Test-only. The server provides `layerServer`, which is empty unless
- * `LECTURN_TEST_PROVIDERS=1` and the Squire switch are both on, in the
- * context the provider registry builds instances in: the scripted adapter
- * resolves `ScriptedScriptSource` once, when the instance is made.
- *
+ * Test-only: `layerServer` is empty unless `LECTURN_TEST_PROVIDERS=1` and the Squire switch are both on.
+ * It is provided where the provider registry builds instances, since the scripted adapter resolves
+ * `ScriptedScriptSource` once, when the instance is made.
  * @module squire/SquireFakeScripts
  */
 import type { ThreadId } from "@lecturn/contracts";

@@ -1,9 +1,6 @@
 /**
- * The Lead's daily digest. Its own scheduler: the Lead's local
- * date comes from the pure `nextScheduledRunAt`, `digest_last_date` is a
- * compare-and-set, and a missed slot catches up once later the same local day.
- * The `digest-due` event carries a bounded input built from stored items,
- * summaries, and the action log, never transcripts.
+ * The Lead's daily digest: `digest_last_date` is a compare-and-set and a missed slot catches up once later the same
+ * local day. The `digest-due` input is built from stored items, summaries, and the action log, never transcripts.
  */
 import {
   DEFAULT_SQUIRE_BUDGETS,

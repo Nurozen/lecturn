@@ -8,18 +8,34 @@ import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
   createThreadEnvironmentAtoms,
+  createThreadFamilyAtoms,
 } from "@lecturn/client-runtime/state/threads";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { useEffect } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { withAndroidAccess, withAndroidAccessFor } from "./androidAccessCommand";
 import { serverEnvironment } from "./server";
-import { environmentSnapshotAtom } from "./shell";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentShell } from "./shell";
 
-const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, environmentSnapshotAtom);
+const threadFamilies = createThreadFamilyAtoms(connectionAtomRuntime, environmentShell.stateAtom);
+const commands = createThreadEnvironmentAtoms(connectionAtomRuntime, threadFamilies.snapshotAtom);
+/** Sending a guest message starts a turn in the thread's own mode; dismissing starts nothing. */
+const sendGuestMessage = withAndroidAccessFor(
+  commands.resolveGuestMessage,
+  (value) => value.input.threadId,
+  (registry, value) =>
+    registry.get(
+      environmentThreadShells.threadShellAtom({
+        environmentId: value.environmentId,
+        threadId: value.input.threadId,
+      }),
+    )?.runtimeMode,
+);
 export const threadEnvironment = {
   ...commands,
   create: withAndroidAccess(commands.create),
@@ -37,6 +53,14 @@ export const threadEnvironment = {
   ),
   setRuntimeMode: withAndroidAccess(commands.setRuntimeMode),
   startTurn: withAndroidAccess(commands.startTurn),
+  resolveGuestMessage: {
+    ...commands.resolveGuestMessage,
+    run: (registry, value) =>
+      (value.input.decision === "send" ? sendGuestMessage : commands.resolveGuestMessage).run(
+        registry,
+        value,
+      ),
+  } satisfies typeof commands.resolveGuestMessage,
 };
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
@@ -47,6 +71,17 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
   serverConfigAtom: serverEnvironment.configValueAtom,
 });
+
+/** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */
+export function useThreadFamily(
+  environmentId: EnvironmentId | null,
+  rootThreadId: ThreadId | null,
+): void {
+  useEffect(() => {
+    if (environmentId === null || rootThreadId === null) return;
+    return threadFamilies.mount(appAtomRegistry, environmentId, rootThreadId);
+  }, [environmentId, rootThreadId]);
+}
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
   Atom.withLabel("web-environment-thread:empty"),
@@ -83,11 +118,7 @@ function isDetailDone<E>(result: AsyncResult.AsyncResult<EnvironmentThreadState,
   );
 }
 
-/**
- * The shell and detail streams are independent, so the shell can report a stop
- * before the detail loads or catches up. A stopped thread stays mounted until
- * its own detail is live and shows the stop too.
- */
+/** Keeps stopped threads mounted until their independent detail stream is live and also reports stopped. */
 export function createRunningThreadKeepAliveAtom<E>(input: {
   readonly environmentIdsAtom: Atom.Atom<ReadonlyArray<EnvironmentId>>;
   readonly threadsAtom: (
@@ -118,8 +149,7 @@ export function createRunningThreadKeepAliveAtom<E>(input: {
       for (const threadId of previous?.get(environmentId) ?? []) {
         if (threadIds.has(threadId)) continue;
         const stateAtom = input.stateAtom(environmentId, threadId);
-        // `once`, not `get`: a dependency on a stopped thread would hold its
-        // stream open until some other change rebuilds this atom.
+        // A get dependency would hold stopped streams open until another change rebuilds this atom.
         if (isDetailDone(get.once(stateAtom))) continue;
         threadIds.add(threadId);
         get.subscribe(stateAtom, (state) => {

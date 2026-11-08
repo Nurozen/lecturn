@@ -6,29 +6,10 @@ import {
   parseStaveCommandHelp,
 } from "./staveFeatures.ts";
 /**
- * StaveBinary - Effect service that locates the `stave` executable the server
- * shells out to, and reports which of the candidate sources supplied it.
- *
- * Two walks share one candidate list:
- *
- * - `resolve` is what `StaveCli` uses. `settings.stave.binaryPath` comes first
- *   and, when set, is authoritative: a configured path that is missing or not
- *   executable fails naming that path rather than silently falling back to a
- *   different binary than the user asked for.
- * - `resolveRunnable` skips settings entirely. It answers "could Stave run on
- *   this machine at all" for settings-independent inventory only,
- *   while status and all execution gates use the authoritative `resolve`.
- *
- * After settings, the order is `LECTURN_STAVE_PATH` → the desktop bootstrap
- * `stavePath` → binaries bundled next to the server build (or, in the
- * single-executable, next to the executable) → `stave` on PATH.
- * Each hit is probed with `stave version`; a failed probe leaves `version`
- * null and does not fail resolution. Successful resolutions are memoised per
- * settings key. Cached file identity is checked cheaply on every resolution;
- * replacement/removal refreshes version and features without re-running help on
- * unchanged files. Settings changes and explicit `invalidate` clear all caches.
- *
- * @module StaveBinary
+ * A set `settings.stave.binaryPath` is authoritative: if missing or not executable, fail naming it,
+ * never fall back. `resolveRunnable` skips settings and serves settings-independent inventory only;
+ * status and every execution gate use `resolve`. Order after settings: `LECTURN_STAVE_PATH`, the
+ * desktop `stavePath`, bundled binaries, then PATH. A failed version probe only nulls `version`.
  */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { CommandResolutionCache, resolveCommandPath } from "@lecturn/shared/shell";

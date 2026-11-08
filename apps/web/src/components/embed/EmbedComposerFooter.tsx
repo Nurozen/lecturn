@@ -13,11 +13,9 @@ export function useEmbedComposerFooterStacked(expanded: boolean): boolean {
 }
 
 /**
- * The composer footer. Outside the embed it is the footer div itself. In the embed pane it has two
- * real rows, the controls ("model | effort | access") and then Contextual, while attach and send
- * sit at the end of the input line above it; ChatComposer pads the editor by the actions' width
- * so text never runs under them. The wrappers stay mounted while the composer rests, as
- * `contents`, so the controls and actions keep their state across a collapse.
+ * In the embed pane: two rows (controls, then Contextual) while attach and send sit on the
+ * input line, which ChatComposer pads by the actions' width. The wrappers stay mounted as
+ * `contents` while the composer rests, so controls keep their state across a collapse.
  */
 export function EmbedComposerFooter({
   stacked,

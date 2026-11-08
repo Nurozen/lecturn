@@ -73,11 +73,9 @@ export {
 const QUEUED_STATUSES: ReadonlySet<string> = new Set(["held", "open", "accepting", "executing"]);
 
 /**
- * The open queue: chips, "Needs a decision", and "FYI" from one list, so counts and groups never
- * disagree. A card the user just acted on leaves at once (`acted`, until a refetch drops it or
- * moves it on), and a selected card that is no longer open becomes a one-line confirmation
- * outside the groups instead of staying among open items. A selected card that is still open
- * but not on a loaded page (a deep link) is kept in place. Rows keep server order: newest first.
+ * Chips and both groups come from one list, so counts never disagree. An acted card leaves at
+ * once (`acted`); a selected card no longer open becomes a one-line confirmation outside the
+ * groups, while a still-open one off the loaded page (deep link) stays. Server order: newest first.
  */
 export function squireQueueView<Row extends SquireCardRow>(
   rows: ReadonlyArray<Row>,

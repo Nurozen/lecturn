@@ -87,14 +87,9 @@ function userMessageText(content: ReadonlyArray<{ type: string; text?: string }>
 }
 
 /**
- * Turns a Codex thread's turns into import transcript rows, in order. Messages
- * keep their text; tool-like items become one activity each, titled and
- * detailed the way the live adapter reports a completed item, so no command
- * output, patch body or tool result is carried. Reasoning, plans and item
- * types this build does not know are skipped.
- *
- * Items carry no timestamp, so each takes its turn's start, else the latest
- * time seen before it (`fallbackSeconds` to begin with).
+ * Tool-like items become one activity each, as the live adapter reports a completed item, so no
+ * command output, patch body or tool result is carried; reasoning, plans and unknown items are
+ * skipped. Items carry no timestamp: each takes its turn's start, else the latest time seen.
  */
 export function codexTurnsToTranscript(
   turns: ReadonlyArray<CodexImportTurn>,
@@ -176,12 +171,9 @@ const messageCount = (turn: CodexImportTurn) =>
   codexTurnsToTranscript([turn], 0).filter((entry) => entry.kind === "message").length;
 
 /**
- * Reads the thread's turns through its last completed one, in chronological
- * order, and reports whether unfinished turns followed it (`cutOff`). Pages
- * arrive newest first and reading stops once they hold more messages than an
- * import keeps: one more than the cap, so the history builder still sees that
- * the session was longer. A very large session therefore costs a few pages
- * rather than its whole history.
+ * Reads through the last completed turn; `cutOff` reports unfinished turns after it. Pages arrive
+ * newest first and reading stops at one message past the import cap, so the history builder still
+ * sees that the session was longer without reading its whole history.
  */
 const readThreadTurns = Effect.fn("readCodexImportTurns")(function* (
   client: CodexImportClient,
@@ -234,11 +226,9 @@ const readThreadTurns = Effect.fn("readCodexImportTurns")(function* (
 });
 
 /**
- * Forks `sessionId` and reads the conversation back from the fork: Codex
- * serves no turns for a thread it has not loaded, and forking is what loads
- * one without touching the source. A trailing turn that never completed is
- * cut by forking again at the last completed turn; the first fork is then an
- * unused two-line rollout that never shows in `thread/list`.
+ * Codex serves no turns for a thread it has not loaded, and forking loads one without touching the
+ * source. A trailing incomplete turn is cut by forking again at the last completed turn; the first
+ * fork is then an unused two-line rollout that never shows in `thread/list`.
  */
 const importCodexExternalThread = Effect.fn("importCodexExternalThread")(function* (
   client: CodexImportClient,

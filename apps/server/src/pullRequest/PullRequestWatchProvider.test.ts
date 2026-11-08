@@ -31,7 +31,7 @@ const identity = (repository: string, host = "github.com"): RepositoryIdentity =
     remoteName: "origin",
     remoteUrl: `https://${host}/${repository}.git`,
   },
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   displayName: repository,
 });
 const repo = (name: string, mode: "edit" | "reference" = "edit"): StaveRepoEntry => ({
@@ -245,7 +245,10 @@ it.effect("refines an unknown provider from its public remote URL", () =>
     const service = yield* make({
       project: {
         ...project(),
-        repositoryIdentity: { ...identity("acme/api"), provider: "unknown" },
+        repositoryIdentity: {
+          ...identity("acme/api"),
+          provider: SourceControlProviderKind.make("unknown"),
+        },
       },
     });
     assert.strictEqual((yield* service.observe(reference)).observation.provider, "github");

@@ -18,6 +18,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
 import { cn } from "../lib/utils";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
+import { GUEST_PAGE_PATH } from "../guestPage";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { useHostedPromptLinkLanding } from "../components/promptLinks/HostedPromptLinkLanding";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
@@ -36,6 +37,17 @@ export const Route = createRootRoute({
     if (location.pathname === "/account/billing" || isEmbedLocation(location)) {
       return { authGateState: { status: "hosted-static" } as const };
     }
+
+    // Guest links open on the owner's tunnel host in a browser with no Lecturn session, and must
+    // not trigger pairing or an environment connection, or load the app shell.
+    if (location.pathname === GUEST_PAGE_PATH) {
+      return {
+        authGateState: {
+          status: "guest",
+        } as const,
+      };
+    }
+
     void loadAppShell();
 
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
@@ -101,6 +113,8 @@ function RootRouteView() {
     authGateState.status === "hosted-static",
   );
 
+  if (pathname === GUEST_PAGE_PATH) return <Outlet />;
+
   if (
     pathname === "/account/billing" ||
     isEmbedLocation({ pathname }) ||
@@ -118,8 +132,7 @@ function RootRouteView() {
     );
   }
 
-  // Ahead of first-run onboarding, which would otherwise send a new visitor to the welcome
-  // wizard and lose the link.
+  // Handle links before onboarding redirects lose them.
   if (hostedPromptLinkLanding !== null) {
     return (
       <>
@@ -231,9 +244,7 @@ function errorDetails(error: unknown): string {
 
 const MAX_ERROR_CAUSE_DEPTH = 5;
 
-/**
- * Takes the pathname only so tokens in the query never land on the clipboard.
- */
+// Use only pathname to keep query tokens off the clipboard.
 function errorReport(error: unknown, pathname: string): string {
   const lines = [
     `${APP_DISPLAY_NAME} ${APP_VERSION}`,

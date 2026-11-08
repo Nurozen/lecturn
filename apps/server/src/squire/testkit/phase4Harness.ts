@@ -1,10 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - The database directory is made synchronously before the layer builds.
 /**
- * The server's Squire wiring (`layerSquire`, switch on or off) over a real
- * orchestrator with the scripted provider and the Squire command allowlist,
- * on a Sqlite file in a temp Lecturn home. Building it again over the same
- * home is a restart. Home-thread turns run the scripts set through
- * `SquireFakeScripts`.
+ * The server's Squire wiring over a real orchestrator with the scripted provider, on a Sqlite file in a temp Lecturn
+ * home. Building it again over the same home is a restart.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

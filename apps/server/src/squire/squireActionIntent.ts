@@ -20,7 +20,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "@lecturn/contracts";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

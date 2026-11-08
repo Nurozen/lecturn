@@ -1,18 +1,8 @@
 /**
- * StaveLifecycleService - fenced, consented and recoverable cleanup of Stave
- * spaces whose projects were deleted or whose threads all settled.
- *
- * Re-homed from V1 `orchestration/Layers/StaveLifecycleService.ts` onto V2:
- * - delete intents come from the application event log. A durable cursor
- *   (`stave_lifecycle_cursor`) folds `project.deleted` (with the Stave
- *   identity the server bound at delete time) and workspace moves into
- *   `stave_project_lifecycle`, exactly as the V1 projector did, but tailing
- *   V2 application events instead of running inside the V1 pipeline;
- * - activity that can change archive eligibility wakes the sweep;
- * - project reads, refreshes and deleted-thread draining go through
- *   `StaveOrchestration`.
- *
- * @module StaveLifecycleService
+ * Fenced, consented and recoverable cleanup of Stave spaces whose projects were deleted or whose
+ * threads all settled. A durable cursor (`stave_lifecycle_cursor`) tails V2 application events and
+ * folds `project.deleted` (with the identity bound at delete time) and workspace moves into
+ * `stave_project_lifecycle`; activity that can change archive eligibility wakes the sweep.
  */
 import {
   type ApplicationStoredEvent,

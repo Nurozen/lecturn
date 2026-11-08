@@ -3,7 +3,13 @@ import type {
   EnvironmentThreadShell,
 } from "@lecturn/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  SourceControlProviderKind,
+  ThreadId,
+} from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -459,7 +465,7 @@ describe("buildHomeThreadGroups", () => {
         remoteName: "origin",
         remoteUrl: "git@github.com:nurozen/lecturn.git",
       },
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       owner: "nurozen",
       name: "lecturn",
       displayName: "Lecturn",

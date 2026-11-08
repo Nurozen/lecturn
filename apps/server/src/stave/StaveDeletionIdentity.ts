@@ -1,13 +1,7 @@
 /**
- * Binds the Stave space identity a project deletion consents to (V1
- * Normalizer `project.delete` binding). The lifecycle journal only cleans up a
- * space whose manifest still carries this exact incarnation, so the identity
- * must be read fresh at delete time, never from a cache.
- *
- * Without a `StaveWorkspaceReader` (Stave not wired) or a manifest, the
- * deletion binds nothing and the journal treats the root as not a space.
- *
- * @module StaveDeletionIdentity
+ * Binds the Stave space identity a project deletion consents to. The lifecycle journal only cleans
+ * up a space whose manifest still carries this exact incarnation, so read it fresh at delete time,
+ * never from a cache. Without a reader or a manifest the deletion binds nothing (not a space).
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

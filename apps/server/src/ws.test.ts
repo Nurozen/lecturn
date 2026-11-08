@@ -12,6 +12,7 @@ import {
   WsRpcGroup,
   WsSubscribeServerConfigRpc,
   type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadShell,
   type OrchestrationProjectShell,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -87,6 +88,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
+import * as GuestShareService from "./guest/GuestShareService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -340,6 +342,71 @@ const layerUnusedLecturnRpcServices = Layer.mergeAll(
   Layer.mock(ThreadNoteService)({}),
 );
 
+it.effect("shell snapshots leave idle subagent children out only for clients that ask", () =>
+  Effect.gen(function* () {
+    const shell = (id: string, parent: string | null, activityRunStatus: "running" | null) =>
+      ({
+        id: ThreadId.make(id),
+        archivedAt: null,
+        status: activityRunStatus ?? "completed",
+        activityRunStatus,
+        pendingRuntimeRequest: null,
+        pendingBackgroundTasks: [],
+        lineage: {
+          parentThreadId: parent === null ? null : ThreadId.make(parent),
+          relationshipToParent: parent === null ? null : "subagent",
+          rootThreadId: ThreadId.make("parent"),
+        },
+      }) as unknown as OrchestrationV2ThreadShell;
+    const threads = [
+      shell("parent", null, null),
+      shell("idle", "parent", null),
+      shell("live", "parent", "running"),
+    ];
+    const firstSnapshotThreadIds = (input: { readonly omitIdleSubagents?: boolean }) =>
+      subscribeOrchestrationV2Shell(input).pipe(
+        Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect)),
+        Effect.map(([item]) =>
+          item?.kind === "snapshot" ? item.snapshot.threads.map((thread) => thread.id) : [],
+        ),
+        Effect.provideService(ThreadManagement.ThreadManagementService, {
+          readShellSnapshot: () =>
+            Effect.succeed(
+              Effect.succeed({
+                schemaVersion: 1,
+                snapshotSequence: 0,
+                threads,
+                archivedThreads: [],
+              }),
+            ),
+        } as unknown as ThreadManagement.ThreadManagementService["Service"]),
+        Effect.provideService(ProjectStore.ProjectStoreV2, {
+          listShells: () => Effect.succeed([]),
+        } as unknown as ProjectStore.ProjectStoreV2["Service"]),
+        Effect.provideService(ProjectService.ProjectService, {
+          getShell: () => Effect.succeedNone,
+        } as unknown as ProjectService.ProjectService["Service"]),
+        Effect.provideServiceEffect(
+          ProjectEnrichment.ProjectEnrichmentService,
+          PubSub.unbounded().pipe(
+            Effect.map(
+              (changes) =>
+                ({
+                  subscribeChanges: PubSub.subscribe(changes),
+                }) as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"],
+            ),
+          ),
+        ),
+      );
+
+    assert.deepEqual(yield* firstSnapshotThreadIds({}), ["parent", "idle", "live"]);
+    assert.deepEqual(yield* firstSnapshotThreadIds({ omitIdleSubagents: true }), [
+      "parent",
+      "live",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+);
+
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.
 const layerUnusedConfigRpcServices = Layer.mergeAll(
   layerUnusedLecturnRpcServices,
@@ -390,6 +457,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ReviewService.ReviewService)({}),
   Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(GuestShareService.GuestShareService)({}),
   Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({}),
   Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({}),
   Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({}),
@@ -588,6 +656,101 @@ it.effect(
     ),
 );
 
+it.effect("advertises thread families only to sessions that may read them", () =>
+  Effect.gen(function* () {
+    const configFor = (subject: string) =>
+      Effect.gen(function* () {
+        const responses = yield* Queue.unbounded<any>();
+        const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+          ...WS_RPC_SERVER_OPTIONS,
+          onFromServer: (response) => Queue.offer(responses, response),
+        }).pipe(
+          Effect.provide(
+            layerWsRpc(
+              {
+                sessionId: AuthSessionId.make("config-test"),
+                subject,
+                method: "bearer-access-token",
+                scopes: [],
+              },
+              {},
+              {},
+              yield* PreviewAutomationBroker.PreviewAutomationBroker,
+              yield* ServerBrowser.ServerBrowser,
+            ).pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  layerUnusedConfigRpcServices,
+                  Layer.mock(ExternalLauncher.ExternalLauncher)({
+                    resolveAvailableEditors: () => Effect.succeed([]),
+                    resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+                  }),
+                  Layer.mock(ProviderRegistry.ProviderRegistry)({
+                    getProviders: Effect.succeed([]),
+                  }),
+                  Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+                  Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
+                    resolveTargets: () => Effect.succeed([]),
+                  }),
+                  Layer.mock(DirectEndpoints.DirectEndpoints)({
+                    resolve: () => Effect.succeed([]),
+                  }),
+                  Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                    scratchRoot: Effect.succeedNone,
+                    namedProjectsRoot: process.cwd(),
+                  }),
+                  Layer.mock(ServerEnvironment.ServerEnvironment)({
+                    getDescriptor: Effect.succeed({
+                      environmentId: EnvironmentId.make("config-test"),
+                      label: "Config test",
+                      platform: { os: "linux", arch: "x64" },
+                      serverVersion: "0.0.0",
+                      capabilities: { repositoryIdentity: false },
+                    }),
+                  }),
+                  Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+                    getDescriptor: () =>
+                      Effect.succeed({
+                        policy: "loopback-browser",
+                        bootstrapMethods: [],
+                        sessionMethods: ["browser-session-cookie"],
+                        sessionCookieName: "config-test-session",
+                      }),
+                  }),
+                ),
+              ),
+              Layer.merge(Layer.succeed(RpcScopeAuthorization)((effect) => effect)),
+            ),
+          ),
+        );
+        yield* server.write(0, {
+          _tag: "Request",
+          id: RpcMessage.RequestId("config"),
+          tag: WS_METHODS.serverGetConfig,
+          payload: {},
+          headers: Headers.empty,
+        });
+        const response = yield* Queue.take(responses);
+        return response.exit.value;
+      }).pipe(Effect.scoped);
+
+    assert.isTrue((yield* configFor("owner")).shellThreadFamilies);
+    // getThreadFamily is closed to an embed, so its shell must keep the idle subagent rows.
+    const embed = yield* configFor(
+      formatEmbedSubject(AppId.make("dev.example.app"), ProjectId.make("project")),
+    );
+    assert.isUndefined(embed.shellThreadFamilies);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+  ),
+);
+
 it.effect("keeps palette picks out of an embed session's thread RPCs", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread-picks");
@@ -757,7 +920,6 @@ it.effect("thread resume across compacted history keeps message order and final 
         )
       `;
     }
-    // Only the event between a's first and newest is deleted.
     assert.equal((yield* maintenance.compactEventStore).deletedEventCount, 1);
 
     const items = yield* subscribeOrchestrationV2Thread({

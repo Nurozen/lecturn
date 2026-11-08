@@ -66,6 +66,8 @@ import {
 import { parseActiveThreadPath, type HardwareKeyboardCommand } from "./hardwareKeyboardCommands";
 import { threadJumpIndex } from "./threadKeyboardShortcuts";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { openSettings } from "../settings/settings-navigation";
+import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
 
 const PALETTE_COMMANDS: ReadonlyArray<HardwareKeyboardCommand> = [
   "commandPalette",
@@ -252,6 +254,7 @@ export function CommandPalette(props: {
   readonly onCommand: (command: HardwareKeyboardCommand) => void;
 }) {
   const navigation = useNavigation();
+  const selectTab = useSelectWorkspaceTab();
   const { themeVariables } = useAppearancePreferences();
   const { selectThread, selectThreadRoute } = useAdaptiveWorkspaceLayout();
   const runCommand = props.onCommand;
@@ -314,66 +317,42 @@ export function CommandPalette(props: {
         kind: "action",
         title: "Open settings",
         searchTerms: ["preferences", "configuration"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "Settings" },
-          }),
+        run: () => selectTab("settings"),
       },
       {
         key: "appearance",
         kind: "action",
         title: "Appearance",
         searchTerms: ["theme", "colors", "dark", "light"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsAppearance" },
-          }),
+        run: () => openSettings(navigation, "SettingsAppearance"),
       },
       {
         key: "environments",
         kind: "action",
         title: "Manage environments",
         searchTerms: ["connections", "server", "remote"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsEnvironments" },
-          }),
+        run: () => openSettings(navigation, "SettingsEnvironments"),
       },
       {
         key: "scheduledTasks",
         kind: "action",
         title: "Scheduled tasks",
         searchTerms: ["schedule", "automations", "recurring"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsScheduledTasks" },
-          }),
+        run: () => openSettings(navigation, "SettingsScheduledTasks"),
       },
       {
         key: "usage",
         kind: "action",
         title: "Usage",
         searchTerms: ["limits", "accounts", "quota"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsUsage" },
-          }),
+        run: () => openSettings(navigation, "SettingsUsage"),
       },
       {
         key: "archive",
         kind: "action",
         title: "Archived threads",
         searchTerms: ["restore", "history"],
-        run: () =>
-          navigation.navigate("SettingsSheet", {
-            screen: "SettingsContent",
-            params: { screen: "SettingsArchive" },
-          }),
+        run: () => openSettings(navigation, "SettingsArchive"),
       },
     ];
     const projectByKey = new Map(
@@ -473,6 +452,7 @@ export function CommandPalette(props: {
     );
     return [...actions, ...squireItems, ...projectItems, ...threadItems];
   }, [
+    selectTab,
     activeThread,
     activeThreadRef,
     environments.length,
@@ -570,9 +550,7 @@ export function CommandPalette(props: {
     pendingAction.current?.();
   }, [props]);
 
-  // iOS drops Modal onDismiss when the VC is dismissed mid-presentation (e.g.
-  // ⌘K during the fade-in) or raced by another sheet — without a fallback the
-  // palette stays mounted-but-invisible and ⌘K dead-ends on a stale open state.
+  // iOS may drop onDismiss during presentation or competing sheets; a fallback clears stale palette state.
   useEffect(() => {
     if (visible) return;
     const fallback = setTimeout(handleDismissed, 400);

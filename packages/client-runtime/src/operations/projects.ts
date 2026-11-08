@@ -26,16 +26,14 @@ import {
 import { isAppProject } from "../state/appProjects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
 import { sourceControlClients } from "../sourceControlClients.ts";
-import type { SourceControlClientDefinition } from "../sourceControlClients.ts";
+import type { SourceControlDefinition } from "../sourceControlClients.ts";
 
 export type AddProjectRemoteSource = SourceControlProviderKind | "url";
 
 /**
- * Sources that create the project through a Stave operation rather than a
- * folder or a clone. Kept apart from `AddProjectRemoteSource` because the
- * remote sources are switched on exhaustively (labels, hints, readiness)
- * and none of that applies here: the wizard owns the whole flow and the
- * server creates the project itself (deviation 26).
+ * Sources that create the project through a Stave operation. Kept apart from
+ * `AddProjectRemoteSource`, whose exhaustive switches (labels, hints, readiness) don't apply: the
+ * wizard owns the whole flow and the server creates the project itself (deviation 26).
  */
 export type AddProjectStaveSource = "stave-space" | "stave-saga";
 export type AddProjectSource = AddProjectRemoteSource | AddProjectStaveSource;
@@ -147,14 +145,24 @@ export function parseAddProjectRemoteSource(
   return (value ? sourceControlClients.find(value)?.kind : undefined) ?? "url";
 }
 
-const GITHUB_REPOSITORY_SHORTHAND =
-  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+(?:\.git)?$/;
+const REPOSITORY_SHORTHAND = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+(?:\.git)?$/;
+
+/**
+ * The clone URL of `owner/name` on the public host of the host a repository reads as before it
+ * reports one. Null when that host has no public host.
+ */
+export function defaultHostCloneUrl(repository: string): string | null {
+  const definition = sourceControlClients.get(undefined);
+  if (definition.publicHost === null) return null;
+  const path = repository.endsWith(".git") ? repository : `${repository}.git`;
+  return definition.defaultCloneTransport === "https"
+    ? `https://${definition.publicHost}/${path}`
+    : `git@${definition.publicHost}:${path}`;
+}
 
 export function normalizePastedCloneUrl(input: string): string {
   const trimmed = input.trim();
-  if (!GITHUB_REPOSITORY_SHORTHAND.test(trimmed)) return trimmed;
-  const repository = trimmed.endsWith(".git") ? trimmed : `${trimmed}.git`;
-  return `https://github.com/${repository}`;
+  return REPOSITORY_SHORTHAND.test(trimmed) ? (defaultHostCloneUrl(trimmed) ?? trimmed) : trimmed;
 }
 
 export function getDefaultCloneUrl(
@@ -250,7 +258,7 @@ export function getNewProjectPathPreview(newProjectsRoot: string, name: string):
 }
 
 export interface NewProjectPublishTarget {
-  readonly definition: SourceControlClientDefinition;
+  readonly definition: SourceControlDefinition;
   readonly owner: string | null;
 }
 

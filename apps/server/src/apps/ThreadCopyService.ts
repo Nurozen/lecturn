@@ -1,19 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Lecturn-to-Lecturn thread copy: an app exports
- * its threads from one environment (usually its sidecar) and imports them into
- * another as history-only threads.
- *
- * A copy is `historyOrigin: "v1_import"` with run-less items and no provider
- * thread, so continuing it starts a fresh provider session that receives the
- * copied history as a full-thread handoff, and forking it cuts the copied
- * history like any imported thread. `importedFrom` is left alone.
- *
- * Interrupted imports: assets are staged under the bundle's hash before any
- * thread is written, and each thread commits in one transaction. A rerun
- * reuses staged assets and skips threads already copied at the bundle's
- * revision. A staging area untouched for a day is swept, together with any
- * promoted file its threads never came to reference.
+ * Lecturn-to-Lecturn thread copy: an app exports threads from one environment and imports them into
+ * another as `historyOrigin: "v1_import"` history-only threads, so continuing one hands the copied
+ * history to a fresh provider session. Assets stage under the bundle hash and each thread commits
+ * in one transaction, so a rerun resumes; staging untouched for a day is swept.
  */
 import * as NodeCrypto from "node:crypto";
 
@@ -257,11 +247,9 @@ const make = Effect.gen(function* () {
         );
 
   /**
-   * Bytes leave only for files the app's own threads minted. A history
-   * reference proves nothing, since an app writes its own history (imports,
-   * tool output). An id names its minting thread only by a lossy segment, so
-   * every thread with that segment must be the app's, as in AppAuthorization's
-   * attachment lookup.
+   * Bytes leave only for files the app's own threads minted; a history reference proves nothing,
+   * since an app writes its own history. An id names its minting thread only by a lossy segment, so
+   * every thread with that segment must be the app's (as in AppAuthorization).
    */
   const makeOwnsAttachment = Effect.fn("ThreadCopyService.makeOwnsAttachment")(function* (
     appProjectIds: ReadonlySet<string>,
@@ -597,16 +585,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * An up-to-date copy is skipped. A newer source replaces a copy that
-   * is still history only; a copy the user has continued is never touched,
-   * and the newer history becomes a thread of its own. So does history that
-   * dropped rows the copy holds (a rollback at the source): a replace cannot
-   * remove them, and they would mix with the newer turns.
-   *
-   * The title is metadata: a rename alone never re-copies history. An
-   * up-to-date copy that is still history only takes the source's current
-   * title instead, which matters because a source is often renamed (title
-   * generation, the user) after its first copy.
+   * An up-to-date copy is skipped. A newer source replaces a copy that is still history only; a
+   * continued copy is never touched, and newer history (or history that dropped rows the copy
+   * holds) becomes its own thread. A rename alone never re-copies: an up-to-date history-only copy
+   * just takes the source's current title.
    */
   const planThread = Effect.fn("ThreadCopyService.planThread")(function* (input: {
     readonly appId: AppId;

@@ -1,9 +1,6 @@
 /**
- * The reactor cursor records whether the switch was on when it was last
- * applied. An on period that turns it on moves the cursor to the log head
- * first, so nothing committed while every Squire was paused is delivered. An
- * off period writes `enabled: false` only after the reactor stopped, since the
- * reactor rewrites the flag it read at its start.
+ * An on period moves the reactor cursor to the log head first, so nothing committed while paused is delivered.
+ * An off period writes `enabled: false` only after the reactor stopped, since it rewrites the flag it read at start.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

@@ -56,6 +56,10 @@ describe("thread status badge", () => {
     ).toBe("Limited");
   });
 
+  it("names a guest's pending request", () => {
+    expect(badgeOf({ pendingGuestMessageCount: 1 })).toBe("Request");
+  });
+
   it("shows Done for a finished run until the thread is opened, then nothing", () => {
     expect(badgeOf({ latestRun: finished, lastVisitedAt: "2026-10-25T11:05:00.000Z" })).toBe(
       "Done",

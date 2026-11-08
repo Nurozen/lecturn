@@ -1,7 +1,7 @@
 import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import type { OrchestrationProjectShell } from "@lecturn/contracts";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
-import { parseChangeRequestUrl } from "@lecturn/shared/changeRequestUrl";
+import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
 import { resolveSendEnvMode } from "@lecturn/shared/projectSettings";
 import type { ComposerDraftWorkspaceSelection } from "../../state/use-composer-drafts";
 
@@ -53,11 +53,9 @@ export function resolveNewTaskWorkspaceLabel(input: {
 }
 
 /**
- * Worktree a local-mode draft should run in when the picked branch lives in
- * one. `projectCwd` is the git cwd the branch list was fetched from, so the
- * checkout itself never counts as a worktree. Stave threads always run in
- * the space root: any path the primary repo's branch list reports is that
- * repo's checkout, never a thread worktree, so it is dropped.
+ * Worktree a local-mode draft runs in when the picked branch lives in one. `projectCwd`
+ * is the git cwd the branch list came from, so the checkout never counts. Stave threads
+ * always run in the space root, so a path from the primary repo's branch list is dropped.
  */
 export function resolveNewTaskBranchWorktreePath(input: {
   readonly workspaceMode: WorkspaceMode;
@@ -117,8 +115,8 @@ export function resolveNewTaskBranchLabel(input: {
   readonly pullRequestReference?: string;
 }): string {
   if (input.workspaceMode === "worktree" && input.pullRequestReference) {
-    const pr = parseChangeRequestUrl(input.pullRequestReference);
-    if (pr) return `From PR #${pr.number}`;
+    const parsed = sourceControlClients.parseChangeRequestUrl(input.pullRequestReference);
+    if (parsed) return `From ${parsed.definition.changeRequest.shortLabel} #${parsed.link.number}`;
   }
   if (!input.branchName) {
     return "Choose branch";

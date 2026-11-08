@@ -237,11 +237,9 @@ export class EnvironmentSupervisor extends Context.Service<
 /** What the owner of a supervisor holds: the service plus controls its consumers do not get. */
 export type EnvironmentSupervisorHandle = EnvironmentSupervisor["Service"] & {
   /**
-   * Swaps the catalog entry used by later attempts, for example when a relay
-   * route gains its owning account. A live connection is kept; a blocked,
-   * backing-off, or in-flight attempt starts over with the new entry and a
-   * fresh retry ladder. An entry equal to the current one changes nothing, and
-   * one for another environment or target kind is refused.
+   * Swaps the catalog entry used by later attempts. A live connection is kept; a blocked,
+   * backing-off, or in-flight attempt starts over with the new entry and a fresh retry ladder.
+   * An equal entry changes nothing; one for another environment or target kind is refused.
    */
   readonly retarget: (entry: ConnectionCatalogEntry) => Effect.Effect<void>;
 };

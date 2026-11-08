@@ -1,10 +1,7 @@
 /**
- * Shared rules behind the "import a folder's agent sessions" flows on web and
- * mobile: the entry labels, grouping a machine-wide session list into folders,
- * which sessions start selected, and importing a selection one at a time.
- * Clients own the listing (one `externalSessions.list` per import-capable
- * instance) and the single-session import dispatch; this module never talks
- * to the server.
+ * Shared rules behind the web and mobile "import a folder's agent sessions" flows. Clients own
+ * the listing (one `externalSessions.list` per import-capable instance) and the single-session
+ * import dispatch; this module never talks to the server.
  */
 import type {
   ExternalSessionSummary,

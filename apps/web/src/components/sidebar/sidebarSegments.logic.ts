@@ -61,11 +61,9 @@ export interface SidebarSegment<Thread, Project> {
 }
 
 /**
- * One segment per known account in known-list order, kept even when empty so
- * its bar can say "Needs sign-in" or "No threads". Then one segment without an
- * account, last, for this device, direct, Tailscale, and SSH environments and
- * for relay entries that have no owner yet. That one is left out when empty,
- * unless a draft waits there for a project that has not loaded.
+ * One segment per known account in known-list order, kept when empty so its bar can say
+ * "Needs sign-in" or "No threads", then a last account-less segment (this device, direct,
+ * Tailscale, SSH, unowned relay entries), dropped when empty unless a draft waits there.
  */
 export function buildSidebarSegments<
   Thread extends EnvironmentScoped,
@@ -127,11 +125,9 @@ export interface SegmentStickyLayout {
 }
 
 /**
- * Sticky offsets per segment. At the top a bar sticks under the bars before
- * it, so what is scrolled past stays named. At the bottom only a bar with an
- * attention pill sticks, which is the one thing an account below the fold has
- * to say. A row is covered by its own and earlier bars above, and by later
- * attention bars below, and that is what it keeps clear of when scrolled to.
+ * At the top a bar sticks under the bars before it, so what is scrolled past stays named; at
+ * the bottom only a bar with an attention pill sticks. A row keeps clear of its own and
+ * earlier bars above and later attention bars below when scrolled to.
  */
 export function layoutSegmentBars(
   segments: ReadonlyArray<{ readonly accountId: string | null; readonly attention: unknown }>,
@@ -349,11 +345,9 @@ export type OwnsEnvironment = (environmentId: string) => boolean;
 export const OWNS_EVERY_ENVIRONMENT: OwnsEnvironment = () => true;
 
 /**
- * Per segment id, whether an environment's drafts show there. It asks the
- * environment, never the loaded projects: a draft outlives its project shell
- * while the environment is offline, needs sign-in, or is still starting. Built
- * apart from the views so the memoized draft block keeps still while thread
- * shells stream in.
+ * Asks the environment, never the loaded projects: a draft outlives its project shell while
+ * the environment is offline, needs sign-in, or is starting. Built apart from the views so
+ * the memoized draft block keeps still while thread shells stream in.
  */
 export function buildSegmentEnvironmentFilters(
   segmentation: SidebarSegmentation,

@@ -408,7 +408,7 @@ describe("SquireOverlap", () => {
             thread.pullRequest,
           ]),
           [
-            // The recommendation's "#318" is on the thread line too.
+            // The recommendation's `#318` is on the thread line too.
             [invoice, "fix/invoice-rounding", 318],
             [currency, "chore/currency-display", undefined],
           ],
@@ -834,7 +834,7 @@ describe("SquireOverlap over inject", () => {
             // The Lead exists before any event, as in the stills procedure (it needs a project).
             yield* service.ensureLead({ requestId: "lead" });
             // Each command lands later than the last, as the boundaries need: 07 moves the
-            // thread onto its branch, and #318 merged before 07's turns.
+            // thread onto its branch, and PR 318 merged before 07's turns.
             yield* TestClock.adjust("1 minute");
             for (const event of scenario.events) yield* fixtures.inject(event);
             yield* TestClock.adjust("1 minute");

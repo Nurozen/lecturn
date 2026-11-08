@@ -100,11 +100,9 @@ export function nextGroupDisplayState(
 }
 
 /**
- * Structural equality for list items. Item objects are rebuilt on every
- * collapse/show-more toggle; without this the lists would consider every
- * mounted row changed and re-render all of them (each carrying a swipeable +
- * a vcs-status subscription). Group/thread references are stable across
- * toggles.
+ * Items are rebuilt on every collapse/show-more toggle; without structural equality every
+ * mounted row (swipeable + vcs-status subscription) re-renders. Group/thread references are
+ * stable across toggles.
  */
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean {
   if (previous.depth !== item.depth) return false;

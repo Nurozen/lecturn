@@ -6,11 +6,9 @@ import SagaWorkbench from "./051_SagaWorkbench.ts";
 import PullRequestWatches from "./052_PullRequestWatches.ts";
 import TitleState from "./052_ProjectionThreadTitleState.ts";
 
-// Both products published migrations 51 and 52 with different names and schemas.
-// The migrator skips IDs below the ledger's latest ID, so an existing Lecturn
-// database never ran upstream's message context and title state columns, and an
-// upstream database at 51 or 52 never ran Lecturn's saga workbench or pull request
-// watch tables. Create only what is missing, without rewriting either ledger.
+// Both products published migrations 51 and 52 with different names and schemas, and the migrator
+// skips IDs below the ledger's latest, so each side missed the other's columns and tables. Create
+// only what is missing, without rewriting either ledger.
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const hasTable = (name: string) =>

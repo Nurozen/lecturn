@@ -1,17 +1,7 @@
 /**
- * Server-local decoders for every `stave --json` payload `StaveCli` consumes.
- *
- * The shapes mirror the Go structs in references/stave/internal/cli
- * (jsonrun.go, jsonrun_verbs.go, memory_json.go, space_list.go, saga.go,
- * config_cmd.go, root.go) and internal/space (manifest.go, saga_status.go,
- * saga_teardown.go, saga_sync_report.go). Decoding is forward-compatible:
- * unknown keys are ignored, closed string sets decode unknown members as
- * `"unknown"`, and Go slices that may be nil or `omitempty` read as `[]`.
- *
- * Only `saga status` is snake_case (Stave's frozen contract); it is renamed
- * to camelCase here so every read model looks alike to the rest of Lecturn.
- *
- * @module staveJson
+ * Shapes mirror the Go structs in references/stave/internal/{cli,space}. Forward-compatible:
+ * unknown keys are ignored, closed string sets decode unknown members as `"unknown"`, and nil or
+ * `omitempty` Go slices read as `[]`. Only `saga status` is snake_case (Stave's frozen contract).
  */
 import { parseStaveVersionOutput, type StaveVersionInfo } from "@lecturn/shared/stave";
 import { formatSchemaError } from "@lecturn/shared/schemaJson";

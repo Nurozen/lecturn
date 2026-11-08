@@ -83,6 +83,8 @@ const ALLOWED_FROM_ANY_CALLER: ReadonlySet<string> = new Set([
   "thread.background-work.settle",
   "notification.delivery.accept",
   "thread.stop",
+  // Records that a user's `runtime-request.respond` could not reach the provider.
+  "runtime-request.delivery.fail",
 ]);
 
 const CONTRACT_COMMAND_TYPES: ReadonlyArray<string> = [

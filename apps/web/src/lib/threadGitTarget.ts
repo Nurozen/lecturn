@@ -30,11 +30,9 @@ export interface ThreadGitTarget {
 }
 
 /**
- * Where a thread's git surfaces should look. Wraps the shared client-runtime
- * resolvers so every web call site derives cwd, branch and the "issue a status
- * query at all" gate from one place. `fallbackCwd` covers rows that only know
- * the project's workspace root (the pre-Stave `projectCwd` prop) when the
- * project itself is unavailable; ordinary projects resolve identically either way.
+ * One place for every web git surface's cwd, branch and status-query gate. `fallbackCwd`
+ * covers rows that only know the workspace root (pre-Stave `projectCwd`) when the project is
+ * unavailable; ordinary projects resolve identically either way.
  */
 export function resolveThreadGitTarget(input: {
   readonly project: ProjectLike | null | undefined;

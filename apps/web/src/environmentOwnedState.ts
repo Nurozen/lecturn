@@ -34,11 +34,9 @@ function sweep<S extends object>(
 }
 
 /**
- * Removes what the view stores keep for the environment of an account that
- * signed out: thread and project entries keyed by it. Project keys shared
- * across environments (repository identity) and device-level state stay.
- * `prompt-stash` and `last-invoked-script-by-project` are not keyed by
- * environment, so nothing in them can be told apart and they stay too.
+ * Clears thread and project entries keyed by a signed-out account's environment. Shared
+ * project keys (repository identity), device-level state, and the environment-agnostic
+ * `prompt-stash` and `last-invoked-script-by-project` stay.
  */
 export function clearEnvironmentOwnedState(environmentId: EnvironmentId): void {
   const prefix = `${environmentId}:`;

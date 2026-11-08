@@ -9,14 +9,10 @@ import type {
 import type { EnvironmentThreadShell } from "./models.ts";
 
 /**
- * Lecturn fork points on V2. A fork is cut at a completed run: the run's user
- * message and everything that run produced travel to the child. The V1
- * `completedTurns` list is gone; runs carry the same information.
- *
- * Run-less history (a V1 migration transcript or an imported session) has no
- * run to cut at. The server forks it by message instead: `sourceMessageId` at
- * a run-less user message copies that history through the turn the message
- * started, and `latest_stable` with no stable run copies all of it.
+ * Lecturn fork points on V2. A fork is cut at a completed run: its user message and everything it
+ * produced travel to the child. Run-less history (a V1 transcript or imported session) forks by
+ * message: `sourceMessageId` at a run-less user message copies through the turn it started, and
+ * `latest_stable` with no stable run copies all of it.
  */
 
 type ForkableRun = Pick<OrchestrationV2Run, "id" | "userMessageId" | "status">;
@@ -36,13 +32,10 @@ export function forkSourcePointForRun(runId: RunId): OrchestrationV2ThreadForkSo
 }
 
 /**
- * Whether the thread itself holds run-less history the server can fork: a V1
- * migration transcript or an imported external session (the server's
- * `hasRunlessHistory`), stored on this thread. A V2 native fork child
- * (`forkedFrom` set) inherits `importedFrom`/`historyOrigin` from its source,
- * but its history stays on the parent: the server reads only the child's own
- * run-less items, finds none and rejects the fork. A run-less fork child
- * (`forkedFrom` null) owns its copy, so it stays forkable.
+ * Whether the thread itself holds run-less history the server can fork (`hasRunlessHistory`). A
+ * V2 native fork child (`forkedFrom` set) inherits `importedFrom`/`historyOrigin`, but its history
+ * stays on the parent and the server rejects the fork. A run-less fork child (`forkedFrom` null)
+ * owns its copy, so it stays forkable.
  */
 export function hasRunlessForkHistory(
   thread:
@@ -140,14 +133,10 @@ export interface ForkPointMessage {
 }
 
 /**
- * Message-anchored fork points for a timeline, oldest message first.
- * - `byUserMessage`: edit-and-branch. A user message forks through the turn
- *   completed just before it (its text is re-seeded into the child).
- * - `byRunlessReply`: a run-less assistant reply forks through its own turn.
- * A run turn completes with a finished assistant message of a completed run
- * other than `activeRunId`; a run-less turn (only with `runlessHistory`)
- * completes with a finished run-less assistant reply. Inherited rows are
- * skipped, so the first user message never has a fork point.
+ * Message-anchored fork points, oldest first. `byUserMessage` (edit-and-branch) forks through the
+ * turn completed just before it; `byRunlessReply` forks through the reply's own turn. A turn
+ * completes with a finished assistant message of a completed run other than `activeRunId`, or a
+ * finished run-less reply (only with `runlessHistory`). Inherited rows are skipped.
  */
 export function resolveMessageForkPoints(input: {
   readonly messages: Iterable<ForkPointMessage>;
@@ -215,12 +204,9 @@ export function isDefaultForkChildTitle(title: string, parentTitle?: string | nu
 }
 
 /**
- * The `titleSeed` a turn on `thread` sends. The server retitles a thread from
- * the seed whenever the thread has no messages yet, which for a V2 fork child
- * (inherited history is not stored on the child) is always true on its first
- * send. So a fork child sends its default title as the seed (the generated
- * title then replaces it), and a fork child the user renamed sends no seed so
- * the rename stands. Other threads seed from the message (`messageTitleSeed`).
+ * The `titleSeed` a turn on `thread` sends. The server retitles a thread with no stored messages,
+ * which a V2 fork child always is on its first send. So a fork child seeds its default title, a
+ * renamed one sends no seed so the rename stands, and others seed from the message.
  */
 export function resolveTurnTitleSeed(input: {
   readonly thread: ForkChildShell;

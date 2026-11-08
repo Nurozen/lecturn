@@ -13,15 +13,10 @@ export interface CompiledMobileModule {
 }
 
 /**
- * Loads a mobile source file as Metro's Android release transform emits it: babel.config.js
- * with the React Compiler on. Some bugs exist only in compiled code, because the compiler
- * decides which closures and derived values keep their identity between renders.
- *
- * `file` is relative to apps/mobile, e.g. "src/features/layout/AdaptiveWorkspaceLayout.tsx".
- * Every import is served from `modules`, and an unlisted one throws. Babel helpers are inlined
- * instead of required from @babel/runtime, which apps/mobile does not depend on directly. It
- * only resolves when pnpm's shim puts the hidden hoisted store on NODE_PATH, and CI's global vp
- * does not. `expose` hands out top-level bindings the module does not export.
+ * Loads a mobile source file (relative to apps/mobile) as Metro's Android release transform
+ * emits it, React Compiler on. Imports come from `modules`; an unlisted one throws. Babel
+ * helpers are inlined: @babel/runtime only resolves via pnpm's NODE_PATH shim, which CI's
+ * global vp lacks. `expose` hands out top-level bindings the module does not export.
  */
 export function loadCompiledMobileModule(input: {
   readonly file: string;

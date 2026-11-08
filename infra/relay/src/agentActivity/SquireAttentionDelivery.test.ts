@@ -32,10 +32,9 @@ import fixtureJson from "./squireAttention.fixture.json" with { type: "json" };
 
 /**
  * D27 end to end: the payload sequence the server's Squire row publishes
- * (written by apps/server/src/relay/AgentAwarenessRelay.test.ts) buzzes each
- * phone exactly when the Squire first needs the user. The relay alerts only on
- * entry into attention, so this replays it through ingestion and real APNs and
- * FCM delivery decisions; only the network clients are fake.
+ * (apps/server/src/relay/AgentAwarenessRelay.test.ts) buzzes each phone exactly when the Squire
+ * first needs the user, through ingestion and real APNs and FCM delivery decisions; only the
+ * network clients are fake.
  */
 
 const SquireFixture = Schema.Struct({

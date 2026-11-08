@@ -1,14 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Evidence goes to the repo-root artifacts folder as raw JSON.
 /**
- * A Codex Squire summary runs in the instance's Squire
- * CODEX_HOME, so the source home's AGENTS.md, skill, and memories never reach
- * the model. Spends provider tokens, so it runs only with
- * SQUIRE_CODEX_SUMMARY_LIVE=1. Every model request goes through the S0a2
- * recording proxy; the source home is a temp home carrying the S0a2
- * sentinels and a copy of the user's login without its refresh token.
- * Control: a workflow summary on the same instance runs in the source home
- * and must carry the AGENTS.md sentinel, or the check proves nothing.
- * Evidence goes to artifacts/squire-bar/p7/codex-summary-home/.
+ * A Codex Squire summary runs in the Squire CODEX_HOME, so the source home's AGENTS.md, skill, and memories never
+ * reach the model. Spends provider tokens, so it runs only with SQUIRE_CODEX_SUMMARY_LIVE=1. The control workflow
+ * summary must carry the AGENTS.md sentinel, or the check proves nothing.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

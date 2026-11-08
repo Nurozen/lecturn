@@ -1,25 +1,10 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off globalFetch:off globalConsole:off - a one-shot smoke harness driving installs and server subprocesses with Node APIs.
 /**
- * Clean-install smoke for the vendoring kit (`cli.ts pack --out-dir`): what an embedding host
- * (RocketWright) gets from its `file:` tarballs and lecturn-pack.json, with no workspace, patches
- * or hoisting it did not ask for.
- *
- * For each pnpm layout (isolated, hoisted) it installs the tarballs into an empty temp dir and,
- * per runtime (this Node, Electron with ELECTRON_RUN_AS_NODE, and with --asar that Electron run
- * again from an asar archive of the hoisted tree), runs the in-process probes (scripts/smoke-pack-probe.ts) and
- * `serve --base-dir <tmp>` until /.well-known/lecturn/environment answers, and imports
- * @lecturn/embed's node and browser entries under this Node.
- *
- * Usage:
- *   node scripts/smoke-pack-install.ts [--electron <binary>] [--asar] [--layout hoisted|isolated|both]
- *     [--pack-dir <dir> | --tarball <tgz>...] [--patches] [--json <file>] [--keep]
- *
- * Without --pack-dir or --tarball it runs `apps/server/scripts/cli.ts pack` (apps/server and
- * packages/embed must be built). The consumer takes allowBuilds and publicHoistPattern from the
- * kit's lecturn-pack.json, and with --patches its patchedDependencies too. Bare --tarball runs fall
- * back to Lecturn's own workspace settings. The default layout is hoisted, the one the kit asks for.
- * Exit code 1 when any check fails.
+ * Clean-install smoke for the vendoring kit (`cli.ts pack --out-dir`) per pnpm layout and runtime;
+ * exits 1 when any check fails. Usage: node scripts/smoke-pack-install.ts [--electron <binary>]
+ * [--asar] [--layout hoisted|isolated|both] [--pack-dir <dir> | --tarball <tgz>...] [--patches]
+ * [--json <file>] [--keep]. Without --pack-dir or --tarball it runs `cli.ts pack` (needs builds).
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";

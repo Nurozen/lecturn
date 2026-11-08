@@ -135,10 +135,8 @@ const make = Effect.gen(function* () {
     return index;
   });
 
-  // Shells are read fresh: a PK read is cheaper than following every thread
-  // event, and settle, archive, or delete must untrack before the next
-  // decision. A settled thread is finished work, so even a thread grant does
-  // not reach it: nothing reads it, reports on it, or steers it until it is
+  // Shells are read fresh: settle, archive, or delete must untrack before the next decision.
+  // Even a thread grant does not reach a settled thread: nothing reads, reports on, or steers it until it is
   // unsettled, and then its grants apply again.
   const trackableShell = (threadId: ThreadId) =>
     projections

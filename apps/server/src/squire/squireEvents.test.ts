@@ -372,10 +372,16 @@ describe("waiting-on-user (P3.1, D1)", () => {
 
 describe("background work (A9)", () => {
   it("a completed run with completion-holding work defers on background", () => {
-    for (const kind of ["subagent", "monitor", "background_task"] as const) {
+    // Commands and monitors hold completion only when the agent awaits them.
+    for (const task of [
+      { kind: "subagent" },
+      { kind: "background_task" },
+      { kind: "monitor", awaited: true },
+      { kind: "command", awaited: true },
+    ] as const) {
       const [candidate] = classifySquireEvent(runUpdated("completed"), {
         ...plain,
-        pendingBackgroundTasks: [{ kind }],
+        pendingBackgroundTasks: [task],
       }).candidates;
       expect(scheduleSquireEvent(candidate!.timing, { waitingThresholdMinutes: 30 })).toEqual({
         status: "deferred",
@@ -395,6 +401,14 @@ describe("background work (A9)", () => {
       defer_reason: "summary",
       not_before: "2026-11-01T12:00:20.000Z",
     });
+  });
+
+  it("a monitor the agent does not await does not hold completion either", () => {
+    const [candidate] = classifySquireEvent(runUpdated("completed"), {
+      ...plain,
+      pendingBackgroundTasks: [{ kind: "monitor" }],
+    }).candidates;
+    expect(candidate!.timing.reason).toBe("summary");
   });
 
   it("stops never defer on background", () => {

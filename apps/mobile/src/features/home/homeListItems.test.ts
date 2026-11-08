@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  SourceControlProviderKind,
 } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -692,7 +693,7 @@ describe("saga list layout", () => {
       ...group.representative,
       repositoryIdentity: {
         canonicalKey: "github.com/org/shared",
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         owner: "org",
         name: "shared",
         displayName: "org/shared",

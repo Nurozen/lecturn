@@ -45,8 +45,7 @@ type OnboardingStep = "publish" | "devices";
 const EMPTY_SESSION_STATE_ATOM = Atom.make(AsyncResult.initial<AuthSessionState>());
 
 function ConfiguredConnectOnboardingDialog() {
-  // Mirrors ManagedRelayAuthProvider: a pending Clerk session must not read as
-  // signed-out, or its later activation would look like a fresh sign-in.
+  // Pending Clerk sessions must not look signed out or activation would look like a new sign-in.
   const { isLoaded, isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
   const [optOutState, setOptOutState] = useLocalStorage(
     CONNECT_ONBOARDING_OPT_OUT_STORAGE_KEY,
@@ -104,11 +103,9 @@ function ConfiguredConnectOnboardingDialog() {
 
   const optOutAccounts = optOutState.optOutAccounts;
 
-  // An account that is new to this client requests the wizard: it starts with
-  // no devices to reach. Switching between known accounts, a known account
-  // signing in again, and sessions restored on a cold load do not. Requests
-  // queue, so two accounts added together each get their turn, and one that
-  // never becomes active lapses instead of opening on a later switch.
+  // Only an account new to this client requests the wizard (it has no devices); switches,
+  // re-sign-ins and cold-load restores do not. Requests queue so accounts added together
+  // each get a turn; one that never becomes active lapses instead of opening later.
   useEffect(() => {
     const previous = observedKnownAccountsRef.current;
     observedKnownAccountsRef.current = knownAccounts;
@@ -134,10 +131,8 @@ function ConfiguredConnectOnboardingDialog() {
     setRequests([]);
   }
 
-  // A manageable session implies a primary environment, so when the scopes
-  // allow publishing, wait for the connection target too — otherwise the
-  // wizard could open on the devices step moments before the publish step
-  // becomes available and freeze there.
+  // Wait for the publish target before opening; otherwise the wizard can freeze on devices before publish
+  // becomes available.
   const publishStepDecided = !canManageRelay || controller.linkState.target !== null;
 
   useEffect(() => {
@@ -213,8 +208,7 @@ function ConfiguredConnectOnboardingDialog() {
       return;
     }
     if (linkStateData === null || controller.linkState.error !== null) return;
-    // The wizard only ever enables — with both toggles off there is nothing to
-    // apply, and an existing link must not be torn down from onboarding.
+    // Onboarding only enables links; both toggles off must preserve existing links.
     if (!exposeEnvironment && !publishAgentActivity) {
       setStep("devices");
       return;

@@ -256,12 +256,8 @@ export function resolveProactiveTurnDiffAction(input: {
   return input.checkpoint.files.length >= 3 || changedLines >= 50 ? "open" : "ignore";
 }
 
-/**
- * Clicking back to an existing Diff tab resumes the review in progress, so the
- * generic-open reset to Changes must skip it. A diff that is already active is
- * left unmarked: the reset never runs for it, and the marker would linger into
- * the next generic open.
- */
+/** Mark reactivated Diff tabs to preserve review scope. Already-active tabs must not leave a marker for
+ * the next open. */
 export function resolveExplicitDiffOpenOnActivate(input: {
   readonly surfaceKind: RightPanelSurface["kind"];
   readonly diffOpen: boolean;
@@ -364,11 +360,7 @@ export function resolveDraftHeroState(input: {
   );
 }
 
-/**
- * Remounting LegendList (or handing it an empty first paint) punches a hole
- * through the chat pane — white in light mode — so cmd+1/2/3 spam flashes even
- * when the destination is already cached.
- */
+/** Remounting or initially emptying LegendList flashes the chat pane, even for cached threads. */
 export type HeldThreadTimeline<T extends readonly unknown[]> = {
   threadKey: string | null;
   entries: T;
@@ -929,8 +921,7 @@ export function branchMismatchKey(
   return `${threadId}:${mismatch.threadBranch}:${mismatch.currentBranch}`;
 }
 
-// Draft content is the intent signal — composer focus is useless here because
-// ChatView autofocuses the composer on every thread open.
+// Composer autofocus makes focus unreliable as draft intent.
 export function shouldShowBranchMismatchBanner(input: {
   hasMismatch: boolean;
   isDismissed: boolean;
@@ -973,9 +964,7 @@ export function isBranchMismatchDismissedForSession(key: string | null): boolean
   return key !== null && sessionDismissedBranchMismatchKeys.has(key);
 }
 
-// Git status for a checkout arrives after the composer paints, and the branch
-// strip mounts on the assumption that a project is a Git repo. Without a
-// memory, a non-Git project would mount the strip and drop it on every visit.
+// Remember non-Git checkouts to avoid flashing the branch strip before delayed Git status arrives.
 const sessionCheckoutIsRepo = new Map<string, boolean>();
 
 function checkoutIsRepoKey(environmentId: EnvironmentId, cwd: string): string {
@@ -1015,8 +1004,7 @@ export function threadShellHasStarted(
   );
 }
 
-// Imported history has no session until its first prompt. Resolve its instance
-// through the environment's provider catalog before locking to a driver.
+// Imported history lacks a session until its first prompt; resolve its instance before locking the driver.
 export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
@@ -1033,8 +1021,7 @@ export function deriveLockedProvider(input: {
   if (deriveUnsentImportInstanceId(input.thread, input.providers) !== null) {
     return input.thread?.importedFrom?.driverKind ?? null;
   }
-  // Preserve the existing lock while an instance is missing from the catalog;
-  // a started thread must not silently fall back to a different driver.
+  // Missing catalog entries must not switch a started thread's driver.
   const threadProvider =
     input.providers.find((provider) => provider.instanceId === input.threadProvider)?.driver ??
     input.threadProvider;
@@ -1049,17 +1036,10 @@ export function deriveLockedProvider(input: {
 }
 
 /**
- * The one provider instance an imported thread can take its first message on,
- * or null once that no longer applies. The import's session only resumes on
- * the instance it was imported with, and no Lecturn run exists until that
- * first send, so the picker pins the instance (models within it stay open).
- * A fork of an import starts from its parent's provider thread instead.
- *
- * "Continued" is a run or a user message newer than the import (imported
- * history is stamped at or before `importedAt`): a thread migrated from V1
- * has no V2 run even when the user already continued it. The pin is dropped
- * when a loaded provider catalog no longer has the instance, so the picker
- * always keeps a selectable provider.
+ * The session only resumes on its import instance, so the picker pins it until the thread
+ * continues (a run or a user message newer than `importedAt`; V1 migrations have no V2 run).
+ * Forks of an import start from the parent's provider thread instead. Dropped when the
+ * loaded catalog lacks the instance, so the picker keeps a selectable provider.
  */
 export function deriveUnsentImportInstanceId(
   thread:
@@ -1176,11 +1156,9 @@ export interface ThreadImportDivider {
 }
 
 /**
- * Why revert is unavailable on a fork that has no run of its own yet, or null.
- * A V2 fork has nothing of its own until its first send. A fork migrated from
- * V1 (`forkOrigin` without V2 `forkedFrom`) may already hold its own turns from
- * before the update, but those carry no V2 checkpoints, so they cannot be
- * reverted either.
+ * A V2 fork has nothing of its own until its first send. A fork migrated from V1
+ * (`forkOrigin` without V2 `forkedFrom`) may hold its own turns, but they carry no V2
+ * checkpoints, so they cannot be reverted either.
  */
 export function resolveForkRevertDisabledReason(
   thread:
@@ -1213,11 +1191,9 @@ export function resolveLegacyForkCreatedAt(
 }
 
 /**
- * Where an imported session's history ends in a thread's timeline: its first
- * message from Lecturn, or the end of the timeline until one is sent, so the
- * session's trailing tool activity stays above the line. A fork of an import
- * keeps `importedFrom` and the inherited imported rows, so it gets the import
- * line too; the fork line itself comes from inherited V2 items.
+ * The first Lecturn message, or the timeline end until one is sent, so trailing tool
+ * activity stays above the line. A fork of an import keeps `importedFrom` and gets the
+ * line too; its fork line comes from inherited V2 items.
  */
 export function resolveThreadImportDivider(
   thread: Pick<Thread, "importedFrom"> | null | undefined,
@@ -1356,14 +1332,9 @@ function reuseForkPoints(
 }
 
 /**
- * Fork points for user-message rows: a user message forks through the turn
- * completed just before it, and its text is re-seeded into the child's
- * composer (edit-and-branch). That turn is a completed run or, on a thread
- * with run-less history (V1 migration, import), a run-less turn. Assistant
- * rows use the upstream per-response fork button instead. Only this thread's
- * own rows qualify: inherited rows cannot be cut here, and the first user
- * message has no turn before it (as on V1). Returns `previous` when unchanged
- * so timeline rows keep their identity across streaming updates.
+ * Edit-and-branch: a user message forks through the turn before it (a run, or a run-less
+ * turn of V1-migrated/imported history) and re-seeds its text. Only own rows qualify, not the
+ * first message. Returns `previous` when unchanged so rows keep identity while streaming.
  */
 export function buildForkPointByUserMessageId(
   input: TimelineForkPointsInput,
@@ -1373,11 +1344,9 @@ export function buildForkPointByUserMessageId(
 }
 
 /**
- * Fork points for the per-response fork button on run-less replies (V1
- * migration, import): a reply has no run, so it forks through its own
- * run-less turn (`latest_stable` + the turn's user message), the same cut
- * mobile sends. Empty unless `runlessHistory`. Returns `previous` when
- * unchanged.
+ * A run-less reply (V1 migration, import) forks through its own run-less turn
+ * (`latest_stable` + the turn's user message), the same cut mobile sends. Empty unless
+ * `runlessHistory`. Returns `previous` when unchanged.
  */
 export function buildForkPointByRunlessReplyId(
   input: TimelineForkPointsInput,
@@ -1387,13 +1356,9 @@ export function buildForkPointByRunlessReplyId(
 }
 
 /**
- * Why forking is unavailable for a thread, or null when it is allowed.
- * Mirrors `getStartedThreadModelChangeBlockReason`: pure, fed the environment
- * capability so every entry point (message hover, menus, palette, keybinding,
- * /fork) blocks with the same copy. The provider does not gate: V2's
- * ThreadForkService forks natively when it can and otherwise hands the
- * transcript to the child as portable context, so presentation
- * `conversationFork: "unsupported"` only means "no native fork".
+ * Pure and fed the environment capability so every entry point blocks with the same copy.
+ * The provider does not gate: ThreadForkService otherwise hands the transcript over as
+ * portable context, so `conversationFork: "unsupported"` only means "no native fork".
  */
 export function resolveForkDisabledReason(input: {
   capability: boolean;
@@ -1545,12 +1510,8 @@ export function createLocalDispatchSnapshot(
   };
 }
 
-/**
- * The timeline renders committed user rows from `visibleTurnItems`, but
- * `message.updated` can land in `projection.messages` one event earlier than
- * the matching `turn-item.updated`. Basing optimistic eviction on visible user
- * turn items avoids dropping steer rows in that gap.
- */
+/** Projection messages can precede visible turn items by one event; evict optimistic rows only when
+ * visible. */
 export function deriveCommittedServerUserMessageIds(
   visibleTurnItems: ReadonlyArray<ThreadStructureRow>,
 ): ReadonlySet<ChatMessage["id"]> {
@@ -1650,11 +1611,6 @@ export interface PlanFollowUpComposerSnapshot {
   readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
 }
 
-/**
- * The caller clears the composer before awaiting the send, so every field it
- * held has to be written back here: a dropped field silently discards user
- * context.
- */
 export function restorePlanFollowUpComposer(input: {
   readonly snapshot: PlanFollowUpComposerSnapshot;
   readonly writePrompt: (prompt: string) => void;
@@ -1692,11 +1648,7 @@ export function canRevertThreadFiles(
   return thread?.worktreePath != null;
 }
 
-/**
- * Adds a directly sent preview annotation to the composer's images and
- * annotations. Its screenshot rides along only while the turn has room for
- * another attachment; over the cap the server rejects the whole turn.
- */
+/** Includes the annotation screenshot only within the attachment cap; exceeding it rejects the whole turn. */
 export function mergeDirectPreviewAnnotation(input: {
   readonly images: ReadonlyArray<ComposerImageAttachment>;
   readonly fileCount: number;
@@ -1728,8 +1680,6 @@ export function mergeDirectPreviewAnnotation(input: {
         ...input.previewAnnotations,
         {
           ...direct.annotation,
-          // Claim an attached crop only when the screenshot really rides
-          // along; a cap-dropped image must not produce a lying prompt.
           screenshot:
             direct.annotation.screenshot && (imageAppended || imageAlreadyAttached)
               ? { ...direct.annotation.screenshot, dataUrl: "" }

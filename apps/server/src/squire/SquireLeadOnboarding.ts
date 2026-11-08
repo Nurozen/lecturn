@@ -1,9 +1,6 @@
 /**
- * The Lead's first run: `open` enqueues one `onboarding`
- * event with a bounded scan of the environment and captures the client's
- * timezone; `squire_propose_squire` turns the Lead's answer into proposal
- * items the user accepts (SquireActions runs the `squire-create` executor).
- *
+ * The Lead's first run: `open` enqueues one `onboarding` event with a bounded environment scan;
+ * `squire_propose_squire` turns the answer into proposal items the user accepts.
  * @module squire/SquireLeadOnboarding
  */
 import {
@@ -60,11 +57,8 @@ export class SquireLeadOnboarding extends Context.Service<
   SquireLeadOnboarding,
   {
     /**
-     * `squire.lead.open`: creates the Lead if absent, stores the
-     * client's timezone when the Lead has none, and enqueues `onboarding`
-     * once: on `start`, or on a plain first open before the user has chatted
-     * with the Lead. A Lead without a provider keeps the row pending until it
-     * has one.
+     * Enqueues `onboarding` once: on `start`, or on a first open before the user has chatted with the Lead.
+     * A Lead without a provider keeps the row pending until it has one.
      */
     readonly open: (
       input: typeof SquireLeadOpenInput.Type,

@@ -1,10 +1,8 @@
 /**
- * Stops headless tool processes that have sat idle. There is no
- * "provider session released" signal, so the existing onRunTerminal hook arms
- * a watch for the run's app project, and HeadlessToolHost arms one whenever a
- * call leaves a process idle (AppRuntimeState.headlessIdleWatch). The watch
- * closes the process once the last call ended long enough ago and no run is
- * active there. A run still going then ends the watch; its own end re-arms it.
+ * Stops idle headless tool processes. With no "provider session released" signal, onRunTerminal and
+ * HeadlessToolHost (when a call leaves a process idle) arm a watch per app project. It closes the
+ * process once the last call ended long enough ago and no run is active there; a running run ends
+ * the watch, and its own end re-arms it.
  */
 import type { ProjectId } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";

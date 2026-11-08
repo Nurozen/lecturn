@@ -20,13 +20,9 @@ function shouldFollowDockedDrawer(input: {
 }
 
 /**
- * The timeline deliberately ignores composer inset changes (its footer layout
- * does not re-pin the end), so typing never moves what is on screen. A drawer
- * docking above the composer is different: it covers the newest rows, which
- * are what the drawer asks about, and once the end is off screen later row
- * growth stops following too. So a timeline that was following its end
- * re-pins when a drawer docks or grows. Runs after the grown inset commits,
- * so the end it scrolls to already clears the drawer.
+ * The timeline ignores composer inset changes so typing never scrolls, but a docked drawer
+ * covers the newest rows and stops later growth from following. So a timeline following
+ * its end re-pins when a drawer docks or grows, after the grown inset commits.
  */
 export function useFollowEndWhenDrawerDocks(input: {
   readonly overlay: HTMLElement | null;

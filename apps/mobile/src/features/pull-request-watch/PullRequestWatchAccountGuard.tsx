@@ -46,10 +46,7 @@ export function PullRequestWatchAccountGuard(props: {
           detail="Sign in to this pull request watch's Connect account to continue."
           actionLabel="Sign in again"
           onAction={() =>
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsAddAccount",
-              params: { accountId: decision.accountId },
-            })
+            navigation.navigate("SettingsAddAccount", { accountId: decision.accountId })
           }
         />
       ) : (

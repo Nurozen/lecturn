@@ -29,8 +29,7 @@ export function usePendingThreadOrder(
   scopes?: ReadonlyMap<string, readonly string[]>,
 ) {
   const pending = useAtomValue(pendingThreadOrderAtom);
-  // A timed wake can change section membership without a shell event. Use the
-  // lists' existing clocks to retire that hold and re-enable their move menus.
+  // Clock-driven wakes can change membership without shell events; retire order holds and re-enable moves then.
   useEffect(() => {
     const current = getPendingThreadOrder(
       new Date(Math.max(Date.parse(`${nowMinute}:00.000Z`), snoozeWakeTick)).toISOString(),

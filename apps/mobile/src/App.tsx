@@ -33,6 +33,13 @@ import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
 import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
+import { restoreSettingsLinkState } from "./features/settings/settings-navigation";
+import {
+  hydrateWorkspaceSelections,
+  launchWorkspaceURL,
+  recordWorkspaceSelections,
+  settingsLinkPage,
+} from "./features/workspace/workspace-selection-store";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
 
 import "../global.css";
@@ -42,6 +49,7 @@ if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
 }
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+void hydrateWorkspaceSelections();
 
 const appLinkPrefixes = [
   Linking.createURL("/"),
@@ -53,7 +61,8 @@ const appLinking = {
   prefixes: appLinkPrefixes,
   getInitialURL: async () => {
     const url = await Linking.getInitialURL();
-    return url && handleIncomingAppLink(url, appLinkPrefixes) ? null : url;
+    if (url) return handleIncomingAppLink(url, appLinkPrefixes) ? null : url;
+    return launchWorkspaceURL();
   },
   subscribe: (listener: (url: string) => void) => {
     const subscription = Linking.addEventListener("url", ({ url }) => {
@@ -66,9 +75,12 @@ const appLinking = {
   // Lecturn: push, Live Activity, and in-app links name a Squire's home thread; open its Squire
   // screen. `linkTo` resolves through this too, so notification taps share it.
   getStateFromPath: (path: string, options?: Parameters<typeof getStateFromPath>[1]) =>
-    restoreDraftLinkState(
-      getStateFromPath(resolveSquireThreadPath(path, appSquireHomeThreadLookup), options),
-      path,
+    restoreSettingsLinkState(
+      restoreDraftLinkState(
+        getStateFromPath(resolveSquireThreadPath(path, appSquireHomeThreadLookup), options),
+        path,
+      ),
+      settingsLinkPage(),
     ),
 };
 
@@ -122,23 +134,21 @@ function AppContent() {
           <SafeAreaProvider>
             <VoiceInputProvider>
               <StatusBar barStyle={themeAppearance === "dark" ? "light-content" : "dark-content"} />
-              {/* The navigation theme drives the NATIVE header appearance: native-stack
-                forwards `dark` as the nav bar's overrideUserInterfaceStyle. Without
-                this, React Navigation defaults to its light theme and every native
-                header (glass buttons, title, materials) is forced light even when
-                the system is in dark mode. */}
+              {/* native-stack needs the theme's dark flag to select dark native headers. */}
               <GlobalVoiceInputControl>
                 <NativeLayoutMetricsProvider>
                   <IncomingShareProvider>
-                    <Navigation linking={appLinking} theme={navigationTheme} />
+                    <Navigation
+                      linking={appLinking}
+                      theme={navigationTheme}
+                      onStateChange={recordWorkspaceSelections}
+                    />
                   </IncomingShareProvider>
                   <Dialog.Host />
                   <ThreadArrangementHost />
                   <ProjectChipIconRasterizer />
                 </NativeLayoutMetricsProvider>
               </GlobalVoiceInputControl>
-              {/* Anchored-menu overlays render here — in-window, so the
-                keyboard stays up while a dropdown is open. */}
               <OverlayPortalHost />
             </VoiceInputProvider>
           </SafeAreaProvider>

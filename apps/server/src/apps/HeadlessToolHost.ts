@@ -1,13 +1,8 @@
 /**
- * Runs each granted app's headless tool command, one process per app project.
- * A process starts on the first call or empty-cache listing and stays
- * up between calls; the idle reaper (headlessReaper.ts) closes it later,
- * armed by the onRunTerminal hook and by every release that leaves the
- * process idle. The process table is the shared AppRuntimeState one, so that
- * hook sees what this host runs.
- *
+ * One headless tool process per granted app project, started on the first call or empty-cache
+ * listing and kept up between calls. The idle reaper closes it, armed by onRunTerminal and by any
+ * release that leaves it idle; the process table is AppRuntimeState's so that hook sees it.
  * `inFlightCalls` counts every holder: calls, listings and `acquire` scopes.
- * The reaper only needs to know that someone is still using the process.
  */
 import type { AppId, ProjectId } from "@lecturn/contracts";
 import { AppsError } from "@lecturn/contracts";

@@ -55,11 +55,9 @@ import * as SquireSwitch from "./SquireSwitch.ts";
 import { toRule } from "./SquireTools.ts";
 
 /**
- * Read side of the Squire RPCs. Reads never write. The always-on
- * stream carries compact snapshots only (about 0.5 KB per Squire): evidence,
- * card bodies, and logs are fetched by query. Each Squire has its own
- * `itemsRevision` and `decisionRevision`, so one Squire's FYI does not refetch
- * another's queue and FYI writes never bump `decisionRevision`.
+ * Reads never write. The always-on stream carries compact snapshots only; evidence, card bodies, and logs are fetched
+ * by query. Per-Squire `itemsRevision` and `decisionRevision` keep one Squire's FYI from refetching another's queue,
+ * and FYI writes never bump `decisionRevision`.
  */
 export class SquireReadModel extends Context.Service<
   SquireReadModel,

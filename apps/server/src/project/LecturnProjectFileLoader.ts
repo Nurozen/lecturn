@@ -28,10 +28,7 @@ export class LecturnProjectFileLoadError extends Schema.TaggedError<LecturnProje
 export class LecturnProjectFileLoader extends Context.Service<
   LecturnProjectFileLoader,
   {
-    /**
-     * Never fails: missing, unreadable, or invalid files resolve to `Option.none` (invalid files
-     * are logged as warnings).
-     */
+    /** Never fails; missing/unreadable/invalid files return none, with warnings for invalid files. */
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<LecturnProjectFile>>;
   }
 >()("lecturn/project/LecturnProjectFileLoader") {}
@@ -46,7 +43,7 @@ const logLecturnProjectFileLoadError = (error: LecturnProjectFileLoadError) =>
     }),
   );
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

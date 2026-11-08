@@ -97,8 +97,7 @@ export function ProjectSettingsPanel({
 
   const landAfterArchive = useStaveArchiveLanding();
 
-  // Remember the members of the last rendered group so a grouping-rule change
-  // (which changes the group key) can follow the project to its new group.
+  // Retain group members so grouping-rule changes can follow the project to its new group.
   const lastSelectionRef = useRef<{
     key: string;
     environmentId: EnvironmentId | null;
@@ -122,11 +121,9 @@ export function ProjectSettingsPanel({
     };
   }, [selected, members, environmentId, checkoutKey]);
 
-  // A grouping-rule change or a Stave restore (which moves the workspace
-  // root) replaces the group key mid-visit; follow the project to its new key.
-  // A project that was archived or removed is done with, so leave instead of
-  // parking on the not-found state: an archived saga member for its saga's
-  // board (as the archive confirmation does), anything else for home.
+  // A grouping-rule change or a Stave restore (moves the workspace root) replaces the group
+  // key mid-visit; follow the project. An archived or removed project leaves instead of
+  // parking on not-found: a saga member for its saga's board, anything else for home.
   useEffect(() => {
     if (members.length > 0) return;
     const last = lastSelectionRef.current;

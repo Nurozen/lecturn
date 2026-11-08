@@ -32,11 +32,10 @@ export type AddAccountGate =
   | { readonly available: false; readonly reason: AddAccountBlockedReason };
 
 /**
- * Whether another Connect account may be added. `clerkSingleSessionMode` is
- * what the loaded Clerk environment reports; anything but `false` blocks,
- * since Clerk's sign-in does nothing in single-session mode. Relay entries
- * without an owner block too, except the ones the registry holds as unlisted:
- * no signed-in account lists those, so none can be handed to the new account.
+ * Whether another Connect account may be added. Any `clerkSingleSessionMode` but `false` blocks,
+ * since Clerk's sign-in does nothing in single-session mode. Ownerless relay entries block too,
+ * except ones the registry holds as unlisted: no signed-in account lists those, so none can be
+ * handed to the new account.
  */
 export function decideAddAccountGate(input: {
   readonly clerkSingleSessionMode: boolean | undefined;

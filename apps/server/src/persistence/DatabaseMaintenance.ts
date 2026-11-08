@@ -68,7 +68,6 @@ export class LegacyDatabaseRemoveError extends Schema.TaggedError<LegacyDatabase
   }
 }
 
-/** Offline inspection and repair of a Lecturn state database, for `lecturn doctor`. */
 export class DatabaseMaintenance extends Context.Service<
   DatabaseMaintenance,
   {
@@ -95,10 +94,7 @@ export class DatabaseMaintenance extends Context.Service<
       | DatabaseProjectionsInvalidError
       | DatabaseCompactError
     >;
-    /**
-     * Deletes the V1 database kept beside this one. Lecturn V1 reads only
-     * that file; this one stays intact.
-     */
+    /** Deletes only the V1 database; Lecturn V1 still uses it. */
     readonly removeLegacyDatabase: (
       databasePath: string,
     ) => Effect.Effect<void, DatabaseInUseError | LegacyDatabaseRemoveError>;
@@ -182,7 +178,6 @@ const make = Effect.gen(function* () {
       const beforeBytes = Number((yield* fs.stat(databasePath)).size);
       const result = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        // Held through compaction and VACUUM.
         yield* lockExclusively(databasePath);
         const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
         if (!(yield* maintenance.verify).valid) {
@@ -192,8 +187,7 @@ const make = Effect.gen(function* () {
         if (!(yield* maintenance.verify).valid) {
           return yield* new DatabaseProjectionsInvalidError({ path: databasePath });
         }
-        // VACUUM rebuilds the file, which is the only way to switch an existing
-        // database to incremental auto_vacuum; the server reclaims online after.
+        // VACUUM is required to enable incremental auto_vacuum on existing databases.
         yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
         yield* sql`VACUUM`;
         yield* rebuildMessageSearch(sql);
@@ -233,9 +227,7 @@ const make = Effect.gen(function* () {
     function* (databasePath: string) {
       const legacy = legacyPath(databasePath);
       if (!(yield* fs.exists(legacy))) return;
-      // Lecturn V1 may still be running against it. Keep the lock
-      // while deleting, and delete the database before its WAL so a failure
-      // never leaves it without committed transactions.
+      // Lecturn V1 may use this file; hold its lock and delete the database before WAL to preserve commits on failure.
       yield* Effect.gen(function* () {
         yield* lockExclusively(legacy);
         for (const suffix of ["", "-wal", "-shm"]) {

@@ -595,6 +595,28 @@ describe("app RPC allowlist", () => {
     }),
   );
 
+  it.effect("leaves a guest's pending message to the owner", () =>
+    Effect.gen(function* () {
+      const send = command({
+        type: "message.dispatch",
+        threadId: rocketThread,
+        dispatchMode: { type: "start_immediately" },
+        guestMessageId: "guest-message-1",
+      });
+      const dismiss = command({
+        type: "thread.guest-message.dismiss",
+        threadId: rocketThread,
+        guestMessageId: "guest-message-1",
+      });
+      expect(yield* allowed(embedSession, O.dispatchCommand, send)).toBe(false);
+      expect(yield* allowed(embedSession, O.dispatchCommand, dismiss)).toBe(false);
+      expect(yield* allowed(appSession, O.dispatchCommand, send)).toBe(false);
+      expect(yield* allowed(appSession, O.dispatchCommand, dismiss)).toBe(false);
+      expect(yield* allowed(session("owner"), O.dispatchCommand, send)).toBe(true);
+      expect(yield* allowed(session("owner"), O.dispatchCommand, dismiss)).toBe(true);
+    }),
+  );
+
   it.effect("names a refused command's type", () =>
     Effect.gen(function* () {
       const error = yield* authorization
@@ -824,6 +846,10 @@ describe("app HTTP authorization", () => {
   it.effect("keeps the app credential to the socket and ticket routes", () =>
     Effect.gen(function* () {
       expect(yield* httpAllowed(appSession, "/api/auth/websocket-ticket")).toBe(true);
+      expect(yield* httpAllowed(appSession, "/api/auth/websocket-ticket/rpc")).toBe(true);
+      expect(yield* httpAllowed(embedSession, "/api/auth/websocket-ticket/rpc")).toBe(true);
+      expect(yield* httpAllowed(appSession, "/api/auth/websocket-ticket/media")).toBe(false);
+      expect(yield* httpAllowed(embedSession, "/api/auth/websocket-ticket/media")).toBe(false);
       expect(yield* httpAllowed(appSession, "/ws")).toBe(true);
       expect(yield* httpAllowed(appSession, `/api/orchestration/threads/${rocketThread}`)).toBe(
         false,

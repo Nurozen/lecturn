@@ -6,10 +6,7 @@ import { CONNECT_PROFILE_PAGES } from "./connectProfilePages";
 
 type PortalTargets = Readonly<Record<string, HTMLDivElement | undefined>>;
 
-/**
- * Clerk mounts custom pages into DOM nodes it owns, so the caller must keep `portals` rendered for
- * as long as the modal can be open.
- */
+/** Keep portals rendered while the modal can open; Clerk owns the custom-page DOM nodes. */
 export function useLecturnConnectAccountPage(): {
   readonly open: (() => void) | null;
   readonly portals: ReactNode;

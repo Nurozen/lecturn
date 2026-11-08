@@ -137,7 +137,7 @@ vi.mock("../../state/query", () => ({
 vi.mock("../../state/queries", () => ({
   useDebouncedValue: (value: string) => value,
   usePaginatedBranches: () => native.branches,
-  // The unfiltered ref list answers the repository check (upstream #21404).
+  // The unfiltered ref list answers the repository check.
   useBranches: () => ({ data: { isRepo: true }, isPending: false }),
 }));
 vi.mock("../../state/projects", () => ({

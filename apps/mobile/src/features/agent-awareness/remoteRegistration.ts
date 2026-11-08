@@ -101,9 +101,7 @@ function activityAccountId(activity: LiveActivity<AgentActivityProps>): string |
     (typeof activity.getId === "function" ? (activityOwners.get(activity.getId()) ?? null) : null)
   );
 }
-// Locally started activities carry the same stale window the relay puts on
-// every push (STALE_AFTER_SECONDS in ApnsClient.ts), so a card whose relay
-// registration never lands still degrades instead of looking alive forever.
+// Match the relay's STALE_AFTER_SECONDS so activities expire even if registration fails.
 const LIVE_ACTIVITY_STALE_AFTER_MS = 10 * 60_000;
 const liveActivityStaleDate = () => new Date(Date.now() + LIVE_ACTIVITY_STALE_AFTER_MS);
 
@@ -135,22 +133,15 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       activityOwners.set(activity.getId(), identity);
     return activity;
   }
-  // Keyed by ActivityKit id: getAgentLiveActivities() wraps the same native
-  // activity in a new object on every call. The relay keeps only the latest token
-  // a device registers, so each activity's token reads and registrations run one
-  // at a time; otherwise a lookup that read the old token could land after the
-  // rotated one.
+  // Keyed by ActivityKit id: getAgentLiveActivities() wraps the same native activity in a
+  // new object on every call. The relay keeps only the latest token, so each activity's
+  // reads and registrations run one at a time; a stale read could land after the rotation.
   const activityPushTokenLocks = new Map<string, Semaphore.Semaphore>();
   const activityTokenSubscriptions = new Set<{ remove: () => void }>();
-  // Activity tokens the relay recently accepted, by acceptance time. The refresh
-  // runs on sign-in, every app foreground, and every environment-connection
-  // update, which arrive in bursts and spammed identical registrations. But the
-  // registration is not a pure no-op: the relay replays the current aggregate to
-  // this device on every accepted registration, and that replay is the
-  // foreground reconciliation that repairs drifted or orphaned activities. So
-  // dedupe only within a short window — bursts collapse to one request, while a
-  // foreground after real time away still triggers a replay. Cleared on
-  // sign-out/identity change alongside the device registration state.
+  // Activity tokens the relay recently accepted, by acceptance time. Each accepted
+  // registration replays the aggregate (the foreground repair for drifted or orphaned
+  // activities), so dedupe only within a short window: bursts collapse, a later foreground
+  // still replays. Cleared on sign-out/identity change with the device registration.
   const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000;
   const registeredActivityPushTokens = new Map<string, number>();
   let androidDeviceReplayedAt: number | null = null;
@@ -322,11 +313,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     enqueueDeviceRegistration({}, "device registration after cloud sign-in failed");
   }
 
-  // Detach the provider and native listeners without the destructive sign-out
-  // cleanup. For provider teardown while the user is still signed in (e.g. the
-  // auth bridge unmounting/remounting), ending lock-screen activities and wiping
-  // the persisted registration would be wrong — the relay still holds a valid
-  // registration and the next mount reuses it.
+  // Detach listeners without the destructive sign-out cleanup: on teardown while still
+  // signed in (auth bridge remount), the relay still holds a valid registration that the
+  // next mount reuses, so lock-screen activities and the persisted registration stay.
   function stopAndDrain(): Promise<void> {
     const pending = activeDeviceRegistration?.operation ?? Promise.resolve();
     releaseAgentAwarenessRelayTokenProvider();
@@ -649,13 +638,10 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     );
   }
 
-  // Arms the lock-screen card the moment the user starts agent work from this
-  // phone, while the app is still foregrounded and the fresh activity's token
-  // can be registered immediately. The seeded row is a best-effort placeholder;
-  // the relay's registration replay repaints it with the authoritative
-  // aggregate within seconds. No-ops when a card is already armed, and skips
-  // environments that report publishing disabled — the seed would sit on
-  // "Connecting" forever with no update ever arriving to repaint or end it.
+  // Arms the lock-screen card while foregrounded so the token registers immediately; the
+  // relay's replay repaints the placeholder seed within seconds. No-ops when a card is
+  // armed, and skips environments with publishing disabled, where the seed would sit on
+  // "Connecting" forever.
   function armAgentAwarenessLiveActivityForLocalWork(input: {
     readonly environmentId: EnvironmentId;
     readonly threadTitle: string;
@@ -1007,12 +993,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     });
   }
 
-  // Re-registering activity tokens on foreground makes the relay replay the
-  // current aggregate to this device, which updates content that drifted while
-  // pushes could not be delivered and ends orphaned activities whose end push
-  // never arrived. (Deduped by ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS: rapid
-  // foreground/sign-in bursts collapse to one registration, but returning after
-  // real time away still replays.)
+  // Re-registering activity tokens on foreground makes the relay replay the aggregate,
+  // repairing content that drifted while pushes failed and ending orphaned activities.
+  // Deduped by ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS.
   function ensureAppStateListener(): void {
     if (appStateSubscription || !canRegisterPushNotifications()) {
       return;
@@ -1204,11 +1187,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     );
   });
 
-  // iOS can replace an activity's push token while it runs, not only deliver a
-  // late first one. The relay keeps pushing to the old token until APNs rejects
-  // it, so every activity needs a listener that registers each new token. The
-  // listener belongs to this relay identity: releasing it removes the listener
-  // and drops the lock, so the next identity observes the activity afresh.
+  // iOS can rotate an activity's push token mid-run and the relay keeps pushing to the old
+  // one until APNs rejects it, so every activity registers each new token. The listener
+  // belongs to this relay identity: releasing it drops the lock for the next identity.
   function observeLiveActivityPushTokens(
     activity: LiveActivity<AgentActivityProps>,
   ): Semaphore.Semaphore {
@@ -1319,13 +1300,10 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       activities = activities.slice(0, 1);
     }
 
-    // Activities are only ever created here, in the foreground, where the
-    // update token can be observed and registered immediately — the relay
-    // never remote-starts one (background push-to-start wakes proved too
-    // unreliable to hand the token over). Arming is conditional: the relay is
-    // asked what the card would show first, so an idle open never creates an
-    // empty lock-screen card, and an armed card is born with the real
-    // aggregate instead of a placeholder.
+    // Activities are only created here, in the foreground, so the update token registers
+    // immediately; the relay never remote-starts one (push-to-start wakes are unreliable).
+    // The relay is asked what the card would show first, so an idle open never creates an
+    // empty card and an armed card starts with the real aggregate.
     if (activities.length === 0) {
       const preferences = yield* Effect.tryPromise({
         try: () => loadPreferences(),

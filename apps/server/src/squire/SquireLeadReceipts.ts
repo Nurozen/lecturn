@@ -1,9 +1,6 @@
 /**
- * The Lead's routing receipts: derived on every read from
- * the `task.routed` row, the target's routed-task event, the cards its turn
- * raised (`routed_task_id`), and its `quiet.recorded` row, so a receipt
- * follows each item's state without a Lead turn and never drifts.
- *
+ * Routing receipts are derived on every read from stored rows, so a receipt follows each item's state without a
+ * Lead turn and never drifts.
  * @module squire/SquireLeadReceipts
  */
 import {

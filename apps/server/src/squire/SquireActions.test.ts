@@ -1,9 +1,6 @@
 /**
- * Held execution and accept under the durable action protocol on the
- * server's switch-on Squire layer over a real orchestrator, with the real
- * `ThreadManagementService`, `ThreadLaunchService`, and the command hook's
- * trigger precondition. A crash is the layer's scope closing; a restart builds it again over
- * the same Lecturn home.
+ * Held execution and accept on the switch-on Squire layer over a real orchestrator and thread services.
+ * A crash is the layer's scope closing; a restart builds it again over the same Lecturn home.
  */
 import { assert, describe, it } from "@effect/vitest";
 import {

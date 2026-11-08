@@ -1,9 +1,6 @@
 /**
- * What goes with a thread that left a Squire's scope (untrack, rescope, a
- * deleted grant target, a Squire delete): its queued events are dropped and
- * its open or held cards outdated, in the caller's transaction. Otherwise the
- * Squire is still sent a thread the user removed, and its cards can only fail
- * an accept as out of scope.
+ * A thread that left a Squire's scope has its queued events dropped and its open or held cards outdated, in the
+ * caller's transaction. Otherwise the Squire is still sent a thread the user removed.
  */
 import type { SquireId, ThreadId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";

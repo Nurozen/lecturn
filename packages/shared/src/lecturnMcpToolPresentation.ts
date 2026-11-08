@@ -24,6 +24,7 @@ export type LecturnMcpToolSummaryAction =
   | "thread-wait"
   | "thread-interrupt"
   | "workflow-stop"
+  | "background-wait"
   | "thread-configuration"
   | "thread-configure"
   | "thread-fork"
@@ -155,6 +156,10 @@ const LECTURN_MCP_TOOLS: Readonly<Record<string, LecturnMcpToolDefinition>> = {
   lecturn_workflow_stop: tool(
     ["Stop", "Stopping", "Requested a stop for", "a workflow"],
     "workflow-stop",
+  ),
+  lecturn_background_wait: tool(
+    ["Update", "Updating", "Updated", "background waits"],
+    "background-wait",
   ),
   lecturn_thread_interrupt: tool(
     ["Interrupt", "Interrupting", "Requested an interrupt of", "a Lecturn thread"],
@@ -378,13 +383,7 @@ function normalizeLecturnMcpToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
-/**
- * ACP agents disagree on how the injected Lecturn server prefixes its tools:
- * `mcp__lecturn__x` (Claude/Cursor), `lecturn.x` (Codex), plus single
- * underscore, colon, slash, dash, and space separators seen from registry
- * agents. The prefix match is deliberately loose because the display-name
- * inventory is the real gate; unknown tools stay on the generic renderer.
- */
+// ACP tool prefixes vary; match loosely but require a known display-name entry.
 function resolveLecturnMcpToolName(value: string): string | null {
   const label = normalizeLecturnMcpToolLabel(value);
   // A registered app's `rw_task_status` ends in a Lecturn tool's name but is still the app's.
@@ -410,9 +409,7 @@ function resolveLecturnMcpToolName(value: string): string | null {
   const prefixed = /^(?:mcp[-_]{1,2})?lecturn(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(label);
   const candidate = prefixed?.groups?.tool ?? label;
   if (Object.hasOwn(LECTURN_MCP_TOOLS, candidate)) return candidate;
-  // OpenCode 2 registers one server per thread, `lecturn-<thread>`, and joins
-  // it to the tool with `_`. Thread ids can hold `_` too, so take the longest
-  // known tool name that ends the label.
+  // OpenCode 2 thread prefixes can contain underscores; choose the longest known tool-name suffix.
   if (!/^lecturn-/i.test(label)) return null;
   let longest: string | null = null;
   for (const tool of Object.keys(LECTURN_MCP_TOOLS)) {

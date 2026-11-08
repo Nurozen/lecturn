@@ -1,9 +1,6 @@
 /**
- * The Squire lifecycle state machine: `creating` and `rehoming` build a
- * home thread in the scratch workspace, `deleting` takes it all down.
- * Orchestration commits apart from Squire SQL and the filesystem, so every
- * step is idempotent and resumable: the home thread id and its command ids
- * derive from (squireId, home_generation), a replayed command returns its
+ * Orchestration commits apart from Squire SQL and the filesystem, so every step is idempotent and resumable:
+ * the home thread id and its command ids derive from (squireId, home_generation), a replayed command returns its
  * receipt, and startup reconciliation re-runs whatever a crash interrupted.
  */
 import {

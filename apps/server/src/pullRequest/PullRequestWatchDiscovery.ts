@@ -1,5 +1,4 @@
 import {
-  pullRequestHostOf,
   SourceControlProviderKind,
   type OrchestrationProjectShell,
   type OrchestrationV2ThreadShell,
@@ -10,6 +9,7 @@ import { stableStringify } from "@lecturn/shared/relaySigning";
 import { Context, DateTime, Effect, Layer, Path, Schema, Semaphore, type Scope } from "effect";
 import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 import { ProjectService } from "../project/ProjectService.ts";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { forkParked } from "../serverActivation.ts";
 import { isSquireThread } from "../squire/squireThread.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
@@ -106,7 +106,7 @@ export function discoveryCandidates(
       const repository = repositorySelector(identity);
       if (!repository || !isProviderKind(identity.provider) || identity.provider === "unknown")
         return [];
-      const host = pullRequestHostOf(identity, identity.provider);
+      const host = sourceControlDefinitions.changeRequestHost(identity, identity.provider);
       if (
         !projectContainsWatch(
           thread.projectId,

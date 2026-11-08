@@ -28,7 +28,7 @@ export function ConnectAccountsSettings({
     setBusy(accountId);
     await (async () => {
       await selectMobileProfileAccount(clerk, accountId);
-      navigation.navigate("SettingsSheet", { screen: "SettingsAuth", params: { accountId } });
+      navigation.navigate("SettingsAuth", { accountId });
     })()
       .catch((error: unknown) => {
         Dialog.alert(
@@ -113,10 +113,7 @@ export function ConnectAccountsSettings({
               icon="person.crop.circle"
               label="Sign in again"
               onPress={() =>
-                navigation.navigate("SettingsSheet", {
-                  screen: "SettingsAddAccount",
-                  params: { accountId: account.accountId },
-                })
+                navigation.navigate("SettingsAddAccount", { accountId: account.accountId })
               }
             />
           )}
@@ -136,9 +133,7 @@ export function ConnectAccountsSettings({
         icon="plus"
         label={accounts.length === 0 ? "Sign in" : "Add account"}
         disabled={!gate.available}
-        onPress={() =>
-          navigation.navigate("SettingsSheet", { screen: "SettingsAddAccount", params: {} })
-        }
+        onPress={() => navigation.navigate("SettingsAddAccount", {})}
       />
       {gate.reason ? (
         <Text className="px-4 pb-3 text-sm text-foreground-muted">{gate.reason}</Text>

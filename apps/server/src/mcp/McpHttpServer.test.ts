@@ -135,7 +135,6 @@ const callTool = (name: string, args: Record<string, unknown>) =>
 
 const callSnapshot = (args: Record<string, unknown>) => callTool("preview_snapshot", args);
 
-// Real tool definitions with handlers that record what they decoded.
 const layerRecordingTools = (calls: Array<unknown>) => {
   const RecordingToolkit = Toolkit.make(
     OrchestratorToolkit.tools.delegate_task,
@@ -368,7 +367,6 @@ it.effect("decodes null optional arguments the way it decodes omitted ones", () 
     yield* callTool("lecturn_thread_read", { ...thread, afterPosition: null, view: null });
     yield* callTool("delegate_task", { task: "Inspect", target: {} });
     yield* callTool("delegate_task", { task: "Inspect", title: null, target: { model: null } });
-    // A null the schema declares keeps its meaning: here it clears the project icon.
     yield* callTool("lecturn_project_update", { projectId: "project-1", projectIcon: null });
 
     expect(calls).toHaveLength(5);
@@ -429,6 +427,17 @@ it.effect.each(["limit", "runLimit", "maxCharsPerItem"])(
     }).pipe(Effect.provide(layerRecordingTools(calls)));
   },
 );
+
+it("routes same-child follow-ups to lecturn_thread_send and independent reviews to delegate_task", () => {
+  const description = OrchestratorToolkit.tools.delegate_task.description ?? "";
+  expect(description).toContain(
+    "For independent Lecturn delegated review rounds, call delegate_task again",
+  );
+  expect(description).toContain(
+    "For a follow-up that needs the same child's conversation, use lecturn_thread_send on its childThreadId.",
+  );
+  expect(description).not.toContain("not the target for starting another");
+});
 
 it.effect(
   "registers the pull request toolkit and surfaces a missing capability as a tool error",
@@ -541,7 +550,6 @@ it.effect("keeps the snapshot text under the agent's output ceiling", () =>
       expect(parsed.consoleEntries[0]?.text).toBe("entry 60");
       expect(notice?.type === "text" ? notice.text : "").toContain("accessibilityTree");
       expect(notice?.type === "text" ? notice.text : "").toContain("60 older console entries");
-      // Claude Code shows the model structuredContent instead of the text, so it is bounded too.
       expect(snapshot.structuredContent).toEqual({
         ...parsed,
         omitted: expect.arrayContaining(["60 older console entries"]),

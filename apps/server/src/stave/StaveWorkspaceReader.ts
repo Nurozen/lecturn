@@ -1,17 +1,7 @@
 /**
- * StaveWorkspaceReader - Effect service that projects a Stave space manifest
- * (`<workspace root>/.stave.yaml`) into the `StaveProjectInfo` read model.
- *
- * Loading is best-effort and never fails: a missing, unreadable, or invalid
- * manifest resolves to `Option.none` (logged at debug level) so a project that
- * is not a Stave space costs one stat per cache miss. Only the root itself is
- * consulted — there is no walk-up — so a project nested inside a space is not
- * mistaken for the space.
- *
- * Results are cached per root with separate positive/negative TTLs; Stave
- * lifecycle operations call `invalidate(root)` after mutating a space.
- *
- * @module StaveWorkspaceReader
+ * Loading never fails: a missing, unreadable or invalid manifest is `Option.none`. Only the root
+ * itself is consulted, with no walk-up, so a project nested inside a space is not mistaken for it.
+ * Stave lifecycle operations call `invalidate(root)` after mutating a space.
  */
 import type {
   RepositoryIdentity,
@@ -89,13 +79,9 @@ export interface MapManifestInput {
 }
 
 /**
- * Pure projection of a decoded manifest onto the read model, minus the
- * primary repository identity (resolved by the caller afterwards).
- *
- * Returns `null` when the manifest cannot describe a space (no usable `id`).
- * Repo entries with an unknown `mode` are dropped rather than failing the
- * whole manifest; optional keys are omitted (never set to `undefined`) so the
- * result decodes against `StaveProjectInfo`.
+ * Returns `null` without a usable `id`. Repo entries with an unknown `mode` are dropped rather than
+ * failing the manifest; optional keys are omitted, never `undefined`, so the result decodes
+ * against `StaveProjectInfo`. The caller resolves the primary repository identity.
  */
 export function mapManifestToProjectInfo(
   input: MapManifestInput,

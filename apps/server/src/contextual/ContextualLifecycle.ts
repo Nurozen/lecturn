@@ -1,11 +1,7 @@
 /**
- * Contextual side-table lifecycle on V2, re-homed from V1
- * orchestration/ContextualLifecycle.ts.
- *
- * Every entry point here is driven by runtime-only V2 signals (Lecturn
- * orchestration hooks and the live application-event tail started after
- * boot). None of them runs on a projection rebuild, so historical events can
- * never cancel, readmit or copy Contextual state twice.
+ * Every entry point is driven by runtime-only signals (orchestration hooks, the live event tail
+ * started after boot). None runs on a projection rebuild, so historical events can never cancel,
+ * readmit or copy Contextual state twice.
  */
 import {
   ContextualPreparation,

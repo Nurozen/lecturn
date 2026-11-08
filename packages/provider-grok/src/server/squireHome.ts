@@ -1,20 +1,8 @@
 /**
- * Lecturn: the Grok launch a Squire home or probe runs in.
- *
- * `grok agent stdio` loads the user's `GROK_HOME` (config MCP servers, hooks,
- * skills, AGENTS.md, rules, memory) and, through `HOME`, Claude's, Cursor's,
- * and Codex's files. A marked thread therefore runs with its own empty
- * `GROK_HOME` and `HOME` per instance, holding only the config and agent
- * profile written here. The login is read in place through
- * `GROK_AUTH_PATH`: a copy would split a refresh-token rotation between two
- * files.
- *
- * The agent profile is the tool control. Its `tools` allowlist keeps only
- * Grok's always-on MCP meta-tools (`search_tool`, `use_tool`), which reach
- * the servers the session attached: Lecturn's alone on a home, none on a
- * probe. Grok falls back to every tool when no allowlist entry resolves
- * (checked on 1.0.70), so the profile also names each native tool in
- * `disallowedTools`. Checked live against grok 1.0.70.
+ * Lecturn: a Squire's Grok launch. `grok agent stdio` loads `GROK_HOME` and, via `HOME`, Claude,
+ * Cursor and Codex files, so each marked thread gets empty ones; the login is read in place via
+ * `GROK_AUTH_PATH` (a copy would split refresh-token rotation). Grok 1.0.70 falls back to every
+ * tool when no allowlist entry resolves, so the profile also names each in `disallowedTools`.
  */
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import type { ProviderInstanceId } from "@lecturn/contracts";

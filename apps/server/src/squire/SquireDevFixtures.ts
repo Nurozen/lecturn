@@ -1,15 +1,7 @@
 /**
- * The Squire test seam and fixture mode. `loadSetup` builds a
- * fixture's projects, threads, and Squires in the sandbox `<lecturn
- * home>/squire-fixtures/`; `inject` writes a fixture event's row after
- * establishing, through normal commands, the orchestration state the event
- * claims; `drainThrough` waits for that row and the Squire turn it caused.
- * Threads in the sandbox are fixture-owned: `inject` is their only row
- * source (`SquireReactor.isFixtureOwnedThread`) and they run on the scripted
- * provider, so nothing on them reaches a real provider.
- *
+ * Sandbox threads under `<lecturn home>/squire-fixtures/` are fixture-owned: `inject` is their only row source and
+ * they run on the scripted provider, so nothing on them reaches a real provider.
  * Provided only with the switch on and `LECTURN_TEST_PROVIDERS=1`.
- *
  * @module squire/SquireDevFixtures
  */
 import {
@@ -43,7 +35,7 @@ import {
   type UnknownUnionMember,
   isUnknownUnionMember,
 } from "@lecturn/contracts";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -200,11 +192,8 @@ function fillEventTemplates(value: unknown, event: unknown): unknown {
 }
 
 /**
- * A fake script as the per-thread registry holds it: the first step per
- * `onEvent` key, templates unfilled (`fillSquireFakeScript` fills them per
- * batch). A `*` step shadows every later step, as "the first matching step
- * runs" reads. Tool calls become real `tools/call`s; a refused one is
- * recorded and the turn goes on, as a model reads a refusal.
+ * The first step per `onEvent` key, templates unfilled; a `*` step shadows every later step.
+ * Tool calls become real `tools/call`s; a refused one is recorded and the turn goes on, as a model reads a refusal.
  */
 export function squireFakeScriptSet(
   script: SquireFakeScript,
@@ -606,12 +595,8 @@ const make = Effect.gen(function* () {
   }
 
   /**
-   * What one fixture Squire's load writes. `declared` is its config as the
-   * fixture file has it and `overrides` the `--set` paths relative to that
-   * config. A fixture's own Squire takes everything; a user's Squire it
-   * reused takes only the companion and permissions sections and `--set`.
-   * Neither gets a companion the fixture does not name (it would reset to
-   * the default figure).
+   * A fixture's own Squire takes everything; a reused user Squire takes only the companion and permissions sections
+   * and `--set`. Neither gets a companion the fixture does not name (it would reset to the default figure).
    */
   const planSquire = (input: {
     readonly declared: Partial<SquireConfig>;

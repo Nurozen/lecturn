@@ -1,13 +1,7 @@
 /**
- * Pending connected-app tool approvals, keyed by runtime request id.
- *
- * State only. A gated MCP tool call registers its request and waits here
- * (`McpHttpServer` branch); the user's answer arrives as
- * `runtime-request.respond` and the effect worker's `RuntimeRequestService`
- * resolves it instead of calling a provider adapter (orchestration branch).
- * Those two branches share no service, so RuntimeLayer provides this once and
- * both sides, plus AppsLayer, resolve the same instance. The approval logic
- * (`AppToolApprovalService`) depends on this, never the reverse, so
+ * Pending connected-app tool approvals, keyed by runtime request id. The gated MCP call
+ * (`McpHttpServer`) and `RuntimeRequestService` share no service, so RuntimeLayer provides this
+ * once for both and AppsLayer. `AppToolApprovalService` depends on this, never the reverse, so
  * orchestration never depends on the toolkit.
  */
 import type { ProviderApprovalDecision, RuntimeRequestId } from "@lecturn/contracts";

@@ -174,11 +174,7 @@ function apiProviderAuthMetadata(
   return apiProvider === "bedrock" ? { type: "bedrock", label: "Amazon Bedrock" } : undefined;
 }
 
-/**
- * The capability probe resolves for a logged-out CLI, so a completed probe only proves Claude
- * Code started. `tokenSource: "none"` is the CLI reporting it found no token at all, and is the
- * one shape that disproves authentication.
- */
+/** Probe completion only proves Claude started. Only tokenSource: "none" disproves auth. */
 function claudeAuthStatus(
   capabilities: Pick<
     ClaudeCapabilitiesProbe,
@@ -189,16 +185,14 @@ function claudeAuthStatus(
     return "authenticated";
   }
   if (capabilities.tokenSource !== "none") return "authenticated";
-  // An `ANTHROPIC_API_KEY` install reports no token source but is authenticated
-  // all the same, so the key and account fields still get a say.
+  // API keys can authenticate with tokenSource: none; also check key and account fields.
   const hasApiKey = Boolean(capabilities.apiKeySource) && capabilities.apiKeySource !== "none";
   return hasApiKey || capabilities.email || capabilities.subscriptionType
     ? "authenticated"
     : "unauthenticated";
 }
 
-// Amazon Bedrock initializes far slower than first-party auth: the SDK boots the Bedrock
-// backend and runs the `awsAuthRefresh` credential hook before returning account info.
+// Bedrock initialization includes backend startup and awsAuthRefresh, taking longer than first-party auth.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
 // Native CLI startup on Windows can exceed the shared probe deadline.
 const CLAUDE_VERSION_CHECK_TIMEOUT_MS = 20_000;
@@ -221,23 +215,17 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     pathToClaudeCodeExecutable: input.executablePath,
     abortController: input.abortController,
     settingSources: [...CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES],
-    // The probe keeps filesystem setting sources for slash-command discovery,
-    // but must not run the user's hooks: it fires every few minutes, so
-    // SessionStart hooks would run on every health check.
+    // Keep settings for slash-command discovery, but disable hooks so health checks do not run SessionStart repeatedly.
     settings: { disableAllHooks: true },
     allowedTools: [],
-    // Ignore MCP definitions from every filesystem setting source above. The
-    // SDK combines this empty explicit map with --strict-mcp-config, which
-    // Claude refuses next to a managed-mcp.json that already excludes them.
+    // Exclude filesystem MCP servers; omit strict mode when managed-mcp.json already excludes them and forbids the flag.
     mcpServers: {},
     ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
     env: {
       ...input.environment,
-      // Connected claude.ai MCP servers are discovered outside filesystem
-      // config; disable them independently for this health check.
+      // Disable claude.ai MCP separately; it is discovered outside filesystem config.
       ENABLE_CLAUDEAI_MCP_SERVERS: "false",
-      // Skipping it also avoids Claude spawning a Windows `tasklist | findstr` process tree on
-      // every periodic refresh.
+      // Skipping this avoids a Windows tasklist | findstr process tree on every refresh.
       FORCE_CODE_TERMINAL: undefined,
       CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
       CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
@@ -259,18 +247,10 @@ export type ClaudeCapabilitiesProbe = {
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
-  /**
-   * Active API backend reported by the SDK's `AccountInfo`. Anthropic OAuth
-   * login only applies when `"firstParty"`; for Amazon Bedrock (`"bedrock"`)
-   * the subscription/token fields are absent and auth is external AWS creds.
-   */
+  /** OAuth applies only to firstParty; Bedrock uses external AWS credentials and omits subscription/token fields. */
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
-  /**
-   * Subscription windows from the SDK's `get_usage` control request, or
-   * `undefined` when the request itself failed. Absent windows on an
-   * otherwise successful response mean the account has none (API key).
-   */
+  /** Undefined means get_usage failed; absent windows on success mean no subscription windows, as with API keys. */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
   readonly usageCheckedAt?: string;
 };
@@ -347,12 +327,7 @@ function waitForAbortSignal(signal: AbortSignal): Promise<void> {
   });
 }
 
-/**
- * We pass a never-yielding AsyncIterable as the prompt so that no user message is ever written
- * to the subprocess stdin. This means the Claude Code subprocess completes its local
- * initialization IPC (returning account info and slash commands) but never starts an API
- * request to Anthropic.
- */
+/** A never-yielding prompt allows local initialization IPC without sending an Anthropic request. */
 const probeClaudeCapabilities = Effect.fn("ClaudeProvider.probeClaudeCapabilities")(
   function* (
     claudeSettings: ClaudeSettings,
@@ -483,17 +458,9 @@ function parseClaudeAuthStatusLoggedIn(stdout: string): boolean | undefined {
 }
 
 /**
- * Ask the CLI whether it is signed in.
- *
- * The capabilities probe cannot answer this. It collapses every failure to
- * `undefined`, so a logged-out CLI is indistinguishable from one that timed
- * out or crashed, and the SDK's `AccountInfo` cannot prove a signed-out state
- * either: every field is optional and `tokenSource: "none"` means OAuth rather
- * than absent credentials. `claude auth status --json` reports `loggedIn`
- * explicitly, which is the only unambiguous signal available.
- *
- * Exit status is deliberately ignored: the CLI reports a logged-out account on
- * stdout while exiting non-zero.
+ * `claude auth status --json` is the only unambiguous signed-out signal: the capabilities probe
+ * collapses failures to `undefined`, and `AccountInfo`'s `tokenSource: "none"` means OAuth. Exit
+ * status is ignored: a logged-out CLI reports on stdout while exiting non-zero.
  */
 const probeClaudeLoggedIn = Effect.fn("probeClaudeLoggedIn")(function* (
   claudeSettings: ClaudeSettings,

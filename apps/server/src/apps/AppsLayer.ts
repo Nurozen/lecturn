@@ -1,24 +1,8 @@
 /**
- * Every connected-app service, built once. server.ts provides this on the
- * outer pipe of its routes so the WebSocket and MCP transports share one
- * instance; a second build would split the lease and process state.
- *
- * Services are stacked in tiers: a service may depend on any service in a
- * lower tier, never on its own tier or above. Reactions that would point
- * upwards subscribe to a stream instead (HeadlessToolHost stops an app's
- * processes and AppToolApprovalService cancels its waiting approvals from
- * `AppRegistryService.streamStatus`). A new upward edge is an interface
- * change, not an edit to a single service file.
- *
- * State that orchestration also reaches is not built here. RuntimeLayer
- * provides it once and this layer takes it from the server's context:
- *
- *   AppToolApprovalRegistry <- RuntimeRequestService (claims), AppToolkit and
- *                              AppToolApprovalService (register, await)
- *   AppRuntimeState         <- AppsOrchestrationHooks (beforeTurnStart,
- *                              onRunTerminal), AppHostContextStore,
- *                              HeadlessToolHost
- *   AppsLayer               <- Ws, McpHttpServer
+ * Every connected-app service, built once: server.ts provides it on the outer pipe so WebSocket and
+ * MCP share one instance (a second build splits lease and process state). A service depends only on
+ * lower tiers; upward reactions subscribe to `AppRegistryService.streamStatus`. State orchestration
+ * also reaches (AppToolApprovalRegistry, AppRuntimeState) comes from RuntimeLayer.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

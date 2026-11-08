@@ -1,12 +1,7 @@
 /**
- * Lecturn: Stave memory MCP wiring shared by the provider packages.
- *
- * A live Stave space whose manifest enables Marmot memory carries a generated
- * `context-marmot` entry in its root `.mcp.json`. The server's
- * `StaveMemoryWiring` layer (apps/server `stave/StaveMemoryWiring.ts`) reads
- * and validates that entry; the service tag and the provider-neutral helpers
- * live here so packaged adapters (Cursor, Grok, OpenCode) can register the
- * memory server next to the `lecturn` MCP server.
+ * Lecturn: Stave memory MCP wiring shared by the provider packages. A live space with Marmot
+ * memory has a generated `context-marmot` entry in its root `.mcp.json`, validated by the server's
+ * `StaveMemoryWiring`; packaged adapters register it next to the `lecturn` MCP server.
  *
  * @module provider-core/server/staveMemory
  */

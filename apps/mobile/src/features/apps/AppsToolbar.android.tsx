@@ -4,6 +4,7 @@ import { View } from "react-native";
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
+import { openSettings } from "../settings/settings-navigation";
 
 /**
  * Keeps the environment switcher reachable while the Apps tab is selected. It draws the same
@@ -19,12 +20,7 @@ export function AppsToolbar() {
         <View className="min-w-0 flex-1 pl-4">
           <WorkspaceConnectionTitle
             grow
-            onPress={() =>
-              navigation.navigate("SettingsSheet", {
-                screen: "SettingsContent",
-                params: { screen: "SettingsEnvironments" },
-              })
-            }
+            onPress={() => openSettings(navigation, "SettingsEnvironments")}
             brand={
               <CompactBrandTitle allowFontScaling={false} accessibilityLabel="Lecturn, Apps" fit />
             }

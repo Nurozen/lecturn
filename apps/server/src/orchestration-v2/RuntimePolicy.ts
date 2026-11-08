@@ -111,11 +111,9 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
-        // Lecturn: Squire home and probe threads always run the deny runtime,
-        // whatever the thread record says. Claude and Codex translate
-        // `squireIsolation` into their own deny and read settings; any other
-        // adapter is left at `approval-required`, whose requests the server
-        // auto-declines on marked threads.
+        // Lecturn: Squire home and probe threads always run the deny runtime. Claude and Codex
+        // translate `squireIsolation` into their own settings; other adapters stay at
+        // `approval-required`, whose requests the server auto-declines on marked threads.
         const squire = input.thread.squire;
         if (squire !== undefined) {
           return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({

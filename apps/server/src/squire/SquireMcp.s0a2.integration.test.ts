@@ -1,28 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Evidence goes to the repo-root artifacts folder; marker files prove what a provider could touch.
 /**
- * S0a2: MCP surface, deny runtime, and skill on a live provider.
- * Spends provider tokens, so it runs only with SQUIRE_S0A2_PROVIDER set
- * (claudeAgent or codex); SQUIRE_BAR_MODEL picks the model.
- *
- * One Squire home on the provider, from a temp provider home carrying a
- * user MCP server, a plugin (server and skill), an instruction-file sentinel,
- * and (Claude) the user's claude.ai connectors. In one Lecturn home:
- * - start: an injected event runs the home's first turn;
- * - control: an ordinary thread on the same provider home lists what leaks;
- * - deny: a user message asks the home to run a shell command, write a
- *   file, and read a file outside any workspace;
- * - probe: a thread created with the probe marker (no server);
- * - home fork: refused by the command hook;
- * - resume: after a restart over the same homes, the home and probe again.
- * Evidence (what the provider was opened with and listed) goes to
- * artifacts/squire-bar/s0a2/<provider>/.
- *
- * Codex also runs every model request through a recording proxy: the
- * home and probe, which run in the instance's Squire CODEX_HOME, must carry
- * none of the temp home's AGENTS.md, skill, or memory sentinels, while the
- * control on the same instance must carry all three. A native fork of the
- * control from inside the Squire home shows a probe can still fork a user's
- * thread. Its evidence goes to artifacts/squire-bar/s0a2/codex/codexhome/.
+ * S0a2: MCP surface, deny runtime, and skill on a live provider. Spends provider tokens, so it runs only with
+ * SQUIRE_S0A2_PROVIDER=claudeAgent|codex. A Squire home must not see the temp provider home's user MCP server, plugin,
+ * or instruction sentinels that an ordinary control thread sees; on Codex the Squire CODEX_HOME must carry none of
+ * the AGENTS.md, skill, or memory sentinels. Evidence goes to artifacts/squire-bar/s0a2/<provider>/.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

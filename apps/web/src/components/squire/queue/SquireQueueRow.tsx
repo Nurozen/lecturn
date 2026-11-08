@@ -261,11 +261,9 @@ function RaiserPortrait(props: { readonly raiser: SquireSnapshotEntry }) {
 }
 
 /**
- * "<raiser> · <thread>". The raiser never shrinks, so a long title cannot clip it to a stray
- * glyph; the target gives way well before the title does, down to a readable floor. On an
- * expanded card the title comes first, so the meta is capped and truncates instead. In the
- * inbox's narrower list the meta takes its own line under the title, so the title keeps the
- * row's width.
+ * The raiser never shrinks, so a long title cannot clip it to a stray glyph; the target gives
+ * way first, down to a readable floor. Expanded cards cap and truncate the meta; the inbox's
+ * narrower list puts it on its own line under the title.
  */
 function RowMeta(props: {
   readonly meta: ReturnType<typeof squireRowMeta>;

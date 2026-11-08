@@ -1,11 +1,7 @@
 /**
- * The Streamable-HTTP MCP client for an app's live endpoint, shaped
- * like `callAcpMcpTool` (AcpMcpStdioBridge.ts). Every operation opens its own
- * MCP session and ends it, so nothing outlives a lease and a restarted app
- * never sees a session id from its previous run.
- *
- * Lease checks happen in AppToolkit before gating; a lease handed here is
- * contacted.
+ * Streamable-HTTP MCP client for an app's live endpoint, shaped like `callAcpMcpTool`. Every
+ * operation opens and ends its own MCP session, so nothing outlives a lease and a restarted app
+ * never sees an old session id. Lease checks happen in AppToolkit before gating.
  */
 // Foreign JSON-RPC is decoded only as far as routing needs; results are then
 // decoded with the MCP schemas. The fetch is injectable so tests can count

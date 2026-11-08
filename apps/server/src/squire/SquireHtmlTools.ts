@@ -1,10 +1,6 @@
 /**
- * `html_render` and `html_preview` for Squires. A Squire's page is always
- * locked down (`lockedHtmlRenderDocument`): no local files, no network, no
- * page scripts. Served as Squire role tools, so the mode comes from the home
- * thread's credential, never from an argument, and each call logs
- * `tool.called` like every other Squire tool.
- *
+ * A Squire's page is always locked down: no local files, no network, no page scripts.
+ * The mode comes from the home thread's credential, never from an argument; each call logs `tool.called`.
  * @module squire/SquireHtmlTools
  */
 import {

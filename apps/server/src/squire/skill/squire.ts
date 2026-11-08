@@ -1,10 +1,7 @@
 /**
- * The Squire skill. Static on purpose: Claude restarts its query when
- * the system prompt changes, so the brief, budget, and tracked containers ride
- * each event message instead. Codex cuts any instruction entry over
- * 4,000 bytes, so each section stays under that and is delivered whole.
- * Authored as TypeScript, not Markdown, because the server ships as one bundle
- * with no asset files beside it.
+ * Static on purpose: Claude restarts its query when the system prompt changes, so the brief, budget, and tracked
+ * containers ride each event message. Codex cuts any instruction entry over 4,000 bytes, so each section stays under.
+ * TypeScript, not Markdown, because the server ships as one bundle with no asset files.
  */
 export const SQUIRE_SKILL_SECTIONS: ReadonlyArray<string> = [
   `## Squire

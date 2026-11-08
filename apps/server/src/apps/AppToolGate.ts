@@ -1,11 +1,8 @@
 /**
- * Whether an app tool call may go ahead, must ask the user, or is refused.
- * AppToolkit asks before forwarding a call (`static`) and again when
- * the app answers `lecturn/approval-required` (`app`).
- *
- * This is the only place app tools are gated: Claude pre-approves every
- * `mcp__lecturn__*` tool, so no provider ever asks on Lecturn's behalf. Any
- * mode this file does not know is treated as Read-only.
+ * Whether an app tool call may go ahead, must ask the user, or is refused: checked before
+ * forwarding (`static`) and when the app answers `lecturn/approval-required` (`app`). The only gate
+ * for app tools, since Claude pre-approves every `mcp__lecturn__*` tool. Unknown modes are
+ * Read-only.
  */
 import type {
   AppRuntimeCeiling,

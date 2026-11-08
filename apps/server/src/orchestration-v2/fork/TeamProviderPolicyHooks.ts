@@ -1,10 +1,8 @@
 /**
- * Lecturn: a Company Connect organization can restrict which providers
- * its members use. Checked when a provider session opens and again before
- * every turn, because the policy can change while a session is live.
- *
- * Registration layer; s-surface provides it with TeamPolicyLive next to
- * runtimeLayer.layerProduction (see hooks-ready).
+ * Lecturn: a Company Connect organization can restrict which providers its members use, checked
+ * when a provider session opens and before every turn because the policy can change mid-session.
+ * s-surface provides this registration layer with TeamPolicyLive next to
+ * runtimeLayer.layerProduction.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

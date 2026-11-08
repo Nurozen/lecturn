@@ -80,11 +80,9 @@ import {
 } from "./AddProjectScreen";
 
 /**
- * Mobile "New Stave space" / "New Stave saga": one scrolling form each over
- * the same pure wizard rules as web, then the streamed operation's progress.
- * Deliberately smaller than the web wizard: no memory, custom kinds, edit
- * bases, reference pins, land-after ordering, dry-run preview or inline repo
- * registration.
+ * Mobile "New Stave space" / "New Stave saga" over the web wizard's pure rules. Deliberately
+ * smaller than web: no memory, custom kinds, edit bases, reference pins, land-after
+ * ordering, dry-run preview or inline repo registration.
  */
 
 /** No operation started yet: the placeholder atom stays `idle`. */

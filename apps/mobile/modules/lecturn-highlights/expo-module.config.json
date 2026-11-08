@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["LecturnHighlightsModule"],
+    "podspecPath": "LecturnHighlightsNative.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.lecturnhighlights.LecturnHighlightsModule"]
+  }
+}

@@ -1,9 +1,6 @@
 /**
- * The Lead's find-work sweep. The server, not the model, picks
- * the candidates from tracked shells, PR link snapshots, and card state; an
- * empty sweep logs one `sweep.ran` row and runs no Lead turn, so it costs no
- * tokens. Findings the Lead raises in the sweep turn are admitted here
- * against the sweep budget and the dismissal memory (`finding_key`).
+ * The server, not the model, picks sweep candidates; an empty sweep logs one `sweep.ran` row and runs no Lead turn,
+ * so it costs no tokens. Findings are admitted against the sweep budget and the dismissal memory (`finding_key`).
  */
 import {
   isUnknownUnionMember,
@@ -20,7 +17,7 @@ import {
   type ThreadId,
   type ThreadPullRequestLink,
 } from "@lecturn/contracts";
-import { threadPullRequestKeyOf } from "@lecturn/shared/threadPullRequests";
+import { threadPullRequestKeyOf } from "../sourceControl/threadPullRequests.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

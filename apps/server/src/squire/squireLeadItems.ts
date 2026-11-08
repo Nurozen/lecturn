@@ -33,11 +33,9 @@ const eventOf = (transition: LeadItemTransition, card: LeadItemCard): SquireEven
 };
 
 /**
- * Writes the Lead's row for `card` (for `resolved`, the card as it is after
- * the transition). Call it inside the transaction that commits the card's
- * change and wake the returned Lead once it commits. None when there is no
- * active Lead, the card is FYI or the Lead's own, or the row already exists
- * (a retried transition).
+ * For `resolved`, pass the card as it is after the transition. Call it inside the transaction that commits the
+ * card's change and wake the returned Lead once it commits.
+ * None when there is no active Lead, the card is FYI or the Lead's own, or the row already exists (a retry).
  */
 export const writeLeadItemEvent = Effect.fn("squireLeadItems.writeLeadItemEvent")(function* (
   repository: SquireRepository.SquireRepository["Service"],

@@ -51,10 +51,7 @@ function makeLoad(
   });
 }
 
-/**
- * The SDK listens for that error, then rejects an internal promise nothing awaits.
- * Node exits on that unhandled rejection and takes the server with it.
- */
+// The SDK leaves a shell-error promise unhandled, which would exit the server.
 const CURSOR_SHELL_SPAWN_MARKERS = [
   "dump_zsh_state",
   "dump_bash_state",
@@ -106,9 +103,8 @@ function onUnhandledRejection(reason: unknown): void {
 }
 
 /**
- * The SDK is proprietary, so apps that bundle this server may leave it out. It
- * loads on first use, and reaching it through this service keeps the shell
- * spawn guard armed while agents run.
+ * The proprietary SDK may be left out of apps that bundle this server, so it loads on first use.
+ * Keeps the shell spawn guard armed while in-process agents run.
  */
 export class CursorSdk extends Context.Service<
   CursorSdk,
@@ -132,6 +128,5 @@ export const layerFromRequire = (require: (id: string) => unknown) =>
     ).pipe(Effect.as(CursorSdk.of({ load: makeLoad(require) }))),
   );
 
-// Cursor's Webpack chunks and local helpers must stay beside the SDK entry.
-// createRequire also loads that disk-backed package from a Node SEA executable.
+// createRequire loads the disk-backed SDK and adjacent chunks even from a Node SEA executable.
 export const layer = layerFromRequire(NodeModule.createRequire(import.meta.url));

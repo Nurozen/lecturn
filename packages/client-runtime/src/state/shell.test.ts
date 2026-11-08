@@ -10,6 +10,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 
 import type { EnvironmentShellState } from "./shell.ts";
 import {
+  EMPTY_SHELL_STATE,
   findProjectVisibleAtSequence,
   ProjectNotVisibleError,
   waitForProjectVisible,
@@ -23,6 +24,7 @@ function shellState(input: {
   readonly snapshotSequence?: number;
 }): EnvironmentShellState {
   return {
+    ...EMPTY_SHELL_STATE,
     snapshot:
       input.updatedAt === undefined
         ? Option.none()
@@ -56,6 +58,7 @@ describe("project visibility at a sequence", () => {
     scripts: [],
   };
   const withProject = (snapshotSequence: number): EnvironmentShellState => ({
+    ...EMPTY_SHELL_STATE,
     snapshot: Option.some({
       schemaVersion: 1,
       snapshotSequence,

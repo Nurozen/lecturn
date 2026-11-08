@@ -10,11 +10,10 @@ import type * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { readMessages, writeMessages } from "../app/AppToolInterceptor.ts";
 
 /**
- * The tools each role may list and call on `/mcp` while Squires are on: the
- * role tools `SquireToolInterceptor` serves, and nothing else. Those include
- * `html_render` and `html_preview` in their locked mode (`SquireHtmlTools`):
- * the ordinary tools inline any local image a page names, and its scripts
- * can send it on.
+ * The tools each role may list and call on `/mcp` while Squires are on: only the role tools
+ * `SquireToolInterceptor` serves. `html_render` and `html_preview` come in locked mode
+ * (`SquireHtmlTools`): the ordinary tools inline any local image a page names, and its scripts can
+ * send it on.
  */
 const SQUIRE_ROLE_TOOLS: Readonly<Record<SquireRole, ReadonlyArray<string>>> = {
   lead: SQUIRE_TOOL_NAMES.lead,
@@ -60,14 +59,10 @@ const keepAllowedTools = (allowed: ReadonlySet<string>) => (message: unknown) =>
 };
 
 /**
- * The shared `/mcp` registry is flat and `actsAsCaller` tools check no
- * capability, so a capability alone cannot fence a Squire's home thread.
- * This runs before dispatch for every credential with a Squire scope:
- * `tools/list` answers only the role allowlist, any other tool call is
- * refused without reaching the transport, and so is every method that is
- * neither a tool request nor protocol plumbing. Other credentials pass
- * untouched. The switch is read per request, so turning it off fences a
- * running Squire at once; a missing `SquireSwitch` reads as off.
+ * `actsAsCaller` tools check no capability on the flat `/mcp` registry, so this fences a Squire
+ * credential before dispatch: `tools/list` answers only the role allowlist, and any other tool call
+ * or non-protocol method is refused; other credentials pass. The switch is read per request (no
+ * `SquireSwitch` reads as off), so turning it off fences a running Squire at once.
  */
 export const make = Effect.gen(function* () {
   const squireSwitch = yield* Effect.serviceOption(SquireSwitch.SquireSwitch);

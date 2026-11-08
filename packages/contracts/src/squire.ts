@@ -198,10 +198,9 @@ export const SquireSweepSettings = squireSweepSettingsStruct.pipe(
 export type SquireSweepSettings = typeof SquireSweepSettings.Type;
 
 // ── Companion ─────────────────────────────────────────────────
-// Only the persisted keys of the v5 exported appearance. v5's runtime keys
-// (state, gaze, transitions, debug) are stripped on decode, and a value this
-// build does not know reads as the default, so a newer client's choice never
-// fails an older client's snapshot.
+// Only the persisted keys of the v5 exported appearance; runtime keys are stripped on decode and
+// an unknown value reads as the default, so a newer client's choice never fails an older
+// client's snapshot.
 
 const companionField = <const L extends ReadonlyArray<string>, const D extends L[number]>(
   literals: L,
@@ -297,12 +296,10 @@ const freeEquipment = (
 };
 
 /**
- * The companion a new Squire gets when none was chosen, distinct from `taken`
- * (every other Squire in the environment; the Lead counts even before it
- * exists): a free appearance and hood first, then a free palette (never gold,
- * the Lead's, and brass only when nothing else is free), then free equipment
- * (never the Lead's). Ties keep `base`'s own look, palette, and equipment; its
- * other keys stay.
+ * The companion a new Squire gets when none was chosen, distinct from `taken` (every other Squire;
+ * the Lead counts even before it exists): a free appearance and hood, then a free palette (never
+ * the Lead's gold, brass only when nothing else is free), then free equipment (never the Lead's).
+ * Ties keep `base`'s own look, palette, and equipment; its other keys stay.
  */
 export const squireDistinctCompanion = (
   taken: ReadonlyArray<SquireCompanion>,
@@ -340,12 +337,10 @@ export const squireDistinctCompanion = (
 };
 
 /**
- * A chosen companion (the Lead's proposal) against `taken`, as
- * `squireDistinctCompanion` counts it: it stands while its appearance and hood
- * are free, or none is free and its full look is, and its palette is not
- * gold or brass. Otherwise it moves to a free look, keeping what it can. The
- * Lead's equipment is never kept: a look that stands only trades it for free
- * equipment.
+ * A chosen companion (the Lead's proposal) against `taken`, as `squireDistinctCompanion` counts
+ * it: it stands while its appearance and hood are free (or none is and its full look is) and its
+ * palette is not gold or brass; otherwise it moves to a free look, keeping what it can. The Lead's
+ * equipment is never kept: a look that stands only trades it for free equipment.
  */
 export const squireDistinctChoice = (
   taken: ReadonlyArray<SquireCompanion>,

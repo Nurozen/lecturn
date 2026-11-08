@@ -1,11 +1,8 @@
 // @effect-diagnostics preferSchemaOverJson:off globalFetch:off - a raw JSON-RPC client exercises the gate's parsing.
 /**
- * The production `/mcp` route set (every registered toolkit, the auth
- * middleware with `SquireMcpGate`, a real `McpSessionRegistry`) served on the
- * test HTTP server. Services behind the tools are stubs: the gate refuses
- * before dispatch, so they only run for calls it lets through. Only the
- * calling-thread lookup and `html_render`'s file store are real enough to
- * succeed. Needs `NodeHttpServer.layerTest`.
+ * Services behind the tools are stubs: the gate refuses before dispatch, so they only run for calls it lets through.
+ * Only the calling-thread lookup and `html_render`'s file store are real enough to succeed.
+ * Needs `NodeHttpServer.layerTest`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {

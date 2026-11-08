@@ -1,13 +1,7 @@
 /**
- * Squire rooms: the room record, its members and
- * cursors, and its log. A room is not a thread: posting appends a
- * `squire_room_post` and, in the same transaction, one `squire_event` of kind
- * `message` per member to wake (keyed by the post's message key), which
- * `SquireDelivery` turns into home-thread messages. Every other member gets
- * the post as context on its next batch (`squireRoomContext.ts`).
- *
- * Caps and member changes run under the policy lock. Room posts never create
- * Notify intents or push.
+ * A room is not a thread: a post appends a `squire_room_post` and, in the same transaction, one `message` event per
+ * member to wake; every other member gets it as context on its next batch. Caps and member changes run under the
+ * policy lock. Room posts never create Notify intents or push.
  */
 import {
   SquireError,
@@ -146,11 +140,8 @@ export class SquireRooms extends Context.Service<
 
     // ── Server seams ──
     /**
-     * Appends a post and its recipients' `message` rows inside the caller's
-     * `repository.transaction` (the tool's commit, or the RPC's own). Routing
-     * per `squireRoomRouting.routeRoomPost`; bot posts with the room's bot
-     * messaging or the environment switch off route to nobody. Callers wake
-     * `wake` and run `afterCommit` after the commit.
+     * Runs inside the caller's `repository.transaction`. Bot posts with the room's bot messaging or the environment
+     * switch off route to nobody. Callers wake `wake` and run `afterCommit` after the commit.
      */
     readonly postInTransaction: (
       input: RoomPostWrite,

@@ -12,6 +12,7 @@ import {
   AppWindowIcon,
   RadioTowerIcon,
   ArchiveIcon,
+  FlaskConicalIcon,
   BlocksIcon,
   BotIcon,
   createLucideIcon,
@@ -96,6 +97,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/connections": Link2Icon,
   "/settings/apps": AppWindowIcon,
   "/settings/relay": RadioTowerIcon,
+  "/settings/beta": FlaskConicalIcon,
   "/settings/archived": ArchiveIcon,
 };
 
