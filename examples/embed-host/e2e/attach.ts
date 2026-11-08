@@ -1,24 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Test harness driving a real Electron app and servers; it runs no Effect runtime of its own.
 /**
- * Scenario steps 3-5 and the copy ledger, from a host that step 1 left on its
- * sidecar:
- *
- *   3. A user server starts (temp home) with the host running; approving the
- *      pairing from an admin client switches the host live. The `mode` event
- *      carries the maps, the embed view stays mounted and reloads at the copy
- *      of its open thread, and the live lease moves to the user server. A
- *      Lecturn web client finds the copy under Apps > Embed Host > ws-a, not
- *      in Projects mode, marked "Copied from Embed Host", with its cards.
- *   4. The host closes. From the web client a turn's headless call runs, the
- *      closed banner shows, and `ex_window_flash` answers that the app is
- *      closed without reaching it.
- *   5. The host reopens; a Supervised flash is approved in the web client,
- *      then a Full-access flash runs with no approval card.
- *   ledger. The user server stops: the host falls back to its sidecar, where
- *      the copied thread is read-only with "Continued in Lecturn". Only a new
- *      sidecar thread is copied on restart. A turn held open across a copy
- *      completes on the sidecar after it and is re-copied exactly once; a
- *      later subtitle write alone re-copies nothing.
+ * Steps 3-5 and the copy ledger: 3 a user server starts and pairing switches the host live
+ * (embed reloads at its thread's copy, lease moves); 4 host closed, headless calls run and
+ * `ex_window_flash` reports closed; 5 reopen, Supervised then Full-access flash. Ledger: fallback
+ * to the sidecar leaves copies read-only, and each sidecar thread or turn is copied exactly once.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeCrypto from "node:crypto";

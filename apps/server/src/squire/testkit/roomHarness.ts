@@ -1,10 +1,6 @@
 /**
- * Rooms fixture over the real switch-on `layerSquire` (phase4Harness):
- * two projects, one tracked thread each, two Squires and the Lead.
- *
- * - Release: project grant on `billing-service` (covers `thr_fix_invoice_rounding`).
- * - Research: project grant on `web-app` (covers `thr_currency_formatter`).
- * - The Lead, homed in `billing-service`.
+ * Rooms fixture over the real switch-on `layerSquire`: Release grants `billing-service` (`thr_fix_invoice_rounding`),
+ * Research grants `web-app` (`thr_currency_formatter`), and the Lead is homed in `billing-service`.
  */
 import {
   CommandId,

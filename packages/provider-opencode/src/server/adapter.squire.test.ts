@@ -1,12 +1,8 @@
 /**
- * Lecturn: a Squire home or probe on OpenCode 1.x.
- *
- * Each session owns its `opencode serve` process, so a Squire session's server
- * is launched without the user's config, project config, instruction files,
- * skills, or plugins, and every native session it creates, resumes, or forks
- * carries a ruleset that removes every tool but Lecturn's (OpenCode drops a
- * tool whose last matching rule is a `*`-pattern deny). These tests assert
- * what the server and its sessions are actually handed.
+ * Lecturn: a Squire home or probe on OpenCode 1.x. A Squire session's own `opencode serve` runs
+ * without user or project config, instruction files, skills, or plugins, and every native session
+ * it touches carries a ruleset removing every tool but Lecturn's (OpenCode drops a tool whose last
+ * matching rule is a `*`-pattern deny).
  */
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";

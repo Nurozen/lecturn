@@ -29,10 +29,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import { isSquireShowcaseApp } from "../squire/showcase/showcaseApp.ts";
 import * as McpAppModelContext from "./McpAppModelContext.ts";
 
-/**
- * A stopped session is reported, never started: an app view must not spend a
- * provider turn.
- */
+/** Reports stopped sessions without starting them; app views must not spend provider turns. */
 export class McpAppRequests extends Context.Service<
   McpAppRequests,
   {
@@ -198,8 +195,7 @@ const make = Effect.gen(function* () {
     }
     if (resolved.connected)
       return yield* resolved.connected.callTool({ ...input, app: resolved.app });
-    // The spec forbids apps calling tools hidden from them; checked here too,
-    // since a client's own check is only a courtesy to its user.
+    // Enforce hidden-tool restrictions server-side; client checks cannot enforce the spec.
     const tool = yield* findTool(input.threadId, resolved, input.name);
     if (tool === undefined || !mcpAppToolCallableByApp(tool._meta)) {
       return yield* fail(input.threadId, "tool-not-callable");
@@ -255,8 +251,7 @@ const make = Effect.gen(function* () {
     input: McpAppUpdateModelContextInput,
   ) {
     const { app } = yield* resolveApp(input);
-    // Context belongs to the conversation on screen, which only shows this app
-    // when it is the app's own thread or one forked from it.
+    // Context belongs only to the app's thread or its descendants.
     if (!(yield* descendsFrom(input.conversationThreadId, input.threadId))) {
       return yield* fail(input.threadId, "not-an-app");
     }

@@ -51,8 +51,7 @@ export function LecturnConnectProfilePage(props: { readonly accountId?: string }
   const [deregisteringEnvironmentId, setDeregisteringEnvironmentId] =
     useState<EnvironmentId | null>(null);
   const mutationPendingRef = useRef(false);
-  // Deregistered rows stay in the cached list until the refresh lands, so hide
-  // them by the linkedAt they had. A re-link produces a new linkedAt and shows again.
+  // Hide cached rows by linkedAt until refresh; re-linking changes linkedAt and restores visibility.
   const [removedEnvironments, setRemovedEnvironments] = useState<{
     readonly accountId: string | null;
     readonly linkedAtById: ReadonlyMap<EnvironmentId, string>;

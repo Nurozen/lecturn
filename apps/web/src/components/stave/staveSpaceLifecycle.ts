@@ -65,11 +65,9 @@ export function useStaveArchiveLanding() {
 }
 
 /**
- * The Archive menu entry for a live Stave space row, read at menu-open time.
- * Null for sagas, archived spaces (restored from New project → Stave),
- * non-Stave projects, and environments where Stave is off; disabled for
- * unbound manifests or a binary that lacks the operation (the same check
- * space settings applies).
+ * Read at menu-open time. Null for sagas, archived spaces (restored from New project →
+ * Stave), non-Stave projects and Stave-off environments; disabled for unbound manifests or a
+ * binary lacking the operation (the same check space settings applies).
  */
 export function readStaveSpaceLifecycleMenuEntry(member: {
   readonly environmentId: EnvironmentId;

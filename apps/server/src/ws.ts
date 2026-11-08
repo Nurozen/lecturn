@@ -416,11 +416,9 @@ const resolveFileManagerRevealKindForConfig = <E, R>(
 ) => resolveDiscoveryForConfig(discovery, () => undefined);
 
 /**
- * Resolves the host discoveries embedded in the server config side by side, so
- * a loaded host costs one discovery timeout per connect instead of their sum.
- * Clients abandon a connect whose config snapshot misses their establishment
- * window (15s) and retry, so serial timeouts kept a busy local server stuck
- * "reconnecting".
+ * Discoveries resolve side by side so a loaded host costs one timeout per connect, not their sum.
+ * Clients abandon and retry a connect whose config snapshot misses their 15s establishment window,
+ * so serial timeouts kept a busy local server stuck "reconnecting".
  */
 export const resolveConfigDiscoveries = <Target, E1, R1, E2, R2, E3, R3>(input: {
   readonly availableEditors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
@@ -480,8 +478,7 @@ export const withLateEditorConfig = <E, R>(
         editors.join() !== config.availableEditors.join() ||
         (editors.includes("file-manager") && config.shellRevealInFileManagerKind === undefined),
     ),
-    // Unbounded, unlike the snapshot: the reveal-kind probe is not shared, so
-    // a timeout here would cancel a probe that outlasts it every time.
+    // Leave the unshared reveal probe unbounded so timeouts cannot cancel every attempt on slow hosts.
     Stream.mapEffect((editors) =>
       resolveEditorConfig(editors, launcher.resolveFileManagerRevealKind()),
     ),
@@ -525,8 +522,7 @@ export const withLateEditorConfig = <E, R>(
             return [{ ...current, providers: event.payload.providers }, [event]];
           case "settingsUpdated":
             return [{ ...current, settings: event.payload.settings }, [event]];
-          // Themes and usage-limit sources never ride in a snapshot; clients
-          // carry their projected values across one.
+          // Themes and usage-limit sources survive snapshots because snapshots never include them.
           default:
             return [current, [event]];
         }
@@ -728,9 +724,7 @@ const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
 // Replaying each intervening event costs a shell refetch; past this gap a
 // single O(active-threads) snapshot is cheaper and bounded.
 const SHELL_RESUME_MAX_GAP = 1_000;
-// Row count alone does not bound replay memory: a few events with large tool
-// payloads can decode to gigabytes. Before replaying, sum the serialized
-// payload bytes of the range in SQL and reset with a snapshot past this budget.
+// Row counts do not bound large tool payloads; sum stored JSON bytes in SQL and snapshot above budget.
 const ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES = 8 * 1024 * 1024;
 
 function toAuthAccessStreamEvent(
@@ -813,8 +807,7 @@ function readClientConnectionOrigin(
   };
 }
 
-// Client telemetry stays in this socket's RPC layer. It must not become a
-// server-global "current client" because several client types can connect at once.
+// Keep telemetry per socket; several client types can connect simultaneously.
 function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) {
   const url = HttpServerRequest.toURL(request);
   if (Option.isNone(url)) {
@@ -1009,9 +1002,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
           afterSequence,
           throughSequence,
           limit: THREAD_RESUME_MAX_REPLAY_EVENTS + 1,
-          // A row a newer build wrote (e.g. after a downgrade) must not fail
-          // every resubscribe. The live tail resumes from `highWater`, so a
-          // dropped row never hides later events.
+          // Downgrades can leave unknown rows; skip them and resume live from highWater so later events survive.
           skipUnknownEventTypes: true,
         })
         .pipe(
@@ -1079,9 +1070,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       );
     });
 
-    // The event sink subscribes to live events before reading the persisted
-    // tail, so no event published during the replay window is lost; overlapping
-    // events are deduped by sequence on the client.
+    // Subscribe before reading persisted events to retain concurrent publishes; clients dedupe overlap by sequence.
     if (input.afterSequence !== undefined) {
       const highWater = yield* applicationEvents.latestAgentSequence(input.threadId).pipe(
         Effect.mapError(
@@ -1113,8 +1102,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
               }),
           ),
         );
-      // Bound stored JSON before decoding, then check projected event
-      // size separately. Neither byte count is a bound on process memory.
+      // Bound stored and projected payload bytes separately; neither bounds process memory.
       if (
         stats.eventCount > THREAD_RESUME_MAX_REPLAY_EVENTS ||
         !isThreadReplayRawPayloadSafe(stats.rawPayloadBytes)
@@ -1132,8 +1120,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
               }),
           ),
         );
-        // A retained creation can belong to a thread already deleted.
-        // Only replace its bounded replay when a snapshot can exist.
+        // Retained creation events may describe deleted threads; replace replay only if a snapshot exists.
         if (shell !== null) return yield* snapshotThenLive();
       }
       const replay = yield* loadReplayThrough(input.afterSequence, highWater);
@@ -1303,11 +1290,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       ),
     );
 
-    // Always attach the enrichment subscription before the first load so
-    // completions that race HTTP snapshot fetch still push a refresh. We still
-    // emit one compact metadata refresh up front: getAvailable may have been
-    // cold on the HTTP path (null identity), and enrichment PubSub events
-    // published before this subscribe attached are dropped.
+    // Subscribe before loading for racing enrichments; initial refresh covers pre-subscription completions and cold HTTP snapshots.
     const completionMarker =
       input.requestCompletionMarker === true
         ? Stream.make({ kind: "synchronized" as const })
@@ -1332,9 +1315,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           resolvedRepositoryIdentityRoots: loaded.resolvedRepositoryIdentityRoots,
         }),
       );
-    // Initial unmarked (+ optional same-load marked) always drains first.
-    // Enrichment merges only with the post-prefix tail so a ready marked
-    // refresh cannot interleave before the authoritative initial frame.
+    // Drain initial frames before merging enrichment with live events so marked refreshes cannot precede the initial frame.
     const completionThenLive = (afterSequence: number) =>
       Stream.concat(completionMarker, liveFrom(afterSequence));
 
@@ -3695,8 +3676,7 @@ export const layerWsRpc = (
     ),
   );
 
-// RpcServer's default sends a socket-level Defect frame instead, and the client
-// ends every pending request on the socket with it.
+// Default socket-level Defect frames end every pending client request.
 export const WS_RPC_SERVER_OPTIONS = {
   disableTracing: true,
   disableFatalDefects: true,
@@ -3813,15 +3793,13 @@ export const layer = Layer.unwrap(
               serverBrowser,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
-              // Request fibers run in the handlers' context, so this reporter sees
-              // their defects, not the rest of the server's.
+              // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
               Layer.provide(AgentSessionScanner.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
-              // One server-lifetime service means clients share the same PR caches, and a WS
-              // mutation invalidates the HTTP diff cache that every client reads from.
+              // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
               Layer.provide(

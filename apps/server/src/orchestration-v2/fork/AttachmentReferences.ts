@@ -1,21 +1,8 @@
 /**
- * Lecturn: deleting a thread removes only attachment files that no other
- * thread, live when the cleanup effect runs, shows. Two ways a thread shows
- * another thread's files:
- * - A run-less fork (V1-migrated or imported history) copies its source's
- *   messages with their attachment refs, and some V1-migrated fork children
- *   already reference their parent's files. Those copies are counted per id.
- * - A native fork (`forkedFrom.type === "run"`) stores no copies; it renders
- *   its source's history by reference, and keeps doing so after the source is
- *   soft-deleted (also through a deleted intermediate fork). While any live
- *   thread descends from the deleted thread through `forkedFrom` runs, all of
- *   its ids are kept, including messages past the fork cut. Those files are
- *   then never removed (no later cleanup lists them): a leak, never data loss.
- *
- * Checked when the cleanup effect runs, after the deleting thread's own
- * `thread.deleted` is committed, so the last of several threads sharing
- * copied refs to be deleted removes the file. A fork that commits after this
- * check is not seen.
+ * Lecturn: deleting a thread removes only attachment files no live thread shows. Run-less fork
+ * copies are counted per id; while a live native-fork descendant exists (even via deleted forks)
+ * all the deleted thread's ids are kept: a leak, never data loss. Checked after `thread.deleted`
+ * commits, so the last sharer removes the file; a fork committed after the check is not seen.
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

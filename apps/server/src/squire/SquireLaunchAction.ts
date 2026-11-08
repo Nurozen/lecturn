@@ -1,10 +1,6 @@
 /**
- * Thread creation for held and accepted proposals. The
- * intent stores the whole launch input with deterministic ids, so a crash
- * between `thread.create` and the initial message is reconciled from the two
- * receipts and a re-launch replays the create and sends the message under its
- * stored id, never a second thread. Created threads are ordinary (unmarked).
- *
+ * The intent stores the whole launch input with deterministic ids, so a crash between `thread.create` and the initial
+ * message reconciles from the two receipts, never a second thread. Created threads are ordinary (unmarked).
  * @module squire/SquireLaunchAction
  */
 import {

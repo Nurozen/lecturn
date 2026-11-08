@@ -1,20 +1,10 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Builds the showcase's shipped assets. The server ships as one bundle
- * (and one executable), so the template and the Lead stills travel as TS
- * modules, like the skill text. `template.html` stays the template's truth;
- * the stills live only in their module, and `stills/manifest.json` records
- * each one's hash, which `SquireShowcase.test.ts` checks the module against.
- *
- *   node apps/server/scripts/squire-showcase-assets.ts template
- *   node apps/server/scripts/squire-showcase-assets.ts stills <gold-stills-dir> [--tint gold] [--crest vector-overlay]
- *
- * Run `vp fmt` on the generated modules afterwards. `stills` needs `cwebp`
- * and `dwebp` (libwebp) on the host. Each still is
- * resized to the header's 2x size, the colour under alpha 0 is zeroed, it is
- * re-encoded lossless with `-exact` (lossy WebP cannot keep those zeros), and
- * decoded again to prove it: `stills/manifest.json` records the check.
+ * Usage: `node <this> template|stills <gold-stills-dir> [--tint gold] [--crest vector-overlay]`,
+ * then `vp fmt` the output. `template.html` stays the template's truth; stills live only in their
+ * module, hashed in `stills/manifest.json`. `stills` needs libwebp: lossless `-exact` keeps the
+ * zeroed colour under alpha 0, which lossy WebP cannot.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";

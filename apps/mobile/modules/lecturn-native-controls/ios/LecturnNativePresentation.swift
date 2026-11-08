@@ -39,7 +39,6 @@ final class LecturnPresentationSourceView: ExpoView {
   }
 }
 
-/// Sizes the containing React Native modal without replacing UIKit's sheet interaction.
 final class LecturnContextSheetSizeView: ExpoView {
   var contentHeight: CGFloat = 0 {
     didSet { updateSheet() }

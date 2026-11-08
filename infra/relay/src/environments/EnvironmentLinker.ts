@@ -339,11 +339,9 @@ const make = Effect.gen(function* () {
               undefined,
               verified.environmentId,
             );
-          // Downgrading a managed link to publish-only must release the tunnel and
-          // DNS that were provisioned for it — nothing else cleans them up until a
-          // full unlink. Best effort: a cleanup failure must not block the link
-          // itself, and the provider treats an absent allocation as already
-          // deprovisioned, so retrying on every non-tunnel link is cheap.
+          // Downgrading a managed link to publish-only must release its tunnel and DNS; nothing
+          // else cleans them up until a full unlink. Best effort: a failure must not block the
+          // link, and an absent allocation counts as deprovisioned, so retrying is cheap.
           if (!input.request.managedTunnelsEnabled) {
             yield* managedEndpointProvider
               .deprovision({

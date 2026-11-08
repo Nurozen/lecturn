@@ -2,13 +2,9 @@
 import * as NodeCrypto from "node:crypto";
 
 /**
- * "Ask about this": the user's question about a card goes to a
- * temporary fork of the card's target thread, marked as a probe, so it runs
- * the deny runtime with auto-decline, gets no MCP session, and is refused
- * every command from outside Squire modules. The answer lands in the card's
- * `ask_json` when the reactor sees the probe's run end; the probe is then
- * deleted, since an archived shell still streams. Nothing is written to the
- * source thread or to the Squire's home thread.
+ * The probe fork runs the deny runtime with auto-decline, gets no MCP session, and is refused every command from
+ * outside Squire modules. It is deleted after its run ends, since an archived shell still streams.
+ * Nothing is written to the source thread or to the Squire's home thread.
  */
 import {
   CommandId,

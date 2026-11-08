@@ -1,15 +1,7 @@
 /**
- * StaveProjectShells - V2 project shells with their Stave `stave` / `notice`
- * fields attached.
- *
- * V1 attached these in ProjectionSnapshotQuery. On V2 the durable project read
- * model is `ProjectStoreV2` (`projection_projects`), which knows nothing about
- * Stave, so every Stave reader decorates rows here: the manifest at the root
- * (through the cached `StaveWorkspaceReader`, enriched with saga membership
- * when available) and the lifecycle notice from `stave_project_lifecycle`.
- * The decoration never runs inside a SQL transaction.
- *
- * @module StaveProjectShells
+ * `ProjectStoreV2` knows nothing about Stave, so every Stave reader decorates project shells here
+ * with the root's manifest and the `stave_project_lifecycle` notice. The decoration never runs
+ * inside a SQL transaction.
  */
 import type { OrchestrationProjectShell, ProjectId } from "@lecturn/contracts";
 import * as Context from "effect/Context";

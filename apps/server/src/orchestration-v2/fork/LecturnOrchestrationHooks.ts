@@ -1,22 +1,8 @@
 /**
- * Lecturn fork extension points for the V2 orchestrator.
- *
- * Upstream V2 files call this service at a few fixed sites; fork features
- * (Stave admission and runtime fence, Contextual turn preparation, team
- * provider policy, provider work admission, decisions, relay) register a
- * contribution instead of editing those files. With no contribution
- * registered every call is a no-op, so upstream behavior is unchanged.
- *
- * Contributions register at layer build time:
- *
- *   Layer.effectDiscard(Effect.gen(function* () {
- *     const hooks = yield* LecturnOrchestrationHooks;
- *     yield* hooks.register({ name: "stave", aroundCommand: ... });
- *   }))
- *
- * Registration is scoped: closing the registering layer removes it.
- * Contributions are read on every call, so a contribution may depend on
- * OrchestratorV2 itself without a construction cycle.
+ * Lecturn fork extension points for the V2 orchestrator: fork features register a contribution
+ * (`hooks.register({ name, aroundCommand })` at layer build) instead of editing upstream V2 call
+ * sites, and with none registered every call is a no-op. Registration is scoped to its layer and
+ * contributions are read per call, so one may depend on OrchestratorV2 without a cycle.
  */
 import type {
   MessageId,
@@ -114,15 +100,10 @@ export interface LecturnTurnStartDecision {
 }
 
 /**
- * Fixed contribution order (registration timing does not matter: server.ts
- * builds the registering layers in parallel). First = outermost aroundCommand /
- * aroundProviderSessionOpen wrapper and first beforeTurnStart. Policy refuses a
- * turn before Contextual prepares anything; provider work admission claims
- * foreground last, right before the provider turn (V1 claimed it in
- * sendTurn), so a held turn never keeps the background decision writer
- * paused. Unknown names run after these, in registration order.
- * Lecturn: the Squire allowlist is outermost, so nothing runs for a command it
- * refuses on a Squire thread.
+ * Fixed contribution order, whatever the registration timing (server.ts builds layers in parallel);
+ * first is the outermost wrapper and first beforeTurnStart. The Squire allowlist is outermost,
+ * policy refuses before Contextual prepares, and provider work admission claims foreground last so
+ * a held turn never pauses the background decision writer. Unknown names run after these.
  */
 export const LECTURN_HOOK_ORDER: ReadonlyArray<string> = [
   "squire",
@@ -239,12 +220,10 @@ export interface LecturnOrchestrationHooksContribution {
     dispatch: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | LecturnHookRejectedError, R>;
   /**
-   * Called once per run start attempt, before the provider session opens and
-   * before the run is marked running. May do bounded work (Contextual
-   * preparation) but must not wait on a user: return `defer` instead, which
-   * releases the effect worker slot and re-runs the chain later. A rejection
-   * fails the run with the reason as its error item (or cancels it, see
-   * LecturnHookRejectedError.disposition).
+   * Once per run start attempt, before the provider session opens and the run is marked running.
+   * May do bounded work (Contextual preparation) but must not wait on a user: return `defer`, which
+   * frees the effect worker slot and re-runs the chain later. A rejection fails the run (or cancels
+   * it, see LecturnHookRejectedError.disposition).
    */
   readonly beforeTurnStart?: (
     input: LecturnTurnStartInput,

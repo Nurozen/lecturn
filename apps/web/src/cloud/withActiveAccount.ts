@@ -81,15 +81,10 @@ export function withActiveSessionTurn<A>(
 }
 
 /**
- * Runs `fn` while `accountId` is Clerk's active account, for the few places
- * where Clerk itself has to act as that account: the CLI authorize redirect
- * and Clerk's profile pages. It is the only caller of `setActive` for choosing
- * an account. Relay reads never need it: they take the account's own token
- * from `readToken(accountId)`.
- *
- * Calls take turns through `withActiveSessionTurn`, with its timeout and its
- * rule against re-entry. The account is made active only when it is not
- * already, checked before and after `fn`, and left active afterwards.
+ * The only `setActive` caller for choosing an account, for where Clerk itself must act as it
+ * (CLI authorize redirect, profile pages); relay reads use `readToken(accountId)`. Calls take
+ * turns via `withActiveSessionTurn` (timeout, no re-entry); the account is checked before
+ * and after `fn` and left active.
  */
 export function withActiveAccount<A>(
   accountId: string,

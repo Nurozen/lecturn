@@ -1,12 +1,8 @@
 /**
- * The command allowlist on Squire-marked threads, always on so a
- * home thread listed by a switch-off or pre-Squire client stays guarded.
- * Default deny: only Squire modules (inside `SquireDispatchOrigin`) run
- * arbitrary commands on a marked thread; anyone else may read, send with the
- * thread's own model, answer a request, and stop.
- *
- * Inside `SquireDispatchOrigin` it also re-checks a held execution's or an
- * accept's trigger under the target's command lock.
+ * Always on, so a home thread listed by a switch-off or pre-Squire client stays guarded. Default deny: only
+ * `SquireDispatchOrigin` runs arbitrary commands on a marked thread; anyone else may read, send with the thread's
+ * own model, answer a request, and stop. It also re-checks a held execution's or an accept's trigger under the
+ * target's command lock.
  */
 import {
   CommandId,
@@ -42,11 +38,8 @@ import * as SquireRepository from "./SquireRepository.ts";
 const CONTRIBUTION = "squire";
 
 /**
- * - `squire`: only a Squire-dispatched command passes.
- * - `user`: passes from any caller.
- * - `user-message`: a user's message in the thread's own model (`allowedUserMessage`).
- * - `plumbing`: server bookkeeping that cannot change provider, model, modes,
- *   cwd, PR links, or lifecycle.
+ * `squire`: only Squire-dispatched. `user`: any caller. `user-message`: a user's message in the thread's own model.
+ * `plumbing`: server bookkeeping that cannot change provider, model, modes, cwd, PR links, or lifecycle.
  */
 type SquireCommandRule = "squire" | "user" | "user-message" | "plumbing";
 

@@ -1103,12 +1103,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
-  // Server-linked pull requests use the shared badge: a stack shows its layer
-  // count and several unrelated links their total, colored by aggregate state;
-  // either opens the thread's pull requests tab. Otherwise the watched and
-  // branch PRs stay individual links. All are real links so cmd/ctrl+click and
-  // middle-click open the host in the browser; a plain click still opens
-  // Lecturn's pull request view.
+  // Server-linked PRs use the shared badge (stack layer count or link total, colored by
+  // aggregate state) and open the pull requests tab; otherwise watched and branch PRs stay
+  // individual. All are real links so cmd/ctrl/middle-click open the host in the browser,
+  // while a plain click opens Lecturn's pull request view.
   const prBadgeShape = supportsMultiplePullRequests
     ? resolveThreadPullRequestBadge(thread.pullRequests)
     : null;

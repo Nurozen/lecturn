@@ -32,9 +32,7 @@ export class ThreadForkPlanError extends Schema.TaggedError<ThreadForkPlanError>
   },
 ) {}
 
-/**
- * `waiting` is provider-finished with checkpoint capture still pending.
- */
+/** waiting means provider-finished with checkpoint capture pending. */
 export function isForkableSourceRunStatus(status: OrchestrationV2Run["status"]): boolean {
   return (
     status === "completed" ||
@@ -52,11 +50,10 @@ export function forkableSourceRunStatusError(
 }
 
 /**
- * Lecturn: fork of run-less history (a V1 migration transcript or an imported
- * session). There is no run or native turn to fork from, so the child is not
- * `forkedFrom` a run: it carries its own copy of the history (written by the
- * caller) and a pending fork transfer anchored at the last carried item, which
- * its first turn resolves as portable context.
+ * Lecturn: fork of run-less history (a V1 migration transcript or an imported session). With no run
+ * to fork from, the child is not `forkedFrom` a run: it carries its own copy of the history and a
+ * pending fork transfer at the last carried item, which its first turn resolves as portable
+ * context.
  */
 export function planRunlessThreadFork(input: {
   readonly sourceThread: OrchestrationV2AppThread;

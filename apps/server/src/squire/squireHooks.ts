@@ -1,10 +1,6 @@
 /**
- * Hooks that let feature layers follow stored summaries and thread changes
- * without the summary writers or the reactor depending on them. The
- * writers read the registry with `Effect.serviceOption` when they are built,
- * and features register into it when they are built, so layer order does
- * not matter as long as one registry instance sits below both.
- *
+ * Writers read the registry with `Effect.serviceOption` and features register into it when built, so layer order
+ * does not matter as long as one registry instance sits below both.
  * @module squire/squireHooks
  */
 import type { RunId, SquireTurnSummary, ThreadId } from "@lecturn/contracts";

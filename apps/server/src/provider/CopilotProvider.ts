@@ -84,13 +84,8 @@ function copilotModels(
 }
 
 /**
- * Reads the model ids listed under the `model` key of `copilot help config`:
- *
- *       `model`: AI model to use for Copilot CLI; ...
- *         - "claude-sonnet-5"
- *         - "gpt-5-mini"
- *
- *       `contextTier`: ...
+ * Reads the indented `- "claude-sonnet-5"` lines under the `model` key of `copilot help config`,
+ * up to the next key.
  */
 export function parseCopilotHelpConfigModels(output: string): ReadonlyArray<ServerProviderModel> {
   const models: ServerProviderModel[] = [];
@@ -151,11 +146,9 @@ const readCopilotConfigLogin = Effect.fn("readCopilotConfigLogin")(function* (
 });
 
 /**
- * Asks the CLI itself: `initialize` then `authenticate` in one short-lived `copilot --acp`
- * process that is closed right after. Neither request opens a session. Environment tokens
- * and `config.json` are not trusted on their own because Copilot falls back to its keychain
- * login. An `auth_required` answer is "unauthenticated"; any other failure or a timeout is
- * "unknown".
+ * Asks a short-lived `copilot --acp` (`initialize`, `authenticate`; no session). Env tokens and
+ * `config.json` are not trusted alone because Copilot falls back to its keychain login.
+ * `auth_required` is "unauthenticated"; any other failure or a timeout is "unknown".
  */
 export const resolveCopilotAuth = Effect.fn("resolveCopilotAuth")(function* (
   settings: GithubCopilotSettings,

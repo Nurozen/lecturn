@@ -1,9 +1,6 @@
 /**
- * Lead control and the Squire-store accept executors on the
- * server's switch-on Squire layer over a real orchestrator: the five Lead
- * control tools in every Manage Squires cell, their execution after the undo
- * window, their revert, and accepting a Lead Squire proposal. A crash is the
- * layer's scope closing; a restart builds it again over the same home.
+ * Lead control and Squire-store accept executors on the switch-on Squire layer over a real orchestrator.
+ * A crash is the layer's scope closing; a restart builds it again over the same home.
  */
 import { assert, describe, it } from "@effect/vitest";
 import {

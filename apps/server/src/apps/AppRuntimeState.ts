@@ -1,11 +1,7 @@
 /**
- * Connected-app state that orchestration hooks must reach.
- *
- * `AppsOrchestrationHooks` registers inside the orchestration runtime, which
- * is built below AppsLayer and cannot see its services. So the state those
- * hooks read lives here, provided once by RuntimeLayer, and the AppsLayer
- * services that own it (AppHostContextStore, HeadlessToolHost) wrap these same
- * refs instead of keeping their own. State only: no logic, no dependencies.
+ * Connected-app state that orchestration hooks must reach. The orchestration runtime is built below
+ * AppsLayer, so RuntimeLayer provides these refs once and the AppsLayer services that own them
+ * (AppHostContextStore, HeadlessToolHost) wrap the same refs. State only: no logic.
  */
 import type { AppId, ProjectId, ThreadId } from "@lecturn/contracts";
 import * as Context from "effect/Context";

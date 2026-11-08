@@ -38,12 +38,9 @@ export function accountPickerVisible(input: {
 }
 
 /**
- * The account a surface acts as. Without a picker that is Clerk's active
- * account, as it was before accounts could be chosen. With one it is the
- * first signed-in account of: the choice made while the surface is open, the
- * account the surface was opened for, the open thread's owner, the account
- * last used on this surface, and Clerk's active account. An account that needs sign-in is never
- * the answer, since it has no token to act with.
+ * Without a picker, Clerk's active account. With one, the first signed-in account of: the
+ * open choice, the account the surface opened for, the thread's owner, the last used here,
+ * Clerk's active one. An account that needs sign-in is never the answer (no token).
  */
 export function resolvePickedAccount(input: {
   readonly knownAccountIds: ReadonlyArray<string>;

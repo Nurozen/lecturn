@@ -50,8 +50,7 @@ const UPDATE_FAILURE_LOG_OUTPUT_MAX_LENGTH = 2_000;
 // Package managers must not inherit it: it leaks into install scripts and any
 // Electron-based tool they launch.
 const UPDATE_ENV_BLOCKLIST = new Set(["ELECTRON_RUN_AS_NODE"]);
-// Every progress publish resends the provider list to each client, so the
-// installer's output is sampled rather than forwarded line by line.
+// Sample installer output because every progress update resends the provider list to all clients.
 const UPDATE_PROGRESS_INTERVAL = Duration.seconds(1);
 const UPDATE_PROGRESS_MAX_LENGTH = 200;
 // An installer may write for minutes without a line ending; only its tail matters.
@@ -105,9 +104,7 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn("ProviderMaintenanceR
   }) {
     const collectCommandResult = Effect.fn("ProviderMaintenanceRunner.collectCommandResult")(
       function* () {
-        // On Windows the update tools are batch shims (e.g. `npm` -> `npm.cmd`), which a bare
-        // ChildProcess.spawn cannot launch (spawn npm ENOENT); resolveSpawnCommand finds the
-        // real `.cmd` and routes it through the shell.
+        // Windows batch shims require shell dispatch through resolveSpawnCommand.
         const resolved = yield* resolveSpawnCommand(input.command, input.args);
         const hostEnvironment = yield* HostProcess.Environment;
         const env = Object.fromEntries(
@@ -306,7 +303,7 @@ function makeUpdateState(input: {
   };
 }
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const manifestService = yield* ModelManifest.ModelManifest;
@@ -466,9 +463,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               }
             }
 
-            // The cached capabilities chose the lock; re-derive ownership
-            // now so the command that runs matches the executable as it is
-            // at click time, not as it was at the last health refresh.
+            // Recheck ownership after acquiring the cached lock in case the executable changed.
             const fresh = yield* providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
               instanceId,
               provider,
@@ -564,8 +559,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               verified,
               instanceId,
             );
-            // A missing version alone is not held against it, since Cursor's `about` probe can
-            // fail transiently on a healthy binary.
+            // Cursor about probes can fail transiently; missing versions alone do not imply failure.
             const couldNotVerify =
               verifiedProviders.length === 0 ||
               verifiedProviders.some((verifiedProvider) => {

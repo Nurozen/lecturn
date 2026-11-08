@@ -31,11 +31,10 @@ type BridgeWindow = Pick<Window, "addEventListener" | "removeEventListener" | "p
 };
 
 /**
- * An Electron host's helper preload exposes a way out and re-posts host messages to this window
- * from its isolated world, so they arrive same-origin from this window. An iframe host talks over
- * `postMessage` with the parent, pinned to the origin it named in the hash; without one there is
- * no origin to trust, so there is no bridge. The hash is the host's own claim, so the frame stays
- * silent until that origin is checked against the app's declared `embedOrigins`.
+ * Electron: the helper preload re-posts host messages same-origin from its isolated world.
+ * Iframe: `postMessage` with the parent, pinned to the origin named in the hash; no origin, no
+ * bridge. The hash is the host's own claim, so the frame stays silent until that origin is
+ * checked against the app's declared `embedOrigins`.
  */
 export function resolveEmbedTransport(
   win: BridgeWindow,

@@ -1,13 +1,8 @@
 /**
- * The one owner of a thread's server-set thread metadata: the connected-app
- * fields (`copiedFrom`, `appData`, `appSubtitle`, `appOrigin`, `continuedIn`)
- * and the Squire marker (`squire`). Orchestration decides them,
- * events carry them inside the thread payload, the projection stores that
- * payload, and both shell builders copy them through this module, so a field
- * added here reaches every reader at once.
- *
- * A thread without this metadata has none of the keys, so non-app payloads and
- * shells stay byte-for-byte what they were.
+ * Sole owner of a thread's server-set metadata: the connected-app fields (`copiedFrom`, `appData`,
+ * `appSubtitle`, `appOrigin`, `continuedIn`) and the Squire marker (`squire`). Both shell builders
+ * copy them through here, so a new field reaches every reader. A thread without this metadata has
+ * none of the keys, so non-app payloads and shells stay byte-for-byte unchanged.
  */
 import {
   AppOrigin,

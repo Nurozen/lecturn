@@ -1,10 +1,6 @@
 import type { ProviderInteractionMode } from "@lecturn/contracts";
 
-/**
- * Authored as self-contained sections so a provider that limits the size of
- * each instruction entry can deliver every one whole. Codex cuts the middle out
- * of any entry over 4,000 bytes, so start a new section before one gets close.
- */
+// Codex truncates entries over 4,000 bytes; keep each section self-contained and below that limit.
 export const LECTURN_ORCHESTRATION_SECTIONS: ReadonlyArray<string> = [
   `## Lecturn orchestration
 
@@ -130,10 +126,7 @@ export function lecturnAcpInstructionState(input: {
   };
 }
 
-/**
- * ACP has no system/developer prompt field, so send Lecturn-owned context in the
- * first user prompt and whenever the available tools or interaction mode change.
- */
+/** ACP lacks system/developer fields; inject context on first prompt and tool/mode changes. */
 export function lecturnAcpPromptWithInstructions(input: {
   readonly prompt: string;
   readonly state: LecturnAcpInstructionState;
@@ -175,9 +168,6 @@ export function lecturnAcpPromptWithInstructions(input: {
   return `<lecturn_instructions>\n${instructions.join("\n\n")}\n</lecturn_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
 
-/**
- * Keep the wrapper explicit so it cannot be mistaken for text authored by the user.
- */
 function prependLecturnOrchestrationInstructions(prompt: string, instructions: string): string {
   return `<lecturn_orchestration_instructions>${instructions.trim()}</lecturn_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
 }

@@ -1,12 +1,7 @@
 /**
- * StaveRootsProvider - where the Stave agent-work directory lives, for callers
- * that must never adopt an ancestor repository from inside it (git spawns
- * whose cwd sits under a space). `layer` reads the selected config directly from disk through `StaveConfigReader`
- * without invoking Stave and reports none
- * until a config file exists; `layerNoop` answers none for hosts and tests
- * without Stave.
- *
- * @module StaveRoots
+ * Where the Stave agent-work directory lives, for git spawns that must never adopt an ancestor
+ * repository from inside a space. `layer` reads the config from disk without invoking Stave and
+ * reports none until a config file exists; `layerNoop` answers none for hosts without Stave.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

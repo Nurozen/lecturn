@@ -20,13 +20,10 @@ const IN_PROGRESS_RUN_STATUSES: ReadonlySet<ThreadRuntimeSummary["status"]> = ne
 ]);
 
 /**
- * Whether a fork-at-latest-run can dispatch right now. Forking needs a live
- * connection (cached capabilities lie while offline), a server that advertises
- * the capability, and a completed latest run to cut the history at — a running
- * thread has no fork point, and a never-run thread has one only when it holds
- * run-less history (V1 migration, import) to fork whole. The provider does not gate: V2 forks
- * natively when it can and otherwise carries the transcript as portable
- * context (presentation `conversationFork` only describes the native path).
+ * Forking needs a live connection (cached capabilities lie while offline), the server
+ * capability, and a completed latest run; a never-run thread forks whole only when it holds
+ * run-less history (V1 migration, import). The provider does not gate: V2 carries the
+ * transcript as portable context when it cannot fork natively.
  */
 export function resolveThreadForkAvailability(input: {
   readonly serverSupportsForking: boolean;

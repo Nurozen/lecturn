@@ -1,7 +1,4 @@
-/**
- * Each event carries a uuid, so PostHog can tell a retried copy from a new
- * event.
- */
+// Event UUIDs let PostHog tell a retried copy from a new event.
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import type { ClientOs } from "@lecturn/contracts";
 import * as Clock from "effect/Clock";
@@ -46,8 +43,7 @@ interface DeliveryState {
   readonly retryAt: number;
 }
 
-// The background flush checks for work at this interval, so a retry delay
-// shorter than it waits for the next check.
+// Retry delays shorter than this still wait for the next background check.
 const FLUSH_INTERVAL_MS = 10_000;
 // A hung send would hold the flush lock, and with it the shutdown flush.
 const SEND_TIMEOUT = "10 seconds";
@@ -58,17 +54,11 @@ const RETRY_BASE_DELAY_MS = 2_000;
 // server's own.
 const MAX_RECORDED_OWNERS = 1_000;
 const RETRY_MAX_DELAY_MS = 300_000;
-// The endpoint answers these when the batch itself is wrong (bad body, wrong
-// api_key, too large), so sending it again cannot help. 408 and 429 are not
-// here because a later send can succeed.
+// These statuses reject the batch itself; unlike 408/429, retrying cannot help.
 const REJECTED_BATCH_STATUSES = new Set([400, 401, 413]);
 
-/**
- * Release channel of this build. Release workflows set it for
- * Nurozen/lecturn builds (see apps/server/vite.config.ts); every other build
- * reports "dev". It is separate from `__LECTURN_BUILD_CHANNEL__`, which names
- * stable "latest" and preview "nightly" for the sign-in page.
- */
+// Official release workflows set this telemetry channel; other builds report dev.
+// Unlike __LECTURN_BUILD_CHANNEL__, this is not the sign-in page's latest/nightly channel.
 declare const __LECTURN_TELEMETRY_CHANNEL__: "stable" | "nightly" | "preview" | "dev" | undefined;
 
 /** `random` is in [0, 1). */
@@ -139,7 +129,7 @@ function serverOsFromNodePlatform(platform: string): ClientOs {
 }
 
 /** @public */
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
   const httpClient = yield* HttpClient.HttpClient;
@@ -240,8 +230,7 @@ export const make = Effect.gen(function* () {
     return [nextBatch, current.slice(nextBatch.length)] as const;
   });
 
-  // A rejected batch is dropped at once, but the next batch still waits for the
-  // backoff, so a wrong api_key does not send every batch as fast as it can.
+  // Back off even after dropping rejected batches so bad API keys cannot drain the queue in a tight loop.
   const flush: AnalyticsService["Service"]["flush"] = Effect.gen(function* () {
     while (true) {
       const delivery = yield* Ref.get(deliveryRef);
@@ -294,8 +283,7 @@ export const make = Effect.gen(function* () {
     function* (event, properties) {
       if (!telemetryConfig.enabled || !distinctId) return;
 
-      // Telemetry is best effort: an event without a uuid is not sent. The
-      // Node implementation throws (a defect) rather than failing, so catch both.
+      // Catch Node UUID defects too; best-effort telemetry drops events without UUIDs.
       const uuid = yield* Effect.exit(crypto.randomUUIDv7());
       if (Exit.isFailure(uuid)) return;
 

@@ -1,9 +1,7 @@
 /**
- * Default-deny authorization for `app:` and `embed:` sessions.
- * Scopes have already been checked by the time this runs; this decides which
- * methods such a session may call at all and which projects it may touch.
- * A method missing from `APP_RPC_RULES` is refused, so a new RPC is closed
- * to connected apps until someone decides otherwise.
+ * Default-deny authorization for `app:` and `embed:` sessions, after scope checks: which methods
+ * such a session may call and which projects it may touch. A method missing from `APP_RPC_RULES` is
+ * refused, so a new RPC is closed to connected apps until someone decides otherwise.
  */
 import {
   APPS_WS_METHODS as A,

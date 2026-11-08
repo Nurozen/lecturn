@@ -1,19 +1,7 @@
 /**
- * StaveSettlement - Stave evidence for V2 automatic thread settlement.
- *
- * Re-homed from the V1 ThreadSettlementReactor Stave branches so the V2
- * `ThreadSettlementService` only needs a few calls:
- * - `decorateProjects`: project shells with their Stave fields, so the sweep
- *   knows which projects are spaces;
- * - `sagaMergedProjects`: spaces whose saga merged (settle-on-saga-merge);
- * - `spacePullRequest`: one aggregate pull request decision for a thread in a
- *   live space, read from every editable checkout plus the thread's explicit
- *   link. Any open member keeps the whole space active; missing evidence
- *   decides nothing; terminal members settle at the latest terminal time.
- * Pure helpers (`aggregateSpacePullRequests`, `linkedHostMatchesMerge`) carry
- * the decisions that do not need I/O.
- *
- * @module StaveSettlement
+ * Stave evidence for V2 automatic thread settlement. A space's pull request decision reads every
+ * editable checkout plus the thread's explicit link: any open member keeps the whole space active,
+ * missing evidence decides nothing, and terminal members settle at the latest terminal time.
  */
 import type {
   GitManagerServiceError,

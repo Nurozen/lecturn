@@ -1684,7 +1684,7 @@ describe("imported thread history (Lecturn)", () => {
       false,
       claudeImport,
     );
-    // The settled fold keeps only the imported exchange's terminal reply (upstream #21393).
+    // The settled fold keeps only the imported exchange's terminal reply.
     expect(collapsed.map((entry) => entry.type)).toEqual([
       "message",
       "run-fold",

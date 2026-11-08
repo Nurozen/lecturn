@@ -15,12 +15,9 @@ import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { formatStaveRepoStatus } from "./StaveProjectSection.logic";
 
 /**
- * The `.stave.yaml` manifest the server attached to a project, enriched with
- * live drift and memory freshness from `stave.spaceStatus` when the feature
- * gate passes. Manifest rows always render; live columns appear only once
- * the probe answers, and a failed probe is reported inline rather than
- * replacing the view. Everything here is owned by Stave; edits go through
- * the CLI.
+ * Stave owns everything here; edits go through the CLI. Manifest rows always render; live
+ * drift/memory columns from `stave.spaceStatus` appear once the probe answers, and a failed
+ * probe is reported inline rather than replacing the view.
  */
 export function StaveProjectSection({
   stave,

@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - browser test commands run in Vitest's Node process.
 /**
- * Browser test commands for the locked page adversarial test
- * (`HtmlRenderFrame.locked.browser.test.tsx`): one server publishes documents
- * with the asset route's headers, and one HTTP and one UDP listener per page
- * kind record whatever reaches them, so a probe on an ordinary page proves the
- * same probe on a locked page could have reached its own listener.
+ * Commands for `HtmlRenderFrame.locked.browser.test.tsx`: a server publishes documents with
+ * the asset route's headers, and per page kind an HTTP and a UDP listener record whatever
+ * reaches them, so the ordinary page proves a probe could have reached its listener.
  */
 import * as NodeDgram from "node:dgram";
 import * as NodeHttp from "node:http";

@@ -1,14 +1,7 @@
 /**
- * Read sources for Lecturn fork features (decisions, contextual, thread notes)
- * on the V2 orchestrator projections.
- *
- * V2 never writes the V1 `projection_threads` / `projection_thread_messages`
- * tables. Every app thread has a V2 row (the legacy importer reconciles all V1
- * shells at startup), but V1 transcripts hydrate lazily, so until a thread's
- * transcript is imported its messages are read from the V1 copy. Message ids
- * are preserved by the importer, so anchors keyed by message id stay valid.
- *
- * Both fragments keep the V1 column names their callers already use.
+ * V2 never writes the V1 projection tables, but V1 transcripts hydrate lazily, so a thread's
+ * messages are read from the V1 copy until its transcript is imported. The importer preserves
+ * message ids, so anchors keyed by message id stay valid.
  */
 import type * as SqlClient from "effect/sql/SqlClient";
 

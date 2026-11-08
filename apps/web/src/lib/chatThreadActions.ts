@@ -92,11 +92,9 @@ interface ThreadModeSource {
 }
 
 /**
- * The runtime and interaction mode a thread created from the viewed thread
- * carries over. Each mode resolves independently: the composer's override
- * (what the user currently sees in the controls) first, then the persisted
- * thread, then the draft. Null means there is nothing to carry and the caller
- * falls back to its own default.
+ * Each mode resolves independently: the composer's override (what the controls show), then
+ * the persisted thread, then the draft. Null means nothing to carry; the caller falls back
+ * to its own default.
  */
 export function resolveCarriedThreadModes(sources: {
   readonly composer: ThreadModeSource | null | undefined;

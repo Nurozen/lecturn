@@ -1,13 +1,10 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-// Enum-like columns carry no CHECK: their value sets grow across Squire phases,
-// and SQLite can only widen a CHECK by rebuilding the table.
-// No foreign keys, within Squire or across domains: the Squire reactor runs the
-// cascades, so a deleted thread, project, or Squire is cleaned up in steps that
-// resume at startup.
-// Idempotent because Migrations.ts re-runs it whenever another build's ledger
-// holds a different migration at this id.
+// No CHECK on enum-like columns: their value sets grow across Squire phases and SQLite widens a
+// CHECK only by rebuilding. No foreign keys: the Squire reactor runs cascades in steps that resume
+// at startup. Idempotent because Migrations.ts re-runs it whenever another build's ledger holds a
+// different migration at this id.
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 

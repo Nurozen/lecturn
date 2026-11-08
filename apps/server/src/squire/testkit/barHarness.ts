@@ -1,17 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - Run files go to the repo-root artifacts folder; action-log data is stored JSON.
 /**
- * The gold-scenario bar harness: the Squire stack as the server builds
- * it (`phase4Layer`: real orchestrator, switch-on `layerSquire`, the fixture
- * seam) plus the production `/mcp` route on a test HTTP port, with the real
- * `McpSessionRegistry` the provider session manager issues home-thread
- * credentials from. A Squire turn's tool calls therefore go provider ->
- * HTTP -> gate -> `SquireToolInterceptor` -> `SquireTools`, as a real
- * provider's do. Each run gets a fresh layer in a fresh temp Lecturn home.
- *
- * The Squire's provider is an option: `scripted` (`squireFake`) or, for
- * live runs, a real `claudeAgent` or `codex` adapter launched from a temp
- * provider home (`barProviders.ts`). Only the Squire's home thread runs the
- * live provider; fixture worker threads stay scripted.
+ * The Squire stack as the server builds it plus the production `/mcp` route on a test HTTP port, so a Squire turn's
+ * tool calls go through HTTP, the gate, and `SquireToolInterceptor` as a real provider's do. Each run gets a fresh
+ * layer in a fresh temp Lecturn home. Only the Squire's home thread runs a live provider; workers stay scripted.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -341,12 +332,9 @@ export const barMark = (loaded: BarLoaded, index: number, action: BarTimelineMar
   });
 
 /**
- * Lets everything the clock and the last step started finish, without
- * sleeping: the clock's `runDue` (due holds through `executeDue`, due rows,
- * slots), then the effect worker, the reactor, delivery, and every in-flight
- * row of the Squire under test, until no new application event appears.
- * The server's own clock fiber may run the same hold concurrently; the
- * action locks and status compare-and-set make that one execution.
+ * Lets everything the clock and the last step started finish, without sleeping, until no new application event
+ * appears. The server's own clock fiber may run the same hold concurrently; the action locks and status
+ * compare-and-set make that one execution.
  */
 export const barSettle = (squireId: SquireId) =>
   Effect.gen(function* () {
@@ -375,11 +363,9 @@ export const barSettle = (squireId: SquireId) =>
   });
 
 /**
- * One timeline step in the current server lifetime, then `barSettle`.
- * `advance` moves the test clock (a live clock refuses it); `undo` presses
- * Undo on every pending hold as the user would (`squire.items.act`, a
- * request id derived from the step); `seedUsage` and `moveHead` are the
- * fixture's own. `restart` needs the lifetime boundary `withBarTimeline` owns.
+ * One timeline step in the current server lifetime, then `barSettle`. `advance` moves the test clock (a live clock
+ * refuses it); `undo` presses Undo on every pending hold as the user would. `restart` needs the lifetime boundary
+ * `withBarTimeline` owns.
  */
 export const applyBarTimelineStep = (
   loaded: BarLoaded,
@@ -426,18 +412,9 @@ const barRestart = (loaded: BarLoaded) =>
   });
 
 /**
- * A gold scenario with a timeline: `runBarScenario`, then each timeline step on the
- * test clock, with a mark after the events and after every step. A
- * `restart` closes the server lifetime (every Squire fiber and the `/mcp`
- * route), moves the test clock by the downtime, and builds a fresh bar layer
- * over the same Lecturn home and database, which reconciles and re-arms as
- * the server does. `observe` runs in the last lifetime. Holds that come due
- * run through the server's clock, `executeDue`, the real thread services,
- * and the command hook.
- *
- * After a restart the in-memory fake script and the fixture's main-Squire
- * pointer are gone, so a step after a restart cannot deliver a scripted turn
- * or `seedUsage` (none of 08-11 does).
+ * A `restart` closes the server lifetime, moves the test clock by the downtime, and builds a fresh bar layer over
+ * the same Lecturn home and database. After a restart the in-memory fake script and the fixture's main-Squire
+ * pointer are gone, so a later step cannot deliver a scripted turn or `seedUsage` (none of 08-11 does).
  */
 export const withBarTimeline = <A, E>(
   scenario: SquireFixtureScenario,
@@ -560,11 +537,8 @@ const stringOr = (value: unknown, fallback: string) =>
   typeof value === "string" ? value : fallback;
 
 /**
- * Effect counts from the action log of the Squire under test only.
- * `card.created` counts toward `card_created` or `proposal_created` only for
- * card kinds `steer` and `proposal`; question, overlap, and fyi rows count
- * toward nothing. A newer card of the same kind updates the open card in place and logs
- * another `card.created` row with the same `card_id`, so cards are counted
+ * Only `steer` and `proposal` cards count toward `card_created`/`proposal_created`. A newer card of the same kind
+ * updates the open card in place and logs another `card.created` row with the same `card_id`, so cards are counted
  * as distinct `card_id`s, never as rows.
  */
 export const barObserve = (squireId: SquireId) =>
@@ -760,13 +734,7 @@ const sameTarget = (actual: BarCard["target"], gold: SquireFixtureExpected["card
       actual.project === gold.project &&
       actual.provider === String(gold.provider);
 
-/**
- * Gold checks: every listed effect at its exact count, nothing in
- * `mustNotHappen`, `deliveredEvents`, `cardTarget`, `cardCaption`, and every
- * listed assertion, the held-action ones from the action log, budget rows,
- * target projections, and the timeline's marks. Returns the failures; empty
- * means the run met gold.
- */
+/** Every listed effect must match its exact count. Returns the failures; empty means the run met gold. */
 export const judgeBarRun = (
   expected: SquireFixtureExpected,
   observed: BarObserved,

@@ -112,7 +112,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
         control.linger = "yes";
       if (!failed && command === "systemctl --user enable lecturn.service") control.enabled = true;
       if (!failed && command === "systemctl --user restart lecturn.service") control.active = true;
-      // A stop that fails (a timeout, say) has still stopped the service.
+      // A timed-out stop may still stop the service.
       if (command === "systemctl --user stop lecturn.service") control.active = false;
       if (
         control.stateAfterStop !== undefined &&

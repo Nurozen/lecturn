@@ -96,11 +96,9 @@ const layerLegacyV1ThreadImporterProvided = LegacyV1ThreadImporter.layer.pipe(
   Layer.provide(layerEventSinkProvided),
 );
 
-// Lecturn: ProjectService admits project commands through the fork hook
-// registry. Server layers outside this runtime also build it (PR watch
-// observer, git setup scripts) and whichever build runs first is the memoized
-// instance, so it brings the one shared registry itself instead of relying on
-// the caller's context (it would otherwise resolve no-op hooks).
+// Lecturn: ProjectService admits project commands through the fork hook registry. Layers outside
+// this runtime also build it (PR watch observer, git setup scripts) and the first build is
+// memoized, so it brings the shared registry itself instead of resolving no-op hooks.
 export const layerProjectService = ProjectService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -236,8 +234,7 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       IdAllocator.layer,
       ProjectStore.layer,
       layerProviderAdapterRegistryProvided,
-      // Same layer reference as the continuation worker and the adapter
-      // infrastructure so layer memoization yields one shared request queue.
+      // Reuse the continuation worker's layer reference so memoization shares one request queue.
       ProviderContinuationRequests.layer,
       layerProviderEventIngestorProvided,
       layerRuntimePolicyProvided,

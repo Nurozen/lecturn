@@ -1,18 +1,8 @@
 /**
- * CopilotAdapterV2 — GitHub Copilot CLI (`copilot --acp`) on the generic ACP
- * adapter.
- *
- * Copilot speaks ACP v1: URL mode ids (`…/session-modes#plan|#agent`), a
- * session-wide `allow_all` switch, `session/set_model` with no advertised model
- * state, and underscore permission option ids (matched by kind). Plan
- * interaction maps to `#plan`, everything else to `#agent`; full access turns
- * `allow_all` on and Copilot is spawned with `--allow-all`. In plan mode
- * Copilot writes its plan to `plan.md` under its session-state directory; that
- * write surfaces as the proposed plan and renders as a plan step rather than a
- * project file change. A cancelled prompt's trailing reply is dropped until the
- * next prompt opens with `usage_update` (see `withCopilotCancelledStreamDiscard`).
- *
- * @module orchestration-v2/Adapters/CopilotAdapterV2
+ * GitHub Copilot CLI (`copilot --acp`, ACP v1) on the generic ACP adapter: URL mode ids (`#plan`
+ * for plan interaction, else `#agent`), `allow_all` plus `--allow-all` for full access, permission
+ * options matched by kind. Its plan-mode write to `plan.md` renders as a plan step, not a file
+ * change; a cancelled prompt's trailing reply is dropped until the next prompt's `usage_update`.
  */
 // @effect-diagnostics nodeBuiltinImport:off - synchronous plan-file reads inside ACP callbacks
 import * as NodeFS from "node:fs";

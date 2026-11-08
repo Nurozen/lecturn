@@ -1,11 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The theme probe (themeProbe.ts) against the real embed
- * guest, with RocketWright's full generated token set and fonts as sent: every
- * allowlisted variable's computed value equals the sent one, every sent font
- * is loaded and used, and the pane background pixel is exactly `--background`.
- * It writes `theme-probe.json` and `theme-probe-pane.png` to the artifacts
- * directory.
+ * The theme probe (themeProbe.ts) against the real embed guest with RocketWright's full token set
+ * and fonts: every allowlisted variable computes to the sent value, every font loads and is used,
+ * and the pane background pixel is exactly `--background`. Writes `theme-probe.json` and
+ * `theme-probe-pane.png` to the artifacts directory.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";

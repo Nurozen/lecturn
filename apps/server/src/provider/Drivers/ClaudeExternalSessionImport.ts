@@ -100,12 +100,9 @@ function toolActivities(content: unknown, createdAt: IsoDateTime): Array<Importe
 }
 
 /**
- * Pure: what `getSessionMessages` returned, as the provider-neutral transcript
- * an imported thread shows: chronological and summary-level, never a tool
- * input payload or a result body. Sidechain, system, tool-result-only,
- * synthetic and empty lines are dropped. `fallbackMs` orders messages that
- * carry no timestamp; only relative order matters, the history builder
- * re-clamps.
+ * Summary-level only: never a tool input payload or a result body. Sidechain, system,
+ * tool-result-only, synthetic and empty lines are dropped. `fallbackMs` orders untimestamped
+ * messages; only relative order matters, the history builder re-clamps.
  */
 export function convertClaudeSessionMessages(
   messages: ReadonlyArray<SessionMessage>,
@@ -151,13 +148,9 @@ export function convertClaudeSessionMessages(
 }
 
 /**
- * Builds `ProviderInstance.importExternalSession` for the server process's own
- * Claude home: forks the session natively (whole, beside the source, which is
- * never written) and reads the FORK back, so the imported history is exactly
- * what the model resumes with. The source is read first, so a session with
- * nothing to show fails before a fork file exists. The SDK readers follow `process.env`, which is
- * why this shares the lister's default-home condition; all three calls are
- * injectable so tests never read a real home.
+ * Forks natively beside the never-written source and reads the FORK back, so the imported history
+ * is exactly what the model resumes with. The source is read first so an empty session fails before
+ * a fork exists. The SDK readers follow `process.env`, hence the lister's default-home condition.
  */
 export function makeClaudeExternalSessionImporter(options: {
   readonly instanceId: ProviderInstanceId;

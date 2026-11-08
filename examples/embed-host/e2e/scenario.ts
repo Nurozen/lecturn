@@ -1,26 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Test harness driving a real Electron app; it runs no Effect runtime.
 /**
- * The full connected-app scenario, automated with the scripted provider so
- * every tool call is exact and goes through Lecturn's real app toolkit.
- * `vp run --filter embed-host e2e -- --steps 1,2` runs a subset of the steps.
- *
- *   1. No user server: the host starts the sidecar, registers, ensures `ws-a`
- *      and mounts the embed view.
- *   2. A Supervised turn makes two `ex_counter_increment` calls and a gated
- *      `ex_window_flash`, approved in the embed; both counter cards render,
- *      the host records the flash, `lecturn/turn.state` goes idle → running →
- *      awaiting-approval → running → idle, and every call carries the right
- *      `lecturn/context`. Then the same flash in Full access and in Auto runs
- *      with no approval card.
- *   3-5, ledger. A user server starts while the host runs; the host switches
- *      to it live, is closed and reopened, and its copy ledger is checked
- *      across fallbacks (attach.ts).
- *   7. Revoke and re-pair (security.ts).
- *   8. The trust boundary: refusals over RPC, the shell stream and MCP,
- *      framing, and re-approval of a changed command (security.ts).
- *
- * Step 8 runs before step 3, on the sidecar. Step 7 runs last, on whichever
- * server the host ends on: it leaves the host without a credential.
+ * The full connected-app scenario on the scripted provider, so every tool call is exact: 1 sidecar
+ * start and mount; 2 Supervised/Full/Auto counter and flash calls with `lecturn/context` checks;
+ * 3-5 and the ledger (attach.ts); 7 revoke and 8 trust boundary (security.ts). Step 8 runs before
+ * 3, on the sidecar; step 7 runs last because it leaves the host without a credential.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";

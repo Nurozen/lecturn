@@ -95,28 +95,24 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   });
 }
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
 
-  // Electron's single-instance lock (taken below) is scoped to the profile,
-  // and Clerk's renderer storage lives in it, so userData must point at the
-  // real (or isolated LECTURN_HOME) profile first.
-  // Must not yield: the bridge registers a scheme Electron rejects once ready.
-  // main.ts provides the synchronous pre-ready FileSystem for this.
+  // The single-instance lock (below) and Clerk's renderer storage are profile-scoped, so
+  // userData must point at the real (or isolated LECTURN_HOME) profile first. Must not yield:
+  // the bridge registers a scheme Electron rejects once ready (main.ts gives a sync FileSystem).
   const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
 
-  // Lecturn owns the profile-scoped lock on every platform; Clerk skips it on macOS.
-  // Quit is asynchronous, so interrupt before the application runtime is built.
+  // Clerk skips the profile lock on macOS. Interrupt before runtime construction because quit is asynchronous.
   if (!(yield* electronApp.requestSingleInstanceLock)) {
     yield* electronApp.quit;
     return yield* Effect.interrupt;
   }
 
-  // Retain launch arguments while asynchronous startup builds the application runtime.
   const pendingSecondInstances: Array<readonly string[]> = [];
   let handleSecondInstance = (argv: readonly string[]) => {
     pendingSecondInstances.push(argv);

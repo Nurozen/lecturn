@@ -1,12 +1,6 @@
 /**
- * `squire_send_message` for Squires and the Lead: a
- * direct message is one `squire_event` of kind `message` on the recipient,
- * its body in the payload, committed with `tool.called`, the `message` usage
- * row, and `message.sent` in one transaction; delivery makes it an ordinary
- * message in the recipient's home thread. A room post goes through
- * `SquireRooms.postInTransaction` inside the same commit.
- *
- * Registered into `SquireToolRegistry` when the layer is built.
+ * A direct message is one `message` event on the recipient, committed with `tool.called`, the usage row, and
+ * `message.sent` in one transaction. A room post goes through `SquireRooms.postInTransaction` inside the same commit.
  */
 import {
   type OrchestrationV2ThreadShell,

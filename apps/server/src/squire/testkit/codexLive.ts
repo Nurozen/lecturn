@@ -1,14 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off globalFetch:off - A local recording proxy and a raw app-server driver for a live run; evidence is raw JSON.
 /**
- * Live Codex evidence for S0a2: a recording proxy every Codex process
- * of the bar instance sends its model requests through, so the test reads
- * exactly what reached the model, and a raw app-server driver that forks a
- * thread from inside another CODEX_HOME.
- *
- * The proxy is a custom model provider (`requires_openai_auth`, no
- * websockets) set by launch args, so it reaches the instance's ordinary
- * sessions and its Squire sessions alike: neither home's config.toml carries
- * it. It forwards to ChatGPT's Codex backend and saves every `/responses`
+ * The recording proxy is a custom model provider set by launch args, so it reaches ordinary and Squire sessions
+ * alike: neither home's config.toml carries it. It forwards to ChatGPT's Codex backend and saves every `/responses`
  * body, decompressed, without headers that carry credentials.
  */
 import * as NodeChildProcess from "node:child_process";

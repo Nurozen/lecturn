@@ -1,12 +1,7 @@
 /**
- * Who answers a room post: deterministic rules on every tier, first
- * match wins. Pure: `SquireRooms` gathers the members, scope cover, recent
- * posts, and switches, and applies the decision.
- *
- * (a) `@Name` mentions, (b) a reply to or quote of a member's post, (c) refs
- * all covered by exactly one member's scope, (d) a user post within 2 min of
- * a member's post, (e) the Lead. The author is never a recipient, a match on
- * the user wakes nobody, a paused match goes to the Lead, and nothing fans out.
+ * First match wins: (a) `@Name` mentions, (b) a reply to or quote of a member's post, (c) refs all covered by exactly
+ * one member's scope, (d) a user post within 2 min of a member's post, (e) the Lead. The author is never a recipient,
+ * a match on the user wakes nobody, a paused match goes to the Lead, and nothing fans out.
  */
 import type {
   SquireId,

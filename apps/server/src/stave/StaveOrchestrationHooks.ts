@@ -1,25 +1,8 @@
 /**
- * StaveOrchestrationHooks - Stave's contribution to the V2 orchestrator hook
- * registry (`LecturnOrchestrationHooks`).
- *
- * Re-expresses the V1 Stave fencing that lived in the OrchestrationEngine
- * (commit admission and space/workspace locks), the Normalizer (worktree
- * admission at intake) and ProviderService (runtime fence around session
- * start):
- * - project create/move: the destination, its previous root, enclosing
- *   project roots and enclosing `.stave.yaml` roots are workspace-locked for
- *   the commit, so a Stave operation never races a project claiming its tree;
- * - thread intents in a space (create, worktree binding, turn start, fork,
- *   import, delegated task, merge-back, unsettle, pin, unarchive):
- *   `StaveAdmission` decides under the space lock, held shared so these
- *   commands only exclude Stave operations, never each other;
- * - provider session open: `StaveRuntimeFence.withStart` keeps new runtimes
- *   out of a space while a teardown holds its fence, and teardown waits for
- *   starts already in flight.
- * Commands a Stave operation issues while it already holds the locks carry
- * `StaveReconciliation` and pass straight through (V1 `staveReconciliation`).
- *
- * @module StaveOrchestrationHooks
+ * Project create/move workspace-locks every affected root so a Stave operation never races a
+ * project claiming its tree. Thread intents in a space hold the space lock shared: they exclude
+ * Stave operations, never each other. Commands from a Stave operation already holding the locks
+ * carry `StaveReconciliation` and pass straight through.
  */
 import type { OrchestrationV2ServerCommand, ProjectId, ThreadId } from "@lecturn/contracts";
 import * as Duration from "effect/Duration";
@@ -49,12 +32,9 @@ import { STAVE_MANIFEST_FILE_NAME } from "./staveManifest.ts";
 const CONTRIBUTION = "stave";
 
 /**
- * How long a thread command waits for a Stave operation to release its space
- * before it is refused. Retargets, refreshes and memory edits finish well
- * inside this, so ordinary contention never reaches the sender; creating,
- * archiving or restoring a space can take minutes, and a send should be told
- * to retry rather than hang that long. It also bounds how long an automatic
- * sender (and its effect worker slot) can sit waiting.
+ * Short Stave operations finish well inside this; creating, archiving or restoring a space can take
+ * minutes, and a send should be told to retry rather than hang. Also bounds how long an automatic
+ * sender (and its effect worker slot) can wait.
  */
 export const STAVE_ADMISSION_WAIT = Duration.seconds(5);
 
@@ -247,12 +227,9 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Waits for the space here, before the orchestrator takes the thread lock,
-   * and holds it shared through `aroundThreadCommand` and commit. Waiting under
-   * the thread lock instead would deadlock (until the timeout) with an
-   * operation that holds the space and dispatches a reconciliation command to
-   * the same thread. The project read here is only a hint for which space to
-   * wait on; `aroundThreadCommand` resolves again under the thread lock.
+   * Waits for the space before the thread lock: waiting under it would deadlock with an operation
+   * that holds the space and dispatches a reconciliation command to the same thread. The project
+   * read here is only a hint; `aroundThreadCommand` resolves again under the thread lock.
    */
   const aroundThreadLock = <A, E, R>(
     command: OrchestrationV2ServerCommand,

@@ -1,10 +1,7 @@
 /**
- * Readable messages for the Stave admission refusals the server raises when
- * a mutation would break a space's invariants. Web and mobile both route
- * command failures through here before falling back to `error.message`, so
- * the wording lives in one place. Matching is by typed `_tag` first and by
- * the wire `code` second (the HTTP path serialises errors as `{code}`
- * envelopes), so either transport renders the same text.
+ * Readable messages for Stave admission refusals, used by web and mobile before falling back to
+ * `error.message`. Matches the typed `_tag` first, then the wire `code` (the HTTP path serialises
+ * errors as `{code}` envelopes), so either transport renders the same text.
  */
 
 const STAVE_ADMISSION_ERROR_TAGS = [

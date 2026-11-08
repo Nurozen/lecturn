@@ -1,11 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off - A real loopback HTTP server stands in for the app's live endpoint.
 /**
- * One app tool call through the whole stack a provider reaches: a real MCP
- * SDK client on `/mcp`, the interceptor, the toolkit with its real gate,
- * approval step and card envelope, then the real headless host over the
- * fixture app or the real live client over a loopback endpoint. Only the
- * registry, the calling thread's projection and the user's answer to an
- * approval are faked; AppToolApprovalService has its own tests.
+ * One app tool call through the whole stack a provider reaches: a real MCP SDK client on `/mcp`,
+ * the interceptor, the toolkit with its real gate, approval and card envelope, then the real
+ * headless host or live client. Only the registry, the thread's projection and the approval answer
+ * are faked.
  */
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";

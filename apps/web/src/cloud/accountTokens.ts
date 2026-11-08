@@ -102,13 +102,9 @@ function tokenSubject(token: string): string | null {
 }
 
 /**
- * Reads one account's relay token from that account's own Clerk session, found
- * at call time because Clerk re-creates its session objects. Resolves null when
- * the account has no signed-in session, as a signed-out reader always has, and
- * when Clerk hands back a token for anyone else.
- *
- * Template tokens only: a template read leaves the active session and its
- * cookie alone, which a bare `getToken()` on a non-active session would not.
+ * Looks up the account's Clerk session at call time (Clerk re-creates them); null when
+ * signed out or when Clerk hands back a token for anyone else. Template tokens only: a
+ * bare `getToken()` on a non-active session would disturb the active session's cookie.
  */
 export function readToken(accountId: string): Promise<string | null> {
   if (hasPhoneConnectAccount()) return phoneConnectAccount.readToken(accountId);

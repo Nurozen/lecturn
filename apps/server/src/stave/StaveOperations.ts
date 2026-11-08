@@ -5,32 +5,10 @@ export { sameManifestIncarnation } from "./staveIncarnation.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import { staveTelemetryEvent } from "./StaveTelemetry.ts";
 /**
- * StaveOperations - application-lifetime runner for the long Stave mutations
- * behind `stave.runOperation` / `stave.observeOperation` (deviation 26).
- *
- * Every operation is started ONCE per client-supplied `operationId` on a
- * fiber owned by this service's scope (a WebSocket-bound fiber would die with
- * the tab), and its progress is kept in a registry entry: a bounded ring
- * buffer of `StaveProgressEvent`s numbered by a per-operation `sequence`
- * (1-based), plus a PubSub for live followers. `run` starts when the id is
- * new, attaches (replay after `afterSequence`, then follow live) when the id
- * is running or finished with the same payload fingerprint, and refuses a
- * different payload under the same id. Terminal entries stay 24h so a
- * reconnecting client can still read the outcome; after that the id is
- * `operation_expired` for good.
- *
- * Progress is Lecturn-orchestrated (deviation 2): each Stave invocation is a
- * `phase_started` / `output` / `phase_finished` triple, Stave's `notes[]` and
- * `plan[]` arrive as `output` with `stream: "notes" | "plan"`, and the
- * operation ends with `finished { kind, result }` or `failed { error }`.
- * Nothing is compensated automatically: a failed `createSpace` leaves the
- * partial space for the explicit `removePartialSpace`, which is bound to the
- * manifest stamp the create produced (`incarnation_mismatch` otherwise).
- *
- * Mutations on one space root are serialised by a keyed mutex (`withSpaceLock`)
- * so admission and lifecycle sweeps can share the same lock later.
- *
- * @module StaveOperations
+ * Each operation starts ONCE per client `operationId` on a service-scoped fiber (a socket-bound one
+ * would die with the tab); the same id and payload attaches, a different payload is refused.
+ * Terminal entries stay 24h, then `operation_expired`. Nothing is compensated: a failed
+ * `createSpace` waits for `removePartialSpace`, bound to the manifest stamp the create produced.
  */
 import {
   CommandId,
@@ -307,7 +285,7 @@ export class StaveOperations extends Context.Service<StaveOperations, StaveOpera
 
 type OperationOutcome = StaveOperationResult;
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("StaveOperations.make")(function* (
   limits: StaveOperationsLimits = {},
 ) {

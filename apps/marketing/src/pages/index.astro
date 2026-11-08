@@ -9,7 +9,6 @@ import {
 ---
 
 <Layout>
-  <!-- ── Hero ──────────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-grid" aria-hidden="true"></div>
 
@@ -67,7 +66,6 @@ import {
     </div>
   </section>
 
-  <!-- ── Harnesses ─────────────────────────────────────────────── -->
   <section id="harnesses" class="sec-harness">
     <div class="container">
       <div class="section-head">
@@ -132,7 +130,6 @@ import {
     </div>
   </section>
 
-  <!-- ── Git ──────────────────────────────────────────────────── -->
   <section id="git" class="sec-git">
     <div class="container git-inner">
       <div
@@ -197,7 +194,6 @@ import {
     </div>
   </section>
 
-  <!-- ── Open source ───────────────────────────────────────────── -->
   <section id="open" class="sec-open">
     <div class="container">
       <div class="section-head open-head">
@@ -263,7 +259,6 @@ import {
     </div>
   </section>
 
-  <!-- ── Final CTA ─────────────────────────────────────────────── -->
   <section id="download" class="sec-cta">
     <div class="container cta-inner">
       <h2 class="display cta-title">
@@ -301,10 +296,7 @@ import {
     return null;
   }
 
-  // Macs always get the arm64 build. Browsers cannot reliably tell Apple Silicon
-  // from Intel (the UA lies, GPU strings lie), and a wrong guess hands an Apple
-  // Silicon user a broken app. Intel users pick their build on /download.
-  // Do NOT add arch detection back here.
+  // Browser architecture hints are unreliable; serve arm64 and let Intel users choose on /download.
   function pickAsset(assets: ReleaseAsset[], platform: Platform): string | null {
     if (platform.os === "win") {
       return assets.find((a) => a.name.endsWith("-x64.exe"))?.browser_download_url ?? null;
@@ -366,7 +358,6 @@ import {
 </script>
 
 <style>
-  /* ── Section base ─────────────────────────────────────────── */
   section {
     position: relative;
     padding: 96px 0;
@@ -418,7 +409,6 @@ import {
     flex-shrink: 0;
   }
 
-  /* ── Hero ─────────────────────────────────────────────────── */
   .hero {
     padding: 72px 0 60px;
     position: relative;
@@ -521,7 +511,6 @@ import {
     text-decoration-color: var(--fg);
   }
 
-  /* Download button icons (platform-aware) */
   .dl-icon {
     display: none;
     width: 14px;
@@ -671,7 +660,6 @@ import {
     object-position: center top;
   }
 
-  /* ── Harnesses ─────────────────────────────────────────── */
   .sec-harness { background: #09090b; }
 
   .harness-grid {
@@ -722,7 +710,6 @@ import {
   }
   .harness-footer-item svg { color: var(--ok); }
 
-  /* ── Endorsements ─────────────────────────────────────── */
   .sec-endorsements {
     overflow: hidden;
   }
@@ -868,7 +855,6 @@ import {
     -webkit-line-clamp: 3;
   }
 
-  /* ── Git ──────────────────────────────────────────────── */
   .git-inner {
     display: grid;
     grid-template-columns: 1.1fr 1fr;
@@ -949,7 +935,6 @@ import {
     padding: 2px 6px; border-radius: 4px;
   }
 
-  /* ── Open source ──────────────────────────────────────── */
   .open-head {
     text-align: center;
     margin: 0 auto 56px;
@@ -1086,7 +1071,6 @@ import {
     color: var(--fg);
   }
 
-  /* ── Final CTA ────────────────────────────────────────── */
   .sec-cta {
     text-align: center;
     padding: 120px 0;
@@ -1133,7 +1117,6 @@ import {
     }
   }
 
-  /* ── Responsive ────────────────────────────────────────── */
   @media (max-width: 960px) {
     .hero-preview {
       width: min(860px, calc(100vw - 24px));

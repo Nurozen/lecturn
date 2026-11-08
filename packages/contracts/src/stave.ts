@@ -12,10 +12,9 @@ import {
 import { RepositoryIdentity } from "./environment.ts";
 
 // ── Stave read models ──────────────────────────────────────────
-// Projections of a Stave space manifest (`.stave.yaml`) attached to a
-// Lecturn project. Produced server-side by the manifest reader; clients only
-// consume them, so every field that later Stave versions may add or widen is
-// optional or forward-compatible.
+// Projections of a Stave space manifest (`.stave.yaml`) attached to a Lecturn project, produced
+// server-side. Every field later Stave versions may add or widen is optional or
+// forward-compatible.
 
 /** How a repository participates in a space: `edit` worktrees are writable,
     `reference` checkouts are read-only context. */
@@ -92,11 +91,9 @@ export const StaveProjectNotice = Schema.Struct({
 export type StaveProjectNotice = typeof StaveProjectNotice.Type;
 
 // ── Stave live status ──────────────────────────────────────────
-// Served by `stave.getStatus`. `capabilities.stave` on the environment
-// descriptor is a static build fact (the LECTURN_STAVE kill switch is on);
-// this is the live answer to "is a binary runnable, is it configured, is
-// marmot reachable", re-probed on every call so the settings page and the
-// project sidebar can react to installs and config edits without a restart.
+// Served by `stave.getStatus`. Unlike the static `capabilities.stave` build fact, this is re-probed
+// on every call (binary runnable, configured, marmot reachable) so the settings page and sidebar
+// react to installs and config edits without a restart.
 
 /** Where the server found the binary it runs: an explicit settings path, the
     environment override, the bootstrap installer, the bundled copy, or PATH. */
@@ -307,12 +304,9 @@ export class StaveCommandError extends Schema.TaggedError<StaveCommandError>()(
 ) {}
 
 // ── Stave operations ───────────────────────────────────────────
-// `stave.runOperation` takes ONE discriminated payload instead of a verb per
-// RPC (deviation 1). Every variant is fully typed: ids are checked against the
-// Stave name charset, modes and memory fates are closed literal sets, and no
-// argv passes through. Space-scoped variants name the space by the Lecturn
-// project's `workspaceRoot` (the server resolves the manifest there), the
-// create verbs by the id being created.
+// `stave.runOperation` takes ONE fully typed discriminated payload (deviation 1): ids match the
+// Stave name charset, modes and memory fates are closed sets, and no argv passes through. Space
+// verbs name the space by the project's `workspaceRoot`, create verbs by the id being created.
 
 /** Mirrors `STAVE_NAME_PATTERN` in `@lecturn/shared/stave`; contracts cannot
     depend on shared. */
@@ -1100,10 +1094,9 @@ export class StaveOperationRejectedError extends Schema.TaggedError<StaveOperati
 ) {}
 
 // ── Stave progress events ─────────────────────────────────────
-// Streamed by `stave.runOperation` and `stave.observeOperation`. Events are
-// keyed on the client-supplied `operationId` and numbered by a per-operation
-// monotonic `sequence`, so a client that reattaches passes the last sequence
-// it saw and receives only what it missed (deviation 26).
+// Streamed by `stave.runOperation` and `stave.observeOperation`, keyed on the client-supplied
+// `operationId` and numbered by a monotonic per-operation `sequence`, so a reattaching client
+// passes the last sequence it saw and receives only what it missed (deviation 26).
 
 const StaveProgressBase = Schema.Struct({
   operationId: TrimmedNonEmptyString,

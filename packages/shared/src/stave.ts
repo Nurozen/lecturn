@@ -95,15 +95,9 @@ export interface StaveVersionInfo {
 const STAVE_VERSION_LINE = /^stave\s+(\S+)\s*$/;
 
 /**
- * Parses `stave version` output:
- *
- *     stave v0.4.0
- *     commit: 1a2b3c4
- *     date: 2026-08-30T12:00:00Z
- *
- * The leading `v` is dropped from the version; dev builds report `dev`.
- * Missing or `unknown` commit/date lines are omitted. Returns null when the
- * first non-empty line is not a `stave <version>` header.
+ * Parses `stave version` output (`stave v0.4.0`, then optional `commit:` and `date:` lines). The
+ * leading `v` is dropped; dev builds report `dev`. Missing or `unknown` commit/date lines are
+ * omitted. Returns null when the first non-empty line is not a `stave <version>` header.
  */
 export function parseStaveVersionOutput(text: string): StaveVersionInfo | null {
   const lines = text

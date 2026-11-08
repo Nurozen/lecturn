@@ -245,11 +245,9 @@ export function alertForAttentionTransition(input: {
   return alertForRows(newlyAttentionRows(input), "agents need attention");
 }
 
-// Alert copy for an update whose aggregate contains threads that finished
-// (Done/Failed) since the previously delivered aggregate — the mid-flight
-// completion buzz while other agents keep the activity alive. Requires the
-// thread to have been present and non-terminal before, so a baseline-less
-// replay or a row that merely fell off the display cap never rings.
+// Alert copy for threads that finished (Done/Failed) since the previously delivered aggregate.
+// Requires the thread to have been present and non-terminal before, so a baseline-less replay
+// or a row that merely fell off the display cap never rings.
 function newlyTerminalRows(
   previousAggregate: RelayAgentActivityAggregateState | null,
   nextAggregate: RelayAgentActivityAggregateState,
@@ -358,8 +356,7 @@ function shouldUpdateLiveActivity(input: {
   );
 }
 
-// Completions replayed long after the fact (server restarts republish every
-// recently-finished thread) must not ring the device again.
+// Restart replays of old completions must not ring again.
 const TERMINAL_NOTIFICATION_FRESHNESS_MS = 2 * 60 * 1_000;
 
 // Bounds the per-device record. Entries normally leave when their thread moves
@@ -436,14 +433,10 @@ export interface PushNotificationDecision {
   readonly notifiedIfQueued: ReadonlyArray<NotifiedPushEvent>;
 }
 
-// The single decision point for the alert-push channel: which event (if any)
-// rings, and what the device's already-notified record becomes. An event rings
-// once; it may ring again only after its thread was seen in another state
-// (Input -> Working -> Input), which is what prunes it from the record here.
-// Threads absent from the aggregate are left alone because notification-only
-// publishes carry just the published thread. Any reason to stay silent must
-// return `notification: null` so the event stays unrecorded and can ring later;
-// that includes `userPresent`, a publish made while the user is at a client.
+// The single decision point for the alert-push channel. An event rings once, and again only
+// after its thread was seen in another state (Input -> Working -> Input). Threads absent from
+// the aggregate are left alone: notification-only publishes carry just the published thread.
+// Every silent outcome (`userPresent` too) returns `notification: null` so it can ring later.
 export function decidePushNotification(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
@@ -552,9 +545,7 @@ function settleLiveActivityRings(
   );
 }
 
-// "suppressed" means a Live Activity owns this state but no update is due
-// (unchanged or throttled); callers must not fall back to an alert push, or
-// every republish of a waiting aggregate would ring the device.
+// Suppressed Live Activity updates must not fall back to alert pushes or unchanged replays would ring.
 function chooseLiveActivityDelivery(input: {
   readonly target: LiveActivities.TargetRow;
   readonly aggregate: RelayAgentActivityAggregateState | null;
@@ -578,11 +569,7 @@ function chooseLiveActivityDelivery(input: {
     return null;
   }
   if (input.aggregate === null) {
-    // Except right after arming: the app arms the card the moment the user
-    // starts work, and the token registration's replay can land before the
-    // environment's first publish for the brand-new thread. Ending here
-    // would retire the token and orphan the card at its seed content, so a
-    // freshly armed card keeps its seed until real state arrives.
+    // Registration replay can precede a new thread's first publish; preserve a freshly armed card until state arrives.
     const armedAtMs = Option.match(
       input.target.remote_started_at === null
         ? Option.none()
@@ -808,11 +795,7 @@ interface LiveActivityDeliveryTarget {
   readonly aps_environment?: "sandbox" | "production" | null;
 }
 
-// Devices register the bundle id and APS environment of the build they run
-// (dev/preview/prod variants have distinct bundle ids; development-signed
-// builds get sandbox tokens). Sending with mismatched routing yields
-// DeviceTokenNotForTopic/BadDeviceToken, so per-device values override the
-// relay-wide defaults when present.
+// Bundle ids and APS environments vary by build; route per device to avoid DeviceTokenNotForTopic/BadDeviceToken.
 function credentialsForTarget(
   credentials: RelayConfiguration.ApnsCredentials,
   target: LiveActivityDeliveryTarget,
@@ -1023,13 +1006,7 @@ export const make = Effect.gen(function* () {
   const apns = yield* Apns.ApnsClient;
   const activityRows = yield* AgentActivityRows.AgentActivityRows;
 
-  // Start jobs are decided at publish time, but consecutive publishes land in
-  // the same queue batch: a start chosen from a running aggregate can be
-  // delivered moments after a newer terminal publish already ended the user's
-  // work, birthing an orphan activity that shows stale content forever (no
-  // token is ever registered for it, so nothing can update or end it).
-  // Re-validate at delivery time that the user still has live work; fail open
-  // on persistence errors so a database hiccup never drops a legitimate start.
+  // Recheck queued starts against newer terminal publishes. Fail open on database errors.
   const userStillHasLiveWork = Effect.fnUntraced(function* (userId: string) {
     const now = yield* DateTime.now;
     return yield* activityRows.listForUser({ userId }).pipe(

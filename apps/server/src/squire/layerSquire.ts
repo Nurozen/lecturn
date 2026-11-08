@@ -1,9 +1,6 @@
 /**
- * Squire server wiring. The command allowlist hook, the MCP gate, and the
- * runtime policy branch sit inside the orchestration runtime and read
- * `SquireRepository` there. Everything else is built whatever the switch says,
- * so turning it on needs no restart: each service checks `SquireSwitch` where
- * it acts, and background work runs only during an on period.
+ * Everything is built whatever the switch says, so turning it on needs no restart: each service checks
+ * `SquireSwitch` where it acts, and background work runs only during an on period.
  */
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Effect from "effect/Effect";
@@ -61,12 +58,9 @@ import * as SquireTools from "./SquireTools.ts";
 import * as SquireTriggers from "./SquireTriggers.ts";
 import * as SquireWorkspace from "./SquireWorkspace.ts";
 
-// Each provideMerge feeds every layer above it. The reactor reads the
-// lifecycle, rules, and policy lock with `serviceOption`, so they must sit
-// below it here: a missing one would silently skip re-homing, rule disabling,
-// or the lock instead of failing the build.
-// The fixture seam and its synthetic Stave memberships exist only with
-// test providers on, so the dev route and the fake are unreachable otherwise.
+// The reactor reads the lifecycle, rules, and policy lock with `serviceOption`, so they must sit below it here:
+// a missing one would silently skip re-homing, rule disabling, or the lock instead of failing the build.
+// The fixture seam and its synthetic Stave memberships exist only with test providers on.
 const testProvidersOnly = <ROut, E, RIn>(layer: Layer.Layer<ROut, E, RIn>) =>
   Layer.unwrap(
     Effect.map(HostProcess.Environment, (environment) => {

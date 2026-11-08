@@ -1,16 +1,7 @@
 /**
- * Decision ingestion input on the V2 application event log.
- *
- * Decisions tail `orchestration_events` through the application event source
- * (project events plus `application_event_version = 2` thread events). V1
- * events are never read: they share the same global sequence space, so a
- * cursor persisted by the V1 ingestion is directly comparable and every V2
- * event (all written after the V1 -> V2 copy) lies above it.
- *
- * Legacy-import events (`migration:*` ids) re-materialize V1 history that the
- * V1 ingestion already indexed under the same message ids. They only advance
- * the cursor; replaying them would bump every migrated thread's source
- * generation and re-enqueue its whole history.
+ * V1 events share the global sequence space, so a V1 ingestion cursor stays comparable and every V2
+ * event lies above it. Legacy-import (`migration:*`) events only advance the cursor: V1 already
+ * indexed them, and replaying would re-enqueue every migrated thread's whole history.
  */
 import type { ApplicationStoredEvent, MessageId, ProjectId, ThreadId } from "@lecturn/contracts";
 

@@ -53,11 +53,9 @@ export function resolveNewTaskWorkspaceLabel(input: {
 }
 
 /**
- * Worktree a local-mode draft should run in when the picked branch lives in
- * one. `projectCwd` is the git cwd the branch list was fetched from, so the
- * checkout itself never counts as a worktree. Stave threads always run in
- * the space root: any path the primary repo's branch list reports is that
- * repo's checkout, never a thread worktree, so it is dropped.
+ * Worktree a local-mode draft runs in when the picked branch lives in one. `projectCwd`
+ * is the git cwd the branch list came from, so the checkout never counts. Stave threads
+ * always run in the space root, so a path from the primary repo's branch list is dropped.
  */
 export function resolveNewTaskBranchWorktreePath(input: {
   readonly workspaceMode: WorkspaceMode;

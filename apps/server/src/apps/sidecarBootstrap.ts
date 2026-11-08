@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the parent pipe is a raw inherited descriptor.
 /**
- * The connected-app sidecar: an app starts its own Lecturn server and
- * hands it an `app-sidecar` envelope on `--bootstrap-fd`. The server stays in
- * web mode, grants the app without a prompt, and seeds an in-memory grant
- * that the helper exchanges at `/api/auth/token` for its `app:<appId>`
- * session.
+ * The connected-app sidecar: an app starts its own Lecturn server with an `app-sidecar` envelope on
+ * `--bootstrap-fd`. The server stays in web mode, grants the app without a prompt, and seeds an
+ * in-memory grant the helper exchanges at `/api/auth/token` for its `app:<appId>` session.
  */
 import {
   type AppSidecarBootstrap,

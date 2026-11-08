@@ -25,8 +25,8 @@ const cut = (value: string) =>
   value.length <= TITLE_MAX_CHARS ? value : `${value.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`;
 
 /**
- * A steer card's title is a short summary ("billing-service #321: required checks
- * failing"), named by the project, the PR, and what changed, so the row reads at a glance; the
+ * A steer card's title is a short summary (`billing-service #321: required checks failing`),
+ * named by the project, the PR, and what changed, so the row reads at a glance; the
  * full steer stays in the payload and shows as the card's recommendation.
  */
 export function squireSteerTitle(input: {

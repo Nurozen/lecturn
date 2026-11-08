@@ -1,23 +1,8 @@
 import { StaveExecutionContext } from "./StaveExecutionContext.ts";
 /**
- * StaveConfigReader - Effect service that answers "where does Stave keep its
- * things on this machine": the config file, the root, the bare-repo and
- * agent-work directories, the registered repos and the memory defaults.
- *
- * `stave config show --json` is the source of truth because it applies the
- * same defaulting every other verb does (deviation 21: Stave alone defines
- * what "set up" means). When Stave cannot answer — no binary, or an older
- * Stave without `config show --json` — the reader reads the YAML itself and
- * mirrors Stave's `ApplyDefaults` (root under `~/stave`, dirs derived from the
- * root, `~` expansion, repo names and bare paths from the map key). Either way
- * the snapshot says which `source` produced it.
- *
- * Loading never fails and never mutates: `stave setup` is not run here, and a
- * missing config simply reports `exists: false` with the defaults Stave would
- * use. Results are cached for 15s and dropped on any settings change or an
- * explicit `invalidate`.
- *
- * @module StaveConfigReader
+ * `stave config show --json` is the source of truth: Stave alone defines what "set up" means. When
+ * Stave cannot answer (no binary, or too old), read the YAML and mirror Stave's `ApplyDefaults`.
+ * Loading never fails and never mutates: `stave setup` is never run here.
  */
 // @effect-diagnostics nodeBuiltinImport:off
 import * as Clock from "effect/Clock";

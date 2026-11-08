@@ -8,10 +8,7 @@ export interface ProviderReplayGate {
   readonly releaseAll: () => void;
   readonly recordProcessed: (label: string) => void;
   readonly waitForProcessed: (label: string) => Promise<void>;
-  /**
-   * Replay runs on a test clock, so a scenario advances it by exactly that on
-   * the receipt.
-   */
+  /** Replay scenarios must advance TestClock by the recorded debounce after finish is armed. */
   readonly recordFinishArmed: (debounce: Duration.Input) => void;
   readonly finishArmedCount: () => number;
   readonly waitForFinishArmed: (seen: number) => Promise<Duration.Input>;

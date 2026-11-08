@@ -3,10 +3,7 @@ import type { ThemeAppearance, ThemeColors } from "@lecturn/shared/themePalettes
 import type { MobileThemeVariable } from "./mobileTheme";
 
 /**
- * Lecturn's own mobile palette: parchment and terracotta in light, night navy
- * and gold in dark. It is the default ("lecturn") theme and is not part of the
- * shared built-in theme library.
- *
+ * Lecturn's default ("lecturn") mobile palette, outside the shared built-in theme library.
  * The roles feed `createMobileThemeVariables`, which derives every token the
  * fork's hand-tuned table below does not pin (and the Clerk native palette).
  */

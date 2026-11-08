@@ -1,10 +1,6 @@
 /**
- * The scripted bar: the gold scenarios on the scripted `squireFake`
- * provider, whose tool calls go through the production `/mcp` route to
- * `SquireTools`, with the held-action executor on. 08-11 run their timeline
- * on the test clock (holds execute through the server's clock, the real
- * thread services, and the command hook against the fixture's real PR
- * link and run); 01-06 keep their recommend-only gold with the executor present.
+ * The scripted bar: gold scenarios on the `squireFake` provider through the production `/mcp` route, executor on.
+ * 08-11 run their timeline on the test clock; 01-06 keep their recommend-only gold.
  * Judged on effects from the Squire's action log. Ungated: CI runs it.
  */
 import { assert, describe, it } from "@effect/vitest";

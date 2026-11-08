@@ -1,8 +1,5 @@
-// Live summary latency and isolation. Runs only with
-// SQUIRE_S0D_PROVIDER set (claudeAgent or codex) and spends provider tokens.
-// Each of SQUIRE_S0D_TURNS (default 20) gold fixture turns carries a fresh
-// nonce in its conversation text, so a leak into spans, logs, or provider
-// transcripts shows up as that nonce. Results go to artifacts/squire-bar/s0d/.
+// Live summary latency and isolation; spends provider tokens, so runs only with SQUIRE_S0D_PROVIDER=claudeAgent|codex.
+// Each gold fixture turn carries a fresh nonce, so a leak into spans, logs, or provider transcripts shows that nonce.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {

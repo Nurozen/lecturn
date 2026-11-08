@@ -1,15 +1,8 @@
 /**
- * Lecturn: import a provider session created outside Lecturn (thread.import).
- *
- * The external session is never resumed or modified. The provider natively
- * forks it (a local operation), the new thread binds that fork as its
- * provider thread, and the session's transcript is copied in as history that
- * belongs to no run. Event order: thread.created -> provider-thread.updated ->
- * message.updated/turn-item.updated (runId null) -> thread.imported.
- *
- * Imported history is not a turn: no run, no checkpoint, nothing to revert or
- * queue. The first message the user sends starts run 1 on the forked native
- * thread.
+ * Lecturn: import an outside provider session without resuming or modifying it: the provider
+ * natively forks it, the thread binds that fork, and the transcript is copied in as run-less
+ * history. Events: thread.created -> provider-thread.updated -> message/turn-item.updated (runId
+ * null) -> thread.imported. The first user message starts run 1 on the forked native thread.
  */
 import {
   ExternalSessionImportError,
@@ -147,13 +140,10 @@ export interface ImportedThreadHistoryV2 {
 }
 
 /**
- * Pure history builder: a provider-neutral transcript becomes run-less V2
- * messages and turn items. Ids are derived from the thread id and position,
- * so a replayed plan is identical.
- *
- * Timestamps are made strictly increasing and no later than `importedAt`:
- * `isImportedHistoryMessage` treats every run-less message at or before
- * `importedFrom.importedAt` as imported history.
+ * Pure history builder: a provider-neutral transcript becomes run-less V2 messages and turn items,
+ * with ids from the thread id and position (a replayed plan is identical). Timestamps are strictly
+ * increasing and no later than `importedAt`: `isImportedHistoryMessage` treats every run-less
+ * message at or before `importedFrom.importedAt` as imported history.
  */
 export function buildImportedThreadHistoryV2(input: {
   readonly threadId: OrchestrationV2AppThread["id"];

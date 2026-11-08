@@ -1,17 +1,6 @@
 /**
- * StaveOrchestration - the narrow orchestration surface Stave code needs.
- *
- * V1 Stave modules read `ProjectionSnapshotQuery`, dispatched through the V1
- * `OrchestrationEngine` (with a `staveReconciliation` bypass for commands
- * issued while a Stave operation already holds the space locks) and stopped
- * runtimes through the V1 `ProviderService`. This service keeps that surface
- * small and V1-shaped so the Stave modules and their tests stay readable.
- * `StaveOrchestrationLive.layer` implements it on V2: `ProjectService` for project commands,
- * `OrchestratorV2` for run interrupts, the V2 projections for reads, the
- * application event log for tails and `ProviderSessionManagerV2` for runtime
- * quiescence.
- *
- * @module StaveOrchestration
+ * The narrow, V1-shaped orchestration surface Stave code needs, kept small so the Stave modules and
+ * their tests stay readable. `StaveOrchestrationLive.layer` implements it on V2.
  */
 import type {
   ApplicationStoredEvent,

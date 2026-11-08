@@ -7,11 +7,7 @@ import {
   LECTURN_ORCHESTRATION_SECTIONS,
 } from "@lecturn/provider-core/server/orchestrationInstructions";
 
-/**
- * Codex cuts the middle out of any `additionalContext` value over 1,000 tokens,
- * which it counts as UTF-8 bytes divided by four. It does this silently, so
- * every value built here has to fit.
- */
+/** Codex silently truncates additionalContext values over 1,000 tokens, counted as UTF-8 bytes / 4. */
 export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
 const LECTURN_DEVICE_TOOL_INSTRUCTIONS = `## Lecturn devices
@@ -28,12 +24,7 @@ const normalizeAvailability = (
 ): LecturnToolAvailability =>
   typeof availability === "boolean" ? { browser: availability, device: false } : availability;
 
-/**
- * Describing `preview_*` or `device_*` tools that aren't in the turn's tool list would be worse
- * than saying nothing: the instructions actively steer the model away from Playwright,
- * agent-browser, and raw simctl/adb, so leaving them in would talk it out of the only automation
- * it still has.
- */
+/** Instructions for unavailable tools would steer the model away from its remaining automation. */
 const toolInstructions = (availability: boolean | LecturnToolAvailability): string => {
   const tools = normalizeAvailability(availability);
   return [
@@ -199,11 +190,7 @@ export function buildCodexDeveloperInstructions(interactionMode: ProviderInterac
     : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
 }
 
-/**
- * This must stay out of the collaboration mode: when the model catalog ships
- * its own text for a mode, as newer models do, Codex uses that text and drops
- * the client's `developer_instructions` entirely.
- */
+/** Keep this outside collaboration mode; model-catalog mode text overrides client developer_instructions. */
 export function buildCodexAdditionalContext(
   runtime: CodexRuntimeInfo,
   toolsAvailable: boolean | LecturnToolAvailability = true,
@@ -215,8 +202,7 @@ export function buildCodexAdditionalContext(
   const [prefix, sections] = squire
     ? ["lecturn_squire", squireInstructions]
     : ["lecturn_orchestration", LECTURN_ORCHESTRATION_SECTIONS];
-  // Separate keys keep each value under Codex's per-entry cap. Codex emits
-  // entries in key order, so the numbering preserves the authored order.
+  // Split values to fit per-entry caps; number keys because Codex emits them in key order.
   return {
     ...Object.fromEntries(
       sections.map((section, index) => [

@@ -1,17 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- A plain Electron host, the shape app developers copy; it runs no Effect runtime.
 /**
- * Embed Host: the smallest Electron app with Lecturn chat in a pane. The
- * Lecturn integration is everything between `lecturn:begin` and
- * `lecturn:end` here, in preload.ts and in renderer/main.ts; the rest is
- * the host app itself.
- *
- * Environment (all optional; tests set every one to a temp path):
- * - LECTURN_HOME: where a user's own Lecturn server would be found.
- * - EMBED_HOST_SIDECAR_DIR: the app's own Lecturn home.
- * - EMBED_HOST_WORKSPACE: the workspace the pane chats about.
- * - EMBED_HOST_USER_DATA: Electron's userData directory.
- * - EMBED_HOST_FLASH_LOG: where window_flash calls are recorded.
- * - EMBED_HOST_CDP_PORT, EMBED_HOST_FREEZE_CLOCK: capture and test hooks.
+ * Embed Host: the smallest Electron app with Lecturn chat in a pane; the integration is everything
+ * between `lecturn:begin`/`lecturn:end` here, in preload.ts and renderer/main.ts. Optional env:
+ * LECTURN_HOME, EMBED_HOST_SIDECAR_DIR (app's own Lecturn home), EMBED_HOST_WORKSPACE,
+ * EMBED_HOST_USER_DATA, EMBED_HOST_FLASH_LOG, EMBED_HOST_CDP_PORT, EMBED_HOST_FREEZE_CLOCK.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";

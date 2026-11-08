@@ -1,16 +1,7 @@
 /**
- * StaveError - the one error every `stave` invocation fails with.
- *
- * `code` is the stable machine-readable code Stave emits in its `--json`
- * failure envelope (`{"error": {code, message, details?}}` on stdout, exit 1)
- * plus the codes Lecturn synthesises around the spawn itself (missing binary,
- * timeout, prose output, ...). Unknown codes from a newer Stave decode as
- * `"unknown"` so a host build never fails on a code it has not learned yet.
- *
- * Source of truth for the Stave codes: references/stave/internal/space/errcode.go
- * and errcode_repos.go; README "Machine-readable output".
- *
- * @module StaveError
+ * `code` is Stave's `--json` failure-envelope code (stdout, exit 1) or a host code Lecturn raises
+ * around the spawn. Unknown codes from a newer Stave decode as `"unknown"` so a host never fails on
+ * a code it has not learned. Source: references/stave/internal/space/errcode.go, errcode_repos.go.
  */
 import {
   STAVE_CLI_ERROR_CODES,
@@ -22,19 +13,6 @@ import * as Schema from "effect/Schema";
 
 // The code lists live in contracts (`STAVE_OPERATION_ERROR_CODES`) because the
 // same values travel in `StaveOperationError`; the server only re-exports them.
-// Host codes, raised here without a Stave envelope behind them:
-//   binary_missing       no usable `stave` binary (resolution failed or ENOENT)
-//   not_setup            Stave is installed but `stave setup` has not run
-//   disabled             the integration is switched off in server settings
-//   non_json_output      Stave exited without a JSON payload or envelope
-//   spawn_failed         the process could not be started or read
-//   timeout              the verb's timeout elapsed (reads 60s, mutations 15m)
-//   nested_project       a project root sits inside another Stave space
-//   archived_project     the operation targets an archived space
-//   incarnation_mismatch the manifest stamp differs from the expected one
-//   membership_unknown   saga membership could not be determined
-//   unreadable           JSON that does not fit the verb's contract
-//   operation_expired    a pending operation handle is no longer valid
 export { STAVE_CLI_ERROR_CODES, STAVE_HOST_ERROR_CODES };
 export const STAVE_ERROR_CODES = STAVE_OPERATION_ERROR_CODES;
 

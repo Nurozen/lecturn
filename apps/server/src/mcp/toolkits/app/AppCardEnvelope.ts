@@ -1,12 +1,8 @@
 /**
- * Wraps an app tool result for MCP Apps cards: the last step of
- * AppToolkit.call, after Lecturn's own `_meta` handling.
- *
- * A tool that declares `_meta.ui.resourceUri` gets its card document captured
- * into an attachment now, while the app can still serve it, and the result
- * carries `structuredContent: { lecturnMcpApp, result }`. That is the envelope
- * every client already reads from tool output, so the card shows on every
- * provider and survives the app closing, the thread stopping and a copy.
+ * Wraps an app tool result for MCP Apps cards, as AppToolkit.call's last step. A tool declaring
+ * `_meta.ui.resourceUri` has its card document captured into an attachment now, while the app can
+ * serve it, and the result carries `structuredContent: { lecturnMcpApp, result }`, the envelope
+ * every client reads, so the card shows on every provider and survives the app closing.
  */
 import type { AppId } from "@lecturn/contracts";
 import {

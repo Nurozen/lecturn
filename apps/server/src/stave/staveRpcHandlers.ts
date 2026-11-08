@@ -6,32 +6,10 @@ import { StaveExecution } from "./StaveExecution.ts";
 import { sameManifestIncarnation } from "./StaveOperations.ts";
 import { StaveMemoryWiring, noop as noopMemoryWiring } from "./StaveMemoryWiring.ts";
 /**
- * staveRpcHandlers - the `stave.*` RPCs served over the WebSocket group.
- *
- * `stave.getStatus` is the LIVE counterpart of the static `capabilities.stave`
- * descriptor (deviation 5): it answers "is a binary runnable, does the config
- * exist, where are the roots, is marmot around, what failed last" without
- * ever running a mutating Stave verb (deviation 21). `stave.spaceStatus` runs
- * `stave space status <id>` for the space whose manifest sits at a workspace
- * root, cached server-wide for 15 seconds per root.
- *
- * The list reads (`listRepos|listSpaces|listSagas|memoryProviders`) run one
- * `--json` read verb each; `dryRun` asks `StaveOperations` for a plan; the
- * two stream RPCs (`runOperation`, `observeOperation`) hand the request to the
- * application-lifetime `StaveOperations` registry, so an operation outlives
- * the socket that started it.
- *
- * Gating: every RPC refuses with `StaveUnavailableError{reason:
- * "disabled_by_server"}` when `LECTURN_STAVE` is off; all but `getStatus`
- * further require `settings.stave.enabled` and a runnable binary. The status
- * RPC deliberately works without those so clients can show what is missing.
- *
- * `StaveRpcRuntime` holds the server-lifetime pieces (last failure, the
- * space-status cache); `makeStaveRpcHandlers` builds one handler record per
- * connection. `RpcInstrumentation` traces them and `RpcScopeAuthorization` checks their scopes in the
- * group middleware, so the handlers carry no wrappers of their own.
- *
- * @module staveRpcHandlers
+ * Every RPC refuses with `disabled_by_server` when `LECTURN_STAVE` is off; all but `getStatus` also
+ * need `settings.stave.enabled` and a runnable binary, so clients can show what is missing.
+ * `getStatus` never runs a mutating Stave verb. Operations run in the application-lifetime
+ * `StaveOperations` registry so they outlive the socket that started them.
  */
 import {
   type StaveDryRunInput,

@@ -1,15 +1,8 @@
 /**
- * Who may ask to pair: only a process on this machine talking to the
- * server directly. Each check closes a different door:
- *
- * - `Origin`: browsers attach it to cross-origin requests, so refusing it keeps
- *   any web page, including one served from localhost, from posting a
- *   registration through the user's browser.
- * - Forwarding and Tailscale headers: Tailscale Serve, Lecturn Connect and
- *   reverse proxies all reach the server from loopback, so a loopback socket
- *   alone does not mean a local caller.
- * - `Host`: a DNS-rebound page arrives with its own hostname.
- * - The socket's remote address: the server may listen on every interface.
+ * Only a process on this machine talking to the server directly may ask to pair. `Origin` is
+ * refused so no web page (even on localhost) posts through the browser; forwarding and Tailscale
+ * headers because Serve, Lecturn Connect and proxies arrive from loopback; `Host` against DNS
+ * rebinding; and the socket address because the server may listen on every interface.
  */
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 

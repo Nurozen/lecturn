@@ -1,13 +1,7 @@
 /**
- * Showcase cards' requests. Lecturn serves them from Squire state, so a
- * card's buttons work on every provider, with the thread stopped, and in a copy
- * of the thread in the same environment: the card is authorized by the item
- * ids its own publish call recorded, never by the thread it is shown in.
- *
- * Its two tools are app-only (`_meta.ui.visibility: ["app"]`) and exist only
- * here, never on /mcp, so no agent can call them. Each acts as the user
- * through `SquireActions.act`, after the client's confirm (the tools are not
- * read-only) and the Operate scope `mcpApps.callTool` requires.
+ * A showcase card is authorized by the item ids its own publish call recorded, never by the thread it is shown in.
+ * Its two tools are app-only and exist only here, never on /mcp, so no agent can call them. Each acts as the user
+ * after the client's confirm and the Operate scope `mcpApps.callTool` requires.
  */
 import {
   McpAppRequestError,

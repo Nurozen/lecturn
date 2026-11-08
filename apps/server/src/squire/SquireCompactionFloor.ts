@@ -1,10 +1,7 @@
 /**
- * Compaction deletes intermediate `thread.pull-request-link-updated`
- * events, the one Squire input it removes, and the reactor classifies each PR
- * transition from its own event. While a Squire could still consume them, the
- * events above the reactor cursor stay. With the switch off or no active
- * Squire nothing will read them (the next on period fast-forwards), so
- * compaction runs as it always has.
+ * Compaction deletes intermediate `thread.pull-request-link-updated` events, which the reactor classifies one by one,
+ * so while a Squire could consume them the events above the reactor cursor stay. With the switch off or no active
+ * Squire nothing reads them (the next on period fast-forwards), so compaction runs as usual.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

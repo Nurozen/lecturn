@@ -9,11 +9,9 @@ import { isCommandAvailable } from "@lecturn/shared/shell";
 import packageJson from "../../package.json" with { type: "json" };
 
 /**
- * Upstream proves npm-global and package-runner (`npx`, `pnpm dlx`, `bunx`)
- * ownership so clients can suggest a manual update command. Lecturn has no
- * public npm distribution yet, so every install stays unknown: clients must not
- * suggest an update that could download the upstream app or an unrelated
- * package with the same name.
+ * Lecturn has no public npm distribution yet, so every install stays unknown:
+ * clients must not suggest an update that could download the upstream app or an
+ * unrelated package with the same name.
  */
 export const resolveServerInstallation: Effect.Effect<ServerInstallation | null> =
   Effect.succeed(null);
@@ -29,11 +27,9 @@ export const resolveEntryPath = Effect.gen(function* () {
 });
 
 /**
- * Render a `lecturn <subcommand>` suggestion. Upstream derives a package
- * runner (`npx`, `pnpm dlx`, `bunx`) and channel tag from the entry path and
- * version so copy/pasting matches the launching command. Lecturn has no public
- * npm distribution yet, so every launch style suggests the plain binary and the
- * entry path and version are accepted only for call-site compatibility.
+ * Render a `lecturn <subcommand>` suggestion. Lecturn has no public npm
+ * distribution yet, so every launch style suggests the plain binary; the entry
+ * path and version are accepted only for call-site compatibility.
  */
 export function formatCliCommand(input: {
   readonly subcommand: string;
@@ -57,28 +53,17 @@ export const resolveCliCommand = (subcommand: string) =>
 const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
 
-/**
- * Quotes `value` for PowerShell, the default Windows terminal. Always quoted,
- * so a path reads the same whether or not it holds a space. Inside double
- * quotes `"` and its typographic forms (which also end the string) double,
- * and `$` and the backtick are escaped so nothing expands.
- */
+/** PowerShell also treats typographic quotes as delimiters; escape them and suppress expansion. */
 const powershellWord = (value: string) =>
   `"${value
     .replaceAll("`", "``")
     .replaceAll("$", "`$")
     .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
 
-/** Quotes a word for the host's shell: POSIX, or PowerShell on Windows. */
 const hostShellWord = (platform: NodeJS.Platform, value: string) =>
   platform === "win32" ? powershellWord(value) : shellWord(value);
 
-/**
- * The launcher a person can type to run this install when `lecturn` is not on
- * PATH: the desktop app's `lecturn` shim, which the app and the shim itself
- * name in `LECTURN_CLI_PATH`, or a standalone binary's own path. Script
- * installs (a repo checkout) have no single launcher and keep plain `lecturn`.
- */
+/** Script installs have no single launcher; desktop shims and standalone binaries do. */
 const resolveInstallLauncher = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const shim = (yield* HostProcess.Environment).LECTURN_CLI_PATH?.trim();

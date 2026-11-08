@@ -394,10 +394,7 @@ export const make = Effect.gen(function* () {
           .onConflictDoUpdate({
             target: [relayLiveActivities.userId, relayLiveActivities.deviceId],
             set: {
-              // A delivered start begins a NEW activity generation: the stored
-              // update token belongs to the previous activity (dead once a new
-              // one starts, and certainly dead after an end), so keep it only
-              // for plain updates.
+              // Starts create new activity generations; only plain updates can reuse the previous update token.
               activityPushToken:
                 input.kind === "live_activity_update"
                   ? sql`${relayLiveActivities.activityPushToken}`

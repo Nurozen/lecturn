@@ -1,23 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off globalDate:off -- Test harness driving a real Electron app and server; it runs no Effect runtime of its own.
 /**
- * Scenario steps 7 and 8, on whichever server the host is using (the sidecar
- * when `--steps 7,8` runs on its own, the user server after steps 3-5):
- *
- *   7. Revoke the app as Settings does. Its credential and embed token are
- *      refused, its live lease is gone and its headless process stops, while
- *      its threads stay open, exportable and deletable from Lecturn and show as
- *      revoked. Pairing again with the approved command restores its project
- *      and threads.
- *   8. An app credential and an embed token are refused for a normal project,
- *      another app's project and an unlisted method, over RPC, the shell stream
- *      and MCP (the host app's thread calling Lecturn's tools). `/embed`, served
- *      from the built web app, refuses framing from a page on a port no app
- *      declared and allows the declared one. A changed headless command waits
- *      for a new approval.
- *
- * A second app ("Security Probe") pairs over the real pairing endpoint to be
- * "another app". Step 7 leaves the host without a credential (a sidecar host
- * only gets one back by restarting), so scenario.ts runs it last.
+ * Steps 7 (revoke: credential, embed token, lease and headless process die; threads stay,
+ * shown revoked; re-pairing restores them) and 8 (credentials refused outside their project
+ * and methods over RPC, shell stream and MCP; `/embed` framing origin-gated; changed headless
+ * command re-approved). Step 7 leaves the host without a credential, so scenario.ts runs it last.
  */
 import * as NodeAssert from "node:assert/strict";
 import * as NodeCrypto from "node:crypto";

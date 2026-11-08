@@ -43,17 +43,12 @@ export interface ProcessRunInput {
   readonly maxOutputBytes?: number | undefined;
   readonly outputMode?: "error" | "truncate" | undefined;
   readonly truncatedMarker?: string | undefined;
-  /**
-   * On timeout, return a synthetic timedOut result.
-   * Partial stdout/stderr are not preserved.
-   */
+  /** Timed-out results discard partial stdout/stderr. */
   readonly timeoutBehavior?: "error" | "timedOutResult" | undefined;
   /**
-   * Receives each complete stdout line as it arrives, while output is still
-   * being buffered into the result. Lines are split on "\n" with a trailing
-   * "\r" stripped; empty lines are skipped and a trailing partial line is
-   * flushed at end-of-stream. Output caps, truncation, and the returned text
-   * are unaffected.
+   * Each complete stdout line as it arrives, split on "\n" with a trailing "\r" stripped; empty
+   * lines are skipped and a trailing partial line is flushed at end-of-stream. Output caps,
+   * truncation and the returned text are unaffected.
    */
   readonly onStdoutLine?: ((line: string) => Effect.Effect<void>) | undefined;
   /** Same as `onStdoutLine`, for stderr. */
@@ -409,9 +404,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
     )
     .pipe(
       Effect.mapError(toSpawnError),
-      // Node's spawn can also throw synchronously, e.g. ENOTDIR when a PATH
-      // entry is a file. That arrives as a defect, which `mapError` never sees,
-      // so callers that recover from spawn failures would be bypassed.
+      // Synchronous spawn throws arrive as defects; recover them too so callers see typed spawn failures.
       Effect.catchDefect((cause) => Effect.fail(toSpawnError(cause))),
     );
 
@@ -493,7 +486,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   } satisfies ProcessRunOutput;
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.fn("ProcessRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 

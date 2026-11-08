@@ -1,12 +1,8 @@
 /**
- * Requests from connected-app cards: `McpAppRequests` hands every card
- * whose server is Lecturn's own here. The app serves them, headless first and
- * then live, so cards keep working in stopped, non-Codex and copied threads,
- * none of which has a provider session that could.
- *
- * A card's `tools/call` is gated exactly like the agent's: same gate, same
- * approval, same `_meta`. Cards know their app's tools by bare name, the agent
- * by prefixed name; both are accepted.
+ * Requests from connected-app cards whose server is Lecturn's own. The app serves them, headless
+ * first then live, so cards work in stopped, non-Codex and copied threads with no provider session.
+ * A card's `tools/call` gets the agent's gate, approval and `_meta`; bare (card) and prefixed
+ * (agent) tool names are both accepted.
  */
 import {
   APP_TOOL_APPROVAL_META_KEY,

@@ -13,14 +13,10 @@ import * as Stream from "effect/Stream";
 import type { McpProviderSessionConfig } from "./mcpSession.ts";
 
 /**
- * Lecturn: whether a provider thread actually got Lecturn's MCP server.
- *
- * MCP configuration is installed per provider thread (Codex passes it in
- * `thread/start` and resume, a reused session attaches a new thread without
- * reopening), and a missing config is not proof of absence (an external
- * OpenCode server is handed a config it never installs). So each adapter
- * reports what it did for the thread it just loaded, and a failure that only
- * surfaces later (Codex's MCP startup status) arrives as its own signal.
+ * Lecturn: whether a provider thread actually got Lecturn's MCP server. Config is installed per
+ * provider thread and a missing config is not proof of absence (an external OpenCode server never
+ * installs it), so each adapter reports what it did for the thread it just loaded, and a later
+ * failure (Codex's MCP startup status) arrives as its own signal.
  */
 export type McpActivationSignal =
   | {
