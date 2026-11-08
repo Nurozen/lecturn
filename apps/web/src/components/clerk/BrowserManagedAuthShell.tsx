@@ -3,7 +3,8 @@ import { useEffect, type ComponentProps, type ReactNode } from "react";
 
 import { ManagedRelayAuthProvider } from "../../cloud/managedAuth";
 import { ClerkDefaultAvatar } from "./ClerkDefaultAvatar";
-import { clerkAppearance } from "./clerkAppearance";
+import { useClientSettings } from "../../hooks/useSettings";
+import { clerkAppearance, redesignClerkAppearance } from "./clerkAppearance";
 
 /**
  * The clerk-js and Clerk UI builds hosted web loads. Exact, because relay
@@ -44,9 +45,10 @@ export default function BrowserManagedAuthShell({
   readonly publishableKey: string;
   readonly children: ReactNode;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   return (
     <ClerkProvider
-      appearance={clerkAppearance}
+      appearance={redesign ? redesignClerkAppearance : clerkAppearance}
       publishableKey={publishableKey}
       {...pinnedClerkScripts}
     >

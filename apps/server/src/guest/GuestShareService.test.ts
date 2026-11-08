@@ -4,9 +4,11 @@ import {
   AppId,
   ChatAttachmentId,
   CommandId,
+  EnvironmentId,
   EventId,
   GuestShareId,
   MessageId,
+  NodeId,
   type OrchestrationV2TurnItem,
   ProjectId,
   ProviderDriverKind,
@@ -581,6 +583,136 @@ const writeCommand = (
     });
     return TurnItemId.make(id);
   });
+
+/** A link request and a task that runs on a linked machine, both naming that machine. */
+const writeLinkedMachineRecords = (suffix: string) =>
+  Effect.gen(function* () {
+    const runId = yield* ownerRun;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const remoteChild = {
+      environmentId: EnvironmentId.make("environment-vps"),
+      threadId: ThreadId.make("thread:on-the-vps"),
+      label: "Hetzner VPS",
+    };
+    const base = {
+      threadId,
+      runId,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      title: null,
+      startedAt: now,
+      completedAt: null,
+      updatedAt: now,
+    };
+    const subagentId = NodeId.make(`node:remote-task-${suffix}`);
+    const common = {
+      threadId,
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: instanceId,
+      occurredAt: now,
+    };
+    yield* eventSink.write({
+      events: [
+        {
+          ...common,
+          id: EventId.make(`event:link-${suffix}`),
+          type: "turn-item.updated",
+          payload: {
+            ...base,
+            id: TurnItemId.make(`item:link-${suffix}`),
+            nodeId: null,
+            ordinal: 1,
+            status: "running",
+            type: "link_request",
+            url: "https://vps.lecturn.example",
+            reason: "Deploy there",
+            hint: "vps",
+            linkStatus: "pending",
+          },
+        },
+        {
+          ...common,
+          id: EventId.make(`event:subagent-${suffix}`),
+          type: "subagent.updated",
+          payload: {
+            id: subagentId,
+            threadId,
+            runId,
+            parentNodeId: NodeId.make("node:root"),
+            origin: "app_owned",
+            createdBy: "agent",
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId: instanceId,
+            providerThreadId: null,
+            childThreadId: null,
+            remoteChild,
+            nativeTaskRef: null,
+            prompt: "Check the health endpoint",
+            title: null,
+            model: null,
+            status: "running",
+            result: null,
+            startedAt: now,
+            completedAt: null,
+            updatedAt: now,
+          },
+        },
+        {
+          ...common,
+          id: EventId.make(`event:task-${suffix}`),
+          type: "turn-item.updated",
+          payload: {
+            ...base,
+            id: TurnItemId.make(`item:task-${suffix}`),
+            nodeId: subagentId,
+            ordinal: 2,
+            status: "running",
+            type: "subagent",
+            subagentId,
+            origin: "app_owned",
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId: instanceId,
+            childThreadId: null,
+            remoteChild,
+            prompt: "Check the health endpoint",
+            result: null,
+          },
+        },
+      ],
+    });
+    return TurnItemId.make(`item:link-${suffix}`);
+  });
+
+it.effect("withholds link requests and linked-machine task targets from the guest", () =>
+  Effect.gen(function* () {
+    const { orchestrator, guestShares, credential } = yield* shareThread;
+    const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
+    const before = yield* writeLinkedMachineRecords("before");
+    const events = yield* guestShares.stream(session);
+    yield* writeLinkedMachineRecords("after");
+    yield* orchestrator.dispatch({
+      type: "thread.guest-share.close",
+      commandId: CommandId.make("close-after-linked-records"),
+      threadId,
+    });
+    const received = Array.from(yield* Stream.runCollect(events));
+    const snapshot = received.find(
+      (event) => event.type === "thread" && event.item.kind === "snapshot",
+    );
+    assert.isDefined(snapshot);
+    // Both halves carry the task, so a test that only ever saw nothing passes for no reason.
+    const wire = JSON.stringify(received);
+    assert.include(wire, "item:task-before");
+    assert.include(wire, "item:task-after");
+    for (const leak of ["link_request", "remoteChild", "environment-vps", "Hetzner VPS", "vps."]) {
+      assert.notInclude(wire, leak);
+    }
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.item(session, before))));
+  }).pipe(Effect.provide(layerTest)),
+);
 
 it.effect("gives the guest a command's detail and output, as the owner's row loads them", () =>
   Effect.gen(function* () {

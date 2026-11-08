@@ -6,6 +6,7 @@ import {
   guestDomainEvent,
   guestThread,
   guestThreadModel,
+  guestTurnItem,
 } from "./guestView.ts";
 
 // Lecturn: what the fork adds to the thread record. Sharing one more needs a decision here.
@@ -45,11 +46,26 @@ describe("guestThread", () => {
     expect(shared.title).toBe("value:title");
 
     const event = { type: "thread.visited", payload: thread } as OrchestrationV2DomainEvent;
-    expect(Object.keys(guestDomainEvent(event).payload).toSorted()).toEqual(
+    expect(Object.keys(guestDomainEvent(event)?.payload ?? {}).toSorted()).toEqual(
       [...GUEST_THREAD_FIELDS].toSorted(),
     );
     const other = { type: "run.updated", payload: { id: "run-1" } } as OrchestrationV2DomainEvent;
     expect(guestDomainEvent(other)).toBe(other);
+  });
+});
+
+describe("guestTurnItem", () => {
+  it("withholds link requests and item types it does not know, and drops remote task targets", () => {
+    const item = (fields: { readonly type: string } & Record<string, unknown>) => ({
+      id: "item-1",
+      ...fields,
+    });
+    expect(guestTurnItem(item({ type: "link_request", url: "https://vps.example" }))).toBeNull();
+    expect(guestTurnItem(item({ type: "machine_from_the_future" }))).toBeNull();
+    const message = item({ type: "assistant_message", text: "Done" });
+    expect(guestTurnItem(message)).toBe(message);
+    const remote = item({ type: "subagent", remoteChild: { label: "VPS" }, prompt: "Check" });
+    expect(guestTurnItem(remote)).toEqual(item({ type: "subagent", prompt: "Check" }));
   });
 });
 

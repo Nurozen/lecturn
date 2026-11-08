@@ -145,6 +145,24 @@ export function applyGuestStreamEvent(
 }
 
 /**
+ * Lecturn: drops link request rows, which name the owner's other machines. The server withholds
+ * them from guests already; this keeps an older server's rows off the page. Same rows in, same
+ * array out, so the timeline's incremental rows keep their cache.
+ */
+export function createGuestRowFilter<Row extends { readonly item: { readonly type: string } }>() {
+  let previous: { readonly rows: ReadonlyArray<Row>; readonly result: ReadonlyArray<Row> } | null =
+    null;
+  return (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => {
+    if (previous?.rows === rows) return previous.result;
+    const result = rows.some((row) => row.item.type === "link_request")
+      ? rows.filter((row) => row.item.type !== "link_request")
+      : rows;
+    previous = { rows, result };
+    return result;
+  };
+}
+
+/**
  * The guest's messages to show after the transcript, oldest first. Pending ones always show. A
  * sent or dismissed one shows only while it awaits a row (see `awaitingRowIds`): a queued send, or
  * a dismissal to report. The transcript is a bounded window, so any other resolved message is old

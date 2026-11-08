@@ -391,7 +391,7 @@ const make = Effect.gen(function* () {
     const descriptor = yield* describe(primary);
     if (Option.isNone(descriptor)) {
       return yield* new PeerLinkError({
-        reason: "not_a_t3_environment",
+        reason: "not_a_lecturn_environment",
         message: `Nothing at ${primary} answered as a Lecturn environment.`,
       });
     }

@@ -17,6 +17,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
 import {
   applyGuestStreamEvent,
+  createGuestRowFilter,
   formatGuestExpiry,
   guestFilesProblem,
   initialGuestStreamState,
@@ -189,6 +190,18 @@ describe("unplacedGuestMessages", () => {
       "dismissed",
       "late",
     ]);
+  });
+});
+
+describe("createGuestRowFilter", () => {
+  it("drops link request rows and returns the same array for the same rows", () => {
+    const filter = createGuestRowFilter();
+    const message = { item: { type: "assistant_message" } };
+    const rows = [message, { item: { type: "link_request" } }];
+    expect(filter(rows)).toEqual([message]);
+    expect(filter(rows)).toBe(filter(rows));
+    const clean = [message];
+    expect(filter(clean)).toBe(clean);
   });
 });
 

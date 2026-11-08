@@ -6,9 +6,8 @@ const authFlowElements = {
     "redesign:border-primary redesign:bg-primary redesign:bg-none redesign:text-primary-foreground redesign:shadow-xs redesign:shadow-primary/24 redesign:hover:bg-primary/90 redesign:focus-visible:ring-2 redesign:focus-visible:ring-inset redesign:focus-visible:ring-ring redesign:focus-visible:ring-offset-1 redesign:focus-visible:ring-offset-background",
 };
 
+/** The Lecturn look: Clerk's styles stay unlayered and cascade with the fork's CSS as on main. */
 export const clerkAppearance = {
-  // index.css orders this layer below components and utilities so the element classes below win.
-  cssLayerName: "clerk",
   variables: {
     // Clerk reuses its primary color for filled buttons and bare links.
     colorPrimary: "var(--update-foreground)",
@@ -44,4 +43,10 @@ export const clerkAppearance = {
   },
   signIn: { elements: authFlowElements },
   signUp: { elements: authFlowElements },
+} satisfies NonNullable<ClerkProviderProps["appearance"]>;
+
+/** The new design: its element classes need Clerk's styles in a layer below them (index.css). */
+export const redesignClerkAppearance = {
+  ...clerkAppearance,
+  cssLayerName: "clerk",
 } satisfies NonNullable<ClerkProviderProps["appearance"]>;

@@ -58,6 +58,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
   applyGuestStreamEvent,
+  createGuestRowFilter,
   formatGuestExpiry,
   guestAttachmentUrl,
   createGuestAttachmentUrls,
@@ -370,7 +371,10 @@ function GuestThread({
   const { resolvedTheme } = useTheme();
   // The rest is what ChatView derives from the same projection.
   const [projectQuestionHistory] = useState(() => createQuestionHistoryProjector());
-  const items = projectQuestionHistory(projection);
+  const [guestRows] = useState(() =>
+    createGuestRowFilter<OrchestrationV2ThreadProjection["visibleTurnItems"][number]>(),
+  );
+  const items = guestRows(projectQuestionHistory(projection));
   // Files load through the guest route.
   const [attachmentUrls] = useState(() => createGuestAttachmentUrls(shareId));
   // Expanded rows read detail and command output through the guest routes.
