@@ -130,6 +130,7 @@ export const SquireCardRow = Schema.Struct({
   escalate_at: NullableText,
   opened_at: NullableText,
   executes_at: NullableText,
+  expires_at: NullableText,
   attempt: Count,
   command_id: NullableText,
   execution_key: NullableText,
@@ -141,6 +142,10 @@ export const SquireCardRow = Schema.Struct({
   updated_at: Text,
 });
 export type SquireCardRow = typeof SquireCardRow.Type;
+/** Only approvals set `expires_at`, so every other insert leaves it out. */
+export type SquireCardInsert = Omit<SquireCardRow, "expires_at"> & {
+  readonly expires_at?: string | null;
+};
 
 export const SquireBudgetUsageRow = Schema.Struct({
   id: Count,
@@ -371,7 +376,7 @@ export class SquireRepository extends Context.Service<
     readonly dropDeferredEvents: (squireId: SquireId, at?: string) => Result<number>;
     /** Every row the Squire has not been sent yet (deferred or pending) is dropped: a pause. */
     readonly dropQueuedEvents: (squireId: SquireId) => Result<number>;
-    readonly insertCard: (row: SquireCardRow) => Result<void>;
+    readonly insertCard: (row: SquireCardInsert) => Result<void>;
     readonly getCard: (id: SquireCardId) => Result<Option.Option<SquireCardRow>>;
     /** Every given filter must match; an empty `statuses` or `kinds` matches nothing. Oldest first. */
     readonly listCards: (filter: {

@@ -61,7 +61,8 @@ export default Effect.gen(function* () {
     title TEXT NOT NULL, why TEXT NOT NULL, payload_json TEXT NOT NULL,
     evidence_json TEXT NOT NULL, trigger_json TEXT NOT NULL, intent_json TEXT,
     origin TEXT NOT NULL, steer_kind TEXT, routed_task_id TEXT, rule_id TEXT, finding_key TEXT,
-    escalate_at TEXT, opened_at TEXT, executes_at TEXT, attempt INTEGER NOT NULL DEFAULT 0,
+    escalate_at TEXT, opened_at TEXT, executes_at TEXT, expires_at TEXT,
+    attempt INTEGER NOT NULL DEFAULT 0,
     command_id TEXT, execution_key TEXT UNIQUE, dedupe_key TEXT,
     replaced_count INTEGER NOT NULL DEFAULT 0, ask_json TEXT, resolution TEXT,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL

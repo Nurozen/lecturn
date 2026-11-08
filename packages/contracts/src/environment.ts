@@ -152,6 +152,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers and when `LECTURN_SQUIRE` pins the switch, so clients then show
       neither the knock suggestion nor "applies now" copy. */
   squireLiveSwitch: Schema.optionalKey(Schema.Boolean),
+  /** Squires talk in their chat: approvals render inline and expire, FYIs close on visit. Absent
+      on older servers, so clients keep inline open approvals and leave FYIs unshown. */
+  squireChatFirst: Schema.optionalKey(Schema.Boolean),
   /** Subscribe to command output only when advertised; older servers never send it. */
   commandOutputStreaming: Schema.optionalKey(Schema.Boolean),
   /** Hosts headless Chromium tabs streamed over /api/preview-stream for clients without a local runtime. */

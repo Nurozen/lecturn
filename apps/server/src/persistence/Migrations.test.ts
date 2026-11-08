@@ -195,6 +195,7 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "SquireChatFirst"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -219,6 +220,7 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "SquireChatFirst"],
       ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
@@ -236,6 +238,7 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "SquireChatFirst"],
       ]);
       yield* insertSearchMessage("after-upgrade");
 
@@ -262,6 +265,7 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "SquireChatFirst"],
       ]);
 
       assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
@@ -300,6 +304,7 @@ describe("runMigrations", () => {
         [85, "WebhookDedupe"],
         [86, "ShellStopRequestIndex"],
         [87, "ThreadMessageSearch"],
+        [88, "SquireChatFirst"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

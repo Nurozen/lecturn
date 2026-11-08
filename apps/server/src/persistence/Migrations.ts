@@ -113,6 +113,7 @@ import Migration0085 from "./Migrations/067_WebhookDedupe.ts";
 // so they run here as 86 and 87.
 import Migration0086 from "./Migrations/068_ShellStopRequestIndex.ts";
 import Migration0087 from "./Migrations/069_ThreadMessageSearch.ts";
+import Migration0088 from "./Migrations/088_SquireChatFirst.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -319,6 +320,7 @@ const migrationEntries = [
   [86, "ShellStopRequestIndex", ShellStopRequestIndexCompatibility],
   // Upstream 69.
   [87, "ThreadMessageSearch", ThreadMessageSearchCompatibility],
+  [88, "SquireChatFirst", Migration0088],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
