@@ -39,23 +39,21 @@ import type {
   ThreadId,
 } from "@lecturn/contracts";
 import {
-  holdRemaining,
-  type SquireEnvironmentState,
-  squireHeldLabel,
-  squireRuleOfferPrompt,
-  squireSupersededNote,
-} from "@lecturn/client-runtime/state/squire";
-import {
   SQUIRE_KIND_LABEL,
+  holdRemaining,
+  squireAcceptOffer,
   squireCardCaption,
   squireCardOrigins,
+  type SquireEnvironmentState,
+  squireHeldLabel,
   squireOfferRuleInput,
-  squireAcceptOffer,
   squireRowAction,
   squireRowTargetName,
-  squireSteerKindLabel,
+  squireRuleOfferPrompt,
+  squireSupersededNote,
   squireUndoOffer,
-} from "../squire/queue/squireQueue.logic";
+} from "@lecturn/client-runtime/state/squire";
+import { squireSteerKindLabel } from "../squire/chat/squireCard.logic";
 
 /** Messages of a subscribed V2 detail for one thread, if any. */
 export function threadDetailMessages(

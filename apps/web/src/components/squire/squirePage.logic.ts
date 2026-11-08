@@ -1,12 +1,11 @@
 import {
   holdRemaining,
-  squireStateLine,
+  squireCardOrigins,
   type SquireEnvironmentState,
-  type SquireQueueChip,
+  type SquireRuleNames,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import type {
-  EnvironmentId,
   SquireActionLogEntry,
   SquireActionLogKind,
   SquireCardId,
@@ -17,9 +16,6 @@ import type {
   ThreadId,
 } from "@lecturn/contracts";
 
-import { squireCardOrigins, type SquireRuleNames } from "./queue/squireQueue.logic";
-import type { SquireViewSearch } from "./squireView.logic";
-
 // ── Page state ────────────────────────────────────────────────
 
 export type SquirePageState =
@@ -29,8 +25,6 @@ export type SquirePageState =
       readonly status: "ready";
       readonly entry: SquireSnapshotEntry;
       readonly isLead: boolean;
-      /** The Lead's team strip; empty for any other Squire. */
-      readonly team: ReadonlyArray<SquireSnapshotEntry>;
     };
 
 /** `capable` is null until the server config arrives, so a slow config never reads as "off". */
@@ -43,74 +37,17 @@ export function squirePageState(
   if (capable === null || state === null) return { status: "loading" };
   const entry = state.squires.find((candidate) => candidate.squire.id === squireId);
   if (entry === undefined) return { status: "unavailable" };
-  const isLead = entry.squire.role === "lead";
-  return {
-    status: "ready",
-    entry,
-    isLead,
-    team: isLead ? state.squires.filter((candidate) => candidate.squire.role !== "lead") : [],
-  };
+  return { status: "ready", entry, isLead: entry.squire.role === "lead" };
 }
 
 // ── Layout ────────────────────────────────────────────────────
 
-/** Main width from which the 340 px companion panel fits beside the queue. */
+/** Main width from which the 340 px companion panel fits beside the chat. */
 const SQUIRE_VIEW_WIDE_PX = 1100;
-/**
- * Main width from which the inbox is offered: its 28rem list, a 30rem detail, the gap, and the
- * page inset. Lower than the panel's, since an open inbox collapses the panel; at a 1280 px
- * window the main is about 1024 px, so the inbox works there.
- */
-export const SQUIRE_INBOX_MIN_PX = 960;
 export const SQUIRE_COMPANION_PANEL_PX = 340;
-/** The header portrait when the companion panel is collapsed or not mounted. */
-export const SQUIRE_HEADER_PORTRAIT_PX = 64;
-/** The Inbox toggle stays in the topbar below its width, disabled, so the entry never vanishes. */
-export const SQUIRE_INBOX_NARROW_HINT = "Inbox needs a wider window";
 
-export interface SquireViewLayout {
-  readonly inboxOffered: boolean;
-  readonly companionPanel: "shown" | "collapsed";
-  readonly queueLayout: "list" | "inbox";
-}
-
-const isSquireViewWide = (mainWidthPx: number) => mainWidthPx >= SQUIRE_VIEW_WIDE_PX;
-
-/** Which side of each layout breakpoint a width is on, so a resize re-renders only on a cross. */
-export const squireViewBreakpoint = (mainWidthPx: number) =>
-  (mainWidthPx >= SQUIRE_INBOX_MIN_PX ? 1 : 0) + (isSquireViewWide(mainWidthPx) ? 1 : 0);
-
-/** The inbox and the 340 px panel do not fit together, so an open inbox collapses the panel. */
-export function squireViewLayout(mainWidthPx: number, inboxOpen: boolean): SquireViewLayout {
-  const inboxOffered = mainWidthPx >= SQUIRE_INBOX_MIN_PX;
-  const inbox = inboxOffered && inboxOpen;
-  return {
-    inboxOffered,
-    companionPanel: isSquireViewWide(mainWidthPx) && !inbox ? "shown" : "collapsed",
-    queueLayout: inbox ? "inbox" : "list",
-  };
-}
-
-// ── Route search ──────────────────────────────────────────────
-
-/** Absent keys stay out of the URL, so "all", no item, and no team filter are the bare route. */
-export function nextSquireViewSearch(
-  search: SquireViewSearch,
-  patch: {
-    readonly chip?: SquireQueueChip;
-    readonly item?: SquireCardId | null;
-    readonly squire?: SquireId | null;
-  },
-): SquireViewSearch {
-  const filter = patch.chip === undefined ? search.filter : patch.chip;
-  const item = patch.item === undefined ? search.item : patch.item;
-  const squire = patch.squire === undefined ? search.squire : patch.squire;
-  return {
-    ...(item == null ? {} : { item }),
-    ...(filter === undefined || filter === "all" ? {} : { filter }),
-    ...(squire == null ? {} : { squire }),
-  };
-}
+/** The side of the panel breakpoint a width is on, so a resize re-renders only on a cross. */
+export const squireViewWide = (mainWidthPx: number) => mainWidthPx >= SQUIRE_VIEW_WIDE_PX;
 
 // ── Activity ──────────────────────────────────────────────────
 
@@ -393,56 +330,7 @@ export function squireRecentFromSnapshot(
     }));
 }
 
-// ── Header lines ──────────────────────────────────────────────
-
-/**
- * The Lead view lists its team's decisions beside its own, so its state line counts them all;
- * the sidebar badge still counts only the Lead's own items.
- */
-export function squireLeadStateLine(
-  lead: Parameters<typeof squireStateLine>[0],
-  team: ReadonlyArray<{
-    readonly openDecisionCount: number;
-    readonly leadRaisedDecisionCount?: number;
-  }>,
-): string {
-  // A Squire's count includes Lead-raised items on its threads, which the Lead's own count
-  // already has, so each counts once.
-  const total = team.reduce(
-    (sum, member) => sum + member.openDecisionCount - (member.leadRaisedDecisionCount ?? 0),
-    lead.openDecisionCount,
-  );
-  const line = squireStateLine({ ...lead, openDecisionCount: total });
-  if (line !== "Working" || total === 0) return line;
-  return `Working · ${total} ${total === 1 ? "needs" : "need"} a decision`;
-}
-
-/**
- * The header's state line. Once the queue loads it counts the rows the queue's groups show, so
- * "N need a decision" is the "Needs a decision" group, Lead-raised items included, and holds
- * count as held; until then the snapshot's counts. The Lead's queue combines its team's.
- */
-export function squireHeaderStateLine(
-  input: Parameters<typeof squireStateLine>[0],
-  queue: { readonly decisions: number; readonly held: number } | null,
-  team: ReadonlyArray<{ readonly openDecisionCount: number }> | null,
-): string {
-  if (queue === null) {
-    return team === null ? squireStateLine(input) : squireLeadStateLine(input, team);
-  }
-  const counted = { ...input, openDecisionCount: queue.decisions, heldCount: queue.held };
-  return team === null ? squireStateLine(counted) : squireLeadStateLine(counted, []);
-}
-
 // ── Banners ───────────────────────────────────────────────────
-
-/** The page-level hold banners: every hold until the queue loads, then those it does not show. */
-export function squireUnshownHolds<Hold extends { readonly cardId: string }>(
-  held: ReadonlyArray<Hold>,
-  shownInQueue: ReadonlySet<string> | null,
-): ReadonlyArray<Hold> {
-  return shownInQueue === null ? held : held.filter((hold) => !shownInQueue.has(hold.cardId));
-}
 
 /**
  * Whole seconds left on a hold, and when that number next changes, so the banner re-renders
@@ -541,76 +429,6 @@ export function squireConversationPane(
     title: squire.role === "lead" ? "Choose a provider for the Lead" : "Choose a provider",
     description: "The conversation starts once a supported provider is chosen.",
   };
-}
-
-/**
- * The queue is the view's primary surface. Collapsed, the conversation is one slim line that
- * expands when focused. Expanded, the queue keeps its content height up to the larger of
- * `queueMinPx` and `queueMaxShare` of the view, so an open card's sticky actions stay on screen,
- * and the conversation takes the rest: most of the view when the queue is short.
- */
-export type SquireConversationLayout =
-  | { readonly kind: "none" }
-  | { readonly kind: "prompt" }
-  | { readonly kind: "slim" }
-  | { readonly kind: "expanded"; readonly queueMaxShare: number; readonly queueMinPx: number };
-
-export function squireConversationLayout(
-  pane: SquireConversationPane,
-  collapsed: boolean,
-): SquireConversationLayout {
-  if (pane.kind === "pending") return { kind: "none" };
-  if (pane.kind === "needs_provider") return { kind: "prompt" };
-  // A tall inline card (an MCP App) needs most of a 900 px window to read as more than its
-  // header, so the pane gets everything the queue does not use; the queue's floor still wins.
-  return collapsed ? { kind: "slim" } : { kind: "expanded", queueMaxShare: 0.4, queueMinPx: 360 };
-}
-
-/** The queue's CSS max-height while the pane is expanded; the pane flexes into the rest. */
-export const squireExpandedQueueMaxHeight = (
-  layout: Extract<SquireConversationLayout, { kind: "expanded" }>,
-) => `max(${layout.queueMinPx}px, ${layout.queueMaxShare * 100}%)`;
-
-/**
- * The expanded pane's height in a view `viewPx` tall whose queue content is `queuePx`, as the
- * page's flex rules resolve it.
- */
-export function squireExpandedConversationPx(
-  layout: Extract<SquireConversationLayout, { kind: "expanded" }>,
-  viewPx: number,
-  queuePx: number,
-): number {
-  const queueCap = Math.max(layout.queueMinPx, viewPx * layout.queueMaxShare);
-  return Math.max(0, viewPx - Math.min(queuePx, queueCap));
-}
-
-/** The collapsed pane's one-line hint. */
-export function squireConversationHint(
-  homeShell: { readonly visibleItemCount: number } | null,
-  working: boolean,
-): string {
-  if (working) return "Working…";
-  const count = homeShell?.visibleItemCount ?? 0;
-  if (count === 0) return "No messages yet";
-  return `${count} ${count === 1 ? "entry" : "entries"}`;
-}
-
-/** Collapsed until the user opens it, so a new view leads with the queue. */
-export const SQUIRE_CONVERSATION_COLLAPSED_DEFAULT = true;
-
-export const squireConversationCollapsedKey = (environmentId: EnvironmentId, squireId: SquireId) =>
-  `lecturn:squire-conversation-collapsed:${environmentId}:${squireId}`;
-
-/**
- * Where a mini composer message goes when its send fails: the home thread's draft, since the
- * real composer is unmounted while collapsed. Blank text hands nothing over; an existing draft
- * is kept, with the new text after it, so nothing typed is dropped.
- */
-export function squireMiniComposerDraft(text: string, draft: string | null): string | null {
-  const next = text.trim();
-  if (next.length === 0) return null;
-  const kept = draft?.trimEnd() ?? "";
-  return kept.length === 0 ? next : `${kept}\n\n${next}`;
 }
 
 // ── Settings switch ───────────────────────────────────────────

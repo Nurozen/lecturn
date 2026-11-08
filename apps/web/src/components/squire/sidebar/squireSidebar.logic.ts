@@ -2,15 +2,10 @@ import {
   squireStateLine,
   type SquireEnvironmentState,
   type SquireIndicatorState,
+  type SquireSidebarState,
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
-import type {
-  EnvironmentId,
-  SquireCardId,
-  SquireCardKind,
-  SquireCardRow,
-  SquireId,
-} from "@lecturn/contracts";
+import type { EnvironmentId, SquireId } from "@lecturn/contracts";
 
 import type { RelativeTimeState } from "../../../timestampFormat";
 
@@ -52,16 +47,25 @@ export function squireLeadBlock(state: SquireEnvironmentState): SquireLeadBlock 
 
 export type SquireRowTrailing =
   | { readonly kind: "working" }
-  | { readonly kind: "badge"; readonly count: number }
+  | { readonly kind: "needs-you"; readonly count: number }
+  | { readonly kind: "unread" }
   | { readonly kind: "none" };
 
-/** The count badge, or "working" in its place while the Squire works. */
-export function squireRowTrailing(indicator: SquireIndicatorState): SquireRowTrailing {
-  if (indicator.workingLabel) return { kind: "working" };
-  if (indicator.badge !== null && indicator.badge > 0) {
-    return { kind: "badge", count: indicator.badge };
+/** The row's one state: how many decisions wait, that it works, or that it wrote since a visit. */
+export function squireRowTrailing(
+  state: SquireSidebarState,
+  openDecisionCount: number,
+): SquireRowTrailing {
+  switch (state) {
+    case "needs-you":
+      return { kind: "needs-you", count: openDecisionCount };
+    case "working":
+      return { kind: "working" };
+    case "unread":
+      return { kind: "unread" };
+    case "none":
+      return { kind: "none" };
   }
-  return { kind: "none" };
 }
 
 /**
@@ -84,7 +88,12 @@ export function squireRowStatusLine(
 }
 
 /** Read aloud and in tooltips, since the indicator's state is otherwise only color and ring. */
-export function squireRowLabel(name: string, indicator: SquireIndicatorState): string {
+export function squireRowLabel(
+  name: string,
+  indicator: SquireIndicatorState,
+  state: SquireSidebarState,
+): string {
+  if (state === "unread") return `${name}, unread messages`;
   switch (indicator.state) {
     case "working":
       return `${name}, working`;
@@ -99,49 +108,10 @@ export function squireRowLabel(name: string, indicator: SquireIndicatorState): s
   }
 }
 
-// ── Decision child rows ───────────────────────────────────────
-
-const SQUIRE_CHILD_ROW_CAP = 5;
-
-/** The queued statuses a view lists under "Needs a decision"; held items have their own group. */
-const AWAITING_DECISION: ReadonlySet<SquireCardRow["status"]> = new Set([
-  "open",
-  "accepting",
-  "executing",
-]);
-
-/**
- * The decision items a row's badge counts, which are its view's "Needs a decision" rows: not FYI,
- * not held, still queued. A Squire's list is what it raised or owns, Lead-raised items on its
- * threads included; the Lead's is its combined queue, so it keeps only what the Lead raised.
- */
-export function squireChildRows<Row extends Pick<SquireCardRow, "kind" | "status" | "squireId">>(
-  items: ReadonlyArray<Row>,
-  target: {
-    readonly squireId: SquireId;
-    readonly leadId: SquireId | null;
-    readonly openDecisionCount: number;
-    /** Lead-raised items the count includes for a Squire; they list under the Lead instead. */
-    readonly leadRaisedDecisionCount?: number;
-  },
-  cap = SQUIRE_CHILD_ROW_CAP,
-): { readonly rows: ReadonlyArray<Row>; readonly moreCount: number } {
-  const isLead = target.squireId === target.leadId;
-  // Each item is one child row, under its raiser: a Lead-raised overlap on Release's thread
-  // lists under the Lead, though Release's badge counts it.
-  const counted = items.filter(
-    (item) =>
-      item.kind !== "fyi" &&
-      AWAITING_DECISION.has(item.status) &&
-      (isLead ? item.squireId === target.squireId : item.squireId !== target.leadId),
-  );
-  const rows = counted.slice(0, cap);
-  // The list is one page; the snapshot count covers what the page left out.
-  const ownCount = isLead
-    ? target.openDecisionCount
-    : target.openDecisionCount - (target.leadRaisedDecisionCount ?? 0);
-  const total = Math.max(counted.length, ownCount);
-  return { rows, moreCount: total - rows.length };
+/** A row's compact age: "now", "5m", "3h", "2d". */
+export function squireChildAgeText(relative: RelativeTimeState): string {
+  if (relative.status !== "relative") return "";
+  return relative.suffix === null ? "now" : relative.value;
 }
 
 /**
@@ -161,38 +131,12 @@ export function squireTeamRaisedCounts<
   );
 }
 
-export type SquireKindDotTone = "info" | "warning" | "destructive" | "success";
-
-/** One tone per decision kind, so a glance tells a steer from a question; FYI is never a row. */
-const SQUIRE_KIND_DOT: Readonly<
-  Record<
-    Exclude<SquireCardKind, "fyi">,
-    { readonly tone: SquireKindDotTone; readonly label: string }
-  >
-> = {
-  steer: { tone: "info", label: "Action" },
-  question: { tone: "warning", label: "Question" },
-  overlap: { tone: "destructive", label: "Overlap" },
-  proposal: { tone: "success", label: "Proposal" },
-};
-
-export function squireKindDot(kind: SquireCardKind) {
-  return kind === "fyi" ? null : SQUIRE_KIND_DOT[kind];
-}
-
-/** A child row's compact age: "now", "5m", "3h", "2d". */
-export function squireChildAgeText(relative: RelativeTimeState): string {
-  if (relative.status !== "relative") return "";
-  return relative.suffix === null ? "now" : relative.value;
-}
-
 // ── Fold state ────────────────────────────────────────────────
 
 export type SquireFoldTarget =
   | { readonly kind: "group" }
   | { readonly kind: "environment"; readonly environmentId: EnvironmentId }
-  | { readonly kind: "lead"; readonly environmentId: EnvironmentId }
-  | { readonly kind: "squire"; readonly environmentId: EnvironmentId; readonly squireId: SquireId };
+  | { readonly kind: "lead"; readonly environmentId: EnvironmentId };
 
 export function squireFoldKey(target: SquireFoldTarget): string {
   switch (target.kind) {
@@ -202,46 +146,28 @@ export function squireFoldKey(target: SquireFoldTarget): string {
       return `environment:${target.environmentId}`;
     case "lead":
       return `lead:${target.environmentId}`;
-    case "squire":
-      return `squire:${target.environmentId}:${target.squireId}`;
   }
 }
 
-/**
- * Only explicit choices persist. The group, each environment, and each Lead start open so every
- * badge is in view; a Squire's child rows start folded because each open Squire runs its own
- * items query, and the badge already says how many wait.
- */
+/** Only explicit choices persist. The group, each environment, and each Lead start open. */
 export function isSquireFoldCollapsed(
   collapsedByKey: Readonly<Record<string, boolean>>,
   target: SquireFoldTarget,
 ): boolean {
-  return collapsedByKey[squireFoldKey(target)] ?? target.kind === "squire";
+  return collapsedByKey[squireFoldKey(target)] ?? false;
 }
 
-/**
- * The Lead row folds its own decision items and its Squires (later its rooms too), so it has
- * something to fold whenever either exists.
- */
+/** The Lead row folds its Squires and rooms, so it has something to fold whenever either exists. */
 export function squireLeadFold(
   collapsedByKey: Readonly<Record<string, boolean>>,
   environmentId: EnvironmentId,
   block: SquireLeadBlock,
 ): { readonly expandable: boolean; readonly expanded: boolean } {
-  const expandable =
-    block.squires.length > 0 || block.rooms.length > 0 || (block.lead?.openDecisionCount ?? 0) > 0;
+  const expandable = block.squires.length > 0 || block.rooms.length > 0;
   return {
     expandable,
     expanded: expandable && !isSquireFoldCollapsed(collapsedByKey, { kind: "lead", environmentId }),
   };
-}
-
-/**
- * The Lead's own items sit in its fold beside its Squires, at the same depth, so they carry a
- * label there that sets them apart from the Squire rows below. Alone in the fold they need none.
- */
-export function squireLeadItemsLabel(block: SquireLeadBlock): string | null {
-  return block.squires.length > 0 || block.rooms.length > 0 ? "Needs a decision" : null;
 }
 
 /**
@@ -257,25 +183,16 @@ export function squireLeadAggregateCount(block: SquireLeadBlock): number {
 
 /**
  * A folded Lead stands for the rows it hides, so it shows the block's total in place of its own
- * count, ahead of "working", because the hidden badges would otherwise go unseen.
+ * state, because the hidden badges would otherwise go unseen.
  */
 export function squireLeadTrailing(
-  indicator: SquireIndicatorState,
+  state: SquireSidebarState,
   block: SquireLeadBlock,
   folded: boolean,
 ): SquireRowTrailing {
   const aggregate = squireLeadAggregateCount(block);
-  if (folded && aggregate > 0) return { kind: "badge", count: aggregate };
-  return squireRowTrailing(indicator);
-}
-
-/** A row folds open only when it has decision items to list. */
-export function isSquireRowExpanded(
-  collapsedByKey: Readonly<Record<string, boolean>>,
-  target: Extract<SquireFoldTarget, { kind: "squire" }>,
-  openDecisionCount: number,
-): boolean {
-  return openDecisionCount > 0 && !isSquireFoldCollapsed(collapsedByKey, target);
+  if (folded && aggregate > 0) return { kind: "needs-you", count: aggregate };
+  return squireRowTrailing(state, block.lead?.openDecisionCount ?? 0);
 }
 
 // ── Visibility and selection ──────────────────────────────────
@@ -296,41 +213,32 @@ export function showSquireEnvironmentLabels(environmentCount: number): boolean {
 export interface SquireRouteSelection {
   readonly environmentId: EnvironmentId;
   readonly squireId: SquireId;
-  readonly item: SquireCardId | null;
 }
 
-/** The route row is active; its child row is selected only on that Squire's own view. */
-export function squireRowSelection(
+export function squireRowSelected(
   route: SquireRouteSelection | null,
   environmentId: EnvironmentId,
   squireId: SquireId,
-): { readonly active: boolean; readonly selectedItem: SquireCardId | null } {
-  const active = route?.environmentId === environmentId && route.squireId === squireId;
-  return { active, selectedItem: active ? (route?.item ?? null) : null };
+): boolean {
+  return route?.environmentId === environmentId && route.squireId === squireId;
 }
 
 const ROUTE_KEY_SEPARATOR = "\n";
 
 /** A string the route selector can return, so the group re-renders only when it changes. */
 export function squireRouteKey(
-  match: {
-    readonly params: { readonly environmentId: string; readonly squireId: string };
-    readonly search: { readonly item?: string | undefined };
-  } | null,
+  match: { readonly params: { readonly environmentId: string; readonly squireId: string } } | null,
 ): string {
   if (match === null) return "";
-  return [match.params.environmentId, match.params.squireId, match.search.item ?? ""].join(
-    ROUTE_KEY_SEPARATOR,
-  );
+  return [match.params.environmentId, match.params.squireId].join(ROUTE_KEY_SEPARATOR);
 }
 
 export function parseSquireRouteKey(key: string): SquireRouteSelection | null {
   if (key === "") return null;
-  const [environmentId, squireId, item] = key.split(ROUTE_KEY_SEPARATOR);
+  const [environmentId, squireId] = key.split(ROUTE_KEY_SEPARATOR);
   if (!environmentId || !squireId) return null;
   return {
     environmentId: environmentId as EnvironmentId,
     squireId: squireId as SquireId,
-    item: item ? (item as SquireCardId) : null,
   };
 }

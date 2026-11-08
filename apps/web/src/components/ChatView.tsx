@@ -398,6 +398,8 @@ import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
+import { useThreadUnreadWindow } from "./chat/useThreadUnreadWindow";
+import type { SquireChatApprovalsInput } from "./chat/MessagesTimeline.logic";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
@@ -444,6 +446,8 @@ type ChatViewProps =
        * row; reading from there counts as user-scrolled, so new output does not snap to the end.
        */
       openAtNewestAppCard?: boolean;
+      /** Lecturn: this Squire's approvals, shown in the timeline when they were raised. */
+      squireApprovals?: SquireChatApprovalsInput;
       routeKind: "server";
       draftId?: never;
     }
@@ -455,6 +459,7 @@ type ChatViewProps =
       forceExpandedMobileComposer?: boolean;
       controls?: never;
       openAtNewestAppCard?: never;
+      squireApprovals?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -556,6 +561,10 @@ export default function ChatView(props: ChatViewProps) {
           updatedAt: fallbackUpdatedAt,
           lastVisitedAt: fallbackLastVisitedAt,
         });
+  const unreadWindow = useThreadUnreadWindow(
+    routeThreadKey,
+    routeKind === "server" ? serverThread : null,
+  );
   const promptRef = useRef("");
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
@@ -3858,6 +3867,8 @@ export default function ChatView(props: ChatViewProps) {
                   notesAllowed={allows("notes")}
                   openAtNewestAppCard={openAtNewestAppCard}
                   compactSquireEvents={!allows("turn-details")}
+                  squireApprovals={paintOnlyDisplayedTimeline ? undefined : props.squireApprovals}
+                  unreadWindow={paintOnlyDisplayedTimeline ? null : unreadWindow}
                   minimapEnabled={allows("timeline-navigation")}
                   {...(paintOnlyDisplayedTimeline ||
                   threadHistoryControls === undefined ||

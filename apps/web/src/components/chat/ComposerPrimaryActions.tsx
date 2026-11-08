@@ -90,11 +90,8 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
 
-/**
- * Lecturn: the composer's send button face, glass or the dev and nightly stage art. Shared with
- * the Squire view's one-line composer, so its send matches the full composer's it stands in for.
- */
-export function ComposerSendButton({ children, ...props }: ComponentProps<"button">) {
+/** Lecturn: the composer's send button face, glass or the dev and nightly stage art. */
+function ComposerSendButton({ children, ...props }: ComponentProps<"button">) {
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     useEnvironmentIdentificationMode() === "artwork",
   );

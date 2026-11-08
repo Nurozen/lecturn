@@ -23,7 +23,7 @@ import {
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
-import { commandFailureMessage } from "../queue/SquireEvidenceCard";
+import { commandFailureMessage } from "../squireCommandFailure";
 import { SquirePortrait } from "../SquireHeader";
 import { SQUIRE_MEMBER_FULL_COLOR } from "./SquireRoomPortraits";
 import {

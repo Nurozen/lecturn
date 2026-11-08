@@ -27,7 +27,6 @@ import type {
   EnvironmentId,
   ProjectId,
   ProjectIconOverride,
-  SquireCardId,
   SquireId,
   ThreadId,
 } from "@lecturn/contracts";
@@ -347,11 +346,10 @@ function EnabledActivityBridge() {
           ? { ok: false, error: formatEnvironmentQueryError(result.cause) }
           : { ok: true, value: result.value };
       },
-      open: async (environmentId, squireId, cardId: SquireCardId) => {
+      open: async (environmentId, squireId) => {
         await navigate({
           to: "/squires/$environmentId/$squireId",
           params: { environmentId, squireId },
-          search: { item: cardId },
         });
       },
     });

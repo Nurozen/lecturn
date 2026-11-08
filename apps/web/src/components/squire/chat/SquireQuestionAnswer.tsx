@@ -21,8 +21,8 @@ import { Button } from "../../ui/button";
 import {
   squireApprovalAnswer,
   squireQuestionPanelQuestions,
-  squireUserInputAnswer,
-} from "./squireQueue.logic";
+} from "@lecturn/client-runtime/state/squire";
+import { squireUserInputAnswer } from "./squireCard.logic";
 
 type QuestionPayload = Extract<SquireCard["payload"], { readonly type: "question" }>;
 

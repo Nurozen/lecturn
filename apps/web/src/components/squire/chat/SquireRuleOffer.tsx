@@ -1,5 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { squireRuleOfferPrompt } from "@lecturn/client-runtime/state/squire";
+import {
+  squireOfferRuleInput,
+  type squireRuleOfferPrompt,
+} from "@lecturn/client-runtime/state/squire";
 import type { EnvironmentId, SquireCardRow, SquireRuleOffer } from "@lecturn/contracts";
 import { useState } from "react";
 
@@ -7,7 +10,6 @@ import { randomUUID } from "../../../lib/utils";
 import { squireEnvironment } from "../../../state/squires";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { Button } from "../../ui/button";
-import { squireOfferRuleInput } from "./squireQueue.logic";
 
 /**
  * "Always allow this" after an accept, or "Always ask first for this" after an Undo: the

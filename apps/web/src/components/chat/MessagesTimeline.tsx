@@ -98,9 +98,14 @@ import {
   resolveTimelineMinimapHitStripWidth,
   timelineTurnFoldRunIdsByEntryId,
   worktreeSetupAgentStarted,
+  insertUnreadDivider,
+  mergeSquireApprovalRows,
   type MessagesTimelineRow,
+  type SquireChatApprovalsInput,
   type TimelineLatestRun,
 } from "./MessagesTimeline.logic";
+import type { ThreadUnreadWindow } from "@lecturn/client-runtime/state/thread-visits";
+import { SquireApprovalRow } from "../squire/chat/SquireApprovalRow";
 import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
 import type { ThreadFindPositionReader } from "./threadFind";
@@ -337,6 +342,10 @@ interface MessagesTimelineProps {
   openAtNewestAppCard?: boolean;
   /** Lecturn: a Squire home thread's compact event rows (ChatView `controls`). */
   compactSquireEvents?: boolean;
+  /** Lecturn: approvals that render in this Squire's chat, at the time they were raised. */
+  squireApprovals?: SquireChatApprovalsInput | undefined;
+  /** Frozen for this open, so the "New" divider stays put as the thread is marked read. */
+  unreadWindow?: ThreadUnreadWindow | null;
   /** Lecturn: false hides the turn minimap (ChatView `controls`). */
   minimapEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
@@ -450,6 +459,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   notesAllowed = true,
   openAtNewestAppCard = false,
   compactSquireEvents = false,
+  squireApprovals,
+  unreadWindow = null,
   minimapEnabled = true,
   historyControls,
   loadEarlier = null,
@@ -866,7 +877,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     hideWaitingRow: embedded,
     compactSquireEvents,
   });
-  const rows = useStableRows(rawRows, listIdentityKey);
+  const rows = useStableRows(
+    insertUnreadDivider(mergeSquireApprovalRows(rawRows, squireApprovals), unreadWindow),
+    listIdentityKey,
+  );
   // Run status/timestamps change per stream event; keep them out of shared row context.
   const runs = useStableHandoffRuns(runsProp);
   const minimapItems = deriveTimelineMinimapItems(rows);
@@ -1607,9 +1621,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         isWorkLogRow || isSubagentGroup
           ? undefined
           : row.kind === "turn-fold" ||
-              row.kind === "squire-updates" ||
               row.kind === "working" ||
-              row.kind === "fork-divider"
+              row.kind === "fork-divider" ||
+              row.kind === "unread-divider"
             ? "pb-1.5"
             : (row.kind === "message" &&
                   row.message.role === "assistant" &&
@@ -1658,7 +1672,14 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         </WorkLogBlock>
       ) : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
-      {row.kind === "squire-updates" ? <SquireUpdatesTimelineRow row={row} /> : null}
+      {row.kind === "squire-approval" ? (
+        <SquireApprovalRow
+          environmentId={row.environmentId}
+          viewSquireId={row.squireId}
+          entry={row.entry}
+        />
+      ) : null}
+      {row.kind === "unread-divider" ? <UnreadDividerTimelineRow /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserMessageRow row={row} /> : null}
@@ -1775,31 +1796,13 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   );
 }
 
-/** Lecturn: consecutive Squire wakes in a home thread, folded like a turn. */
-function SquireUpdatesTimelineRow({
-  row,
-}: {
-  row: Extract<TimelineRow, { kind: "squire-updates" }>;
-}) {
-  const ctx = use(TimelineRowCtx);
-
+/** Lecturn: where this open's unread messages begin. Static: it never animates or moves. */
+function UnreadDividerTimelineRow() {
   return (
-    <div className="group/timeline-row relative flex items-center gap-1 border-b border-border/60 pb-2 pe-0.5 pt-1">
-      <button
-        type="button"
-        aria-expanded={row.expanded}
-        data-scroll-anchor-ignore
-        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      >
-        <span>{row.label}</span>
-        <MorphIcon className="size-3.5" icon={row.expanded ? ChevronDown : ChevronRight} />
-      </button>
-      <TimelineRowTimestamp
-        createdAt={row.createdAt}
-        timestampFormat={ctx.timestampFormat}
-        className="ms-auto"
-      />
+    <div className="flex items-center gap-3 py-1">
+      <div className="h-px flex-1 bg-primary/40" />
+      <span className="shrink-0 text-xs font-medium text-primary">New</span>
+      <div className="h-px flex-1 bg-primary/40" />
     </div>
   );
 }

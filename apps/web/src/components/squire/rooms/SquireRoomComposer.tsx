@@ -15,7 +15,7 @@ import { useAtomCommand } from "../../../state/use-atom-command";
 import { Button } from "../../ui/button";
 import { Textarea } from "../../ui/textarea";
 import { toastManager } from "../../ui/toast";
-import { commandFailureMessage } from "../queue/SquireEvidenceCard";
+import { commandFailureMessage } from "../squireCommandFailure";
 import { SquireIndicator } from "../SquireIndicator";
 import { SQUIRE_MEMBER_FULL_COLOR } from "./SquireRoomPortraits";
 

@@ -173,6 +173,11 @@ export function useCommandPaletteThreadItems(input: {
       if (threadSearchQuery.trim().length > 0 && !threadSearchQuery.startsWith(">") && !isOpen) {
         claimThreadOpen(thread.environmentId, thread.id, Date.now());
       }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+      });
+      // After the navigation: the thread view reads its unread boundary from the old watermark.
       if (
         threadSearchQuery.trim().length > 0 &&
         !threadSearchQuery.startsWith(">") &&
@@ -189,10 +194,6 @@ export function useCommandPaletteThreadItems(input: {
           },
         });
       }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-      });
     },
   });
 
