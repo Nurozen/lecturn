@@ -12,7 +12,6 @@ import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
 } from "@lecturn/contracts";
-import type {} from "@lecturn/contracts";
 
 import * as BuiltInDrivers from "./builtInDrivers.ts";
 import { sourceControlDefinitions } from "./sourceControlDefinitions.ts";

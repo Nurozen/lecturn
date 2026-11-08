@@ -2,11 +2,14 @@ import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@lecturn/contracts";
 import {
   makeLocalFileTracer,
   makeTraceSink,
+  nodeProcessRuntimeAttributes,
+  processServiceInstanceId,
   type SignalExport,
 } from "@lecturn/shared/observability";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as SharedObservability from "@lecturn/shared/observability";
 import * as OtelEnvironment from "@lecturn/shared/otelEnvironment";
+import { releaseChannelOf, releaseResourceAttributes } from "@lecturn/shared/releaseResource";
 import {
   parsePersistedServerObservabilitySettings,
   type PersistedServerObservabilitySettings,
@@ -595,15 +598,24 @@ const layerTelemetry = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const endpoints = yield* resolveOtlpEndpoints;
+    // Unpackaged runs launch a script, so Electron reports its own version.
+    const serviceVersion = environment.isPackaged
+      ? environment.appVersion
+      : desktopPackageJson.version;
     const resource = {
       serviceName: "lecturn-desktop",
-      // Unpackaged runs launch a script, so Electron reports its own version.
-      serviceVersion: environment.isPackaged ? environment.appVersion : desktopPackageJson.version,
+      serviceVersion,
       attributes: {
         "service.namespace": "lecturn",
         "service.runtime": "desktop",
-        "service.mode": environment.isDevelopment ? "development" : "packaged",
+        "lecturn.desktop.mode": environment.isDevelopment ? "development" : "packaged",
+        "service.instance.id": processServiceInstanceId(endpoints.resourceAttributes),
+        ...releaseResourceAttributes(
+          environment.isDevelopment ? "dev" : releaseChannelOf(serviceVersion),
+          endpoints.resourceAttributes,
+        ),
         "host.name": endpoints.resourceAttributes["host.name"] || (yield* HostProcess.Hostname),
+        ...nodeProcessRuntimeAttributes(),
       },
     };
 

@@ -1,6 +1,7 @@
 import type { EnvironmentMachineKind } from "@lecturn/contracts";
 import { CloudIcon, LaptopIcon, MonitorIcon, ServerIcon, type LucideProps } from "lucide-react";
 import type { FunctionComponent, SVGProps } from "react";
+import { cn } from "~/lib/utils";
 import { LinuxIcon } from "./Icons";
 
 function LucideLike(props: SVGProps<SVGSVGElement>) {
@@ -16,6 +17,8 @@ function LucideLike(props: SVGProps<SVGSVGElement>) {
       strokeLinecap="round"
       strokeLinejoin="round"
       {...props}
+      // The new design thins lucide-classed strokes (index.css).
+      className={cn("lucide", props.className)}
     />
   );
 }
@@ -23,8 +26,17 @@ function LucideLike(props: SVGProps<SVGSVGElement>) {
 function MacMiniIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <LucideLike {...props}>
-      <rect width="20" height="8" x="2" y="8" rx="2" />
-      <path d="M6 12h.01" />
+      <rect width="20" height="8" x="2" y="8" rx="2" className="redesign:hidden" />
+      <path d="M6 12h.01" className="redesign:hidden" />
+      <rect width="18" height="12" x="3" y="6" rx="2.5" className="hidden redesign:inline" />
+      <circle
+        cx="7.5"
+        cy="12"
+        r="1"
+        fill="currentColor"
+        stroke="none"
+        className="hidden redesign:inline"
+      />
     </LucideLike>
   );
 }

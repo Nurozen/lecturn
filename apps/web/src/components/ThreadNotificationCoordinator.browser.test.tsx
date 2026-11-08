@@ -1,11 +1,12 @@
 import { threadsForProjectsMode } from "@lecturn/client-runtime/state/app-projects";
+import { WORKING_EXIT_GRACE_MS } from "@lecturn/client-runtime/state/thread-inbox";
 import { AppId, EnvironmentId, ProjectId, ThreadId } from "@lecturn/contracts";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { act, render, stubGlobal, type Screen } from "../../test/render";
+import { act, fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   mode: "off" as ClientSettings["notificationMode"],
@@ -256,9 +257,12 @@ function setup() {
   };
   return {
     render: renderCoordinator,
+    // A completion notifies once the Working shelf's exit grace passes.
     complete: async () => {
+      using _timers = fakeTimers();
       state.completedAt = "2026-09-13T10:00:00.000Z";
       await renderCoordinator();
+      await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
     },
     [Symbol.asyncDispose]: () => stack.disposeAsync(),
   };
@@ -321,9 +325,11 @@ describe("app thread notifications", () => {
     async (event, title) => {
       await using app = setupApp();
       await app.render();
+      using _timers = fakeTimers();
       if (event === "approval") state.approval = true;
       else state.completedAt = "2026-09-13T10:00:00.000Z";
       await app.render();
+      await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
       expect(state.add).toHaveBeenCalledTimes(1);
       const toast = state.add.mock.calls[0]?.[0];
       expect(toast?.title).toBe(title);
@@ -344,9 +350,11 @@ describe("app thread notifications", () => {
       state.mode = "notifications";
       state.focused = false;
       await app.render();
+      using _timers = fakeTimers();
       if (event === "approval") state.approval = true;
       else state.completedAt = "2026-09-13T10:00:00.000Z";
       await app.render();
+      await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
       expect(state.notification).toHaveBeenCalledWith(title, {
         body: "Fix the login form",
         tag: threadNotificationTag(EnvironmentId.make("env-1"), ThreadId.make("thread-1")),

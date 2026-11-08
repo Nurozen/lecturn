@@ -1276,6 +1276,53 @@ from upstream's side.
   `useT3Connect`, `mcp__t3-code__` and `EXPO_PUBLIC_T3_` escape the sweep. A renamed fork
   test title reads as a dropped test: add a new test instead.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream c8c6deb6).**
+
+- **Task cache (#24693).** Lecturn ships no `.task-cache.json` and runs no cache Worker.
+  `infra/task-cache` stays inert upstream source with Lecturn names (`VP_LECTURN_TASK_CACHE_MODE`);
+  `remoteCacheUrl()`, `setup-ci-deps` (`hashFiles` gate), `install-ci.ts` and
+  `mobile-native-client.ts` all skip without the file. Never restore it or map
+  `*.pinglabs.workers.dev` to a Lecturn name; delete it again if upstream edits it.
+- **Effect budget (#24964).** `scripts/effect-budget.json` holds each fork file at its effect
+  count, keys repo-relative and sorted. When a file exceeds upstream's budget, check first
+  whether the merge kept an effect upstream moved into a store (#24970-#25079); port the fork
+  behavior into the new form instead of raising the budget. New fork effects state their reason
+  (`oxlint-disable-next-line lecturn/react-effect-budget -- <why>`).
+- **#24865 New design.** The Beta toggle stays off and the Lecturn look is the default.
+  Upstream's unconditional visual tweaks go behind `redesign:` / `[data-redesign]` (old value
+  first, new under the variant); SVGs with `stroke-width="2"` take the `lucide` class so the
+  redesign stroke rule reaches them. Structural and copy changes are taken as upstream.
+- **#24850 instructions.** Take upstream's short sections with Lecturn names; keep the
+  `lecturn-thread://` link rule, Squire and connected-app overrides, and the ACP-only MCP
+  fallback (skipped on Squire homes). Codex connected-app instructions travel as
+  `additionalContext` `lecturn_app_instructions_NN`, never in `collaborationMode`.
+- **Recorded fixtures (`.ndjson`).** Never identity-translate them: resolve as upstream `:3:`
+  plus the fork's client-identity and `runtime_info` token swaps; `/home/replay-user/t3code`
+  paths and the `pingdotgg` remote URL stay verbatim.
+- **Mobile navigation lint (#24710).** Fork pages use `useSelectWorkspaceDetail` for a page
+  and a drill-in (Android selects, iOS `StackActions.push`) to open a thread over a fork page
+  (Squire, Decisions, Contextual, PR watch). Screen lists register through
+  `NativeScrollView`/`NativeScrollViewMarker`, never `react-native-screens` directly.
+- **Mobile Settings (#24644, #24766).** `SettingsList` sections may carry `render`; Connect
+  accounts is the `accounts` slot above Connections; Settings pages keep
+  `ScreenScrollViewSurface` `bg-transparent` so `ArcaneBackdrop` shows. `useSelectWorkspaceDetail`
+  replaced `home-thread-navigation`; the router swaps params wholesale, clearing linked
+  `accountId`/`appId`/`prompt`.
+- **Web.** Fork settings routes are `_chat.settings.{apps,relay,squires}` inside the #24847
+  modal (AccountSurface, phone Back to chat, `PhoneSettingsCategorySelect`). `managedAuth.tsx`
+  stays fork (multi-account); `appInit` applies appearance and title (#25004). Fork Stave
+  matching and host lending for PR links live in client-runtime
+  `resolveChangeRequestLinkTarget` (#24738). The fork sidebar root list uses
+  `useOlderSettledShelf`.
+- **Server.** ws.ts has six handler groups (core, orchestration, contextual, apps, squire,
+  lecturn); split by prefix if TS2589 returns. `shellOlderSettled` goes to non-app sessions
+  only, and app/embed shells never take `omitOlderSettled`. PR linked-thread lookups leave out
+  Squire-marked threads. `compactEventStore` is a function (#20877).
+- **Deps.** Vendored `apps/mobile/deps/*-t3.N*.tgz` the fork never modified (blob equals the
+  merge base) take upstream's newer file with `package.json`, `allowBuilds` and the lock.
+  `docs/operations/development.md` omits upstream's GitCafe mirror section;
+  `mobile-screens-fork.md` follows the committed tarball's tag on the repo that has it.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

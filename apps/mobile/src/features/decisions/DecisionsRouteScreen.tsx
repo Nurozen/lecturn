@@ -2,7 +2,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { DecisionRelationSuggestions } from "../contextual/DecisionRelationSuggestions";
 import { DecisionGroupPanel } from "../contextual/DecisionGroupPanel";
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
   AuthOrchestrationOperateScope,
   EnvironmentId,
@@ -18,7 +18,7 @@ import {
   assembleDecisionJsonExport,
 } from "@lecturn/client-runtime/state/threadDecisions";
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, Share, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, Share, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -26,6 +26,17 @@ import { threadDecisionEnvironment as decisions } from "../../state/thread-decis
 import { environmentSession } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+
+// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
+function useOpenThreadOverPage() {
+  const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
+  return (params: { readonly environmentId: string; readonly threadId: string }) => {
+    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
+    else navigation.dispatch(StackActions.push("Thread", params));
+  };
+}
 
 export type DecisionsRouteParams = { environmentId: string; projectId: string; threadId?: string };
 function Button({
@@ -404,7 +415,7 @@ function DecisionSourceModal({
   evidence: DecisionEvidence;
   onClose: () => void;
 }) {
-  const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const source = useEnvironmentQuery(
     decisions.sourceWindow({
       environmentId,
@@ -421,7 +432,7 @@ function DecisionSourceModal({
             label="Open conversation"
             onPress={() => {
               onClose();
-              navigation.navigate("Thread", { environmentId, threadId: evidence.threadId });
+              openThread({ environmentId, threadId: evidence.threadId });
             }}
           />
         ) : null}

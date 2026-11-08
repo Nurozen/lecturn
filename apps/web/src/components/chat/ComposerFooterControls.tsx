@@ -52,9 +52,11 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       ? "Plan mode. Click to return to normal build mode"
       : "Default mode. Click to enter plan mode";
 
+  // The new design drops the hairlines between composer controls.
+  const separator = <ComposerControlSeparator size={size} className="redesign:hidden!" />;
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
-      <ComposerControlSeparator size={size} />
+      {separator}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -92,8 +94,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
   return (
     <>
-      <ComposerControlSeparator size={size} />
-
+      {separator}
       <Tooltip>
         <Select
           open={open}

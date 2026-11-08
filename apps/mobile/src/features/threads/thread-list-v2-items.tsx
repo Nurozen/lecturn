@@ -280,19 +280,30 @@ export const ThreadListV2SettledShelfHeader = memo(function ThreadListV2SettledS
 export const ThreadListV2ShowMoreRow = memo(function ThreadListV2ShowMoreRow(props: {
   readonly pane?: "screen" | "sidebar";
   readonly hiddenCount: number;
+  /** Older settled threads are loading, or their last read failed. */
+  readonly state?: "loading" | "failed";
   readonly onPress: () => void;
 }) {
+  const label =
+    props.state === "loading"
+      ? "Loading"
+      : props.state === "failed"
+        ? "Could not load older threads. Retry"
+        : `Show more (${props.hiddenCount} settled hidden)`;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Show ${Math.min(props.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
+      accessibilityLabel={
+        props.state === undefined
+          ? `Show ${Math.min(props.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`
+          : label
+      }
+      disabled={props.state === "loading"}
       onPress={props.onPress}
       className="mx-4 mt-2 items-center rounded-full border border-border bg-card py-3"
       style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <Text className="text-xs font-lecturn-medium text-foreground-muted">
-        Show more ({props.hiddenCount} settled hidden)
-      </Text>
+      <Text className="text-xs font-lecturn-medium text-foreground-muted">{label}</Text>
     </Pressable>
   );
 });

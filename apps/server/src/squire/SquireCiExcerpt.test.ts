@@ -394,7 +394,7 @@ const fiberHarness = (links: ReadonlyArray<ThreadPullRequestLink>) => {
             }),
           ),
           Effect.provide(github.layer),
-          Effect.map(Option.some),
+          Effect.asSome,
           Effect.mapError((cause) => new SquireCiExcerpt.SquireCiReadError({ cause })),
         ),
     }),

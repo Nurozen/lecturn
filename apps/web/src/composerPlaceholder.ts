@@ -1,5 +1,7 @@
-export const DISCONNECTED_COMPOSER_PLACEHOLDER =
-  "Ask for changes, send follow-ups, or attach images";
+const DISCONNECTED_COMPOSER_PLACEHOLDER = "Ask for changes, send follow-ups, or attach images";
+
+export const DEFAULT_COMPOSER_PLACEHOLDER =
+  "Ask anything, @tag files/folders, $use skills, or / for commands";
 
 /**
  * The composer's prompt while nothing asks the user for anything. A thread with no provider
@@ -14,7 +16,7 @@ export function idleComposerPlaceholder(input: {
 }): string {
   if (input.hostPlaceholder !== null) return input.hostPlaceholder;
   if (!input.hasSession) return DISCONNECTED_COMPOSER_PLACEHOLDER;
-  if (!input.resting) return "Ask anything, @tag files/folders, $use skills, or / for commands";
+  if (!input.resting) return DEFAULT_COMPOSER_PLACEHOLDER;
   return input.canAttach
     ? "Ask for changes, send follow-ups, or attach files"
     : "Ask for changes or send a follow-up";

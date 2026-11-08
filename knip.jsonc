@@ -106,6 +106,19 @@
       // React Native codegen discovers component specifications by filename.
       "entry": ["src/*NativeComponent.ts!"],
     },
+    "infra/task-cache": {
+      "ignore": ["vendor/**"],
+      // The bootstrap and Vite+ hook are loaded by shell/package configuration.
+      "entry": [
+        "alchemy.run.ts!",
+        "scripts/install.ts",
+        "scripts/install-ci.ts",
+        "src/runHook.ts",
+        "src/flush.ts",
+        "src/nativeRunHook.js",
+        "src/preload.mjs",
+      ],
+    },
     "infra/relay": {
       // The multi-account push probe is run by hand; see infra/relay/README.md.
       "entry": [
@@ -121,8 +134,9 @@
       // mobile-native-client.ts runs directly for native client verification (AGENTS.md),
       // setup-worktree.ts runs directly from the lecturn.json setup action,
       // smoke-pack-install.ts runs by hand against a built vendoring kit,
-      // verify-windows-desktop-artifact.ts checks a Windows payload built on another host, and
-      // electron-builder loads the macOS signer (sign-macos.ts) by path.
+      // verify-windows-desktop-artifact.ts checks a Windows payload built on another host,
+      // electron-builder loads the macOS signer (sign-macos.ts) by path, and mobile-e2e.ts runs
+      // agent-device's CLI by path.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
@@ -137,6 +151,7 @@
         "smoke-pack-install.ts",
         "verify-windows-desktop-artifact.ts",
       ],
+      "ignoreDependencies": ["agent-device"],
       // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
       // knip run beside it in check:changed must not report.
       "ignore": [".knip-test-*/**"],

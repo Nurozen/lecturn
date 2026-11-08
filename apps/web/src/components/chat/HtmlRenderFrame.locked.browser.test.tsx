@@ -44,15 +44,16 @@ const { urls, theme, openLink } = vi.hoisted(() => ({
   theme: { current: undefined as HtmlRenderTheme | undefined },
   openLink: vi.fn<(url: string) => Promise<void>>(),
 }));
-vi.mock(import("~/assets/assetUrls"), async (original) => ({
+vi.mock(import("~/assets/longLivedAssetUrls"), async (original) => ({
   ...(await original()),
-  useAssetUrlState: (_environmentId, resource) => ({
+  useLongLivedAssetUrl: (_environmentId, resource) => ({
     _tag: "Success" as const,
-    url:
-      urls.get(resource !== null && "attachmentId" in resource ? resource.attachmentId : "") ??
-      "about:blank",
+    url: urls.get("attachmentId" in resource ? resource.attachmentId : "") ?? "about:blank",
     expiresAt: Date.now() + 60 * 60_000,
   }),
+}));
+vi.mock(import("~/assets/assetUrls"), async (original) => ({
+  ...(await original()),
   useAssetUrlRefresh: () => vi.fn(),
 }));
 vi.mock(import("~/browser/useOpenLink"), async (original) => ({

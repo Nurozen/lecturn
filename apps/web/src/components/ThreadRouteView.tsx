@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
 import { AppReferencesProvider } from "./embed/AppReferencesProvider";
+import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
@@ -33,8 +34,17 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 
 const AccountGoneNotice = lazy(() => import("./clerk/AccountGoneNotice"));
 
-/** Render in the shared layout to retain ChatView across route swaps; plain server threads remain unkeyed. */
-export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
+/**
+ * Render in the shared layout to retain ChatView across route swaps; plain server threads remain unkeyed.
+ * `background` keeps the thread mounted, inert and in place under Settings or Usage.
+ */
+export function ThreadRouteView({
+  target,
+  background = false,
+}: {
+  target: ThreadRouteTarget;
+  background?: boolean;
+}) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
@@ -137,7 +147,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }, [draftSession?.promotedTo, inferredThreadRef]);
 
   useEffect(() => {
-    if (!canonicalThreadRef) {
+    if (!canonicalThreadRef || background) {
       return;
     }
     let cancelled = false;
@@ -154,14 +164,14 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     return () => {
       cancelled = true;
     };
-  }, [canonicalThreadRef, navigate]);
+  }, [background, canonicalThreadRef, navigate]);
 
   useEffect(() => {
-    if (target.kind !== "draft" || draftSession || canonicalThreadRef) {
+    if (background || target.kind !== "draft" || draftSession || canonicalThreadRef) {
       return;
     }
     void navigate({ to: "/", replace: true });
-  }, [canonicalThreadRef, draftSession, navigate, target.kind]);
+  }, [background, canonicalThreadRef, draftSession, navigate, target.kind]);
 
   useEffect(() => {
     if (target.kind !== "server" || !bootstrapComplete) {
@@ -170,25 +180,25 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     if (renderState === "missing") {
       const { clearPendingFileDropsForThread } = useSidebarPendingFileDropStore.getState();
       clearPendingFileDropsForThread(target.threadRef);
-      if (environmentHasAnyThreads) {
+      if (environmentHasAnyThreads && !background) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
+  }, [background, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
   // Lecturn: replace, so Back skips the thread route that only redirects.
   const squireViewEnvironmentId = squireView?.environmentId ?? null;
   const squireViewSquireId = squireView?.squireId ?? null;
   useEffect(() => {
-    if (squireViewEnvironmentId === null || squireViewSquireId === null) return;
+    if (background || squireViewEnvironmentId === null || squireViewSquireId === null) return;
     void navigate({
       to: "/squires/$environmentId/$squireId",
       params: { environmentId: squireViewEnvironmentId, squireId: squireViewSquireId },
       replace: true,
     });
-  }, [navigate, squireViewEnvironmentId, squireViewSquireId]);
+  }, [background, navigate, squireViewEnvironmentId, squireViewSquireId]);
 
-  // Settings replaces this route, so its account pickers default to the thread left behind.
+  // Settings opens over this thread, so its account pickers default to it.
   const openEnvironmentId = routeThreadRef?.environmentId ?? null;
   useEffect(() => {
     if (openEnvironmentId !== null) {
@@ -244,13 +254,16 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }
 
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
+    <SidebarInset
+      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      inert={background}
+    >
       {accountGone !== null ? (
         <Suspense fallback={null}>
           <AccountGoneNotice account={accountGone} />
         </Suspense>
       ) : null}
-      {view}
+      <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>
     </SidebarInset>
   );
 }

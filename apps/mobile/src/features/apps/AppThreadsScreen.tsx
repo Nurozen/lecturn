@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { AppId, EnvironmentId } from "@lecturn/contracts";
 import { LegendList } from "@legendapp/list/react-native";
-import { useNavigation } from "@react-navigation/native";
 import { useEffect, useState, type ReactElement } from "react";
 import { View, type ScrollViewProps } from "react-native";
 
@@ -14,7 +13,6 @@ import { useAppProjects, useAppThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
 import { threadListEnvironmentsAtom } from "../../state/server";
 import { HierarchyRow } from "../home/HierarchyRow";
-import { useHomeThreadSelection } from "../home/home-thread-navigation";
 import {
   DEFAULT_GROUP_DISPLAY_STATE,
   nextGroupDisplayState,
@@ -25,6 +23,7 @@ import { buildSidebarHierarchy } from "../threads/sidebar-hierarchy";
 import { ThreadListGroupHeader } from "../threads/thread-list-items";
 import { ThreadListV2SettledShelfHeader } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 import { AppCardHeader } from "./AppCardHeader";
 import { AppDetailSheet } from "./AppDetailSheet";
 import { AppPairingRow } from "./AppPairingRow";
@@ -60,6 +59,7 @@ function AppThreadSectionLabel(props: { readonly label: AppSectionLabel }) {
 
 function useMinuteClock(): string {
   const [now, setNow] = useState(() => new Date().toISOString());
+  // oxlint-disable-next-line lecturn/react-effect-budget -- a timer is an external system.
   useEffect(() => {
     const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
     return () => clearInterval(id);
@@ -79,7 +79,6 @@ export function AppsTree(props: {
   readonly contentTopInset?: number;
   readonly onScrollOffset?: (offset: number) => void;
 }) {
-  const navigation = useNavigation();
   const { environments } = useEnvironments();
   const statuses = useAppStatusesByEnvironment(environments);
   const projects = useAppProjects();
@@ -105,7 +104,12 @@ export function AppsTree(props: {
   const frames = appCardFrames(items);
   const { providersByEnvironmentId } = useAtomValue(threadListEnvironmentsAtom);
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
-  const selectThread = useHomeThreadSelection();
+  const selectDetail = useSelectWorkspaceDetail();
+  const selectThread = (thread: { readonly environmentId: EnvironmentId; readonly id: string }) =>
+    selectDetail({
+      name: "Thread",
+      params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+    });
   const [detailAppId, setDetailAppId] = useState<AppId | null>(null);
   const detailCard = cards.find((card) => card.appId === detailAppId) ?? null;
 
@@ -131,11 +135,14 @@ export function AppsTree(props: {
     const project = appCardTargetWorkspace(card);
     if (project === null) return null;
     return () =>
-      navigation.navigate("Thread", {
-        draft: {
-          environmentId: String(project.environmentId),
-          projectId: String(project.id),
-          title: project.title,
+      selectDetail({
+        name: "Thread",
+        params: {
+          draft: {
+            environmentId: String(project.environmentId),
+            projectId: String(project.id),
+            title: project.title,
+          },
         },
       });
   };

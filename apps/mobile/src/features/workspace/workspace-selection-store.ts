@@ -47,12 +47,25 @@ function save() {
     .catch(() => undefined);
 }
 
+// Route keys only name routes of the session that wrote them; a saved one would make a tab rebuild
+// its page under a stale key, which UIKit animates as a pop and a push.
+function withoutRouteKeys(saved: WorkspaceSelections | undefined): WorkspaceSelections {
+  const omitKey = <Selection extends { readonly key?: string }>({ key: _, ...rest }: Selection) =>
+    rest;
+  const { threads, pullRequests, settingsKey: _, threadsDraft: _draft, ...rest } = saved ?? {};
+  return {
+    ...rest,
+    ...(threads ? { threads: omitKey(threads) } : {}),
+    ...(pullRequests ? { pullRequests: omitKey(pullRequests) } : {}),
+  };
+}
+
 /** Loads the saved selections once; pages visited before it resolves win over saved ones. */
 export function hydrateWorkspaceSelections() {
   if (!REMEMBERS) return Promise.resolve();
   hydration ??= loadPreferences()
     .then((preferences) => {
-      selections = { ...preferences.workspaceSelections, ...selections };
+      selections = { ...withoutRouteKeys(preferences.workspaceSelections), ...selections };
       saved = selections;
       AppState.addEventListener("change", (status) => {
         if (status !== "active") save();
@@ -66,7 +79,10 @@ export function currentWorkspaceSelections() {
   return selections;
 }
 
-/** The navigation container's `onStateChange`: remembers the page each tab is showing. */
+/**
+ * The navigation container's `onReady` and `onStateChange`: remembers the page each tab is
+ * showing. The initial state, such as a cold start's reopened chat, reaches only `onReady`.
+ */
 export function recordWorkspaceSelections(state: NavigationState | undefined) {
   if (!REMEMBERS || !state) return;
   selections = workspaceSelectionsIn(

@@ -5,6 +5,7 @@ import {
   createEnvironmentThreadStateAtoms,
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
+  createOlderSettledThreadAtoms,
   createThreadEnvironmentAtoms,
   createThreadFamilyAtoms,
 } from "@lecturn/client-runtime/state/threads";
@@ -20,6 +21,10 @@ import { serverEnvironment } from "./server";
 import { environmentShell } from "./shell";
 
 export const threadFamilies = createThreadFamilyAtoms(
+  connectionAtomRuntime,
+  environmentShell.stateAtom,
+);
+export const olderSettledThreads = createOlderSettledThreadAtoms(
   connectionAtomRuntime,
   environmentShell.stateAtom,
 );
@@ -46,6 +51,18 @@ export function useThreadFamily(
     if (environmentId === null || rootThreadId === null) return;
     return threadFamilies.mount(appAtomRegistry, environmentId, rootThreadId);
   }, [environmentId, rootThreadId]);
+}
+
+// Long enough for the opened screen to subscribe; its subscription keeps the thread after this.
+const OPENING_THREAD_HOLD_MS = 3_000;
+
+/**
+ * Starts loading a thread being opened before its screen renders and subscribes, which
+ * otherwise waits for navigation to commit.
+ */
+export function startOpeningEnvironmentThread(environmentId: EnvironmentId, threadId: ThreadId) {
+  const release = appAtomRegistry.mount(environmentThreads.stateAtom(environmentId, threadId));
+  setTimeout(release, OPENING_THREAD_HOLD_MS);
 }
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(

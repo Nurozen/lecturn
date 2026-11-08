@@ -19,6 +19,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { Toolbar } from "../../components/ui/Toolbar";
 import { environmentProjects } from "../../state/projects";
@@ -374,6 +375,7 @@ export function ImportSessionPickerRouteScreen() {
       </ScrollView>
     ) : (
       <LegendList
+        renderScrollComponent={Platform.OS === "ios" ? NativeScrollView : undefined}
         alwaysBounceVertical={false}
         automaticallyAdjustsScrollIndicatorInsets
         automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}

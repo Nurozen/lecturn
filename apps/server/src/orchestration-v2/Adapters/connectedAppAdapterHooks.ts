@@ -11,6 +11,8 @@ import { connectedAppInstructionsSection } from "@lecturn/provider-core/server/o
 import type * as CodexSchema from "effect-codex-app-server/schema";
 import * as Effect from "effect/Effect";
 
+import { CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES } from "../../provider/CodexDeveloperInstructions.ts";
+
 type McpSessions = McpProviderSessions.McpProviderSessions["Service"];
 type McpSessionConfig = McpProviderSession.McpProviderSessionConfig;
 
@@ -26,6 +28,38 @@ export function withConnectedAppInstructions<T extends string | undefined>(
 ): T | string {
   const section = connectedAppInstructionsSection(appInstructions);
   return section === undefined ? text : text === undefined ? section : `${text}\n\n${section}`;
+}
+
+/**
+ * Codex turn context for a connected app's registered instructions. They are the app's own
+ * guidance for its tools, so they go in as trusted `application` text, split under Codex's
+ * per-value cap. Collaboration-mode `developer_instructions` would replace Codex's mode text.
+ */
+export function codexConnectedAppInstructionsContext(
+  appInstructions: string | undefined,
+): Record<string, CodexSchema.V2TurnStartParams__AdditionalContextEntry> {
+  const section = connectedAppInstructionsSection(appInstructions);
+  if (section === undefined) return {};
+  const chunks: Array<string> = [];
+  let current = "";
+  let currentBytes = 0;
+  for (const char of section) {
+    const bytes = Buffer.byteLength(char, "utf8");
+    if (currentBytes + bytes > CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES) {
+      chunks.push(current);
+      current = "";
+      currentBytes = 0;
+    }
+    current += char;
+    currentBytes += bytes;
+  }
+  chunks.push(current);
+  return Object.fromEntries(
+    chunks.map((value, index) => [
+      `lecturn_app_instructions_${String(index + 1).padStart(2, "0")}`,
+      { kind: "application" as const, value },
+    ]),
+  );
 }
 
 /**

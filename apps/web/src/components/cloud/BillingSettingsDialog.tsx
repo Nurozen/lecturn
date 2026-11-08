@@ -107,7 +107,7 @@ export function BillingSettingsDialog({
   );
 }
 
-export function BillingSettingsMenuItem() {
+export function BillingSettingsMenuItem({ labelClassName }: { readonly labelClassName?: string }) {
   const [open, setOpen] = useState(false);
   if (!hasCloudPublicConfig()) return null;
   return (
@@ -115,7 +115,7 @@ export function BillingSettingsMenuItem() {
       <SidebarMenuItem>
         <SidebarMenuButton onClick={() => setOpen(true)}>
           <CreditCardIcon />
-          <span>Billing</span>
+          <span className={labelClassName}>Billing</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
       <BillingSettingsDialog open={open} onOpenChange={setOpen} />

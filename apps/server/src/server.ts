@@ -905,39 +905,36 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
-)
-  .pipe(
-    Layer.provideMerge(layerOrchestrationApplication),
-    // Lecturn: Contextual turn hooks and the provider work admission the V2
-    // hook registrations and decisions share (one instance each).
-    Layer.provideMerge(Layer.mergeAll(layerContextual, ProviderWorkAdmission.layer)),
-    Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
-    Layer.provideMerge(
-      Layer.mergeAll(ProjectStore.layer, ThreadSearch.layer, ProjectionStoreV2.layer),
+).pipe(
+  Layer.provideMerge(layerOrchestrationApplication),
+  // Lecturn: Contextual turn hooks and the provider work admission the V2
+  // hook registrations and decisions share (one instance each).
+  Layer.provideMerge(Layer.mergeAll(layerContextual, ProviderWorkAdmission.layer)),
+  Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
+  Layer.provideMerge(
+    Layer.mergeAll(ProjectStore.layer, ThreadSearch.layer, ProjectionStoreV2.layer),
+  ),
+  Layer.provideMerge(layerServerSettings),
+  Layer.provideMerge(layerSourceControlProviderRegistry),
+  Layer.provideMerge(layerGit),
+  Layer.provideMerge(layerVcs),
+  Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
+  Layer.provideMerge(layerPersistence),
+  Layer.provideMerge(
+    Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
+  ),
+  Layer.provideMerge(ProviderRegistry.layer),
+  Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      AntigravityInstallation.AntigravityInstallation.layer,
+      CodexInstallation.CodexInstallation.layer,
+      // Lecturn: below the provider registry so the scripted adapter reads its
+      // script source; merged up so the fixture seam writes the same registry.
+      SquireFakeScripts.layerServer,
     ),
-    Layer.provideMerge(layerServerSettings),
-    Layer.provideMerge(layerSourceControlProviderRegistry),
-    Layer.provideMerge(layerGit),
-    Layer.provideMerge(layerVcs),
-    Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
-    Layer.provideMerge(layerPersistence),
-    Layer.provideMerge(
-      Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
-    ),
-    Layer.provideMerge(ProviderRegistry.layer),
-    Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
-  )
-  .pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        AntigravityInstallation.AntigravityInstallation.layer,
-        CodexInstallation.CodexInstallation.layer,
-        // Lecturn: below the provider registry so the scripted adapter reads its
-        // script source; merged up so the fixture seam writes the same registry.
-        SquireFakeScripts.layerServer,
-      ),
-    ),
-  );
+  ),
+);
 
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerPtyAdapter),

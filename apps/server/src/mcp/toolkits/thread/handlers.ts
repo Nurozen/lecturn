@@ -9,6 +9,7 @@ import {
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@lecturn/shared/model";
+import { formatThreadLink } from "@lecturn/shared/threadLinks";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -108,9 +109,15 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       const projectId = input.projectId ?? caller?.projectId;
       if (projectId !== undefined) yield* McpInvocationContext.assertProjectReach(scope, projectId);
       const threadSearch = yield* ThreadSearch.ThreadSearch;
-      return yield* threadSearch
+      const { matches } = yield* threadSearch
         .searchThreads({ ...input, projectId })
         .pipe(Effect.mapError(unavailable));
+      return {
+        matches: matches.map((match) => ({
+          ...match,
+          link: formatThreadLink(match.threadId, match.title),
+        })),
+      };
     }),
   ),
   lecturn_thread_fork: writesThread((input) =>

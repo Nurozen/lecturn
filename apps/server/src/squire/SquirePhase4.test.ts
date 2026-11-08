@@ -412,7 +412,7 @@ describe("Squire reactor and delivery integration", () => {
           yield* write([prEvent("sha2", "passing", now)]);
           yield* write([prEvent("sha3", "failing", now)]);
           const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
-          yield* maintenance.compactEventStore;
+          yield* maintenance.compactEventStore();
           yield* startServer;
           yield* settle;
           const prKey = "github.com/acme/billing-service#321";

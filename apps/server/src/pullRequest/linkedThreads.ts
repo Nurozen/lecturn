@@ -14,6 +14,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 const decodeLinkedThreads = Schema.decodeUnknownEffect(PullRequestLinkedThreadsResult);
 
+// Lecturn: a Squire's hidden home and probe threads never stand in for a pull request's thread.
 export const listLinkedPullRequestThreads = Effect.fn("listLinkedPullRequestThreads")(
   function* (input: ThreadPullRequestKey) {
     const key = normalizeThreadPullRequestKey(input);
@@ -39,6 +40,7 @@ export const listLinkedPullRequestThreads = Effect.fn("listLinkedPullRequestThre
       WHERE json_extract(link.value, '$.number') = ${key.number}
         AND json_extract(link.value, '$.source') != 'stack-dismissed'
         AND t.deleted_at IS NULL
+        AND json_extract(t.payload_json, '$.squire') IS NULL
       ORDER BY "updatedAt" DESC, id ASC
     `.pipe(NodeSqliteClient.readOnly);
     const threads = rows

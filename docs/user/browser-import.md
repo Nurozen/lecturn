@@ -17,6 +17,6 @@ the import wizard afterward. You can revoke Full Disk Access once the import is 
 If Safari has more than one profile, the wizard lists each one under **From**; only the cookies
 of the profile you choose are copied.
 
-On Windows, import supports Firefox and Helium profiles that use standard profile encryption.
+On Windows, import supports Firefox, Zen, and Helium profiles that use standard profile encryption.
 Other Chromium-based browsers use app-bound encryption and cannot be imported. Partitioned cookies
 are skipped on all platforms.

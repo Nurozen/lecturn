@@ -398,7 +398,7 @@ function assertReinjectedInstructions(
 ) {
   const text = blocks[0]?.text ?? "";
   assert.include(text, "Lecturn interaction mode: Default");
-  assert.include(text, "Lecturn collaborative browser");
+  assert.include(text, "## Lecturn browser");
   assert.include(text, "Lecturn orchestration");
   assert.include(text, `<user_request>\n${request}\n</user_request>`);
 }
@@ -1390,7 +1390,7 @@ describe("AcpAdapterV2", () => {
       const firstDefault = yield* runTurn(2, defaultPolicy, "First default request.");
       assert.equal(firstDefault.textBlockCount, 2);
       assert.include(firstDefault.prompt, "Lecturn interaction mode: Default");
-      assert.include(firstDefault.prompt, "Lecturn collaborative browser");
+      assert.include(firstDefault.prompt, "## Lecturn browser");
       assert.include(firstDefault.prompt, "Lecturn orchestration");
       assert.notInclude(
         firstDefault.methods,

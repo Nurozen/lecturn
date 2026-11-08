@@ -43,7 +43,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import { ScrollViewMarker } from "react-native-screens";
+import { NativeScrollViewMarker as ScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -377,9 +377,6 @@ export function HomeScreen(props: HomeScreenProps) {
           )
         ? [props.selectedEnvironmentId]
         : [];
-  const threadSearch = useThreadSearch(searchEnvironmentIds, props.searchQuery);
-  const threadSearchMatchByKey = useThreadListSearchMatches(props.threads, threadSearch);
-  const matchedThreadKeys = new Set(threadSearchMatchByKey.keys());
   const effectiveGroupDisplayStates = withPersistedCollapsedGroups(
     groupDisplayStates,
     preferencesResult,
@@ -521,6 +518,16 @@ export function HomeScreen(props: HomeScreenProps) {
           ),
         );
 
+  const threadSearch = useThreadSearch(
+    searchEnvironmentIds,
+    props.searchQuery,
+    selectedProjectScope === null
+      ? {}
+      : { projectIds: selectedProjectScope.projectRefs.map((ref) => ref.projectId) },
+  );
+  const threadSearchMatchByKey = useThreadListSearchMatches(props.threads, threadSearch);
+  const matchedThreadKeys = new Set(threadSearchMatchByKey.keys());
+
   const sagaIndex = useMobileSagaIndex(props.projects, nestSagas);
   const projectGroups = buildHomeThreadGroups({
     accountSections,
@@ -644,6 +651,7 @@ export function HomeScreen(props: HomeScreenProps) {
     layout: threadListV2Layout,
     items: flatThreadListV2Items,
     contentOnlyThreadKeys,
+    olderSettledShelf,
   } = useThreadListV2({
     threads: props.threads,
     allThreads: allThreadShells,
@@ -932,7 +940,8 @@ export function HomeScreen(props: HomeScreenProps) {
   const hasAnyThreads =
     props.threads.some((thread) => thread.archivedAt === null) ||
     props.pendingTasks.length > 0 ||
-    projectGroups.length > 0;
+    projectGroups.length > 0 ||
+    threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null
       ? null
@@ -1094,7 +1103,15 @@ export function HomeScreen(props: HomeScreenProps) {
                   settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
                     <ThreadListV2ShowMoreRow
                       hiddenCount={threadListV2Layout.hiddenSettledCount}
-                      onPress={showMoreSettled}
+                      {...(olderSettledShelf.loading
+                        ? { state: "loading" as const }
+                        : olderSettledShelf.failed
+                          ? { state: "failed" as const }
+                          : {})}
+                      onPress={() => {
+                        olderSettledShelf.retry();
+                        showMoreSettled();
+                      }}
                     />
                   ) : null
                 }

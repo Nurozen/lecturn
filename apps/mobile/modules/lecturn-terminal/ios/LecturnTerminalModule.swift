@@ -8,9 +8,14 @@ public class LecturnTerminalModule: Module {
     // logs so a stale native binary is distinguishable from a broken key pipeline.
     Constants([
       "hardwareKeyRevision": 3,
+      "outputRevision": 1,
     ])
 
     View(LecturnTerminalView.self) {
+      AsyncFunction("writeOutput") { (view: LecturnTerminalView, data: String, reset: Bool) in
+        view.writeOutput(data, reset: reset)
+      }
+
       Prop("terminalKey") { (view: LecturnTerminalView, terminalKey: String) in
         view.terminalKey = terminalKey
       }

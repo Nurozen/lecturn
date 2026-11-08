@@ -502,6 +502,10 @@ export const layerWithOptions = (
                 ]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
+                const subagent = yield* projectionStore.getThread(threadId).pipe(
+                  Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
+                  Effect.orElseSucceed(() => false),
+                );
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.
@@ -524,7 +528,9 @@ export const layerWithOptions = (
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable &&
                     resolved.squire?.squireId === squire?.squireId &&
-                    resolved.squire?.role === squire?.role
+                    resolved.squire?.role === squire?.role &&
+                    // A credential issued while the lineage read failed is replaced once it works.
+                    (resolved.thread.subagent === true) === subagent
                   ) {
                     const agentDeviceEnvironment =
                       deviceToolsAvailable && existing.agentDeviceEnvironment === undefined
@@ -555,6 +561,7 @@ export const layerWithOptions = (
                   providerInstanceId,
                   browserToolsAvailable,
                   capabilities,
+                  subagent,
                   ...(squire === undefined
                     ? yield* appCredentialFields(projectionStore, projectService, threadId)
                     : { squire }),

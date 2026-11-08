@@ -23,7 +23,12 @@ import {
 } from "@lecturn/client-runtime/state/activityContext";
 import { useMobileSagaIndex } from "../../state/stave";
 import { isRepositoryWatchManagerEligible } from "@lecturn/client-runtime/state/repositoryScope";
-import { useNavigation, useIsFocused, type StaticScreenProps } from "@react-navigation/native";
+import {
+  StackActions,
+  useNavigation,
+  useIsFocused,
+  type StaticScreenProps,
+} from "@react-navigation/native";
 import {
   AuthOrchestrationOperateScope,
   CommandId,
@@ -34,7 +39,7 @@ import {
 } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { makeQueuedMessageMetadata } from "../../lib/commandMetadata";
 import { uuidv4 } from "../../lib/uuid";
@@ -51,6 +56,17 @@ import { environmentSession } from "../../state/session";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+
+// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
+function useOpenThreadOverPage() {
+  const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
+  return (params: { readonly environmentId: string; readonly threadId: string }) => {
+    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
+    else navigation.dispatch(StackActions.push("Thread", params));
+  };
+}
 
 function Action(props: {
   readonly label: string;
@@ -207,6 +223,7 @@ function PullRequestWatchControls({
 }) {
   const { themeAppearance } = useAppearancePreferences();
   const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const focused = useIsFocused();
   const projects = useProjects();
   const config = useEnvironmentServerConfig(environmentId);
@@ -517,9 +534,7 @@ function PullRequestWatchControls({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Open managing thread: ${manager.title}`}
-                onPress={() =>
-                  navigation.navigate("Thread", { environmentId, threadId: manager.id })
-                }
+                onPress={() => openThread({ environmentId, threadId: manager.id })}
               >
                 <Text className="font-lecturn-medium text-foreground" numberOfLines={2}>
                   {manager.title}
@@ -736,12 +751,7 @@ function PullRequestWatchControls({
                 <Action
                   label="Open thread"
                   icon="text.bubble"
-                  onPress={() =>
-                    navigation.navigate("Thread", {
-                      environmentId,
-                      threadId: watch.managerThreadId!,
-                    })
-                  }
+                  onPress={() => openThread({ environmentId, threadId: watch.managerThreadId! })}
                 />
                 <Action
                   label="Unassign"

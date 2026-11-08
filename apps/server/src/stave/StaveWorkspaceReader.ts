@@ -199,7 +199,7 @@ export const readManifestStrict = Effect.fn("StaveWorkspaceReader.readManifestSt
   const raw = yield* fileSystem
     .readFileString(path.join(workspaceRoot, STAVE_MANIFEST_FILE_NAME))
     .pipe(
-      Effect.map(Option.some),
+      Effect.asSome,
       Effect.catchTags({
         PlatformError: (error) =>
           error.reason._tag === "NotFound"
@@ -220,7 +220,7 @@ export const readManifestStrict = Effect.fn("StaveWorkspaceReader.readManifestSt
     return yield* new InvalidStaveManifestError({ detail: "manifest is not a mapping" });
   }
   return yield* decodeStaveManifest(parsed).pipe(
-    Effect.map(Option.some),
+    Effect.asSome,
     Effect.catchTags({
       SchemaError: (error) =>
         Effect.fail(

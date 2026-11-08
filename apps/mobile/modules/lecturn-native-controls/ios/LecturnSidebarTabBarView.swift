@@ -92,8 +92,7 @@ final class LecturnSidebarTabBarView: ExpoView, UITabBarDelegate {
     }
     configuration.cornerStyle = .capsule
     configuration.baseForegroundColor = .label
-    configuration.image = UIImage(systemName: "square.and.pencil")
-    configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 24)
+    configuration.image = tabIcon(UIImage(systemName: "square.and.pencil"))
     composeButton.configuration = configuration
   }
 

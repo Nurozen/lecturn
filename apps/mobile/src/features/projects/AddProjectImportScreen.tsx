@@ -30,7 +30,7 @@ import { replaceNewTaskFlowWithThread } from "./replaceNewTaskFlowWithThread";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -38,6 +38,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { ErrorBanner } from "../../components/ui/ErrorBanner";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProject } from "../../state/entities";
 import { externalSessionsEnvironment } from "../../state/externalSessions";
@@ -396,6 +397,7 @@ export function AddProjectImportFoldersScreen(props: {
 
   return (
     <LegendList
+      renderScrollComponent={Platform.OS === "ios" ? NativeScrollView : undefined}
       alwaysBounceVertical={false}
       automaticallyAdjustsScrollIndicatorInsets
       className="flex-1 bg-sheet"
@@ -709,6 +711,7 @@ export function AddProjectImportSessionsScreen(props: {
     <View className="flex-1 bg-sheet" collapsable={false}>
       {screenOptions}
       <LegendList
+        renderScrollComponent={Platform.OS === "ios" ? NativeScrollView : undefined}
         alwaysBounceVertical={false}
         automaticallyAdjustsScrollIndicatorInsets
         className="flex-1"

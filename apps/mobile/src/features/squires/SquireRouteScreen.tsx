@@ -10,9 +10,10 @@ import {
   type SquireSnapshotEntry,
 } from "@lecturn/client-runtime/state/squire";
 import { EnvironmentId, SquireCardId, SquireId } from "@lecturn/contracts";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useLayoutEffect, useRef, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   View,
@@ -42,6 +43,17 @@ import {
   squireScreenState,
   squireTeamFilterToggle,
 } from "./squireQueue.logic";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+
+// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
+function useOpenThreadOverPage() {
+  const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
+  return (params: { readonly environmentId: string; readonly threadId: string }) => {
+    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
+    else navigation.dispatch(StackActions.push("Thread", params));
+  };
+}
 
 export type SquireRouteParams = {
   environmentId: string;
@@ -170,7 +182,7 @@ function SquireHeader(props: {
 }) {
   const { environmentId, entry } = props;
   const { squire } = entry;
-  const navigation = useNavigation();
+  const openThread = useOpenThreadOverPage();
   const indicator = useSquireIndicator(environmentId, entry);
   const portraitRef = useRef<ViewInstance>(null);
   const inView = useSquireInView(portraitRef, indicator.state === "working");
@@ -228,12 +240,7 @@ function SquireHeader(props: {
         {actions.chatThreadId === null ? null : (
           <RequestActionButton
             label="Chat"
-            onPress={() =>
-              navigation.navigate("Thread", {
-                environmentId,
-                threadId: actions.chatThreadId!,
-              })
-            }
+            onPress={() => openThread({ environmentId, threadId: actions.chatThreadId! })}
           />
         )}
         {canSetStatus && actions.setupPrompt === null ? (

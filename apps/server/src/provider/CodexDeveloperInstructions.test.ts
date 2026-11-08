@@ -59,7 +59,20 @@ describe("buildCodexAdditionalContext", () => {
   );
 });
 
-describe("buildCodexDeveloperInstructions", () => {
+describe("Codex runtime context", () => {
+  it("describes Markdown media support in the runtime context in both modes", () => {
+    {
+      const instructions = runtimeInstructions({
+        model: "gpt-5.3-codex",
+        reasoningEffort: "high",
+      });
+      NodeAssert.match(
+        instructions,
+        /<runtime_info>.*embed images, video, and audio.*Markdown image syntax with absolute file paths.*Link any other file.*absolute path.*files viewer.*<\/runtime_info>/,
+      );
+    }
+  });
+
   it("flattens multiline metadata into single-line runtime info", () => {
     const instructions = runtimeInstructions({
       model: "gpt\n5.3\ncodex",
@@ -72,23 +85,23 @@ describe("buildCodexDeveloperInstructions", () => {
 });
 
 describe("Codex orchestration context", () => {
-  it("routes same-child follow-ups to lecturn_thread_send and independent reviews to delegate_task", () => {
+  it("routes subagents native first, delegate_task for the rest", () => {
     const orchestration = Object.entries(buildCodexAdditionalContext({ model: "gpt-6.1-sol" }))
       .filter(([key]) => key.startsWith("lecturn_orchestration_"))
       .map(([, entry]) => entry.value)
       .join("\n");
 
+    NodeAssert.ok(orchestration.includes("use your native tool when the child uses your provider"));
+    NodeAssert.ok(orchestration.includes("`run_in_background:false`"));
+    NodeAssert.ok(orchestration.includes("A native type running another provider's model"));
     NodeAssert.ok(
-      orchestration.includes(
-        "For independent Lecturn delegated review rounds, call `delegate_task` again.",
-      ),
+      orchestration.includes("Every new delegate review or re-check is a new `delegate_task`"),
     );
-    NodeAssert.ok(
-      orchestration.includes(
-        "For a follow-up that needs the same child's conversation, use `lecturn_thread_send` on its `childThreadId`.",
-      ),
-    );
-    NodeAssert.ok(!orchestration.includes("Do not use `lecturn_thread_send`"));
+    NodeAssert.ok(orchestration.includes("never a `lecturn_thread_send`"));
+    NodeAssert.ok(!orchestration.includes("inheritedOptions"));
+    NodeAssert.ok(!orchestration.includes("Prefer native"));
+    // The ACP terminal fallback is ACP-only; Codex agents never need it.
+    NodeAssert.ok(!orchestration.includes("acp-mcp-call"));
   });
 });
 

@@ -1,5 +1,5 @@
 import { threadDecisionEnvironment } from "../../state/thread-decisions";
-import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import {
   DecisionEvidenceId,
   type EnvironmentId,
@@ -8,13 +8,24 @@ import {
   type ProjectId,
 } from "@lecturn/contracts";
 import { useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 import { contextualEnvironment as contextual } from "../../state/contextual";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { randomHex } from "../../lib/uuid";
 import { ContextualButton as Button } from "./ContextualControls";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+
+// Android shows one page at a time; iOS opens the thread over this page, so Back returns.
+function useOpenThreadOverPage() {
+  const navigation = useNavigation();
+  const selectDetail = useSelectWorkspaceDetail();
+  return (params: { readonly environmentId: string; readonly threadId: string }) => {
+    if (Platform.OS === "android") selectDetail({ name: "Thread", params });
+    else navigation.dispatch(StackActions.push("Thread", params));
+  };
+}
 
 export function DecisionGroupPanel({
   environmentId,
@@ -27,12 +38,7 @@ export function DecisionGroupPanel({
   canOperate: boolean;
   onChanged: () => void;
 }) {
-  const navigation = useNavigation<
-    NavigationProp<{
-      Thread: { environmentId: string; threadId: string };
-      Decisions: { environmentId: string; projectId: string; threadId?: string };
-    }>
-  >();
+  const openThread = useOpenThreadOverPage();
   const [source, setSource] = useState<{ decisionId: DecisionId; evidenceId: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>();
@@ -94,9 +100,7 @@ export function DecisionGroupPanel({
               ) : null}
               <Button
                 label="Open occurrence conversation"
-                onPress={() =>
-                  navigation.navigate("Thread", { environmentId, threadId: occurrence.threadId })
-                }
+                onPress={() => openThread({ environmentId, threadId: occurrence.threadId })}
               />
               {occurrence.evidenceIds.map((evidenceId, index) => (
                 <Button

@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - cleanup uses Node's retrying rm, which the FileSystem service does not expose.
-import { vi } from "vite-plus/test";
-import { ClaudeSettings } from "@lecturn/contracts";
-import * as NodeFSP from "node:fs/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ClaudeSettings, type ServerProvider } from "@lecturn/contracts";
+import { vi } from "vite-plus/test";
+import * as NodeFSP from "node:fs/promises";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import {
   buildClaudeCapabilitiesProbeQueryOptions,
   probeClaudeCapabilities,
+  probeClaudeWorkspaceSnapshot,
 } from "./ClaudeProvider.ts";
 
 vi.mock("@anthropic-ai/claude-agent-sdk", { spy: true });
@@ -129,3 +130,15 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
     }).pipe(Effect.scoped),
   );
 });
+
+it.effect("reports a deleted worktree's scan as finished, not pending", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* probeClaudeWorkspaceSnapshot(
+      yield* Schema.decodeEffect(ClaudeSettings)({}),
+      { skills: [], slashCommands: [] } as unknown as ServerProvider,
+      "/nonexistent/lecturn-deleted-worktree",
+      { HOME: "/nonexistent/lecturn-home" },
+    );
+    assert.strictEqual(snapshot.slashCommandsPending, false);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
