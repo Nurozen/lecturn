@@ -68,15 +68,13 @@ export function shouldShowComposerContextStrip(input: {
   /** Stave space context remains useful without an editable Git repo. */
   isStaveProject?: boolean;
   showEnvironmentIndicator: boolean;
-  hostsRestingComposerControls: boolean;
 }): boolean {
+  // A new thread always shows the strip, since it names the permissions the first send uses.
   return (
     input.hasActiveProject &&
-    (input.isDraftHeroState || input.persistInActiveThreads) &&
-    (input.isGitRepo ||
-      input.isStaveProject === true ||
-      input.showEnvironmentIndicator ||
-      input.hostsRestingComposerControls)
+    (input.isDraftHeroState ||
+      (input.persistInActiveThreads &&
+        (input.isGitRepo || input.isStaveProject === true || input.showEnvironmentIndicator)))
   );
 }
 

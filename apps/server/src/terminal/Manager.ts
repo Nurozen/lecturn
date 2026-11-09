@@ -59,6 +59,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
@@ -72,6 +73,7 @@ import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
+import { terminalOutputStream } from "./OutputProtocol.ts";
 import * as PtyAdapter from "@lecturn/shared/PtyAdapter";
 
 export {
@@ -162,11 +164,26 @@ export class TerminalManager extends Context.Service<
       input: TerminalOpenInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
+    /**
+     * Attached viewers share one PTY sized to the smallest of them, so a narrow client
+     * still sees the whole TUI. Streams and resizes with the same `viewerId` (one client
+     * connection) count as one viewer; streams without one are each their own viewer.
+     */
     readonly attachStream: (
       input: TerminalAttachInput,
       listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>,
       registerCleanup?: (stop: () => void) => void,
+      viewerId?: string,
     ) => Effect.Effect<() => void, TerminalError>;
+
+    /**
+     * The `terminal.attach` RPC stream. Overflow recovery swaps the inner subscription, so
+     * `viewerId` and the size it reported stay attached until the whole stream ends.
+     */
+    readonly attachOutputStream: (
+      input: TerminalAttachInput,
+      viewerId: string,
+    ) => Stream.Stream<TerminalAttachStreamEvent, TerminalError>;
 
     readonly observeStream: (
       input: TerminalObserveInput,
@@ -182,7 +199,10 @@ export class TerminalManager extends Context.Service<
 
     readonly write: (input: TerminalWriteInput) => Effect.Effect<void, TerminalError>;
 
-    readonly resize: (input: TerminalResizeInput) => Effect.Effect<void, TerminalError>;
+    readonly resize: (
+      input: TerminalResizeInput,
+      viewerId?: string,
+    ) => Effect.Effect<void, TerminalError>;
 
     readonly clear: (input: TerminalClearInput) => Effect.Effect<void, TerminalError>;
 
@@ -282,6 +302,17 @@ interface TerminalSessionState {
   runtimeEnv: Record<string, string> | null;
 }
 
+interface TerminalGrid {
+  readonly cols: number;
+  readonly rows: number;
+}
+
+/** One client connection attached to a terminal, possibly through several streams. */
+interface TerminalViewer {
+  streams: number;
+  grid: TerminalGrid | null;
+}
+
 interface PersistHistoryRequest {
   history: BoundedTerminalHistory;
   immediate: boolean;
@@ -363,6 +394,8 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     label: terminalWireLabel(session),
     updatedAt: session.updatedAt,
     sequence: session.eventSequence,
+    cols: session.cols,
+    rows: session.rows,
   };
 }
 
@@ -1043,6 +1076,10 @@ function isCsiFinalByte(codePoint: number): boolean {
   return codePoint >= 0x40 && codePoint <= 0x7e;
 }
 
+function isControlSequenceCancel(codePoint: number): boolean {
+  return codePoint === 0x18 || codePoint === 0x1a;
+}
+
 function shouldStripCsiSequence(body: string, finalByte: string): boolean {
   if (finalByte === "n") {
     return true;
@@ -1091,7 +1128,7 @@ function stripStringTerminator(value: string): string {
 function findStringTerminatorIndex(input: string, start: number): number | null {
   for (let index = start; index < input.length; index += 1) {
     const codePoint = input.charCodeAt(index);
-    if (codePoint === 0x07 || codePoint === 0x9c) {
+    if (codePoint === 0x07 || codePoint === 0x9c || isControlSequenceCancel(codePoint)) {
       return index + 1;
     }
     if (codePoint === 0x1b && input.charCodeAt(index + 1) === 0x5c) {
@@ -1153,10 +1190,11 @@ function sanitizeTerminalHistoryChunk(
       if (nextCodePoint === 0x5b) {
         let cursor = index + 2;
         while (cursor < input.length) {
-          if (isCsiFinalByte(input.charCodeAt(cursor))) {
+          const cancelled = isControlSequenceCancel(input.charCodeAt(cursor));
+          if (cancelled || isCsiFinalByte(input.charCodeAt(cursor))) {
             const sequence = input.slice(index, cursor + 1);
             const body = input.slice(index + 2, cursor);
-            if (!shouldStripCsiSequence(body, input[cursor] ?? "")) {
+            if (cancelled || !shouldStripCsiSequence(body, input[cursor] ?? "")) {
               append(sequence);
             }
             index = cursor + 1;
@@ -1207,10 +1245,11 @@ function sanitizeTerminalHistoryChunk(
     if (codePoint === 0x9b) {
       let cursor = index + 1;
       while (cursor < input.length) {
-        if (isCsiFinalByte(input.charCodeAt(cursor))) {
+        const cancelled = isControlSequenceCancel(input.charCodeAt(cursor));
+        if (cancelled || isCsiFinalByte(input.charCodeAt(cursor))) {
           const sequence = input.slice(index, cursor + 1);
           const body = input.slice(index + 1, cursor);
-          if (!shouldStripCsiSequence(body, input[cursor] ?? "")) {
+          if (cancelled || !shouldStripCsiSequence(body, input[cursor] ?? "")) {
             append(sequence);
           }
           index = cursor + 1;
@@ -1659,6 +1698,104 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E, R> => threadLocks.withLock(threadId, effect);
+
+  const terminalViewers = new Map<string, Map<string, TerminalViewer>>();
+  let anonymousViewerCount = 0;
+
+  const retainViewer = (sessionKey: string, viewerId: string, grid: TerminalGrid | null) => {
+    let viewers = terminalViewers.get(sessionKey);
+    if (!viewers) {
+      viewers = new Map();
+      terminalViewers.set(sessionKey, viewers);
+    }
+    const viewer = viewers.get(viewerId);
+    if (viewer) {
+      viewer.streams += 1;
+      // After a viewer's first size, resizes own it; attach retries resend the original size.
+      viewer.grid ??= grid;
+    } else {
+      viewers.set(viewerId, { streams: 1, grid });
+    }
+  };
+
+  /** Returns whether the viewer left, which can grow the shared grid. */
+  const releaseViewer = (sessionKey: string, viewerId: string) => {
+    const viewers = terminalViewers.get(sessionKey);
+    const viewer = viewers?.get(viewerId);
+    if (!viewers || !viewer) return false;
+    viewer.streams -= 1;
+    if (viewer.streams > 0) return false;
+    viewers.delete(viewerId);
+    if (viewers.size === 0) terminalViewers.delete(sessionKey);
+    return true;
+  };
+
+  // The smallest attached viewer bounds each axis, so every viewer can draw the whole grid.
+  const sharedViewerGrid = (sessionKey: string): TerminalGrid | null => {
+    let shared: TerminalGrid | null = null;
+    for (const viewer of terminalViewers.get(sessionKey)?.values() ?? []) {
+      if (!viewer.grid) continue;
+      shared = shared
+        ? {
+            cols: Math.min(shared.cols, viewer.grid.cols),
+            rows: Math.min(shared.rows, viewer.grid.rows),
+          }
+        : viewer.grid;
+    }
+    return shared;
+  };
+
+  /** Attached viewers own the size; a caller's own size only applies when none has reported one. */
+  const withSharedGrid = <
+    A extends { readonly cols?: number | undefined; readonly rows?: number | undefined },
+  >(
+    sessionKey: string,
+    input: A,
+  ): A => {
+    const shared = sharedViewerGrid(sessionKey);
+    return shared ? { ...input, cols: shared.cols, rows: shared.rows } : input;
+  };
+
+  // Renderers draw the PTY grid, so every size change reaches them. It rides on activity
+  // because older clients reject unknown event types.
+  const resizeSession = Effect.fnUntraced(function* (
+    session: TerminalSessionState,
+    process: PtyAdapter.PtyProcess,
+    cols: number,
+    rows: number,
+  ) {
+    yield* resizePtyProcess(session, process, cols, rows);
+    session.cols = cols;
+    session.rows = rows;
+    session.updatedAt = yield* nowIso;
+    const eventStamp = advanceEventSequence(session);
+    yield* publishEvent({
+      type: "activity",
+      threadId: session.threadId,
+      terminalId: session.terminalId,
+      sequence: eventStamp.sequence,
+      hasRunningSubprocess: session.hasRunningSubprocess,
+      label: terminalWireLabel(session),
+      cols,
+      rows,
+    });
+  });
+
+  const applySharedGrid = Effect.fnUntraced(function* (threadId: string, terminalId: string) {
+    const session = yield* getSession(threadId, terminalId);
+    if (Option.isNone(session)) return;
+    const process = session.value.process;
+    const shared = sharedViewerGrid(toSessionKey(threadId, terminalId));
+    if (
+      !process ||
+      session.value.status !== "running" ||
+      !shared ||
+      (shared.cols === session.value.cols && shared.rows === session.value.rows)
+    ) {
+      return;
+    }
+    yield* resizeSession(session.value, process, shared.cols, shared.rows);
+  });
 
   const clearKillFiber = Effect.fn("terminal.clearKillFiber")(function* (
     process: PtyAdapter.PtyProcess | null,
@@ -2719,151 +2856,143 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }).pipe(Effect.ignoreCause({ log: true })),
   );
 
+  const openWithWorkspaceLease = Effect.fn("terminal.openLocked")(function* (
+    requestedInput: TerminalOpenInput,
+  ) {
+    const terminalId = requestedInput.terminalId;
+    yield* assertValidCwd(requestedInput.cwd);
+
+    const sessionKey = toSessionKey(requestedInput.threadId, terminalId);
+    const input = withSharedGrid(sessionKey, requestedInput);
+    const existing = yield* getSession(input.threadId, terminalId);
+    if (Option.isNone(existing)) {
+      yield* flushPersist(input.threadId, terminalId);
+      const inherited = yield* readHistory(input.threadId, terminalId);
+      const history = new BoundedTerminalHistory(
+        historyLineLimit,
+        neutralizeInheritedHistory(
+          inherited.value(),
+          historyLineLimit,
+          Math.min(historyByteLimit, DEFAULT_MAX_TERMINAL_BUFFER_BYTES),
+        ),
+        historyByteLimit,
+      );
+      const cols = input.cols ?? DEFAULT_OPEN_COLS;
+      const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+      const session: TerminalSessionState = {
+        threadId: input.threadId,
+        terminalId,
+        cwd: input.cwd,
+        worktreePath: input.worktreePath ?? null,
+        status: "starting",
+        pid: null,
+        history,
+        pendingHistoryControlSequence: "",
+        pendingProcessEvents: [],
+        pendingProcessEventIndex: 0,
+        processEventDrainRunning: false,
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: yield* nowIso,
+        eventSequence: 0,
+        inputCount: 0,
+        cols,
+        rows,
+        process: null,
+        unsubscribeData: null,
+        unsubscribeExit: null,
+        hasRunningSubprocess: false,
+        childCommandLabel: null,
+        runtimeEnv: normalizedRuntimeEnv(input.env),
+      };
+
+      const createdSession = session;
+      yield* modifyManagerState((state) => {
+        const sessions = new Map(state.sessions);
+        sessions.set(sessionKey, createdSession);
+        closedSessionKeys.delete(sessionKey);
+        return [undefined, { ...state, sessions }] as const;
+      });
+
+      yield* evictInactiveSessionsIfNeeded();
+      yield* startSession(
+        session,
+        {
+          cwd: input.cwd,
+          ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+          cols,
+          rows,
+        },
+        "started",
+      );
+      return snapshot(session);
+    }
+
+    const liveSession = existing.value;
+    const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+    const currentRuntimeEnv = liveSession.runtimeEnv;
+    const targetCols = input.cols ?? liveSession.cols;
+    const targetRows = input.rows ?? liveSession.rows;
+    const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
+    const nextWorktreePath =
+      input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
+    const launchContextChanged =
+      liveSession.cwd !== input.cwd ||
+      runtimeEnvChanged ||
+      liveSession.worktreePath !== nextWorktreePath;
+
+    if (launchContextChanged) {
+      yield* stopProcess(liveSession);
+      liveSession.cwd = input.cwd;
+      liveSession.worktreePath = nextWorktreePath;
+      liveSession.runtimeEnv = nextRuntimeEnv;
+      liveSession.history.clear();
+      liveSession.pendingHistoryControlSequence = "";
+      liveSession.pendingProcessEvents = [];
+      liveSession.pendingProcessEventIndex = 0;
+      liveSession.processEventDrainRunning = false;
+      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
+    } else if (liveSession.status === "exited" || liveSession.status === "error") {
+      liveSession.runtimeEnv = nextRuntimeEnv;
+      liveSession.worktreePath = nextWorktreePath;
+      liveSession.history.clear();
+      liveSession.pendingHistoryControlSequence = "";
+      liveSession.pendingProcessEvents = [];
+      liveSession.pendingProcessEventIndex = 0;
+      liveSession.processEventDrainRunning = false;
+      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
+    }
+
+    if (!liveSession.process) {
+      yield* startSession(
+        liveSession,
+        {
+          cwd: input.cwd,
+          worktreePath: liveSession.worktreePath,
+          cols: targetCols,
+          rows: targetRows,
+        },
+        "started",
+      );
+      return snapshot(liveSession);
+    }
+
+    if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
+      yield* resizeSession(liveSession, liveSession.process, targetCols, targetRows);
+    }
+
+    return snapshot(liveSession);
+  });
+
   // The Stave fence check runs before the workspace lease, so a start under a
   // fenced space fails fast instead of queueing behind a held lease.
-  const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
-    return yield* runtimeFence
+  const openLocked = (input: TerminalOpenInput) =>
+    runtimeFence
       .withStart(
         input.cwd,
         withWorkspaceLease(
           path.resolve(input.worktreePath ?? input.cwd),
-          Effect.gen(function* () {
-            const terminalId = input.terminalId;
-            yield* assertValidCwd(input.cwd);
-
-            const sessionKey = toSessionKey(input.threadId, terminalId);
-            const existing = yield* getSession(input.threadId, terminalId);
-            if (Option.isNone(existing)) {
-              yield* flushPersist(input.threadId, terminalId);
-              const inherited = yield* readHistory(input.threadId, terminalId);
-              const history = new BoundedTerminalHistory(
-                historyLineLimit,
-                neutralizeInheritedHistory(
-                  inherited.value(),
-                  historyLineLimit,
-                  Math.min(historyByteLimit, DEFAULT_MAX_TERMINAL_BUFFER_BYTES),
-                ),
-                historyByteLimit,
-              );
-              const cols = input.cols ?? DEFAULT_OPEN_COLS;
-              const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-              const session: TerminalSessionState = {
-                threadId: input.threadId,
-                terminalId,
-                cwd: input.cwd,
-                worktreePath: input.worktreePath ?? null,
-                status: "starting",
-                pid: null,
-                history,
-                pendingHistoryControlSequence: "",
-                pendingProcessEvents: [],
-                pendingProcessEventIndex: 0,
-                processEventDrainRunning: false,
-                exitCode: null,
-                exitSignal: null,
-                updatedAt: yield* nowIso,
-                eventSequence: 0,
-                inputCount: 0,
-                cols,
-                rows,
-                process: null,
-                unsubscribeData: null,
-                unsubscribeExit: null,
-                hasRunningSubprocess: false,
-                childCommandLabel: null,
-                runtimeEnv: normalizedRuntimeEnv(input.env),
-              };
-
-              const createdSession = session;
-              yield* modifyManagerState((state) => {
-                const sessions = new Map(state.sessions);
-                sessions.set(sessionKey, createdSession);
-                closedSessionKeys.delete(sessionKey);
-                return [undefined, { ...state, sessions }] as const;
-              });
-
-              yield* evictInactiveSessionsIfNeeded();
-              yield* startSession(
-                session,
-                {
-                  cwd: input.cwd,
-                  ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-                  cols,
-                  rows,
-                },
-                "started",
-              );
-              return snapshot(session);
-            }
-
-            const liveSession = existing.value;
-            const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
-            const currentRuntimeEnv = liveSession.runtimeEnv;
-            const targetCols = input.cols ?? liveSession.cols;
-            const targetRows = input.rows ?? liveSession.rows;
-            const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
-            const nextWorktreePath =
-              input.worktreePath !== undefined
-                ? (input.worktreePath ?? null)
-                : liveSession.worktreePath;
-            const launchContextChanged =
-              liveSession.cwd !== input.cwd ||
-              runtimeEnvChanged ||
-              liveSession.worktreePath !== nextWorktreePath;
-
-            if (launchContextChanged) {
-              yield* stopProcess(liveSession);
-              liveSession.cwd = input.cwd;
-              liveSession.worktreePath = nextWorktreePath;
-              liveSession.runtimeEnv = nextRuntimeEnv;
-              liveSession.history.clear();
-              liveSession.pendingHistoryControlSequence = "";
-              liveSession.pendingProcessEvents = [];
-              liveSession.pendingProcessEventIndex = 0;
-              liveSession.processEventDrainRunning = false;
-              yield* persistHistory(
-                liveSession.threadId,
-                liveSession.terminalId,
-                liveSession.history,
-              );
-            } else if (liveSession.status === "exited" || liveSession.status === "error") {
-              liveSession.runtimeEnv = nextRuntimeEnv;
-              liveSession.worktreePath = nextWorktreePath;
-              liveSession.history.clear();
-              liveSession.pendingHistoryControlSequence = "";
-              liveSession.pendingProcessEvents = [];
-              liveSession.pendingProcessEventIndex = 0;
-              liveSession.processEventDrainRunning = false;
-              yield* persistHistory(
-                liveSession.threadId,
-                liveSession.terminalId,
-                liveSession.history,
-              );
-            }
-
-            if (!liveSession.process) {
-              yield* startSession(
-                liveSession,
-                {
-                  cwd: input.cwd,
-                  worktreePath: liveSession.worktreePath,
-                  cols: targetCols,
-                  rows: targetRows,
-                },
-                "started",
-              );
-              return snapshot(liveSession);
-            }
-
-            if (liveSession.cols !== targetCols || liveSession.rows !== targetRows) {
-              yield* resizePtyProcess(liveSession, liveSession.process, targetCols, targetRows);
-              liveSession.cols = targetCols;
-              liveSession.rows = targetRows;
-              liveSession.updatedAt = yield* nowIso;
-            }
-
-            return snapshot(liveSession);
-          }),
+          openWithWorkspaceLease(input),
         ),
       )
       .pipe(
@@ -2871,7 +3000,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           StaveRuntimeFenced: (cause) => new TerminalCwdStatError({ cwd: input.cwd, cause }),
         }),
       );
-  });
 
   const open: TerminalManager["Service"]["open"] = (input) =>
     withThreadLock(
@@ -2879,8 +3007,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       resolveLaunchInputEnvironment(input).pipe(Effect.flatMap(openLocked)),
     );
 
-  const openOrAttachForStream = Effect.fnUntraced(function* (input: TerminalAttachInput) {
-    const terminalId = input.terminalId;
+  const openOrAttachForStream = Effect.fnUntraced(function* (requestedInput: TerminalAttachInput) {
+    const terminalId = requestedInput.terminalId;
+    const input = withSharedGrid(toSessionKey(requestedInput.threadId, terminalId), requestedInput);
     const existing = yield* getSession(input.threadId, terminalId);
 
     if (Option.isNone(existing)) {
@@ -2920,11 +3049,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       session.status === "running" &&
       (session.cols !== targetCols || session.rows !== targetRows)
     ) {
-      const process = session.process;
-      yield* resizePtyProcess(session, process, targetCols, targetRows);
-      session.cols = targetCols;
-      session.rows = targetRows;
-      session.updatedAt = yield* nowIso;
+      yield* resizeSession(session, session.process, targetCols, targetRows);
     }
 
     return snapshot(session);
@@ -3045,11 +3170,60 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
   };
 
+  /** Retains `viewer` and returns its release, which runs at most once. */
+  const retainViewerOnce = (
+    input: TerminalObserveInput,
+    viewer: string,
+    grid: TerminalGrid | null,
+  ) => {
+    const sessionKey = toSessionKey(input.threadId, input.terminalId);
+    retainViewer(sessionKey, viewer, grid);
+    let retained = true;
+    return () => {
+      if (!retained) return;
+      retained = false;
+      if (releaseViewer(sessionKey, viewer)) {
+        runFork(withThreadLock(input.threadId, applySharedGrid(input.threadId, input.terminalId)));
+      }
+    };
+  };
+
   const attachStream: TerminalManager["Service"]["attachStream"] = (
     input,
     listener,
     registerCleanup,
-  ) => streamSession(input, openOrAttachForStream(input), listener, registerCleanup);
+    viewerId,
+  ) => {
+    const viewer = viewerId ?? `stream:${++anonymousViewerCount}`;
+    let detach = () => {};
+    const initial = Effect.suspend(() => {
+      detach = retainViewerOnce(
+        input,
+        viewer,
+        input.cols !== undefined && input.rows !== undefined
+          ? { cols: input.cols, rows: input.rows }
+          : null,
+      );
+      return openOrAttachForStream(input);
+    });
+    return streamSession(
+      input,
+      initial,
+      listener,
+      registerCleanup &&
+        ((stop) =>
+          registerCleanup(() => {
+            stop();
+            detach();
+          })),
+    ).pipe(
+      Effect.map((stop) => () => {
+        stop();
+        detach();
+      }),
+      Effect.onError(() => Effect.sync(detach)),
+    );
+  };
 
   const observeStream: TerminalManager["Service"]["observeStream"] = (
     input,
@@ -3075,6 +3249,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ),
       listener,
       registerCleanup,
+    );
+
+  const attachOutputStream: TerminalManager["Service"]["attachOutputStream"] = (input, viewerId) =>
+    Stream.unwrap(
+      Effect.acquireRelease(
+        Effect.sync(() => retainViewerOnce(input, viewerId, null)),
+        (release) => Effect.sync(release),
+      ).pipe(
+        Effect.as(
+          terminalOutputStream(
+            (listener, registerCleanup) => attachStream(input, listener, registerCleanup, viewerId),
+            (listener, registerCleanup) => resyncStream(input, listener, registerCleanup),
+          ),
+        ),
+      ),
     );
 
   const metadataEventFromTerminalEvent = (
@@ -3183,23 +3372,36 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     });
   });
 
-  const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
+  const resizeLocked = Effect.fn("terminal.resize")(function* (
+    input: TerminalResizeInput,
+    viewerId: string | undefined,
+  ) {
+    const sessionKey = toSessionKey(input.threadId, input.terminalId);
+    const viewer =
+      viewerId === undefined ? undefined : terminalViewers.get(sessionKey)?.get(viewerId);
+    if (viewer) {
+      viewer.grid = { cols: input.cols, rows: input.rows };
+      return yield* applySharedGrid(input.threadId, input.terminalId);
+    }
+    // A caller that is not attached cannot override the viewers that are.
+    if (sharedViewerGrid(sessionKey)) return;
     const session = yield* getSession(input.threadId, input.terminalId);
     if (Option.isNone(session)) {
       return;
     }
     const process = session.value.process;
-    if (!process || session.value.status !== "running") {
+    if (
+      !process ||
+      session.value.status !== "running" ||
+      (session.value.cols === input.cols && session.value.rows === input.rows)
+    ) {
       return;
     }
-    yield* resizePtyProcess(session.value, process, input.cols, input.rows);
-    session.value.cols = input.cols;
-    session.value.rows = input.rows;
-    session.value.updatedAt = yield* nowIso;
+    yield* resizeSession(session.value, process, input.cols, input.rows);
   });
 
-  const resize: TerminalManager["Service"]["resize"] = (input) =>
-    withThreadLock(input.threadId, resizeLocked(input));
+  const resize: TerminalManager["Service"]["resize"] = (input, viewerId) =>
+    withThreadLock(input.threadId, resizeLocked(input, viewerId));
 
   const clear: TerminalManager["Service"]["clear"] = (input) =>
     withThreadLock(
@@ -3385,6 +3587,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   return TerminalManager.of({
     open,
     attachStream,
+    attachOutputStream,
     observeStream,
     resyncStream,
     write,

@@ -5,7 +5,6 @@ import {
 } from "@lecturn/contracts";
 import { parseLecturnProjectFile } from "@lecturn/shared/lecturnProjectFile";
 import { useAtomValue } from "@effect/atom-react";
-import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { createContext, type ReactNode, useContext } from "react";
 
@@ -33,7 +32,7 @@ const memberProjectFilesAtom = Atom.family((membersKey: string) => {
       if (result.waiting) continue;
       const data =
         get(optimisticFileAtom(environmentId, workspaceRoot, LECTURN_PROJECT_FILE_NAME))?.data ??
-        Option.getOrNull(AsyncResult.value(result));
+        AsyncResult.getOrElse(result, () => null);
       files.set(
         physicalProjectKey,
         data === null || data.exists === false || data.truncated

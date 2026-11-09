@@ -41,8 +41,8 @@ This installs the dev client for the checkout's native fingerprint: from the
 device or the local cache in seconds, building once only when this machine has
 no client with that fingerprint yet (5-15 minutes, logged to the file it
 names). The device id may be omitted when exactly one device is booted. It
-prints one JSON line; on failure it names the next command. Authorized mobile
-verification includes that step unless the user prohibits it.
+prints one JSON line; on failure it names the next command. Mobile verification
+includes that step unless the user prohibits it.
 
 For a device you opened in an agent-device session elsewhere (a device pool,
 cloud, or remote host), run `vp run mobile:install <ios|android> --session <s>`
@@ -99,7 +99,7 @@ Do not treat unavailable iOS tooling as a blocker when Android is a valid repres
 
 ### Ensure a compatible native client
 
-Authorized mobile verification includes building and installing a development client. A missing, stale, or unknown native client is not a reason to skip verification or leave a PR in draft. Build and install it, then continue. Respect an explicit user instruction not to rebuild; otherwise do not ask for separate permission.
+Mobile verification includes building and installing a development client. A missing, stale, or unknown native client is not a reason to skip verification or leave a PR in draft. Build and install it, then continue. Respect an explicit user instruction not to rebuild; otherwise do not ask for separate permission.
 
 Run this from the checkout being tested, on the machine that hosts the selected simulator or emulator. Select and boot one explicit iOS UDID or Android emulator serial first:
 

@@ -12,8 +12,10 @@ import { useRef, useState } from "react";
 import {
   deregisterManagedRelayEnvironmentCommand,
   useManagedRelayEnvironments,
+  useManagedTunnelUsage,
 } from "../../cloud/managedRelayState";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -111,6 +113,17 @@ function LecturnConnectEnvironmentRow(props: {
   );
 }
 
+// T3 Chat plan upgrades are upstream-only (D7), so the meter shows the relay cap alone.
+function LecturnConnectTunnelUsage() {
+  const usage = useManagedTunnelUsage();
+  if (usage.used === null || usage.limit === null) return null;
+  return (
+    <div className="border-t py-4">
+      <TunnelUsageMeter used={usage.used} limit={usage.limit} />
+    </div>
+  );
+}
+
 export function LecturnConnectUserProfilePage() {
   const environmentsState = useManagedRelayEnvironments();
   const deregisterEnvironment = useAtomCommand(deregisterManagedRelayEnvironmentCommand, {
@@ -189,6 +202,8 @@ export function LecturnConnectUserProfilePage() {
     (environment) =>
       removedEnvironmentLinkedAt.get(environment.environmentId) !== environment.linkedAt,
   );
+  const usage = useManagedTunnelUsage();
+  const refreshAll = usage.refresh;
   const isInitialLoad =
     !environmentsState.accountId || (environmentsState.data === null && !environmentsState.error);
 
@@ -200,7 +215,7 @@ export function LecturnConnectUserProfilePage() {
         <ClerkUserProfileRefreshButton
           disabled={deregisteringEnvironmentId !== null}
           isPending={environmentsState.isPending}
-          onClick={environmentsState.refresh}
+          onClick={refreshAll}
         />
       }
     >
@@ -216,6 +231,7 @@ export function LecturnConnectUserProfilePage() {
         <p className="mb-4 text-xs text-muted-foreground">
           Use the same Lecturn account in your browser.
         </p>
+        <LecturnConnectTunnelUsage />
         {environmentsState.error ? (
           <div className="mb-4 border-t border-destructive/35 py-3 text-xs" role="alert">
             <p className="font-medium text-destructive-foreground">

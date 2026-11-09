@@ -250,6 +250,8 @@ import {
 import {
   ProjectCreateNewInput,
   ProjectCreateNewResult,
+  ProjectCreateFromThreadInput,
+  ProjectCreateFromThreadResult,
   ProjectEnsureScratchResult,
   ProjectListEntriesError,
   ProjectListEntriesInput,
@@ -313,6 +315,9 @@ import {
   DeviceEasAccount,
   DeviceEasAccountError,
   DeviceEasAccountInput,
+  DeviceSimlockIdentity,
+  DeviceSimlockIdentityError,
+  DeviceSimlockIdentityInput,
   DeviceHostSummary,
   DeviceOpenInput,
   DeviceServiceState,
@@ -501,6 +506,12 @@ import {
   SourceControlRepositoryError,
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
+  SourceControlAppAccess,
+  SourceControlAppAccessInput,
+  SourceControlSignInError,
+  SourceControlSignInInput,
+  SourceControlSignInPrompt,
+  SourceControlSignInResult,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
@@ -517,6 +528,7 @@ export const WS_METHODS = {
   projectsMutate: "projects.mutate",
   projectsEnsureScratch: "projects.ensureScratch",
   projectsCreateNew: "projects.createNew",
+  projectsCreateFromThread: "projects.createFromThread",
 
   shellOpenInEditor: "shell.openInEditor",
 
@@ -589,6 +601,7 @@ export const WS_METHODS = {
   deviceList: "device.list",
   deviceTestHost: "device.testHost",
   deviceEasAccount: "device.easAccount",
+  deviceSimlockIdentity: "device.simlockIdentity",
   deviceOpen: "device.open",
   deviceClose: "device.close",
   deviceShutdown: "device.shutdown",
@@ -777,6 +790,10 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+  sourceControlSignInStart: "sourceControl.signInStart",
+  sourceControlSignInWait: "sourceControl.signInWait",
+  sourceControlSignInCancel: "sourceControl.signInCancel",
+  sourceControlAppAccess: "sourceControl.appAccess",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1912,6 +1929,33 @@ const WsSourceControlCloneRepositoryRpc = Rpc.make(WS_METHODS.sourceControlClone
   error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
 });
 
+// Starts a device-flow sign-in the server finishes on its own, so a client can leave meanwhile.
+const WsSourceControlSignInStartRpc = Rpc.make(WS_METHODS.sourceControlSignInStart, {
+  payload: SourceControlSignInInput,
+  success: SourceControlSignInPrompt,
+  error: Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),
+});
+
+// Resolves when the sign-in `signInStart` began ends, however long the user takes.
+const WsSourceControlSignInWaitRpc = Rpc.make(WS_METHODS.sourceControlSignInWait, {
+  payload: SourceControlSignInInput,
+  success: SourceControlSignInResult,
+  error: Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),
+});
+
+// Ends the sign-in `signInStart` began, so approving the code afterwards signs nothing in.
+const WsSourceControlSignInCancelRpc = Rpc.make(WS_METHODS.sourceControlSignInCancel, {
+  payload: SourceControlSignInInput,
+  success: Schema.Void,
+  error: Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),
+});
+
+const WsSourceControlAppAccessRpc = Rpc.make(WS_METHODS.sourceControlAppAccess, {
+  payload: SourceControlAppAccessInput,
+  success: SourceControlAppAccess,
+  error: EnvironmentAuthorizationError,
+});
+
 // Returns when the project exists and cloning starts; progress uses the subscription.
 const WsProjectCloneStartRpc = Rpc.make(WS_METHODS.projectCloneStart, {
   payload: ProjectCloneStartInput,
@@ -1999,6 +2043,12 @@ const WsProjectsEnsureScratchRpc = Rpc.make(WS_METHODS.projectsEnsureScratch, {
 const WsProjectsCreateNewRpc = Rpc.make(WS_METHODS.projectsCreateNew, {
   payload: ProjectCreateNewInput,
   success: ProjectCreateNewResult,
+  error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectsCreateFromThreadRpc = Rpc.make(WS_METHODS.projectsCreateFromThread, {
+  payload: ProjectCreateFromThreadInput,
+  success: ProjectCreateFromThreadResult,
   error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
 });
 
@@ -2310,6 +2360,12 @@ const WsDeviceEasAccountRpc = Rpc.make(WS_METHODS.deviceEasAccount, {
   payload: DeviceEasAccountInput,
   success: DeviceEasAccount,
   error: Schema.Union([DeviceEasAccountError, EnvironmentAuthorizationError]),
+});
+
+const WsDeviceSimlockIdentityRpc = Rpc.make(WS_METHODS.deviceSimlockIdentity, {
+  payload: DeviceSimlockIdentityInput,
+  success: DeviceSimlockIdentity,
+  error: Schema.Union([DeviceSimlockIdentityError, EnvironmentAuthorizationError]),
 });
 
 const WsDeviceListRpc = Rpc.make(WS_METHODS.deviceList, {
@@ -2814,6 +2870,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
+  WsSourceControlSignInStartRpc,
+  WsSourceControlSignInWaitRpc,
+  WsSourceControlSignInCancelRpc,
+  WsSourceControlAppAccessRpc,
   WsProjectCloneStartRpc,
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,
@@ -2825,6 +2885,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsEnsureScratchRpc,
   WsProjectsCreateNewRpc,
+  WsProjectsCreateFromThreadRpc,
   WsProjectsWriteFileRpc,
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
@@ -2881,6 +2942,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceListRpc,
   WsDeviceTestHostRpc,
   WsDeviceEasAccountRpc,
+  WsDeviceSimlockIdentityRpc,
   WsDeviceOpenRpc,
   WsDeviceCloseRpc,
   WsDeviceShutdownRpc,

@@ -220,6 +220,7 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
     consultProjectFile: true,
   }),
 }));
+vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: () => null }));
 vi.mock("../lib/lecturnProjectFileDefaults", () => ({
   readLecturnProjectFile: () => testState.projectFileRead,
 }));

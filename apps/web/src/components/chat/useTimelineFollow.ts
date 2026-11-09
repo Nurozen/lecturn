@@ -18,7 +18,6 @@ import {
   observeTimelineRun,
   type TimelineRunObservation,
 } from "./timelineScrollAnchoring";
-import { type ChatComposerHandle } from "./ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./pageScrollController";
 import {
   FOLLOWING,
@@ -66,7 +65,6 @@ function createVisitScrollState(
 ) {
   return {
     visit,
-    intent: null as "toward-end" | "away-from-end" | null,
     // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
     // thread switches. LegendList fires scroll events with isAtEnd=false while
     // initialScrollAtEnd is settling; hiding is always immediate.
@@ -150,7 +148,6 @@ function sameRunObservation(
 
 interface TimelineFollowInput {
   readonly legendListRef: RefObject<LegendListRef | null>;
-  readonly composerRef: RefObject<ChatComposerHandle | null>;
   readonly composerTimelineInset: number;
   readonly routeThreadKey: string;
   readonly activeThreadKey: string | null;
@@ -173,7 +170,6 @@ interface TimelineFollowInput {
 export function useTimelineFollow(input: TimelineFollowInput) {
   const {
     legendListRef,
-    composerRef,
     composerTimelineInset,
     routeThreadKey,
     activeThreadKey,
@@ -225,7 +221,6 @@ export function useTimelineFollow(input: TimelineFollowInput) {
       (current.mode === "following" || current.atEnd)
     );
   };
-  const isTimelineAtLogicalEndStable = useStableCallback(isTimelineAtLogicalEnd);
   const visitScrollRef = useRef<VisitScrollState | null>(null);
   /** Only from handlers: the bookkeeping of the visit they run in. */
   const visitScroll = () => {
@@ -312,8 +307,6 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     null,
   );
   const handlePageScrollStart = useStableCallback((key: PageScrollKey) => {
-    visitScroll().intent = key === "PageUp" ? "away-from-end" : "toward-end";
-    composerRef.current?.collapseForTimelineScrollKey(key);
     if ((key === "PageUp" && timelineRealContentOverflowsViewport()) || !isTimelineAtLogicalEnd()) {
       // Through the viewport, so a running position restore stops too.
       viewportRef.current?.navigate({ releasesFollow: true });
@@ -375,31 +368,12 @@ export function useTimelineFollow(input: TimelineFollowInput) {
   });
 
   const handleNavigation = (navigation: TimelineNavigation) => {
-    const composer = composerRef.current;
     const awayFromEnd = () => resolveTimelineIsAtEnd(legendListRef.current?.getState()) === false;
     const releases = navigationReleasesFollow(navigation, {
       contentScrollsUp: timelineRealContentOverflowsViewport,
       awayFromEnd,
     });
-    if (navigation.source === "wheel") {
-      visitScroll().intent = navigation.direction === "down" ? "toward-end" : "away-from-end";
-      const current = readFollow();
-      if (navigation.direction === "down" && (current.mode === "following" || current.atEnd)) {
-        composer?.restoreAfterTimelineReachedEnd();
-      }
-    }
-    if (navigation.source === "key") {
-      visitScroll().intent = navigation.direction === "down" ? "toward-end" : "away-from-end";
-    }
     if (releases) releaseFollowForNavigation();
-    if (navigation.source === "key" && navigation.key !== " ") {
-      if (navigation.direction === "up") {
-        if (releases) composer?.collapseForTimelineScrollKey(navigation.key);
-      } else {
-        composer?.collapseForTimelineScrollKey(navigation.key);
-        if (isTimelineAtLogicalEnd()) composer?.restoreAfterTimelineReachedEnd();
-      }
-    }
   };
   const handleNavigationStable = useStableCallback(handleNavigation);
   /**
@@ -515,10 +489,6 @@ export function useTimelineFollow(input: TimelineFollowInput) {
   };
   const onTimelineAnchorSizeChangedStable = useStableCallback(onTimelineAnchorSizeChanged);
 
-  const onToolOutputCollapsedAtEnd = () => {
-    composerRef.current?.restoreAfterTimelineReachedEnd();
-  };
-  const onToolOutputCollapsedAtEndStable = useStableCallback(onToolOutputCollapsedAtEnd);
   // The list ignores footer layout, so a new queued turn or status line there would land
   // under the composer. Follow it when the reader was following the end.
   const onTimelineFooterGrow = () => {
@@ -538,9 +508,6 @@ export function useTimelineFollow(input: TimelineFollowInput) {
     });
     if (after === before) return;
     if (after.mode === "following") {
-      if (scroll.intent === "toward-end") {
-        composerRef.current?.restoreAfterTimelineReachedEnd();
-      }
       setTimelineAnchor(releaseChatTimelineAnchor);
       scroll.showScrollDebouncer.cancel();
       setShowScrollToBottom(false);
@@ -595,14 +562,12 @@ export function useTimelineFollow(input: TimelineFollowInput) {
   return {
     showScrollToBottom,
     timelineLiveFollowEnabled,
-    isTimelineAtLogicalEndStable,
     onComposerPageScrollKeyDownStable,
     onComposerPageScrollKeyUpStable,
     onComposerPageScrollReleaseStable,
     scrollToEnd,
     onTimelineAnchorReadyStable,
     onTimelineAnchorSizeChangedStable,
-    onToolOutputCollapsedAtEndStable,
     onTimelineFooterGrowStable,
     onIsAtEndChangeStable,
     anchorNewTurn,

@@ -75,6 +75,18 @@ export const phoneManagedRelayLayer = Layer.effect(
         const relay = yield* client;
         return yield* relay.getAgentActivitySnapshot(input);
       }),
+      getT3ChatLink: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.getT3ChatLink(input);
+      }),
+      createT3ChatLinkRequest: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.createT3ChatLinkRequest(input);
+      }),
+      unlinkT3Chat: Effect.fnUntraced(function* (input) {
+        const relay = yield* client;
+        return yield* relay.unlinkT3Chat(input);
+      }),
       resetTokenCache: Effect.fnUntraced(function* (accountId) {
         const relay = yield* client;
         return yield* relay.resetTokenCache(accountId);

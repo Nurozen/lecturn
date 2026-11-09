@@ -84,7 +84,6 @@ describe("shouldShowComposerContextStrip", () => {
         isGitRepo: false,
         isStaveProject: true,
         showEnvironmentIndicator: false,
-        hostsRestingComposerControls: false,
       }),
     ).toBe(true);
   });

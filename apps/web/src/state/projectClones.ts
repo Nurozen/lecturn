@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { parseScopedProjectKey, scopedProjectKey } from "@lecturn/client-runtime/environment";
 import type { EnvironmentId, ProjectCloneSnapshot, ScopedProjectRef } from "@lecturn/contracts";
-import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { isEmbedLocation } from "../embed/embedAuth";
@@ -20,7 +19,7 @@ export const environmentProjectClonesAtom = Atom.family((environmentId: Environm
       return EMPTY_CLONES;
     }
     const result = get(sourceControlEnvironment.projectClones({ environmentId, input: {} }));
-    return Option.getOrElse(AsyncResult.value(result), () => EMPTY_CLONES);
+    return AsyncResult.getOrElse(result, () => EMPTY_CLONES);
   }).pipe(Atom.withLabel(`web-project-clones:${environmentId}`)),
 );
 

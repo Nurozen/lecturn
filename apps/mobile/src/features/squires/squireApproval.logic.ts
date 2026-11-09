@@ -25,7 +25,7 @@ import type {
 import {
   buildPendingUserInputAnswers,
   type PendingUserInputDraftAnswer,
-} from "../../lib/threadActivity";
+} from "@lecturn/client-runtime/state/pending-user-input";
 
 // Shared with web; re-exported so the chat's callers keep one import.
 export {

@@ -81,6 +81,7 @@ import {
   parsePermissionRequest,
   parseSessionUpdateEvent,
   toolCallVisibleOutputChanged,
+  withTrackedPermissionToolCall,
   type AcpPlanUpdate,
   type AcpAgentTerminalState,
   type AcpSessionModeState,
@@ -235,6 +236,7 @@ export interface AcpAdapterV2Flavor {
     readonly promptCapabilities: EffectAcpSchema.AgentCapabilities["promptCapabilities"];
   }) => Effect.Effect<ReadonlyArray<EffectAcpSchema.ContentBlock>, EffectAcpErrors.AcpError>;
   readonly promptFailure?: (cause: unknown) => OrchestrationV2ProviderFailure;
+  readonly requiresSignIn?: (cause: unknown) => boolean;
   /**
    * Runs before attachment paths, Lecturn instructions and native slash-command detection,
    * so a rewrite can turn the user's text into a native command.
@@ -308,7 +310,7 @@ export interface AcpAdapterV2Flavor {
       request: EffectAcpSchema.ReadTextFileRequest,
       cwd: string | null,
     ) => Effect.Effect<EffectAcpSchema.ReadTextFileResponse, EffectAcpErrors.AcpError>;
-    readonly writeTextFile: (
+    readonly writeTextFile?: (
       request: EffectAcpSchema.WriteTextFileRequest,
       cwd: string | null,
     ) => Effect.Effect<EffectAcpSchema.WriteTextFileResponse, EffectAcpErrors.AcpError>;
@@ -900,7 +902,24 @@ export function acpToolCallDiffPatch(content: unknown): string | undefined {
   });
   for (const diff of diffs) {
     const patch = unknownRecord(diff.patch);
-    if (typeof patch?.text === "string") return patch.text;
+    if (typeof patch?.text === "string") {
+      const change =
+        Array.isArray(diff.changes) && diff.changes.length === 1
+          ? unknownRecord(diff.changes[0])
+          : undefined;
+      if (
+        patch.format === "git_patch" &&
+        patch.text.trimStart().startsWith("@@ ") &&
+        typeof change?.path === "string"
+      ) {
+        const oldPath = typeof change.oldPath === "string" ? change.oldPath : change.path;
+        const before = change.operation === "add" ? "/dev/null" : JSON.stringify(`a/${oldPath}`);
+        const after =
+          change.operation === "delete" ? "/dev/null" : JSON.stringify(`b/${change.path}`);
+        return `diff --git ${JSON.stringify(`a/${oldPath}`)} ${JSON.stringify(`b/${change.path}`)}\n--- ${before}\n+++ ${after}\n${patch.text.trimStart()}`;
+      }
+      return patch.text;
+    }
   }
   const v1Patches = diffs.flatMap((diff) => {
     if (typeof diff.path !== "string" || typeof diff.newText !== "string") return [];
@@ -2089,7 +2108,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             clientCapabilities: {
               fs: {
                 readTextFile: clientFileSystem !== undefined,
-                writeTextFile: clientFileSystem !== undefined,
+                writeTextFile: clientFileSystem?.writeTextFile !== undefined,
               },
               terminal: clientTerminals !== undefined,
               elicitation: { form: {}, ...(flavor.onUrlElicitation ? { url: {} } : {}) },
@@ -6086,11 +6105,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 Effect.flatMap(({ policy }) => clientFileSystem.readTextFile(request, policy.cwd)),
               ),
             );
-            yield* targetRuntime.handleWriteTextFile((request) =>
-              clientPolicyContext.pipe(
-                Effect.flatMap(({ policy }) => clientFileSystem.writeTextFile(request, policy.cwd)),
-              ),
-            );
+            const writeTextFile = clientFileSystem.writeTextFile;
+            if (writeTextFile !== undefined) {
+              yield* targetRuntime.handleWriteTextFile((request) =>
+                clientPolicyContext.pipe(
+                  Effect.flatMap(({ policy }) => writeTextFile(request, policy.cwd)),
+                ),
+              );
+            }
           }
           if (handlerOptions.mcp !== false) {
             yield* wireAcpRuntimeMcpHandlers(targetRuntime, runtimeMcpBridge);
@@ -6103,8 +6125,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               projectAcpRuntimeSessionUpdate(handlerGeneration, rawNotification),
             );
           }
-          yield* targetRuntime.handleRequestPermission((params, requestContext) =>
+          yield* targetRuntime.handleRequestPermission((nativeParams, requestContext) =>
             Effect.gen(function* () {
+              const trackedTurn = yield* Ref.get(activeTurn);
+              const params =
+                trackedTurn !== null && nativeParams.sessionId === (yield* Ref.get(activeSessionId))
+                  ? withTrackedPermissionToolCall(
+                      nativeParams,
+                      trackedTurn.tools.get(nativeParams.toolCall.toolCallId),
+                    )
+                  : nativeParams;
               const transportRequestId = requestContext.requestId;
               const permissionQuestion =
                 squireIsolation === undefined
@@ -7344,16 +7374,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const appInstructions = acpAppInstructions({
             instructions: turnInput.appInstructions,
-            app: (yield* mcpSessions.read(turnInput.threadId))?.app,
+            app: mcpSession?.app,
             toolName: flavor.lecturnMcpToolName,
           });
           const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasLecturnMcp:
-              squireIsolation !== "probe" &&
-              (yield* readAdapterMcpContext(turnInput.threadId)).servers.length > 0,
+              squireIsolation !== "probe" && acpMcpContext(mcpSession, self).servers.length > 0,
+            hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
             ...(appInstructions === undefined ? {} : { appInstructions }),
             ...(turnInput.squireInstructions === undefined
               ? {}
@@ -8738,6 +8769,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               new ProviderAdapter.ProviderAdapterOpenSessionError({
                 driver,
                 providerSessionId: input.providerSessionId,
+                ...(flavor.requiresSignIn?.(cause) === true ? { requiresSignIn: true } : {}),
                 cause,
               }),
           ),

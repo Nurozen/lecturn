@@ -137,7 +137,8 @@
       // smoke-pack-install.ts runs by hand against a built vendoring kit,
       // verify-windows-desktop-artifact.ts checks a Windows payload built on another host,
       // electron-builder loads the macOS signer (sign-macos.ts) by path, mobile-e2e.ts runs
-      // agent-device's CLI by path. smoke-desktop-app.ts (the desktop launch check) runs by
+      // agent-device's CLI by path, mobile-behavior.ts spawns its runner by path.
+      // smoke-desktop-app.ts (the desktop launch check) runs by
       // hand until it has a fixture database from a Lecturn build.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
@@ -147,6 +148,7 @@
         "export-provider-emblems.ts",
         "generate-legal-notices.ts",
         "knip-schemas.ts",
+        "mobile-behavior/run.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
         "sign-macos.ts",

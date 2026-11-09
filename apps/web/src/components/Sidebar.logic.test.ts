@@ -33,7 +33,11 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
+  groupSidebarThreadsByProject,
+  resolveSidebarFolderDot,
+  sidebarFolderExpansionKeys,
 } from "./Sidebar.logic";
+import { resolveProjectExpanded } from "../uiStateStore";
 import { threadSearchMatchKey } from "@lecturn/client-runtime/state/thread-search";
 import {
   EnvironmentId,
@@ -1381,5 +1385,102 @@ describe("resolveSidebarRouteReveal", () => {
         findThread,
       }),
     ).toEqual({ pendingKey: hiddenKey, widensScope: false });
+  });
+});
+
+describe("sidebarFolderExpansionKeys", () => {
+  it("honors a collapse the legacy sidebar saved under a member's cwd", () => {
+    const keys = sidebarFolderExpansionKeys({
+      projectKey: "github.com/nurozen/lecturn",
+      memberProjects: [
+        { physicalProjectKey: "local:/code/lecturn", workspaceRoot: "/code/lecturn" },
+      ],
+    });
+    const cwdKey = keys.at(-1)!;
+
+    expect(resolveProjectExpanded({}, keys)).toBe(true);
+    expect(resolveProjectExpanded({ [cwdKey]: false }, keys)).toBe(false);
+    expect(resolveProjectExpanded({ [keys[0]!]: true, [cwdKey]: false }, keys)).toBe(true);
+  });
+});
+
+describe("groupSidebarThreadsByProject", () => {
+  it("puts each thread in its project's folder and drops empty projects unless kept", () => {
+    const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+    const lecturn = ProjectId.make("lecturn");
+    const lecturnRemote = ProjectId.make("lecturn-remote");
+    const fleet = ProjectId.make("fleet");
+    const thread = (id: string, environmentId: EnvironmentId, projectId: ProjectId) => ({
+      id,
+      environmentId,
+      projectId,
+    });
+    const groups = [
+      {
+        projectKey: "lecturn",
+        memberProjectRefs: [
+          { environmentId: localEnvironmentId, projectId: lecturn },
+          { environmentId: remoteEnvironmentId, projectId: lecturnRemote },
+        ],
+      },
+      {
+        projectKey: "fleet",
+        memberProjectRefs: [{ environmentId: localEnvironmentId, projectId: fleet }],
+      },
+    ];
+
+    const threads = [
+      thread("a", localEnvironmentId, lecturn),
+      thread("orphan", localEnvironmentId, ProjectId.make("deleted")),
+      thread("b", remoteEnvironmentId, lecturnRemote),
+    ];
+    const summarize = (keepEmpty: boolean) =>
+      groupSidebarThreadsByProject(groups, threads, keepEmpty).map((folder) => ({
+        projectKey: folder.group.projectKey,
+        threads: folder.threads.map((entry) => entry.id),
+      }));
+
+    expect(summarize(true)).toEqual([
+      { projectKey: "lecturn", threads: ["a", "b"] },
+      { projectKey: "fleet", threads: [] },
+    ]);
+    expect(summarize(false)).toEqual([{ projectKey: "lecturn", threads: ["a", "b"] }]);
+  });
+});
+
+describe("resolveSidebarFolderDot", () => {
+  it("flags the most urgent hidden thread and stays quiet otherwise", () => {
+    const idle = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestRun: makeLatestRun(),
+      lastVisitedAt: "2026-03-09T10:06:00.000Z",
+      runtime: null,
+    };
+    const runtime = {
+      status: "running" as const,
+      activeRunId: null,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-03-09T10:00:00.000Z",
+    };
+    const working = { ...idle, runtime };
+    const unread = { ...idle, lastVisitedAt: "2026-03-09T10:04:00.000Z" };
+    const limited = {
+      ...idle,
+      runtime: { ...runtime, status: "failed" as const, lastErrorClass: "usage_limit" as const },
+    };
+
+    expect(resolveSidebarFolderDot([idle])).toBeNull();
+    // A waiting thread stays quiet even with an unread completion, like its row.
+    expect(
+      resolveSidebarFolderDot([{ ...unread, runtime: { ...runtime, status: "idle" as const } }]),
+    ).toBeNull();
+    expect(resolveSidebarFolderDot([idle, working])).toBe("working");
+    expect(resolveSidebarFolderDot([working, unread])).toBe("unread");
+    expect(resolveSidebarFolderDot([unread, limited])).toBe("attention");
   });
 });

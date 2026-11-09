@@ -36,31 +36,39 @@ const variantColors: Record<ComposerBannerVariant, string> = {
 // Lecturn: Squire notices stand alone as floating cards rather than joining the composer.
 type ComposerBannerPlacement = "attached" | "floating";
 
+/**
+ * An attached surface tucks its bottom under the card below it. A detached (or floating) one is
+ * a whole card of its own, for a notice that sits apart from the composer.
+ */
 function Surface({
   placement = "attached",
   variant = "default",
+  detached = false,
   className,
   ...props
 }: ComponentProps<"div"> & {
   placement?: ComposerBannerPlacement;
   variant?: ComposerBannerVariant;
+  detached?: boolean;
 }) {
+  const standalone = detached || placement === "floating";
   return (
     <div
-      data-composer-banner-surface={placement}
+      data-composer-banner-surface={detached ? "detached" : placement}
       data-variant={variant}
       className={cn(
         surfaceColors,
         "relative isolate border-0 bg-transparent shadow-none [--chat-composer-attached-tint:transparent]",
         variantColors[variant],
-        // Bleed the mask 1px past the seam to cover Chromium's fractional-pixel backdrop loss.
-        placement === "attached"
-          ? "[--chat-composer-attachment-overlap:calc(1rem+1px)] before:rounded-t-2xl before:mask-t-from-transparent before:mask-t-from-4 before:mask-t-to-black before:mask-t-to-4"
-          : "[--chat-composer-attachment-overlap:0px] before:rounded-2xl",
+        standalone
+          ? "[--chat-composer-attachment-overlap:0px] before:rounded-2xl"
+          : // Bleed the mask 1px past the seam to cover Chromium's fractional-pixel backdrop loss.
+            "[--chat-composer-attachment-overlap:calc(1rem+1px)] before:rounded-t-2xl before:mask-t-from-transparent before:mask-t-from-4 before:mask-t-to-black before:mask-t-to-4",
         "before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:border before:border-(--chat-composer-attached-outline)",
         "before:bg-(--chat-composer-attached-surface)/(--glass-opacity) before:bg-linear-to-b before:from-(--chat-composer-attached-tint) before:to-(--chat-composer-attached-tint) before:backdrop-blur-(--glass-blur) before:backdrop-saturate-(--glass-saturation)",
         "before:shadow-composer dark:before:shadow-composer-dark",
-        "dark:supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-composer-seam-above",
+        !standalone &&
+          "dark:supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-composer-seam-above",
         "not-supports-[((backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px)))]:before:bg-(--chat-composer-attached-surface)",
         className,
       )}
@@ -114,12 +122,11 @@ function Root({
   density = "default",
   placement = "attached",
   variant = "default",
+  detached = false,
   width = "fill",
   ...props
-}: ComponentProps<"div"> & {
+}: ComponentProps<typeof Surface> & {
   density?: "default" | "comfortable" | "spacious";
-  placement?: ComposerBannerPlacement;
-  variant?: ComposerBannerVariant;
   width?: "fill" | "content";
 }) {
   return (
@@ -136,7 +143,7 @@ function Root({
           "[&>[data-composer-banner-row]:first-child>[data-slot=composer-banner-actions]>:last-child>[data-slot=button]:last-of-type]:rounded-se-xl",
           "[&>:first-child>[data-composer-banner-row]:first-child>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-se-xl",
         ],
-        placement === "floating" &&
+        (placement === "floating" || detached) &&
           density !== "spacious" && [
             "[&>[data-composer-banner-row]:only-child>[data-slot=composer-banner-actions]>[data-slot=button]:last-child]:rounded-ee-xl",
             "[&>[data-composer-banner-row]:only-child>[data-slot=composer-banner-actions]>:last-child>[data-slot=button]:last-of-type]:rounded-ee-xl",
@@ -145,6 +152,7 @@ function Root({
       )}
       data-slot="composer-banner"
       placement={placement}
+      detached={detached}
       data-composer-banner-width={width}
       variant={variant}
       {...props}

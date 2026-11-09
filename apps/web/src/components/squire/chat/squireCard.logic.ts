@@ -11,7 +11,7 @@ import { UnknownUnionMember } from "@lecturn/contracts";
 import {
   buildPendingUserInputAnswers,
   type PendingUserInputDraftAnswer,
-} from "../../../pendingUserInput";
+} from "@lecturn/client-runtime/state/pending-user-input";
 
 export function squireSteerKindLabel(kind: SquireSteerKind | null): string | null {
   if (kind === null || kind === "other") return null;

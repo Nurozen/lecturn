@@ -65,7 +65,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
   );
 
   const catalogValueAtom = Atom.make((get) =>
-    Option.getOrElse(AsyncResult.value(get(catalogAtom)), () => EMPTY_ENVIRONMENT_CATALOG_STATE),
+    AsyncResult.getOrElse(get(catalogAtom), () => EMPTY_ENVIRONMENT_CATALOG_STATE),
   ).pipe(Atom.withLabel("environment-catalog-value"));
 
   const pullRequestRoutingPermissionsAtom = runtime.atom(
@@ -75,7 +75,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
     { initialValue: [] as ReadonlyArray<StoredPullRequestRoutingPermission> },
   );
   const pullRequestRoutingPermissionsValueAtom = Atom.make((get) =>
-    Option.getOrElse(AsyncResult.value(get(pullRequestRoutingPermissionsAtom)), () => []),
+    AsyncResult.getOrElse(get(pullRequestRoutingPermissionsAtom), () => []),
   ).pipe(Atom.withLabel("environment-pull-request-routing-permissions"));
   const setPullRequestRoutingPermission = createRuntimeCommand(runtime, {
     label: "environment-catalog:pull-request-routing-permission",
@@ -106,7 +106,7 @@ export function createEnvironmentCatalogAtoms<R, E>(
   );
 
   const networkStatusValueAtom = Atom.make((get) =>
-    Option.getOrElse(AsyncResult.value(get(networkStatusAtom)), () => "unknown" as const),
+    AsyncResult.getOrElse(get(networkStatusAtom), () => "unknown" as const),
   ).pipe(Atom.withLabel("environment-network-status-value"));
 
   const unlistedRelayEnvironmentIdsAtom = runtime.atom(

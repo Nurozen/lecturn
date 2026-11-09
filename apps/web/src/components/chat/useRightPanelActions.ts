@@ -1,3 +1,4 @@
+import type { ToolCallDiffTarget } from "../../diffPanelStore";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
 import type { ThreadPreviewState } from "../../previewStateStore";
 import { formatFilePathForClipboard } from "@lecturn/client-runtime/media-actions";
@@ -302,6 +303,15 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   };
+  const onOpenToolDiffStable = useStableCallback((target: ToolCallDiffTarget) => {
+    if (!isServerThread || !activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectToolCall(activeThreadRef, target);
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  });
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
@@ -338,6 +348,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     createBrowserSurface,
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
+    onOpenToolDiffStable,
     onOpenTurnDiffStable,
     onToggleDiffStable,
     openChangesFromThreadPanelStable,

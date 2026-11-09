@@ -113,6 +113,7 @@ import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublish
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
 import * as ManagedEndpointReaper from "./environments/ManagedEndpointReaper.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
+import * as T3ChatAccounts from "./t3chat/T3ChatAccounts.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
 import * as HookForwarder from "./hooks/HookForwarder.ts";
 import * as HeldHooks from "./hooks/HeldHooks.ts";
@@ -391,6 +392,8 @@ export const layer = Api.make(
     )
       return yield* Effect.die("Clerk and Stripe environment mismatch");
 
+    // Lecturn has no T3 Chat counterpart, so the relay never configures the T3 Chat
+    // account link: T3ChatAccounts stays unavailable and tunnel caps keep their defaults.
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
@@ -797,7 +800,7 @@ export const layer = Api.make(
             ),
           ),
         ),
-        Layer.provideMerge(LiveActivities.layer),
+        Layer.provideMerge(Layer.mergeAll(LiveActivities.layer, T3ChatAccounts.layer)),
         Layer.provideMerge(DeliveryAttempts.layer),
         Layer.provideMerge(RelayTokens.layer),
         Layer.provideMerge(

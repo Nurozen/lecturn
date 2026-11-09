@@ -60,6 +60,7 @@ interface PackageJson {
   files: string[];
   dependencies: Record<string, string>;
   overrides: Record<string, string>;
+  lecturn?: { databaseMigration: number };
 }
 
 const PackageJsonPrettyJson = fromJsonStringPretty(Schema.Unknown);
@@ -333,6 +334,8 @@ export interface PublishManifestInput {
    * manifest declares only what dist/ still imports at runtime.
    */
   readonly runtimeExternalsOnly?: boolean | undefined;
+  /** Highest server migration; the update track switch reads it back from npm. */
+  readonly databaseMigration?: number | undefined;
 }
 
 export const buildPublishManifest = (input: PublishManifestInput): PackageJson => {
@@ -366,6 +369,9 @@ export const buildPublishManifest = (input: PublishManifestInput): PackageJson =
       ? selectCliRuntimeExternalDependencies(dependencies)
       : dependencies,
     overrides: resolveCatalogDependencies(workspaceOverrides, workspaceCatalog, "apps/server"),
+    ...(input.databaseMigration === undefined
+      ? {}
+      : { lecturn: { databaseMigration: input.databaseMigration } }),
   };
 };
 
@@ -542,6 +548,9 @@ const withPackageManifest = Effect.fn("cli.withPackageManifest")(function* <A, E
     Effect.gen(function* () {
       const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
       const workspaceConfig = yield* readWorkspaceConfig();
+      const { BUILD_MIGRATION_HEAD } = yield* Effect.promise(
+        () => import("../src/persistence/databaseMigrationHead.ts"),
+      );
       const pkg = buildPublishManifest({
         version,
         workspaceConfig,
@@ -549,6 +558,7 @@ const withPackageManifest = Effect.fn("cli.withPackageManifest")(function* <A, E
         binName: Option.getOrUndefined(config.binName),
         githubRepository: process.env.GITHUB_REPOSITORY,
         runtimeExternalsOnly: config.runtimeExternalsOnly,
+        databaseMigration: BUILD_MIGRATION_HEAD,
       });
 
       return {

@@ -1488,6 +1488,62 @@ from upstream's side.
   in `apps/mobile/deps/README.md`; the Triage hosted label is `lecturn.cloudgatherer.net`.
   `agentContextBudget.json` grows with upstream's link tools and prompt text.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream 7f39a860).**
+
+- **Legacy sidebar (#21039).** Upstream deletes `LegacySidebar.tsx`; the fork reaches it
+  (`useLegacySidebarEnabled`, the Labs row), so it stays with its setting,
+  `sidebarThreadPreviewCount` and the exports #21039 removed for it. The boring sidebar takes
+  #21039's project folders inside the fork `Sidebar`: folders per account segment (via
+  `ownsEnvironment`), off under saga nesting. New-thread commands check both
+  `boringSidebarEnabled` and `legacySidebarEnabled`.
+- **Composer (#25869, #26255).** Resting/scroll collapse and the model strip go in both
+  looks. The Lecturn look keeps controls left, attach beside send, chevrons
+  (`redesign:hidden`), hover boxes and the notched context drawer; the new design takes the
+  grouped row. Provider approvals answer on their timeline row; Lecturn Apps tool approvals
+  keep the composer card (`ComposerPendingApprovalPanel`, `onRespondToApproval`), and the embed
+  card answers every approval. Contextual is the last block outside
+  `composerControlsOwnership`; `ComposerBanner` keeps `placement="floating"` for Squire.
+- **T3 Chat (#25931, #26186, #26320, #26369).** T3 Chat is a separate upstream product, never
+  "Lecturn Chat": identifiers, relay paths and copy keep upstream's `T3Chat*`/`T3CHAT_*` names
+  (`infra/relay/src/t3chat/T3ChatAccounts.ts`). The relay never configures the link (no
+  secret in `deploy-relay.yml`), so `available` is false and caps stay at
+  `DEFAULT_MANAGED_TUNNEL_LIMIT`. The web UI has no T3 Chat tab or upsell (`TunnelLimitAlert`
+  takes only `onManageTunnels`), and the tunnel-limit error names no plan.
+- **GitHub app sign-in (#26245).** Inert unless `LECTURN_GITHUB_APP_CLIENT_ID` is set, and
+  nothing sets it. `github.com/apps/lecturn-for-github` does not exist; every install link
+  (web and mobile settings, access notice, clone toast) shows only when the server reports
+  `appSignIn` or a `not-covered` access check, which needs that variable. Register the app
+  under that slug before setting it.
+- **Simlock (#25259).** Labs alpha, off by default; it reaches only hosts listed in
+  `simlockDeviceHosts`.
+- **Device instructions (#25661).** Shared as `LECTURN_DEVICE_TOOL_INSTRUCTIONS[_WITH_TOOL_SEARCH]`
+  with `mcp__lecturn__device_*`; a Squire home skill replaces the orchestration, browser and
+  device sections in every adapter. `DeviceService.agentCli` stays (R5) for
+  `AgentDeviceEnvironment`.
+- **Server.** Upstream migration 73 (`ActiveTurnItemIndexes`) runs as fork 92 with an
+  index-exists compatibility wrapper. The out-of-usage text generation fallback (#26164)
+  wraps commit, PR, branch, review-guide and title only, never Decisions, Contextual, Squire
+  or workflow summaries. `lecturn_thread_list` `allProjects` (#26442) is refused for
+  connected-app credentials.
+- **Relay.** Upstream's `20261028062605_backfill_withdrawn_tunnel_allocations` runs as
+  `20261109000000_backfill_withdrawn_tunnel_allocations`, its snapshot a copy of the fork head
+  snapshot with prevIds rechained (SQL byte-identical, data only). Check with
+  `drizzle-kit generate --out <copy of migrations/postgres>`: it must report no changes.
+- **Release (#26288, #26893).** `apps/server/scripts/cli.ts` publish writes the update track
+  switch's npm field `lecturn.databaseMigration` (`BUILD_MIGRATION_HEAD`); upstream's
+  `scripts/build-npm-launcher.ts` stays deleted. `scripts/generate-release-notes.ts` is not
+  wired (needs `OPENAI_API_KEY`); release notes stay GitHub-generated. Linux CLI archives
+  bundle libatomic (#26912), so `build_linux_cli` installs patchelf.
+- **HTML renders (#23745).** The base CSS adds an 8px html gutter, so a page frame is 16px
+  taller than its content; the fork locked-page test expects that.
+- **Mobile.** `PendingUserInputQuestionList` is shared by thread and Squire question cards, so
+  new `QuestionText` props go through the list and `SquireQuestionAnswer`. The acknowledged
+  message atom lives in the leaf module `state/acknowledged-thread-messages-atom.ts` (import
+  cycle). `GitBranchesSheet` compares worktrees with `selectedThreadGitCwd` (Stave/repoKey).
+- **Marketing (#26960, #26875).** The redesign (Inter, black, blue accent, hero image, font
+  deletions) is not taken; the fork keeps DM Sans/JetBrains Mono and its palette and takes
+  only the responsive fixes.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

@@ -44,8 +44,9 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const { selectedThreadGitCwd, selectedThreadWorktreePath, selectedThreadGitRepository } =
-    useSelectedThreadWorktree(props.route.params.repoKey);
+  const { selectedThreadGitCwd, selectedThreadGitRepository } = useSelectedThreadWorktree(
+    props.route.params.repoKey,
+  );
   const gitState = useSelectedThreadGitState(props.route.params.repoKey);
   const gitActions = useSelectedThreadGitActions(props.route.params.repoKey);
   const { canChangeThreadBranch } = gitActions;
@@ -63,7 +64,8 @@ export function GitBranchesSheet(props: GitBranchesSheetProps) {
   );
 
   const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
-  const currentWorktreePath = selectedThreadWorktreePath;
+  // A Stave space's checkout is its selected repository, not the space root.
+  const currentWorktreePath = selectedThreadGitCwd;
   const availableBranches = gitState.selectedThreadBranches;
   const branchesLoading = gitState.selectedThreadBranchesLoading;
   const busy =

@@ -64,6 +64,7 @@ describe("connected-app migrations on a divergent ledger", () => {
           [89, "PeerLinkFence"],
           [90, "WaitingLinkRequestIndex"],
           [91, "SquireChatFirst"],
+          [92, "ActiveTurnItemIndexes"],
           [79, "AppRegistrations"],
           [80, "ProjectionProjectsAppBinding"],
         ]);
@@ -82,6 +83,7 @@ describe("connected-app migrations on a divergent ledger", () => {
           { migration_id: 89, name: "PeerLinkFence" },
           { migration_id: 90, name: "WaitingLinkRequestIndex" },
           { migration_id: 91, name: "SquireChatFirst" },
+          { migration_id: 92, name: "ActiveTurnItemIndexes" },
         ]);
         // Every later start repairs again; the SQL is idempotent, so that is a no-op.
         yield* runMigrations();
@@ -131,6 +133,7 @@ describe("connected-app migrations on a divergent ledger", () => {
         [89, "PeerLinkFence"],
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
+        [92, "ActiveTurnItemIndexes"],
         [79, "AppRegistrations"],
       ]);
       yield* assertAppSchema;

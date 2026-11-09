@@ -138,10 +138,12 @@ export const layer = HttpApiBuilder.group(
         anchorThreadId?: Parameters<
           typeof threadManagement.getThreadSnapshotWindow
         >[1]["anchorThreadId"],
+        deferWork = false,
       ) {
         return yield* threadManagement
           .getThreadSnapshotWindow(threadId, {
             rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
+            deferWork,
             userTurnLimit:
               anchorItemId === undefined
                 ? THREAD_HISTORY_PAGE_POLICY.maxUserTurns
@@ -233,9 +235,12 @@ export const layer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.threadBoundedSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          const snapshot = yield* loadThreadSnapshotWindow(args.params.threadId).pipe(
-            traceLocalHandlerWork,
-          );
+          const snapshot = yield* loadThreadSnapshotWindow(
+            args.params.threadId,
+            undefined,
+            undefined,
+            args.query.deferWork === "1",
+          ).pipe(traceLocalHandlerWork);
           const bounded = buildBoundedThreadProjection({
             projection: AppStreamFilter.filterThreadProjectionForSubject(principal.subject)(
               snapshot.projection,
@@ -273,6 +278,11 @@ export const layer = HttpApiBuilder.group(
               args.query.cursor,
               args.query.throughEntryId,
               args.query.view === "conversation",
+              args.query.view === "work"
+                ? "work"
+                : args.query.deferWork === "1"
+                  ? "deferred"
+                  : undefined,
             )
             .pipe(
               Effect.map((page) =>

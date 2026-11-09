@@ -36,7 +36,7 @@ function threadState(
   partial: Pick<EnvironmentThreadState, "data" | "status" | "error"> &
     Partial<Pick<EnvironmentThreadState, "history">>,
 ): EnvironmentThreadState {
-  return { ...partial, history: partial.history ?? EMPTY_THREAD_HISTORY_META };
+  return { ...partial, history: partial.history ?? EMPTY_THREAD_HISTORY_META, sequence: 0 };
 }
 
 it("draws an app approval below the call it holds and keeps the rows stable meanwhile", () => {

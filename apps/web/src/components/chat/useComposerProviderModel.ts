@@ -12,10 +12,8 @@ import {
 } from "@lecturn/contracts";
 import {
   NO_PROVIDER_MODEL_SELECTION,
+  providerInstanceEntriesFor,
   type ProviderInstanceEntry,
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { type UnifiedSettings } from "@lecturn/contracts/settings";
 import { getComposerPromptInjectionState, getComposerProviderState } from "./composerProviderState";
@@ -53,12 +51,10 @@ export function useComposerProviderModel(
     requireExactInstance,
   } = input;
   const draftModelState = useComposerDraftModelState(threadRef);
-  const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(providerStatuses),
-      settings,
-      activeProjectId,
-    ),
+  const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = providerInstanceEntriesFor(
+    providerStatuses,
+    settings,
+    activeProjectId,
   );
   const selection = resolveComposerProviderSelection({
     entries: providerInstanceEntries,

@@ -6,11 +6,7 @@ import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { appsEnvironment, useAppEmbedContext } from "../../state/apps";
 import { useProject } from "../../state/entities";
 import { useEnvironmentProviders } from "../../state/environments";
@@ -60,9 +56,7 @@ export function EmbedProvidersPanel({
   const rows = deriveEmbedProviderRows(providers);
   const defaults = resolveEmbedDefaultModel({ settings, projectId, project, providers });
   const selection = defaults.selection;
-  const entries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, projectId),
-  );
+  const entries = providerInstanceEntriesFor(providers, settings, projectId);
   const modelOptions = getCustomModelOptionsByInstance(
     settings,
     providers,

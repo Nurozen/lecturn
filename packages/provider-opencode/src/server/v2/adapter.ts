@@ -3162,7 +3162,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
-        lecturnOrchestrationSystemPrompt(mcpAvailable, turnInput.squireInstructions),
+        lecturnOrchestrationSystemPrompt(
+          mcpAvailable,
+          mcpSession?.capabilities?.has("device") === true,
+          turnInput.squireInstructions,
+        ),
         connectedAppInstructionsSection(turnInput.appInstructions),
       ]
         .filter((part) => part !== undefined && part.length > 0)

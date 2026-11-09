@@ -134,7 +134,8 @@ export function ComposerSelectControl({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon>
+      {/* The new design drops select chevrons; the Lecturn look keeps them. */}
+      <SelectPrimitive.Icon className="redesign:hidden">
         <ComposerControlChevron size={size} />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>

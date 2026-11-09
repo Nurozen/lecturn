@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
+  ProjectId,
   SourceControlProviderKind,
   type PullRequestListEntry,
   type PullRequestListResult,
@@ -26,6 +27,7 @@ import {
   withListedPullRequests,
   withShownPullRequestStats,
   withoutScratchProjectScope,
+  pullRequestProjectChoices,
 } from "./pullRequestList";
 
 function entry(number: number, patch: Partial<PullRequestListEntry> = {}): PullRequestListEntry {
@@ -399,6 +401,53 @@ describe("pullRequestFilterChoices", () => {
     });
     expect(rows).toHaveLength(100);
     expect(rows[50]).toBe("label-from-host");
+  });
+});
+
+describe("pullRequestProjectChoices", () => {
+  const laptop = EnvironmentId.make("env-laptop");
+  const desktop = EnvironmentId.make("env-desktop");
+  const project = (id: string, environmentId: EnvironmentId) => ({
+    id: ProjectId.make(id),
+    environmentId,
+    title: "lecturn",
+    workspaceRoot: `/work/${id}`,
+    repositoryIdentity: { canonicalKey: "github.com/Nurozen/lecturn" },
+  });
+  const projects = [project("main", laptop), project("worktree", laptop), project("main", desktop)];
+  const choices = (
+    servesPullRequests: (environmentId: EnvironmentId) => boolean,
+    scope: { projectId?: string; projectEnvironmentId?: string } = {},
+  ) =>
+    pullRequestProjectChoices(projects, {
+      environmentId: null,
+      controls: { ...DEFAULT_PR_LIST_CONTROLS, ...scope },
+      environmentLabels: new Map([
+        [laptop, "laptop"],
+        [desktop, "desktop"],
+      ]),
+      servesPullRequests,
+    }).map(({ id, environmentId, title }) => ({ id, environmentId, title }));
+
+  it("lists each repository once per environment that serves pull requests", () => {
+    expect(choices(() => true)).toEqual([
+      { id: "main", environmentId: desktop, title: "lecturn · desktop" },
+      { id: "main", environmentId: laptop, title: "lecturn · laptop" },
+    ]);
+    expect(choices((environmentId) => environmentId === desktop)).toEqual([
+      { id: "main", environmentId: desktop, title: "lecturn" },
+    ]);
+  });
+
+  it("keeps the saved scope when its environment stops serving or has not loaded", () => {
+    const scope = { projectId: "worktree", projectEnvironmentId: laptop };
+    expect(choices((environmentId) => environmentId === desktop, scope)).toEqual([
+      { id: "main", environmentId: desktop, title: "lecturn · desktop" },
+      { id: "worktree", environmentId: laptop, title: "lecturn · laptop" },
+    ]);
+    expect(choices(() => false, scope)).toEqual([
+      { id: "worktree", environmentId: laptop, title: "lecturn" },
+    ]);
   });
 });
 

@@ -8,6 +8,7 @@ import { allowsChatViewControl, type ChatViewControls } from "./chatViewControls
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl, ComposerControlSeparator } from "./ComposerControl";
 import {
+  ComposerPermissionsSection,
   ComposerFooterModeControls,
   ComposerModelPicker,
   type RuntimeModeOption,
@@ -21,17 +22,25 @@ import {
   type RuntimeMode,
   type ServerProvider,
 } from "@lecturn/contracts";
+import type { EffortDisplay } from "@lecturn/contracts/settings";
 import { cn } from "~/lib/utils";
+import { shortcutLabelForCommand } from "../../keybindings";
 import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
+import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
 /**
  * The composer footer controls: model picker, traits, mode controls and the overflow menu for
- * blocks that do not fit. Rendered in the expanded footer or the resting controls host.
+ * blocks that do not fit. Rendered in the footer or the collapsed mobile controls row.
  */
+// Model and effort sit a word space apart, so hover and open states brighten text, not a box.
+// The Lecturn look keeps its hover box.
+const TEXT_CONTROL_STATES =
+  "redesign:hover:bg-transparent redesign:data-pressed:bg-transparent redesign:data-popup-open:bg-transparent data-pressed:text-foreground data-popup-open:text-foreground";
+
 export function ComposerControlsBar(props: {
   environmentId: EnvironmentId;
   routeKind: ChatComposerProps["routeKind"];
@@ -47,8 +56,12 @@ export function ComposerControlsBar(props: {
   onPromptEdit: (edit: (prompt: string) => string) => void;
   planModeEnabled: boolean;
   planModeUiEnabled: boolean;
+  effortDisplay: EffortDisplay;
+  /** The strip under a new thread names the permissions, so the row does not repeat them. */
+  permissionsShownInStrip: boolean;
   interactionMode: ProviderInteractionMode;
   compatibleRuntimeMode: RuntimeMode;
+  defaultRuntimeMode: RuntimeMode | undefined;
   compatibleRuntimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
@@ -56,8 +69,6 @@ export function ComposerControlsBar(props: {
   composerControlsHidden: boolean;
   restingHiddenBlockCount: number;
   iconOnlyBlockCount: number;
-  showInlineRestingControls: boolean;
-  showLeadingSeparator: boolean;
   showProviderUnavailable: boolean;
   providerSetupInstanceId: ProviderInstanceId | undefined;
   onOpenProviderSetup: ChatComposerProps["onOpenProviderSetup"];
@@ -105,15 +116,14 @@ export function ComposerControlsBar(props: {
     planModeUiEnabled,
     interactionMode,
     compatibleRuntimeMode,
+    defaultRuntimeMode,
     compatibleRuntimeModeOptions,
     toggleInteractionMode,
     handleRuntimeModeChange,
     composerControlsCollapsed,
     composerControlsHidden,
-    restingHiddenBlockCount,
+    restingHiddenBlockCount: measuredHiddenBlockCount,
     iconOnlyBlockCount,
-    showInlineRestingControls,
-    showLeadingSeparator,
     showProviderUnavailable,
     providerSetupInstanceId,
     onOpenProviderSetup,
@@ -143,6 +153,12 @@ export function ComposerControlsBar(props: {
     embedFooterStacked,
   } = props;
   const modelPickerAllowed = allowsChatViewControl(controls, "model-picker");
+  const runtimeModeAllowed = allowsChatViewControl(controls, "runtime-mode");
+  const interactionModeAllowed =
+    planModeUiEnabled && allowsChatViewControl(controls, "interaction-mode");
+  const contextualBlockShown = contextualBlock && !embedFooterStacked;
+  // The measured count includes Contextual, the last block, before traits and mode.
+  const contextualHidden = contextualBlockShown && measuredHiddenBlockCount > 0;
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -156,6 +172,8 @@ export function ComposerControlsBar(props: {
     onPromptEdit,
     planModeEnabled,
   });
+  const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
+  const permissionsChipHidden = accessMatchesDefault || props.permissionsShownInStrip;
   const providerTraitsPickerInput = {
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -169,12 +187,56 @@ export function ComposerControlsBar(props: {
     onPromptEdit,
     planModeEnabled,
     isComposerOwned: true,
+    effortDisplay: props.effortDisplay,
+    triggerClassName: cn("ps-1.5 pe-1", TEXT_CONTROL_STATES),
+    // Permissions always live in the effort menu, so the section never unmounts while open.
+    extraMenuContent: runtimeModeAllowed ? (
+      <ComposerPermissionsSection
+        runtimeMode={compatibleRuntimeMode}
+        runtimeModeOptions={compatibleRuntimeModeOptions}
+        onRuntimeModeChange={handleRuntimeModeChange}
+      />
+    ) : undefined,
+    ...(permissionsChipHidden && runtimeModeAllowed
+      ? {
+          extraMenuHint: [
+            `Permissions: ${
+              compatibleRuntimeModeOptions.find((option) => option.mode === compatibleRuntimeMode)
+                ?.label ?? compatibleRuntimeMode
+            }`,
+            shortcutLabelForCommand(keybindings, "composer.mode"),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : {}),
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
+  const {
+    accessDisplay,
+    showModeBlock,
+    hiddenBlockCount: ownedHiddenBlockCount,
+    hiddenBlockIds: ownedHiddenBlockIds,
+    traitsHidden: traitsBlockHidden,
+    effortOwnsModeShortcut,
+    overflowShowsPermissions,
+  } = resolveComposerControlsOwnership({
+    matchesDefault: permissionsChipHidden,
+    hasTraits: providerTraitsPicker !== null && modelPickerAllowed,
+    planModeUiEnabled: interactionModeAllowed,
+    collapsed: composerControlsCollapsed,
+    measuredHiddenBlockCount: Math.max(0, measuredHiddenBlockCount - (contextualHidden ? 1 : 0)),
+  });
+  const restingHiddenBlockCount = ownedHiddenBlockCount + (contextualHidden ? 1 : 0);
+  const hiddenRestingBlockIds: ReadonlyArray<string> = [
+    ...ownedHiddenBlockIds,
+    ...(contextualHidden ? ["contextual"] : []),
+  ];
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
-    hidden: composerControlsHidden || restingHiddenBlockCount > (contextualBlock ? 2 : 1),
+    hidden: composerControlsHidden || traitsBlockHidden,
+    extraMenuOwnsModeShortcut: effortOwnsModeShortcut,
   });
   const restingBlockDefs = [
     ...(providerTraitsPicker && modelPickerAllowed
@@ -193,40 +255,45 @@ export function ComposerControlsBar(props: {
           },
         ]
       : []),
-    {
-      id: "mode",
-      content: (
-        <ComposerFooterModeControls
-          showInteractionModeToggle={
-            planModeUiEnabled && allowsChatViewControl(controls, "interaction-mode")
-          }
-          interactionMode={interactionMode}
-          runtimeMode={compatibleRuntimeMode}
-          runtimeModeOptions={compatibleRuntimeModeOptions}
-          size={composerControlsCollapsed ? "xs" : "sm"}
-          hidden={composerControlsHidden || restingHiddenBlockCount > (contextualBlock ? 1 : 0)}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      ),
-    },
-  ].filter((def) => def.id !== "mode" || allowsChatViewControl(controls, "runtime-mode"));
-  if (contextualBlock && !embedFooterStacked)
-    restingBlockDefs.push({
-      id: "contextual",
-      content: (
-        <>
-          <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-          {contextualControl(
-            composerControlsCollapsed ? "xs" : "sm",
-            composerControlsHidden || restingHiddenBlockCount > 0,
-          )}
-        </>
-      ),
-    });
-  const hiddenRestingBlockIds = restingBlockDefs
-    .slice(restingBlockDefs.length - restingHiddenBlockCount)
-    .map((def) => def.id);
+    ...(!showModeBlock || !(runtimeModeAllowed || interactionModeAllowed)
+      ? []
+      : [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                showInteractionModeToggle={interactionModeAllowed}
+                interactionMode={interactionMode}
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                hidden={composerControlsHidden || ownedHiddenBlockCount > 0}
+                accessDisplay={runtimeModeAllowed ? accessDisplay : "hidden"}
+                emphasized={!accessMatchesDefault}
+                onToggleInteractionMode={toggleInteractionMode}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]),
+    // Lecturn: Contextual is the last block, so it overflows first.
+    ...(contextualBlockShown
+      ? [
+          {
+            id: "contextual",
+            content: (
+              <>
+                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
+                {contextualControl(
+                  composerControlsCollapsed ? "xs" : "sm",
+                  composerControlsHidden || contextualHidden,
+                )}
+              </>
+            ),
+          },
+        ]
+      : []),
+  ];
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (
     <ComposerModelPicker
@@ -256,15 +323,14 @@ export function ComposerControlsBar(props: {
       keybindings={keybindings}
       modelOptionsByInstance={modelOptionsByInstance}
       size={composerControlsCollapsed ? "xs" : "sm"}
-      triggerClassName={
+      triggerClassName={cn(
+        "redesign:pe-1",
+        TEXT_CONTROL_STATES,
         composerControlsCollapsed
-          ? cn(
-              "min-w-13 shrink text-xs!",
-              !showInlineRestingControls &&
-                "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
-            )
-          : "-ms-2.5 min-w-13 redesign:-ms-2"
-      }
+          ? "min-w-13 shrink text-xs!"
+          : // The Lecturn look starts the controls row, aligned with the prompt text.
+            "-ms-2.5 min-w-13 redesign:ms-0",
+      )}
       terminalOpen={terminalOpen}
       open={modelPickerOpen}
       instanceIndicatorBackground={
@@ -272,14 +338,8 @@ export function ComposerControlsBar(props: {
           ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
           : "var(--contrast-input)"
       }
-      {...(modelPickerIconClassName || composerControlsCollapsed
-        ? {
-            activeProviderIconClassName: cn(
-              modelPickerIconClassName,
-              composerControlsCollapsed &&
-                "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
-            ),
-          }
+      {...(modelPickerIconClassName
+        ? { activeProviderIconClassName: modelPickerIconClassName }
         : {})}
       onOpenChange={onModelPickerOpenChange}
       getModelDisabledReason={getModelDisabledReason}
@@ -307,13 +367,6 @@ export function ComposerControlsBar(props: {
     </>
   ) : (
     <>
-      {showLeadingSeparator ? (
-        <ComposerControlSeparator
-          size="xs"
-          className="@max-[400px]/composer-surface:hidden"
-          data-resting-controls-separator="true"
-        />
-      ) : null}
       {modelPickerAllowed ? composerModelPicker : null}
 
       <>
@@ -363,6 +416,8 @@ export function ComposerControlsBar(props: {
                 ? contextualControl(composerControlsCollapsed ? "xs" : "sm")
                 : null
             }
+            // Permissions join the overflow only when their normal home is in it.
+            showPermissions={overflowShowsPermissions && runtimeModeAllowed}
             onToggleInteractionMode={toggleInteractionMode}
             onRuntimeModeChange={handleRuntimeModeChange}
           />

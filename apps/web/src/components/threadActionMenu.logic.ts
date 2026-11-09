@@ -8,8 +8,10 @@ import {
 } from "./squire/track/squireTrack.logic";
 
 export type ThreadActionMenuId =
+  | "find"
   | "new-thread-on-branch"
   | "filter-by-project"
+  | "turn-into-project"
   | "project-settings"
   | "fork"
   | "pin"
@@ -75,6 +77,7 @@ export function buildDraftActionMenuItems(options: {
 
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
+  readonly canFind?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
     readonly label: string;
@@ -108,11 +111,14 @@ export interface ThreadActionMenuState {
   } | null;
   /** Guest links need their own grant, so the caller checks it instead of `canOperate`. */
   readonly canShareWithGuest?: boolean;
+  /** A No project thread with its own folder, on a server that can promote it. */
+  readonly canTurnIntoProject?: boolean;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
   return ![
+    "find",
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
@@ -129,6 +135,9 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
+    ...(state.canFind
+      ? [{ id: "find" as const, label: "Find in thread", icon: "text-search" }]
+      : []),
     ...(state.branch
       ? [
           {
@@ -208,6 +217,16 @@ export function buildThreadActionMenuItems(
               ? "Show all projects"
               : `Filter by ${state.projectFilter.label}`,
             icon: "folder-tree",
+          },
+        ]
+      : []),
+    ...(state.canTurnIntoProject
+      ? [
+          {
+            id: "turn-into-project" as const,
+            label: "Turn into project",
+            icon: "folder-plus",
+            disabled: state.isRunning,
           },
         ]
       : []),
