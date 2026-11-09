@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import { Cookies, FetchHttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
 
 import { verifyDpopProof } from "@lecturn/shared/dpop";
@@ -22,10 +23,12 @@ import {
   clearAgentAwarenessRegistrationRecord,
   loadAgentAwarenessRegistrationRecord,
   loadOrCreateAgentAwarenessDeviceId,
+  loadPreferences,
   saveAgentAwarenessRegistrationRecord,
 } from "../../persistence/imperative";
 import { makeRelayDeviceRegistrationRequest } from "./registrationPayload";
 import {
+  armAgentAwarenessLiveActivityForLocalWork,
   syncAgentAwarenessAccounts,
   unregisterAgentAwarenessAccount,
   __resetAgentAwarenessRemoteRegistrationForTest,
@@ -95,11 +98,21 @@ vi.mock("./agentLiveActivity", () => ({
   startAgentLiveActivity: widgetMocks.start,
 }));
 
-// Avoid importing the native connection stack; this gate only needs configs.
+const catalogMock = vi.hoisted(() => ({
+  atom: Symbol("catalogValueAtom"),
+  entries: new Map<string, { target: Record<string, unknown> }>(),
+}));
+
+// Avoid importing the native connection stack; these gates only need configs and the catalog.
 vi.mock("../../state/atom-registry", () => ({
   appAtomRegistry: {
-    get: () => environmentConfigsMock.configs,
+    get: (atom: unknown) =>
+      atom === catalogMock.atom ? { entries: catalogMock.entries } : environmentConfigsMock.configs,
   },
+}));
+
+vi.mock("../../connection/catalog", () => ({
+  environmentCatalog: { catalogValueAtom: catalogMock.atom },
 }));
 
 vi.mock("../../state/server", () => ({
@@ -261,6 +274,8 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     widgetMocks.start.mockClear();
     widgetMocks.dismissEnded.mockReset();
     environmentConfigsMock.configs.clear();
+    catalogMock.entries.clear();
+    vi.mocked(loadPreferences).mockResolvedValue({ liveActivitiesEnabled: false } as never);
   });
 
   it("disables push features in Personal Team relay registrations", () => {
@@ -896,6 +911,30 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       expect(clearAgentAwarenessRegistrationRecord).not.toHaveBeenCalledWith("b");
     },
   );
+  it("arms the local-work card only for the account that owns the environment", async () => {
+    vi.mocked(loadPreferences).mockResolvedValue({ liveActivitiesEnabled: true } as never);
+    catalogMock.entries.set("env-1", {
+      target: { _tag: "RelayConnectionTarget", environmentId: "env-1", accountId: "b" },
+    });
+    syncAgentAwarenessAccounts(
+      new Map([
+        ["a", async () => "a"],
+        ["b", async () => "b"],
+      ]),
+      "a",
+      true,
+    );
+    armAgentAwarenessLiveActivityForLocalWork({
+      environmentId: "env-1" as EnvironmentId,
+      threadTitle: "Fix login",
+      projectTitle: "Lecturn",
+    });
+    await vi.waitFor(() => expect(widgetMocks.start).toHaveBeenCalledTimes(1));
+    expect(widgetMocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "b" }),
+      expect.any(Date),
+    );
+  });
   it("retires only removed sessions' local cards when revocation bypasses explicit sign-out", () => {
     const a = { getId: () => "a", getAccountId: () => "a", end: vi.fn(async () => {}) };
     const b = { getId: () => "b", getAccountId: () => "b", end: vi.fn(async () => {}) };
