@@ -1924,6 +1924,22 @@ async function captureAndroid(
         scene === "review" ? 8_000 : (scene as string) === "composer-long" ? 10_000 : 5_000,
       ),
     );
+    if (scene === "threads" && sceneIndex > 0) {
+      // Capture-only: the threads scene keeps the last tab, so tap Chats/Threads like a user.
+      const xml = await Promise.race([
+        adbOutput(serial, ["exec-out", "uiautomator", "dump", "/dev/tty"]).catch(() => ""),
+        delay(30_000).then(() => ""),
+      ]);
+      const match =
+        /content-desc="(?:Chats|Threads)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml) ??
+        /text="Chats"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
+      const b = match ? match.slice(1).map(Number) : null;
+      NodeProcess.stdout.write(`${shot} chats-tap node=${JSON.stringify(match?.[0]?.slice(0, 40) ?? null)} bounds=${JSON.stringify(b)}\n`);
+      if (b) {
+        await runAdb(serial, ["shell", "input", "tap", String(Math.round((b[0]! + b[2]!) / 2)), String(Math.round((b[1]! + b[3]!) / 2))]);
+        await delay(4_000);
+      }
+    }
     if ((scene as string) === "settings-back") {
       // Capture-only: Android Back from the Settings page.
       await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"]);
