@@ -1411,6 +1411,10 @@ from upstream's side.
   render, delegate/launch fork fields and Squire tools are unchanged. `agentContextBudget.json`
   holds the fork measurement; raise it only with the `agent-context-increase` label.
 - **Queue reordering (#25846, D6).** Taken as upstream: no drag reordering, a Send now row.
+- **Palette store (#25733).** The `add-project` intent view lists sources without setting
+  `addProjectEnvironmentId`, so the Stave gate (`useStaveFeatureAvailable`) reads
+  `browseEnvironmentId`; on `addProjectEnvironmentId` the intent path drops New Stave
+  space/saga. `CommandPalette.addProject.browser.test.tsx` covers it.
 - **Sweep misses.** model-manifest `t3CodeRange` becomes `lecturnRange`; effect-acp
   `_t3_unknown` becomes `_lecturn_unknown`; `EXPO_PUBLIC_T3_FLOATING_TABS` becomes
   `EXPO_PUBLIC_LECTURN_FLOATING_TABS`; prompt-link tests use the fork owner `Nurozen/lecturn`.
