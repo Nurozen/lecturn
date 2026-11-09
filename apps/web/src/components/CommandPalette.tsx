@@ -646,9 +646,6 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
-  const staveFeature = useStaveFeatureAvailable(addProjectEnvironmentId);
-  const staveAvailable = staveFeature.available;
-  const staveUnsupportedOperations = staveFeature.status.data?.features?.unsupportedOperations;
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [newProjectFlow, setNewProjectFlow] = useState<{
@@ -731,6 +728,11 @@ function OpenCommandPaletteDialog(props: {
         : false;
     }) ?? null;
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  // The "add-project" intent lists the default environment's sources without choosing it,
+  // so the Stave gate follows the environment the source list is built for.
+  const staveFeature = useStaveFeatureAvailable(browseEnvironmentId);
+  const staveAvailable = staveFeature.available;
+  const staveUnsupportedOperations = staveFeature.status.data?.features?.unsupportedOperations;
   const canCreateProject = useEnvironmentScope(browseEnvironmentId, AuthOrchestrationOperateScope);
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
