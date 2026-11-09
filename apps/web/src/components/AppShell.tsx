@@ -11,7 +11,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
   selectProjectGroupingSettings,
-} from "../logicalProject";
+} from "@lecturn/client-runtime/state/project-grouping";
 import { readProject } from "../state/entities";
 import { primaryServerConfigAtom, primaryServerWelcomeAtom } from "../state/server";
 import { useUiStateStore } from "../uiStateStore";

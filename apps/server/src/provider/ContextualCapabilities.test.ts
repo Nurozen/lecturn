@@ -89,15 +89,11 @@ describe("Contextual receipt evidence policy", () => {
   });
 });
 
-import {
-  EventId,
-  ProviderDriverKind,
-  ThreadId,
-  type ProviderRuntimeEvent,
-} from "@lecturn/contracts";
+import { EventId, ProviderDriverKind, ThreadId } from "@lecturn/contracts";
 import {
   contextualCompactionBoundaryKey,
   providerContextIdForSession,
+  type ContextualCompactionEvent,
 } from "./ContextualCapabilities.ts";
 
 it("extracts native context identity without treating local thread IDs or reconnect as continuity", () => {
@@ -113,7 +109,7 @@ it("extracts native context identity without treating local thread IDs or reconn
   expect(providerContextIdForSession("future", { threadId: "native" })).toBeNull();
 });
 it("deduplicates native Codex compaction aliases and refuses session-only OpenCode occurrence", () => {
-  const event: ProviderRuntimeEvent = {
+  const event: ContextualCompactionEvent = {
     type: "thread.state.changed",
     eventId: EventId.make("local-event"),
     provider: ProviderDriverKind.make("codex"),
@@ -126,7 +122,7 @@ it("deduplicates native Codex compaction aliases and refuses session-only OpenCo
       payload: { threadId: "native", turnId: "native-turn" },
     },
   };
-  const alias: ProviderRuntimeEvent = {
+  const alias: ContextualCompactionEvent = {
     ...event,
     raw: {
       source: "codex.app-server.notification",
@@ -159,7 +155,7 @@ it("deduplicates native Codex compaction aliases and refuses session-only OpenCo
   expect(contextualCompactionBoundaryKey({ ...event, raw: undefined }, "native")).toBeNull();
 });
 it("uses Claude native boundary UUID, never the synthetic event identity", () => {
-  const event: ProviderRuntimeEvent = {
+  const event: ContextualCompactionEvent = {
     type: "thread.state.changed",
     eventId: EventId.make("local-event"),
     provider: ProviderDriverKind.make("claudeAgent"),

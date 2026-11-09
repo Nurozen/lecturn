@@ -57,10 +57,10 @@ import {
   type AppRegistrationRecord,
   AppRegistrationRepository,
 } from "../persistence/AppRegistrations.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SquireMobileAttention from "../squire/SquireMobileAttention.ts";
 import * as SquirePresence from "../squire/SquirePresence.ts";
@@ -246,7 +246,6 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getThreadTranscript: unused,
     getThreadSnapshotWindow: unused,
     getProjectThreadRecords: () => Effect.die("unused project record read"),
-    getProjectThread: unused,
     listProjectThreads: unused,
     sendToThread: unused,
     assertProviderInstanceEnabled: unused,
@@ -954,7 +953,10 @@ describe("AgentAwarenessRelay", () => {
         publications.map((publication) => publication.state?.phase),
         ["running", "completed"],
       );
-    }).pipe(Effect.scoped, Effect.provide(ProjectionStore.layerMemory)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+    ),
   );
 });
 

@@ -98,10 +98,6 @@ export const terminalSessionsTotal = Metric.counter("lecturn_terminal_sessions_t
   description: "Total terminal sessions started.",
 });
 
-export const terminalRestartsTotal = Metric.counter("lecturn_terminal_restarts_total", {
-  description: "Total terminal restart requests handled.",
-});
-
 export const webhookDeliveriesTotal = Metric.counter("lecturn_webhook_deliveries_total", {
   description: "Webhook requests handled, by outcome and source.",
 });

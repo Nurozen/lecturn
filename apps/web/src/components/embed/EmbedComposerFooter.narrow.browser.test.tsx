@@ -21,7 +21,7 @@ import { installEmbedTheme } from "../../embed/embedTheme";
 import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
-import { ComposerPromptEditor } from "../ComposerPromptEditor";
+import { ComposerPromptEditorTiptap as ComposerPromptEditor } from "../ComposerPromptEditorTiptap";
 import {
   ComposerControl,
   ComposerControlChevron,

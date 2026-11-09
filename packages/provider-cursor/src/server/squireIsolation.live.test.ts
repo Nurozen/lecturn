@@ -31,10 +31,8 @@ import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter"
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { CursorSettings } from "../settings.ts";
 import { makeCursorAdapterV2 } from "./adapter.ts";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 import * as CursorSdk from "./CursorSdk.ts";
@@ -45,7 +43,6 @@ const evidenceDir = NodePath.resolve(
   import.meta.dirname,
   "../../../../artifacts/squire-bar/s0a2/cursor",
 );
-const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 const instanceId = ProviderInstanceId.make("cursor");
 const modelSelection = { instanceId, model };
 
@@ -295,7 +292,6 @@ describe.skipIf(!live)("S0a2 Cursor Squire isolation (live)", () => {
         );
         const adapter = yield* makeCursorAdapterV2({
           instanceId,
-          settings: yield* decodeCursorSettings({}),
           environment: { HOME: fixture.home, CURSOR_API_KEY: apiKey },
         }).pipe(
           Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, runner),

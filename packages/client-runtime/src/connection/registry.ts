@@ -20,7 +20,6 @@ import {
   type ConnectionRegistration,
   type ConnectionRoute,
   type PlatformConnectionRegistration,
-  type PrimaryConnectionRegistration,
   RelayConnectionRegistration,
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
@@ -109,7 +108,6 @@ export class EnvironmentRegistry extends Context.Service<
     readonly register: (
       registration: ConnectionRegistration,
     ) => Effect.Effect<boolean, Persistence.ConnectionPersistenceError>;
-    readonly registerPlatform: (registration: PrimaryConnectionRegistration) => Effect.Effect<void>;
     readonly reconcilePlatform: (
       registrations: ReadonlyArray<PlatformConnectionRegistration>,
     ) => Effect.Effect<void>;
@@ -813,12 +811,6 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const registerPlatform = Effect.fn("EnvironmentRegistry.registerPlatform")(function* (
-    registration: PrimaryConnectionRegistration,
-  ) {
-    yield* installPlatformRegistration(registration);
-  });
-
   const reconcilePlatform = Effect.fn("EnvironmentRegistry.reconcilePlatform")(function* (
     platformRegistrations: ReadonlyArray<PlatformConnectionRegistration>,
   ) {
@@ -1313,7 +1305,6 @@ export const make = Effect.gen(function* () {
     networkStatus,
     start,
     register,
-    registerPlatform,
     reconcilePlatform,
     remove,
     removeRoute,

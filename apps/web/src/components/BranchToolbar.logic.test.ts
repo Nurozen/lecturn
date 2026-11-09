@@ -1,7 +1,7 @@
 import { type VcsRef } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import { dedupeRemoteBranchesWithLocalMatches } from "@lecturn/shared/git";
 import {
-  dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,

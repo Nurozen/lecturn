@@ -7,7 +7,7 @@ import {
 
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useClientSettings } from "../hooks/useSettings";
-import { getProjectOrderKey } from "../logicalProject";
+import { getProjectOrderKey } from "@lecturn/client-runtime/state/project-grouping";
 import { useProjects, useVisibleThreadShells } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";

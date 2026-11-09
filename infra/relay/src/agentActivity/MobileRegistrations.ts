@@ -1,5 +1,6 @@
 import { ManagedAccess } from "../billing/ManagedAccess.ts";
 import { filterPermittedActivity } from "../teams/TeamNotifications.ts";
+import { makeAggregateState } from "./agentActivityAggregate.ts";
 import type {
   RelayAgentActivitySnapshotResponse,
   RelayDeviceRegistrationRequest,
@@ -42,7 +43,7 @@ export class MobileRegistrations extends Context.Service<
   }
 >()("lecturn-relay/agentActivity/MobileRegistrations") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const rows = yield* AgentActivityRows.AgentActivityRows;
   const managedAccess = yield* ManagedAccess;
   const devices = yield* Devices.Devices;
@@ -101,7 +102,7 @@ export const make = Effect.gen(function* () {
           aggregate: yield* filterPermittedActivity(
             managedAccess,
             input.userId,
-            AgentActivityPublisher.makeAggregateState({
+            makeAggregateState({
               activeStates,
               terminalState: null,
               nowMs: now.epochMilliseconds,

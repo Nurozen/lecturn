@@ -26,7 +26,6 @@ import {
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useMemo } from "react";
 
 import {
   appListedProjects,
@@ -263,13 +262,9 @@ export function useLiveThreadLinkLabels(markdown: string, environmentId: Environ
   const titles = useAtomValue(
     hasThreadLinks(markdown) ? threadTitlesAtom(environmentId) : EMPTY_THREAD_TITLES_ATOM,
   );
-  return useMemo(
-    () =>
-      titles.size === 0
-        ? markdown
-        : relabelThreadLinks(markdown, (threadId) => titles.get(threadId)),
-    [markdown, titles],
-  );
+  return titles.size === 0
+    ? markdown
+    : relabelThreadLinks(markdown, (threadId) => titles.get(threadId));
 }
 
 export function useThreadChipIcons(

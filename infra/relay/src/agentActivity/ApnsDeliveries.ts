@@ -19,8 +19,6 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 import {
-  isExpiredAgentActivityState,
-  isTerminalPhase,
   sanitizeAgentActivityAggregateState,
   sanitizeApnsNotificationPayload,
   statusForAgentActivity,
@@ -59,12 +57,12 @@ const PERMANENT_APNS_TOKEN_REASONS = new Set([
 
 type LiveActivityDeliveryKind = Extract<
   RelayDeliveryKind,
-  "live_activity_start" | "live_activity_update" | "live_activity_end"
+  "live_activity_update" | "live_activity_end"
 >;
 
 type ChosenLiveActivityDelivery =
   | {
-      readonly kind: "live_activity_start" | "live_activity_update";
+      readonly kind: "live_activity_update";
       readonly token: string;
       readonly aggregate: RelayAgentActivityAggregateState;
       readonly alert: ApnsLiveActivityAlert | null;
@@ -127,8 +125,6 @@ export class ApnsDeliveryTransportError extends Schema.TaggedError<ApnsDeliveryT
     return `APNs ${this.kind} delivery failed for device ${this.deviceId}.`;
   }
 }
-
-export const isApnsDeliveryTransportError = Schema.is(ApnsDeliveryTransportError);
 
 const decodeRelayAgentActivityAggregateStateJson = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayAgentActivityAggregateStateSchema),
@@ -693,8 +689,6 @@ function chooseDelivery(input: {
 
 function deliveryEvent(kind: LiveActivityDeliveryKind): Apns.ApnsLiveActivityEvent {
   switch (kind) {
-    case "live_activity_start":
-      return "start";
     case "live_activity_update":
       return "update";
     case "live_activity_end":
@@ -809,11 +803,9 @@ function credentialsForTarget(
 
 function expectedCurrentToken(input: {
   readonly target: LiveActivities.TargetRow;
-  readonly kind: RelayDeliveryKind;
+  readonly kind: Exclude<RelayDeliveryKind, "live_activity_start">;
 }): string | null {
   switch (input.kind) {
-    case "live_activity_start":
-      return input.target.push_to_start_token;
     case "live_activity_update":
     case "live_activity_end":
       return input.target.activity_push_token;
@@ -832,7 +824,7 @@ interface SendLiveActivityDeliveryInputBase {
 
 export type SendLiveActivityDeliveryInput =
   | (SendLiveActivityDeliveryInputBase & {
-      readonly kind: "live_activity_start" | "live_activity_update";
+      readonly kind: "live_activity_update";
       readonly aggregate: RelayAgentActivityAggregateState;
       readonly alert?: ApnsLiveActivityAlert | null;
     })
@@ -849,7 +841,6 @@ function makeLiveActivityDeliveryRequest(
 ) {
   const epochSeconds = Math.floor(now.epochMilliseconds / 1_000);
   const base = {
-    accountId: input.target.user_id,
     token: input.token,
     nowEpochSeconds: epochSeconds,
     nowIso: DateTime.formatIso(now),
@@ -861,7 +852,6 @@ function makeLiveActivityDeliveryRequest(
     iosMajorVersion: input.target.ios_major_version ?? undefined,
   };
   switch (input.kind) {
-    case "live_activity_start":
     case "live_activity_update":
       return {
         epochSeconds,
@@ -925,7 +915,7 @@ export class ApnsDeliveries extends Context.Service<
   }
 >()("lecturn-relay/agentActivity/ApnsDeliveries") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const managedAccess = yield* ManagedAccess;
   const permitted = (
     userId: string,
@@ -1005,24 +995,6 @@ export const make = Effect.gen(function* () {
   const config = yield* RelayConfiguration.RelayConfiguration;
   const apns = yield* Apns.ApnsClient;
   const activityRows = yield* AgentActivityRows.AgentActivityRows;
-
-  // Recheck queued starts against newer terminal publishes. Fail open on database errors.
-  const userStillHasLiveWork = Effect.fnUntraced(function* (userId: string) {
-    const now = yield* DateTime.now;
-    return yield* activityRows.listForUser({ userId }).pipe(
-      Effect.map((states) =>
-        states.some(
-          (state) =>
-            !isTerminalPhase(state) && !isExpiredAgentActivityState(state, now.epochMilliseconds),
-        ),
-      ),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("live-work recheck failed; allowing queued start", { cause }).pipe(
-          Effect.as(true),
-        ),
-      ),
-    );
-  });
 
   // Only content the user may still see owns the card: an access-loss cleanup
   // end must not be skipped because unpermitted rows remain.
@@ -1135,7 +1107,7 @@ export const make = Effect.gen(function* () {
 
   const currentSignedJobTarget = Effect.fnUntraced(function* (input: {
     readonly target: LiveActivityDeliveryTarget;
-    readonly kind: RelayDeliveryKind;
+    readonly kind: Exclude<RelayDeliveryKind, "live_activity_start">;
     readonly token: string;
   }) {
     return yield* liveActivities.listTargets({ userId: input.target.user_id }).pipe(
@@ -1201,11 +1173,6 @@ export const make = Effect.gen(function* () {
       input.kind !== "live_activity_end"
     ) {
       yield* discardDeniedJob(input);
-      if (input.kind === "live_activity_start")
-        yield* liveActivities.clearStartQueued({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-        });
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
     // Alerts may contain a thread title removed by authorization filtering.
@@ -1225,11 +1192,6 @@ export const make = Effect.gen(function* () {
       ))
     ) {
       yield* discardDeniedJob(input);
-      if (input.kind === "live_activity_start")
-        yield* liveActivities.clearStartQueued({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-        });
       return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
     }
     const now = yield* DateTime.now;
@@ -1343,7 +1305,6 @@ export const make = Effect.gen(function* () {
                 ),
         };
       } else if (
-        input.kind !== "live_activity_start" &&
         aggregate !== null &&
         !(yield* aggregateRowsAreCurrent({ userId: input.target.user_id, aggregate }))
       ) {
@@ -1369,22 +1330,6 @@ export const make = Effect.gen(function* () {
       }
     }
     if (
-      input.kind === "live_activity_start" &&
-      !(yield* userStillHasLiveWork(input.target.user_id))
-    ) {
-      yield* liveActivities.clearStartQueued({
-        userId: input.target.user_id,
-        deviceId: input.target.device_id,
-      });
-      if (input.sourceJobId) {
-        yield* attempts.completeSourceJob({
-          sourceJobId: input.sourceJobId,
-          apnsReason: "Stale APNs start job skipped.",
-        });
-      }
-      return staleJobResult({ deviceId: input.target.device_id, kind: input.kind });
-    }
-    if (
       !(yield* aggregatePermitted(
         input.target.user_id,
         input.kind,
@@ -1392,11 +1337,6 @@ export const make = Effect.gen(function* () {
         input.originCreatedAtSeconds,
       ))
     ) {
-      if (input.kind === "live_activity_start")
-        yield* liveActivities.clearStartQueued({
-          userId: input.target.user_id,
-          deviceId: input.target.device_id,
-        });
       if (input.sourceJobId)
         yield* attempts.completeSourceJob({
           sourceJobId: input.sourceJobId,
@@ -1455,11 +1395,6 @@ export const make = Effect.gen(function* () {
         deviceId: input.target.device_id,
         kind: input.kind,
         invalidatedAt: iso,
-      });
-    } else if (input.kind === "live_activity_start") {
-      yield* liveActivities.clearStartQueued({
-        userId: input.target.user_id,
-        deviceId: input.target.device_id,
       });
     }
     if (input.sourceJobId) {
@@ -1684,7 +1619,6 @@ export const make = Effect.gen(function* () {
     const originCreatedAtSeconds = Date.parse(payload.createdAt) / 1000;
     return yield* Effect.suspend(() => {
       switch (payload.kind) {
-        case "live_activity_start":
         case "live_activity_update":
           if (payload.aggregate === null) {
             return Effect.fail(
@@ -1932,14 +1866,6 @@ export const make = Effect.gen(function* () {
               ),
             ),
       );
-    }
-    if (delivery.kind === "live_activity_start") {
-      const now = yield* DateTime.now;
-      yield* liveActivities.markStartQueued({
-        userId: input.target.user_id,
-        deviceId: input.target.device_id,
-        queuedAt: DateTime.formatIso(now),
-      });
     }
     return result;
   });

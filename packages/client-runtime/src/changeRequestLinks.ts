@@ -101,20 +101,15 @@ function findChangeRequestHostTarget<Project extends ChangeRequestProject>(
     : { project, repository: link.repository, host: changeRequestLinkHost(link) };
 }
 
-export interface ChangeRequestLinkCapabilities {
-  readonly pullRequests?: boolean | undefined;
-  readonly threadPullRequests?: boolean | undefined;
-}
-
 /**
  * Where every client opens a change request link in the app, or null for the browser. A link
- * opened into a pull request view may borrow any project on its host when the server reads
- * change requests by host, so a mirror's or a sibling repository's link still opens in the app.
+ * opened into a pull request view may borrow any project on its host, so a mirror's or a
+ * sibling repository's link still opens in the app.
  */
 export function resolveChangeRequestLinkTarget<Project extends ChangeRequestProject>({
   url,
   projects,
-  capabilities,
+  configLoaded,
   environmentId,
   projectId,
   primaryEnvironmentId,
@@ -122,7 +117,7 @@ export function resolveChangeRequestLinkTarget<Project extends ChangeRequestProj
 }: {
   url: string;
   projects: ReadonlyArray<Project>;
-  capabilities: (environmentId: EnvironmentId) => ChangeRequestLinkCapabilities | undefined;
+  configLoaded: (environmentId: EnvironmentId) => boolean;
   /** The link's own environment; without one, any environment that reads change requests. */
   environmentId?: EnvironmentId | undefined;
   /** The project the link came from, tried first. */
@@ -140,7 +135,7 @@ export function resolveChangeRequestLinkTarget<Project extends ChangeRequestProj
   // Matching remotes do not make project ids usable outside the link's environment.
   const candidates = (
     environmentId === undefined
-      ? projects.filter((project) => capabilities(project.environmentId)?.pullRequests === true)
+      ? projects.filter((project) => configLoaded(project.environmentId))
       : projects.filter((project) => project.environmentId === environmentId)
   ).sort(
     (left, right) =>
@@ -150,23 +145,15 @@ export function resolveChangeRequestLinkTarget<Project extends ChangeRequestProj
   );
   const target =
     findChangeRequestTarget(candidates, link) ??
-    (lendHostProject
-      ? findChangeRequestHostTarget(
-          candidates.filter(
-            (candidate) => capabilities(candidate.environmentId)?.threadPullRequests === true,
-          ),
-          link,
-        )
-      : undefined);
-  if (target === undefined) return null;
-  const { project, host } = target;
-  const projectCapabilities = capabilities(project.environmentId);
-  if (projectCapabilities?.pullRequests !== true) return null;
-  // A server that links pull requests to threads resolves the URL's own spelling; an older
-  // one reads the matched checkout's repository selector, a Stave space's secondary one too.
-  const repository =
-    projectCapabilities.threadPullRequests === true ? link.repository : target.repository;
-  return { project, repository, number: link.number, host };
+    (lendHostProject ? findChangeRequestHostTarget(candidates, link) : undefined);
+  if (target === undefined || !configLoaded(target.project.environmentId)) return null;
+  // The server resolves the URL's own spelling; the host is the one the matched checkout reads.
+  return {
+    project: target.project,
+    repository: link.repository,
+    number: link.number,
+    host: target.host,
+  };
 }
 
 export function resolvePullRequestPreviewTarget({

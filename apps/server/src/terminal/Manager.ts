@@ -29,7 +29,6 @@ import {
   type TerminalObserveInput,
   type TerminalResizeInput,
   type ResourceMonitorProcessTableEntry,
-  type TerminalRestartInput,
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
   type TerminalSummary,
@@ -68,11 +67,7 @@ import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import {
-  increment,
-  terminalRestartsTotal,
-  terminalSessionsTotal,
-} from "../observability/Metrics.ts";
+import { increment, terminalSessionsTotal } from "../observability/Metrics.ts";
 import { expandHomePath } from "@lecturn/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
@@ -193,7 +188,7 @@ export class TerminalManager extends Context.Service<
 
     /** Resets history before spawning. */
     readonly restart: (
-      input: TerminalRestartInput,
+      input: TerminalOpenInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
     /** Omit terminalId to close all sessions for the thread. */
@@ -253,9 +248,11 @@ export interface ShellCandidate {
   args?: string[];
 }
 
-export interface TerminalStartInput extends TerminalOpenInput {
-  cols: number;
-  rows: number;
+interface TerminalStartInput {
+  readonly cwd: string;
+  readonly worktreePath?: string | null;
+  readonly cols: number;
+  readonly rows: number;
 }
 
 interface TerminalSessionState {
@@ -400,7 +397,7 @@ function shouldPublishTerminalMetadataEvent(event: TerminalEvent): boolean {
   }
 }
 
-function terminalEventToAttachEvent(event: TerminalEvent): TerminalAttachStreamEvent | null {
+function terminalEventToAttachEvent(event: TerminalEvent): TerminalAttachStreamEvent {
   switch (event.type) {
     case "started":
       return {
@@ -1521,7 +1518,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const resolveLaunchInputEnvironment = Effect.fn("terminal.resolveLaunchInputEnvironment")(
-    function* <Input extends TerminalOpenInput | TerminalAttachInput | TerminalRestartInput>(
+    function* <Input extends TerminalOpenInput | TerminalAttachInput>(
       input: Input,
     ): Effect.fn.Return<
       Input,
@@ -2789,13 +2786,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               yield* startSession(
                 session,
                 {
-                  threadId: input.threadId,
-                  terminalId,
                   cwd: input.cwd,
                   ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
                   cols,
                   rows,
-                  ...(input.env ? { env: input.env } : {}),
                 },
                 "started",
               );
@@ -2851,13 +2845,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               yield* startSession(
                 liveSession,
                 {
-                  threadId: input.threadId,
-                  terminalId,
                   cwd: input.cwd,
                   worktreePath: liveSession.worktreePath,
                   cols: targetCols,
                   rows: targetRows,
-                  ...(input.env ? { env: input.env } : {}),
                 },
                 "started",
               );
@@ -3018,7 +3009,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           }
 
           const attachEvent = terminalEventToAttachEvent(event);
-          return attachEvent ? listener(attachEvent) : Effect.void;
+          return listener(attachEvent);
         },
         (cleanup) => {
           unsubscribe = cleanup;
@@ -3040,9 +3031,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         }
 
         const attachEvent = terminalEventToAttachEvent(event);
-        if (attachEvent) {
-          yield* listener(attachEvent);
-        }
+        yield* listener(attachEvent);
       }
       // The live listener keeps this closure, so release replayed output.
       bufferedEvents.length = 0;
@@ -3235,9 +3224,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
 
   const restartResolved = Effect.fn("Manager.restartResolved")(function* (
-    input: TerminalRestartInput,
+    input: TerminalOpenInput,
   ) {
-    yield* increment(terminalRestartsTotal, { scope: "thread" });
     const terminalId = input.terminalId;
     yield* assertValidCwd(input.cwd);
 
@@ -3301,13 +3289,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     yield* startSession(
       session,
       {
-        threadId: input.threadId,
-        terminalId,
         cwd: input.cwd,
         ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
         cols,
         rows,
-        ...(input.env ? { env: input.env } : {}),
       },
       "restarted",
     );

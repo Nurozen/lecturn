@@ -160,7 +160,6 @@ async function renderTimeline(options: {
   const timeline = (
     <MessagesTimeline
       isWorking={false}
-      activeTurnInProgress={false}
       emptyPlaceholderInset={0}
       listRef={createRef<LegendListRef | null>()}
       latestRun={{ runId: LATEST, status: "completed", startedAt: at(30), completedAt: at(50) }}
@@ -170,7 +169,6 @@ async function renderTimeline(options: {
       onOpenTurnDiff={() => {}}
       onOpenThread={() => {}}
       onForkFromRun={async () => {}}
-      onRollbackCheckpoint={() => {}}
       supportsConversationRollback={false}
       onRevertToTurnCount={() => {}}
       isRevertingCheckpoint={false}

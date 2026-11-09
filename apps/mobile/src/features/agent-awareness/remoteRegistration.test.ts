@@ -13,11 +13,10 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import { Cookies, FetchHttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import type { EnvironmentId } from "@lecturn/contracts";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
 
-import type { EnvironmentId } from "@lecturn/contracts";
 import { verifyDpopProof } from "@lecturn/shared/dpop";
-import type { SavedRemoteConnection } from "../../lib/connection";
 import * as Dpop from "../cloud/dpop";
 import * as ManagedRelayLayer from "../cloud/managedRelayLayer";
 import {
@@ -36,11 +35,9 @@ import {
   getAgentAwarenessRegistrationStatus,
   getAgentNotificationRegistrationEnabled,
   refreshAgentAwarenessRegistration,
-  registerAgentAwarenessConnection,
   registerLiveActivityPushToken,
   releaseAgentAwarenessRelayTokenProvider,
   setAgentAwarenessRelayTokenProvider,
-  unregisterAgentAwarenessConnection,
   updateAgentAwarenessRegistrationPreferences,
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
@@ -217,18 +214,6 @@ function proofIat(proof: string): number {
   return decoded.iat;
 }
 
-function savedConnection(): SavedRemoteConnection {
-  return {
-    environmentId: "env-1" as EnvironmentId,
-    environmentLabel: "Desktop",
-    pairingUrl: "https://desktop.example/pair",
-    displayUrl: "https://desktop.example",
-    httpBaseUrl: "https://desktop.example",
-    wsBaseUrl: "wss://desktop.example/ws",
-    bearerToken: "bearer-token",
-  };
-}
-
 const layerRelayTest = ManagedRelayLayer.layer("https://relay.example.test").pipe(
   Layer.provide(Layer.mergeAll(FetchHttpClient.layer, Dpop.layer)),
 );
@@ -314,7 +299,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   });
 
   it.effect("registers one push-token listener per Live Activity across wrappers", () => {
-    registerAgentAwarenessConnection(savedConnection());
     const addPushTokenListener = vi.fn();
     // getInstances() returns a new wrapper for the same native activity each call.
     const wrapper = () => ({
@@ -816,44 +800,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     }).pipe(Effect.provide(layerRelayTest));
   });
 
-  it.effect(
-    "keeps the user-scoped relay APNs device when an environment connection is removed",
-    () => {
-      const fetchMock = vi.fn((request: RequestInfo | URL) => {
-        const url = request instanceof Request ? request.url : String(request);
-        return Promise.resolve(
-          Response.json(
-            url.endsWith("/v1/client/dpop-token")
-              ? {
-                  access_token: "relay-dpop-token",
-                  issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-                  token_type: "DPoP",
-                  expires_in: 300,
-                  scope: "mobile:registration",
-                }
-              : { ok: true },
-          ),
-        );
-      });
-      vi.stubGlobal("fetch", fetchMock);
-      Constants.expoConfig!.extra = {
-        relay: {
-          url: "https://relay.example.test/",
-        },
-      };
-
-      registerAgentAwarenessConnection(savedConnection());
-      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
-      return Effect.gen(function* () {
-        yield* runBackgroundOperations();
-        fetchMock.mockClear();
-
-        unregisterAgentAwarenessConnection(savedConnection().environmentId);
-
-        expect(fetchMock).not.toHaveBeenCalled();
-      }).pipe(Effect.provide(layerRelayTest));
-    },
-  );
   it.effect(
     "registers each account with the complete device set and falls back to primary on an older relay",
     () => {

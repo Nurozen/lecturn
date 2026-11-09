@@ -4,7 +4,10 @@ import { expect, it } from "vite-plus/test";
 import { act, render as renderUi, type Screen } from "../../test/render";
 
 import { serializeEditorDoc } from "~/composer-rich-text-doc";
-import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
+import {
+  ComposerPromptEditorTiptap as ComposerPromptEditor,
+  type ComposerPromptEditorHandle,
+} from "./ComposerPromptEditorTiptap";
 import { AppReferencesContext, type AppReferences } from "./embed/AppReferencesContext";
 
 let container: HTMLDivElement;

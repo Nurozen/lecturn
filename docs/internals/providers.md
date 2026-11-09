@@ -94,7 +94,7 @@ cannot be verified also stays manual-only: `grok update` would install a second 
 `npm` on `PATH` can belong to a different Node than the one that owns the provider. Homebrew
 compares against `brew info` since casks trail npm by hours; native installs share npm's version
 train, so the registry stays authoritative for them.
-See the [resolver](../../apps/server/src/provider/providerMaintenance.ts).
+See the [resolver](../../apps/server/src/provider/providerMaintenanceRunner.ts).
 
 GitHub Copilot is the one provider whose other installs update themselves: a path that is not a
 Node package install runs `copilot update`, and a Node package install updates only through a

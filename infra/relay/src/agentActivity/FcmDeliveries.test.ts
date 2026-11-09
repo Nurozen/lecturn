@@ -129,8 +129,6 @@ function harness() {
         }),
       withPushNotificationLock: (target, use) => use(target),
       markPushNotified: () => Effect.void,
-      markStartQueued: () => Effect.void,
-      clearStartQueued: () => Effect.void,
       invalidateDeliveryToken: () => Effect.void,
     }),
     Layer.succeed(AgentActivityRows.AgentActivityRows, {

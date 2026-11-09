@@ -75,7 +75,6 @@ function registryLayer(reconciles: Ref.Ref<ReadonlyArray<Reconcile>>) {
         networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
         start: Effect.die("unused"),
         register: () => Effect.die("unused"),
-        registerPlatform: () => Effect.die("unused"),
         reconcilePlatform: () => Effect.die("unused"),
         remove: () => Effect.die("unused"),
         removeRoute: () => Effect.die("unused"),

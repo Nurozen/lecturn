@@ -13,12 +13,10 @@ import {
   ThreadId,
   type OrchestrationV2ProviderThread,
 } from "@lecturn/contracts";
-import { CursorSettings } from "../settings.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
@@ -29,7 +27,6 @@ import { LECTURN_ORCHESTRATION_INSTRUCTIONS } from "@lecturn/provider-core/serve
 import { makeCursorAdapterV2 } from "./adapter.ts";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 
-const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 const instanceId = ProviderInstanceId.make("cursor");
 const modelSelection = { instanceId, model: "composer-2.5" };
 const SQUIRE_SKILL = "## Squire\n\nSQUIRE-SKILL-SENTINEL: stay quiet by default.";
@@ -68,7 +65,6 @@ const makeHarness = Effect.fn("makeHarness")(function* (input: {
   let agents = 0;
   const adapter = yield* makeCursorAdapterV2({
     instanceId,
-    settings: yield* decodeCursorSettings({}),
     environment: { HOME: input.workspace },
     // A user with Stave memory configured for this cwd.
     resolveStaveMemory: () =>

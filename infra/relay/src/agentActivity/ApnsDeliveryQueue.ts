@@ -77,7 +77,7 @@ export class ApnsDeliveryQueue extends Context.Service<
   }
 >()("lecturn-relay/agentActivity/ApnsDeliveryQueue") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const sender = yield* ApnsDeliveryQueueSender;
   const crypto = yield* Crypto.Crypto;
   const config = yield* RelayConfiguration.RelayConfiguration;

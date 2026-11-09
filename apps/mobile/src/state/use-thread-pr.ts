@@ -60,11 +60,7 @@ const pullRequestSummaryAtom = createLinkedPullRequestSummaryAtomFamily(
     ),
 );
 
-export {
-  presentThreadPr,
-  type ThreadPr,
-  type ThreadPrPresentation,
-} from "./thread-pr-presentation";
+export { type ThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
 
 export type ThreadPrProject = Pick<OrchestrationProjectShell, "workspaceRoot" | "stave">;
 
@@ -78,7 +74,7 @@ export function useThreadPr(
 ): ThreadPrPresentation | null {
   const supportsLinks = useAtomValue(
     serverEnvironment.configValueAtom(thread.environmentId),
-    (config) => config?.environment.capabilities.threadPullRequests === true,
+    (config) => config !== null,
   );
   const { linkedPresentation, pullRequestRef } = useMemo(
     () =>
@@ -88,7 +84,7 @@ export function useThreadPr(
           linkedPullRequest: thread.linkedPullRequest,
           branchPullRequest: thread.branchPullRequest,
         },
-        { threadPullRequests: supportsLinks },
+        supportsLinks,
         project,
       ),
     [
@@ -119,16 +115,13 @@ export function useThreadPr(
   );
   const summary = pullRequestRef === null ? undefined : (pullRequestSummary.data ?? snapshot);
   // Rows pass `pr` into callbacks; a fresh object per render would invalidate them.
-  const summaryPresentation = useMemo(
-    () =>
-      summary === undefined
-        ? null
-        : presentThreadPr(pullRequestDetailToVcsStatus(summary), {
-            kind: summary.provider,
-            name: summary.provider,
-            baseUrl: "",
-          }),
-    [summary],
-  );
+  const summaryPresentation =
+    summary === undefined
+      ? null
+      : presentThreadPr(pullRequestDetailToVcsStatus(summary), {
+          kind: summary.provider,
+          name: summary.provider,
+          baseUrl: "",
+        });
   return linkedPresentation ?? summaryPresentation;
 }

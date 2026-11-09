@@ -34,14 +34,10 @@ export function useSelectedThreadWorktree(repoKey?: string) {
   const pinnedRepositoryMissing = repoKey !== undefined && selectedThreadGitRepository === null;
   const detailWorktreePath = useSelectedThreadWorktreePath();
 
-  const selectedThreadWorktreePath = useMemo(
-    () =>
-      resolvePreferredThreadWorktreePath({
-        threadShellWorktreePath: selectedThread?.worktreePath ?? null,
-        threadDetailWorktreePath: detailWorktreePath,
-      }),
-    [detailWorktreePath, selectedThread?.worktreePath],
-  );
+  const selectedThreadWorktreePath = resolvePreferredThreadWorktreePath({
+    threadShellWorktreePath: selectedThread?.worktreePath ?? null,
+    threadDetailWorktreePath: detailWorktreePath,
+  });
   const selectedThreadBranch = selectedThread?.branch ?? null;
   const gitTarget = useMemo(
     () =>

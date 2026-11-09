@@ -284,9 +284,7 @@ interface ActiveOpenCodeTurn {
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
   readonly providerThreadId: OrchestrationV2ProviderTurn["providerThreadId"];
-  readonly providerTurnOrdinal: number;
   readonly runOrdinal: number;
-  readonly runAttemptId: OrchestrationV2ProviderTurn["runAttemptId"];
   readonly startedAt: DateTime.Utc;
   readonly itemOrdinals: Map<string, number>;
   readonly parts: Map<string, Exclude<OpenCodePart, ToolPart>>;
@@ -2390,9 +2388,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             runtimePolicy: state.parentSubagent.parentTurn.runtimePolicy,
             providerTurnId,
             providerThreadId: providerTurn.providerThreadId,
-            providerTurnOrdinal: providerTurn.ordinal,
             runOrdinal: state.parentSubagent.parentTurn.runOrdinal,
-            runAttemptId: null,
             startedAt,
             itemOrdinals: new Map(),
             usage: makeOpenCodeTurnTokenUsageAccumulator(),
@@ -3356,9 +3352,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 runtimePolicy: turnInput.runtimePolicy,
                 providerTurnId,
                 providerThreadId: turnInput.providerThread.id,
-                providerTurnOrdinal: turnInput.providerTurnOrdinal,
                 runOrdinal: turnInput.runOrdinal,
-                runAttemptId: turnInput.attemptId,
                 startedAt,
                 itemOrdinals: new Map(),
                 usage: makeOpenCodeTurnTokenUsageAccumulator(),

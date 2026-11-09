@@ -17,6 +17,7 @@ import { Link } from "@tanstack/react-router";
 import { notificationChildThreadId } from "@lecturn/client-runtime/state/thread-execution";
 import {
   resolveViewedImageAsset,
+  toolGroupAction,
   workEntryAppToolSummary,
   workEntryViewedImagePath,
 } from "@lecturn/client-runtime/work-log/presentation";
@@ -41,7 +42,6 @@ import {
   threadReadLabelPrefix,
   threadReadTargetId,
   threadReadTargetTitle,
-  toolGroupAction,
   workEntryDisplayLabel,
   workEntryReadOutput,
 } from "./MessagesTimeline.logic";
@@ -537,9 +537,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               environmentId={ctx.activeThreadEnvironmentId}
               cwd={ctx.markdownCwd}
               workspaceRoot={workspaceRoot}
-              onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
               source={ctx.turnItemSource}
             />

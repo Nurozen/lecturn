@@ -7,12 +7,8 @@ import type {
 } from "@lecturn/contracts";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@lecturn/shared/git";
-import { toSortableTimestamp } from "../lib/threadSort";
-export {
-  dedupeRemoteBranchesWithLocalMatches,
-  deriveLocalBranchNameFromRemoteRef,
-  sanitizeNewRefName,
-} from "@lecturn/shared/git";
+import { toSortableTimestamp } from "@lecturn/client-runtime/state/thread-sort";
+export { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@lecturn/shared/git";
 
 export interface EnvironmentOption {
   environmentId: EnvironmentId;

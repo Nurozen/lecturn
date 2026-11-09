@@ -1619,6 +1619,35 @@ run them on a Mac.
 - `packages/provider-grok/src/server/adapter.ts` `GrokProviderCapabilitiesV2`:
   `presentationParity.test.ts`.
 - `packages/ssh/src/tunnel.ts` `buildRemoteLaunchScript`: `tunnel.test.ts`.
+- Provider drivers `CodexAdapterV2Driver` (with `DEFAULT_CODEX_SETTINGS`), `ClaudeAdapterV2Driver`
+  and provider-cursor `CursorAdapterV2Driver`: `builtInProviderAdapterDrivers.ts` and
+  `squire/testkit/barProviders.ts`.
+- `apps/server/src/background/BackgroundPolicy.ts` `subscribe` and `reportHostPowerState`:
+  `DecisionWorker.ts`, `SquirePresence.ts` and their tests (the WS RPCs went).
+- `CloudLink.ts` `reconcileDesiredLink`: `CloudLink.fork.test.ts`. `terminal/Manager.ts`
+  `restart`: fork tests in `Manager.test.ts`.
+- `AntigravityAcpRuntimeInput.agentDeviceEnvironment` and `withAgentDeviceEnvironment`: fork
+  provider-acp device env. `DelegatedTaskAnalytics` and `AnalyticsService.layerTest`: fork tests.
+- shared `formatSchemaError` (`stave/staveJson.ts`), `resolveProjectAutoPull`
+  (`serverRuntimeStartup.ts`, `VcsStatusBroadcaster.ts`), `readMcpAppResourceUri`
+  (`AppCardEnvelope.ts`); client-runtime `workEntryIndicatesToolSuccess`
+  (`AppToolWorkRow.logic.ts`); web `findFirstUnansweredPendingUserInputQuestionIndex`
+  (`SquireQuestionAnswer.tsx`). Their upstream tests stay with them.
+- `scripts/lib/brand-assets.ts` `resolveWebAssetBrandForPackageVersion` and
+  `scripts/lib/public-config.ts` `resolvePublicConfig`: `apps/server/scripts/cli.ts`, which
+  `release.yml` runs for build-exe and npm publish.
+- Relay: `ApnsClient.make` (`SquireAttentionDelivery.test.ts`); `Api.ts`
+  `RELAY_LIFECYCLE_REQUEST_DEADLINE_MS` and `revokeEnvironmentLinkRecord` (`Api.test.ts`);
+  `DeliveryAttempts.record` and the optional `sourceJobId` (billing sends without a job);
+  `ManagedEndpointAllocations.make` and `ManagedEndpointProvider.make`
+  (`ManagedGatewayStore.test.ts`).
+- `apps/web/src/components/GitActionsControl.tsx` toolbar mode (Group, result toasts):
+  `StaveGitOverview.tsx` passes `displayMode="toolbar"`; panel is the default.
+- `apps/mobile/src/features/settings/components/SettingsChoiceRow.tsx` (iOS glass row): fork
+  settings screens and their test mocks. Upstream uses `ListChoiceRow` directly.
+- Exports kept for fork tests: mobile `MOBILE_THEME_VARIABLE_NAMES`, `AgentActivity`; web
+  `observeAssistantCitationSource`. For fork code: `useThreadProjection`, `ChatShortcutsInput`,
+  `SidebarThreadDropPlan`, and `authPrompt` (always `null`) from `useLecturnConnectAuthPrompt`.
 
 One export stays with no caller, marked `@public` for knip because the fork's code
 no longer uses it and upstream's deleted test was its last consumer:
@@ -1636,6 +1665,37 @@ remain. `examples/embed-host` gained a `test` script so its fork tests reach CI.
 keeps "keeps the committed outputs current", which upstream deleted. No other check
 catches a stale `generated-uniwind-theme-names.json` or `clerk-theme.json`, and the
 fork's palette edits can drift them.
+
+## Dead-code deletion (#26238, sync to upstream 67661cfbb5)
+
+Upstream deletes code that nothing in its own tree reaches. Take a deletion (file, export,
+test, asset, script, CI step) only when nothing in the merged fork tree reaches it: fork
+files and tests, kept tests (R1, R3, R4), native code, workflows, package scripts and non-TS
+consumers (`.swift`/`.m` fixtures, `.ndjson` read by URL, assets by path, `patches/`).
+Search the whole worktree first. Otherwise keep it and list it under the R5 keeps. Such a
+pass never deletes fork-only code. When upstream simplifies a shared function, keep the fork
+parameter or branch and fold upstream's change around it. Where upstream moved a function
+(client-runtime `state/project-grouping`, `state/thread-sort`, `@lecturn/shared/favicon`), fork
+call sites follow the move.
+
+- **Older-server fallbacks (D12).** Taken: legacy context send, the `attachmentUploads`
+  gate, PR capability checks, and per-flag gates that now only need a loaded server config.
+  Main clients already block pre-protocol-v2 servers, and the oldest protocol-v2 nightly
+  lacks only `mergeMethods`/`stackActions`, which degrade without failing. Fork tests that
+  pinned the old branches (and effect-outbox lease expiry) follow the new contract.
+- **Not restored (D13).** contracts `ProviderRuntimeEvent` family and `CanonicalItemType`:
+  the fork users (`ContextualCapabilities.ts`, `ExternalSessionPresentation.ts`) carry local
+  structural types. `ProjectionStore.layerMemory` went, so the parity tests are SQL-only.
+- **Live Activity push-to-start (D13).** It went with the relay start kind, since the fork's
+  chooser never picked it. The `relay_live_activities` remote-start and push-to-start token
+  columns stay until a later migration. Mobile `remoteRegistration.ts` follows upstream's
+  removal of the environment-connection registry.
+- **Relay Worker default export (D13).** Alchemy imports `src/worker.ts` and reads its default
+  export. #26238 dropped `export default layer`, and upstream restored it in #26303. Keep it
+  and the `src/worker.ts!` knip entry. CI does not plan alchemy, so only deploy-relay fails.
+- **Props.** When upstream drops a prop the fork still reads (ChatComposer `isServerThread`),
+  keep the prop and its ChatView pass-through. The inspector "Roll back" chain and the
+  `rollback` ChatView control went with their only render path.
 
 ## Verifying
 

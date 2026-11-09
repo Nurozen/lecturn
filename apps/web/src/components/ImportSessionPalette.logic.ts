@@ -7,7 +7,7 @@ import type {
   ServerProvider,
 } from "@lecturn/contracts";
 
-import { normalizeProjectPathForComparison } from "../lib/projectPaths";
+import { normalizeProjectPathForComparison } from "@lecturn/client-runtime/state/projects";
 import { getDefaultProviderInstanceModel } from "../providerInstances";
 
 /** Marks the palette view whose groups are swapped for the live session list. */

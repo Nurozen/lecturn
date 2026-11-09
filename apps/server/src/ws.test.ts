@@ -627,8 +627,6 @@ it.effect(
               scopes: [],
             },
             {},
-            {},
-            yield* PreviewAutomationBroker.PreviewAutomationBroker,
             yield* ServerBrowser.ServerBrowser,
           ).pipe(Layer.provide(configRpcServices)),
         ),
@@ -716,8 +714,6 @@ it.effect("advertises thread families only to sessions that may read them", () =
                 scopes: [],
               },
               {},
-              {},
-              yield* PreviewAutomationBroker.PreviewAutomationBroker,
               yield* ServerBrowser.ServerBrowser,
             ).pipe(
               Layer.provide(
@@ -863,8 +859,6 @@ it.effect("keeps palette picks out of an embed session's thread RPCs", () =>
             scopes: [],
           },
           {},
-          {},
-          yield* PreviewAutomationBroker.PreviewAutomationBroker,
           yield* ServerBrowser.ServerBrowser,
         ).pipe(
           Layer.provide(services),
@@ -1012,8 +1006,6 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
             scopes: [],
           },
           {},
-          {},
-          yield* PreviewAutomationBroker.PreviewAutomationBroker,
           yield* ServerBrowser.ServerBrowser,
         ).pipe(Layer.provide(configRpcServices)),
       ),

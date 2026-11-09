@@ -108,7 +108,10 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { isMacPlatform } from "~/lib/utils";
 import { readLocalApi } from "../localApi";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
-import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
+import {
+  getProjectOrderKey,
+  selectProjectGroupingSettings,
+} from "@lecturn/client-runtime/state/project-grouping";
 import {
   buildSidebarProjectSnapshots,
   projectGroupsSpanEnvironments,
@@ -448,14 +451,11 @@ function partitionForkSidebarThreads(input: {
   const snoozed: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   for (const thread of visible) {
-    const supportsSettlement =
-      serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
-    const supportsSnooze =
-      serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+    const configLoaded = serverConfigs.has(thread.environmentId);
     // Snooze outranks settlement and pinning until the thread wakes.
     const section = resolveSidebarThreadSection({
-      snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
-      settled: supportsSettlement && thread.settledOverride === "settled",
+      snoozed: configLoaded && effectiveSnoozed(thread, { now: preciseNow }),
+      settled: configLoaded && thread.settledOverride === "settled",
       pinned: thread.pinnedAt != null,
     });
     (section === "snoozed"
@@ -467,7 +467,7 @@ function partitionForkSidebarThreads(input: {
           : inbox(thread)
     ).push(thread);
   }
-  // Capability gates dragging only; mixed server versions must preserve the same pinned order across clients.
+  // A loaded config gates dragging only; the sort must not depend on it, so web and mobile agree.
   return {
     pinnedThreads: sortPinnedThreadsForSidebar(pinned),
     activeThreads: workingShelfEnabled
@@ -1623,14 +1623,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           : null;
       const canApply = (key: string) => {
         const thread = threadByKeyRef.current.get(key);
-        const capabilities =
-          thread && serverConfigs.get(thread.environmentId)?.environment.capabilities;
         return (
           thread !== undefined &&
           sectionByThreadKeyRef.current.get(key) === originSection &&
-          (action === "unsnooze"
-            ? capabilities?.threadSnooze === true
-            : capabilities?.threadSettlement === true)
+          serverConfigs.has(thread.environmentId)
         );
       };
       let targetKey: string | null = null;
@@ -1785,13 +1781,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       );
       const canSnoozeSelection = selectedThreads.every(
         (thread) =>
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true &&
+          serverConfigs.has(thread.environmentId) &&
           canSnooze(thread, { now: selectionNow.toISOString() }),
       );
-      const titleRegenerationThreads = selectedThreads.filter(
-        (thread) =>
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadTitleRegeneration === true,
+      const titleRegenerationThreads = selectedThreads.filter((thread) =>
+        serverConfigs.has(thread.environmentId),
       );
       const regeneratableTitleThreads = titleRegenerationThreads.filter(
         (thread) => thread.titleRegeneration == null,
@@ -1801,9 +1795,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         actionableCount: regeneratableTitleThreads.length,
       });
       const pinnedSelectedThreads = selectedThreads.filter(
-        (thread) =>
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning ===
-            true && thread.pinnedAt != null,
+        (thread) => serverConfigs.has(thread.environmentId) && thread.pinnedAt != null,
       );
       const unpinMenuItem = buildBulkUnpinContextMenuItem({
         pinnedCount: pinnedSelectedThreads.length,
@@ -2101,19 +2093,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           thread.worktreePath ??
           projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??
           null;
-        const supportsSettlement =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
-        const supportsSnooze =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-        const supportsPinning =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true;
+        const configLoaded = serverConfigs.has(thread.environmentId);
         const supportsAutoSettleOptOut =
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadAutoSettleOptOut === true;
-        const supportsTitleRegeneration =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadTitleRegeneration === true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
@@ -2161,11 +2144,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
                 ),
               supports: {
-                settlement: supportsSettlement,
+                settlement: configLoaded,
                 autoSettleOptOut: supportsAutoSettleOptOut,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
+                snooze: configLoaded,
+                pinning: configLoaded,
+                titleRegeneration: configLoaded,
                 fork: readEnvironmentSupportsForking(thread.environmentId),
               },
               snoozePresets,
@@ -2954,18 +2937,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                   ? "unsettle"
                                   : "settle"
                             }
-                            settlementSupported={
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadSettlement === true
-                            }
-                            snoozeSupported={
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadSnooze === true
-                            }
-                            pinningSupported={
-                              serverConfigs.get(thread.environmentId)?.environment.capabilities
-                                .threadPinning === true
-                            }
+                            settlementSupported={serverConfigs.has(thread.environmentId)}
+                            snoozeSupported={serverConfigs.has(thread.environmentId)}
+                            pinningSupported={serverConfigs.has(thread.environmentId)}
                             isPinned={thread.pinnedAt != null}
                             sortable={sortable}
                             dropVerb={dropVerb}

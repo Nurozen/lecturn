@@ -123,7 +123,15 @@ import { resolveProjectSettings } from "@lecturn/shared/projectSettings";
 import { resolveThreadReferenceCopyTarget } from "@lecturn/client-runtime/thread-reference";
 import { resolveTerminalSessionLabel } from "@lecturn/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
-import { type SetStateAction, use, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type SetStateAction,
+  use,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { useLocation } from "@tanstack/react-router";
 import { useEmbedPresentation } from "../embed/EmbedPresentationContext";
@@ -224,7 +232,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { focusTerminalOnThreadEnter, getTerminalFocusOwner } from "../lib/terminalFocus";
-import { selectProjectGroupingSettings } from "../logicalProject";
+import { selectProjectGroupingSettings } from "@lecturn/client-runtime/state/project-grouping";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   resolveLogicalProjectKey,
@@ -312,7 +320,7 @@ import {
   WorkspaceTitlebarControls,
 } from "./chat/PanelLayoutControls";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
-import { ThreadDetailsPanel, type ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
+import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
   resolveEffectiveEnvMode,
@@ -749,7 +757,6 @@ export default function ChatView(props: ChatViewProps) {
   const [localServerErrorsByThreadKey, setLocalServerErrorsByThreadKey] = useState<
     Record<string, LocalThreadErrorEntry>
   >({});
-  const [isConnecting, _setIsConnecting] = useState(false);
   const isRevertingCheckpoint = useComposerDraftStore((store) =>
     store.rewindingThreadKeys.has(routeThreadKey),
   );
@@ -1306,13 +1313,11 @@ export default function ChatView(props: ChatViewProps) {
   const pullRequestsCapabilityKnown = serverConfig !== null;
   const notesAvailable =
     isServerThread && serverConfig?.environment.capabilities.threadNotes === true;
-  const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
+  const supportsPullRequests = serverConfig !== null;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
-  const supportsQuestionAttachments =
-    attachmentEnvironmentConfig?.environment.capabilities.questionAttachments === true;
-  const supportsAttachmentUploads =
-    attachmentEnvironmentConfig?.environment.capabilities.attachmentUploads === true;
+  const supportsQuestionAttachments = attachmentEnvironmentConfig !== null;
+  const supportsAttachmentUploads = attachmentEnvironmentConfig !== null;
   const advertisedFileAttachmentBytes =
     attachmentEnvironmentConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null;
   const maxFileAttachmentBytes =
@@ -1533,11 +1538,7 @@ export default function ChatView(props: ChatViewProps) {
     (isSendBusy || phase === "connecting" || phase === "running") &&
     (compactionRunning || (compactRequestIsActive && !compactionSettled));
   const isWorking =
-    phase === "running" ||
-    isSendBusy ||
-    isConnecting ||
-    isCompacting ||
-    runlessWorkStartedAt !== null;
+    phase === "running" || isSendBusy || isCompacting || runlessWorkStartedAt !== null;
   const activeContextWindow = deriveLatestContextWindowSnapshot(
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
@@ -2180,8 +2181,7 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
-  const supportsThreadPullRequests =
-    serverConfig?.environment.capabilities.threadPullRequests === true;
+  const supportsThreadPullRequests = serverConfig !== null;
   const visiblePullRequests = visibleThreadPullRequests(
     (activeThreadShell ?? activeThread)?.pullRequests ?? [],
   );
@@ -2992,7 +2992,6 @@ export default function ChatView(props: ChatViewProps) {
     onForkFromMessageStable,
     onForkFromRunStable,
     onRevertTimelineTurnStable,
-    onTimelineRollbackCheckpointStable,
   } = useTimelineRewind({
     environmentId,
     routeThreadRef,
@@ -3006,7 +3005,6 @@ export default function ChatView(props: ChatViewProps) {
     forkPointByRunlessReplyId,
     timelineMessages,
     phase,
-    isConnecting,
     isSendBusy,
     isRevertingCheckpoint,
     supportsConversationRollback,
@@ -3062,7 +3060,6 @@ export default function ChatView(props: ChatViewProps) {
     resumableRunId,
     hasHeldQueuedRuns,
     isSendBusy,
-    isConnecting,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -3084,7 +3081,6 @@ export default function ChatView(props: ChatViewProps) {
     activeProposedPlan,
     isServerThread,
     isSendBusy,
-    isConnecting,
     composerRef,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -3126,7 +3122,6 @@ export default function ChatView(props: ChatViewProps) {
     composerTerminalContextsRef,
     feedbackUploadsInFlightRef,
     queuedRunEdit,
-    isConnecting,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -3253,7 +3248,6 @@ export default function ChatView(props: ChatViewProps) {
     workLocallyResendDraftId === draftId &&
     isLocalDraftThread &&
     !isSendBusy &&
-    !isConnecting &&
     !isRevertingCheckpoint &&
     !threadDetailLoading &&
     clientSettingsHydrated &&
@@ -3452,7 +3446,7 @@ export default function ChatView(props: ChatViewProps) {
       }}
     />
   ) : null;
-  const threadDetailsPanelProps: ThreadDetailsPanelProps = {
+  const threadDetailsPanelProps: ComponentProps<typeof ThreadDetailsPanel> = {
     anchor: threadPanelPopoverAnchorRef,
     handle: threadPanelPopoverHandle,
     forceNewWorktree: multipleModelSelections !== null,
@@ -3708,7 +3702,6 @@ export default function ChatView(props: ChatViewProps) {
                     : {})}
                   isWorking={isWorking}
                   runlessWorkActive={runlessWorkStartedAt !== null}
-                  activeTurnInProgress={isWorking || !latestRunSettled}
                   isCompacting={isCompacting}
                   awaitingUser={
                     activePendingApproval !== null
@@ -3771,9 +3764,6 @@ export default function ChatView(props: ChatViewProps) {
                   parentThreadLink={parentThreadLink}
                   workflowOpening={workflowOpening}
                   onForkFromRun={onForkFromRunStable}
-                  onRollbackCheckpoint={
-                    allows("rollback") ? onTimelineRollbackCheckpointStable : undefined
-                  }
                   supportsConversationRollback={
                     supportsConversationRollback && allows("edit-from-here")
                   }
@@ -3970,12 +3960,10 @@ export default function ChatView(props: ChatViewProps) {
                                     ? { contextualProjectId: activeProject.id }
                                     : {})}
                                   activeThreadId={activeThreadId}
-                                  activeThreadEnvironmentId={activeThread?.environmentId}
                                   activeThread={activeThread}
                                   activeThreadShell={activeThreadShell}
                                   promptHistoryMessages={timelineMessages}
                                   isServerThread={isServerThread}
-                                  isLocalDraftThread={isLocalDraftThread}
                                   forceExpandedOnMobile={
                                     nativeComposerExpanded ||
                                     (forceExpandedMobileComposer && isDraftHeroState)
@@ -3986,7 +3974,6 @@ export default function ChatView(props: ChatViewProps) {
                                   phase={phase}
                                   isCompacting={isCompacting}
                                   canInterrupt={canInterruptRunningThread}
-                                  isConnecting={isConnecting}
                                   isSendBusy={
                                     (isSendBusy && !sendQueuesBehindSetup) ||
                                     (setupQueueSendThreadKey !== null &&

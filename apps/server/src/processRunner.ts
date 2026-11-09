@@ -169,8 +169,6 @@ const DEFAULT_TIMEOUT = "60 seconds";
 const FORCE_KILL_AFTER = "1 second";
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
-export { isWindowsCommandNotFound } from "@lecturn/provider-core/server/snapshotProbe";
-
 // Line splitter shared with GitVcsDriverCore.collectOutput: decodes chunks
 // incrementally and emits complete lines, flushing the partial tail on end.
 const makeLineEmitter = (onLine: (line: string) => Effect.Effect<void>) => {

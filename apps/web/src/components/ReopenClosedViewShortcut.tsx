@@ -185,7 +185,7 @@ export function ReopenClosedViewShortcut() {
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- registers forwarded shortcut chords with the desktop preview bridge and clears them on cleanup
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
-    if (!preview?.setForwardedShortcuts) return;
+    if (!preview) return;
     const options = {
       context: {
         previewFocus: true,
@@ -214,7 +214,7 @@ export function ReopenClosedViewShortcut() {
       )
       .catch(() => undefined);
     return () => {
-      void preview.setForwardedShortcuts?.([]).catch(() => undefined);
+      void preview.setForwardedShortcuts([]).catch(() => undefined);
     };
   }, [hasHistory, keybindings, terminalOpen]);
 

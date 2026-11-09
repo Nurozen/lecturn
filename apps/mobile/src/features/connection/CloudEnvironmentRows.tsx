@@ -15,7 +15,7 @@ import {
   resolveEnvironmentMachineKind,
 } from "@lecturn/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { Pressable, type TextLayoutEvent, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -85,10 +85,8 @@ function CloudEnvironmentRowsContent(
   const hasCloudRows =
     props.connectedCloudEnvironments.length > 0 || availableCloudEnvironments.length > 0;
 
-  const handleConnectCloudEnvironment = useCallback(
-    (entry: RelayEnvironmentView) => controller.connectRelayEnvironment(entry.environment),
-    [controller],
-  );
+  const handleConnectCloudEnvironment = (entry: RelayEnvironmentView) =>
+    controller.connectRelayEnvironment(entry.environment);
 
   const discoveredDescriptors = new Map(
     controller.relayEnvironments.flatMap((entry) =>
@@ -98,9 +96,9 @@ function CloudEnvironmentRowsContent(
     ),
   );
 
-  const handleToggleCloudError = useCallback((environmentId: string) => {
+  const handleToggleCloudError = (environmentId: string) => {
     setExpandedErrorId((current) => (current === environmentId ? null : environmentId));
-  }, []);
+  };
 
   const showHeader = props.showHeader ?? true;
 
@@ -361,21 +359,18 @@ function CloudEnvironmentRowShell(props: {
   const StatusContainer = errorCanExpand ? Pressable : View;
   const ContentContainer = props.onOpen || props.onRemove ? Pressable : View;
   const ChevronContainer = props.onOpen || props.onRemove ? Pressable : View;
-  const onMeasuredErrorTextLayout = useCallback(
-    (event: TextLayoutEvent) => {
-      if (!props.connectionError) {
-        return;
-      }
-      const nextLineCount = event.nativeEvent.lines.length;
-      setErrorMeasurement((currentMeasurement) =>
-        currentMeasurement?.text === measuredErrorText &&
-        currentMeasurement.lineCount === nextLineCount
-          ? currentMeasurement
-          : { text: measuredErrorText, lineCount: nextLineCount },
-      );
-    },
-    [measuredErrorText, props.connectionError],
-  );
+  const onMeasuredErrorTextLayout = (event: TextLayoutEvent) => {
+    if (!props.connectionError) {
+      return;
+    }
+    const nextLineCount = event.nativeEvent.lines.length;
+    setErrorMeasurement((currentMeasurement) =>
+      currentMeasurement?.text === measuredErrorText &&
+      currentMeasurement.lineCount === nextLineCount
+        ? currentMeasurement
+        : { text: measuredErrorText, lineCount: nextLineCount },
+    );
+  };
   return (
     <View
       collapsable={false}

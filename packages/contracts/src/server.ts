@@ -215,7 +215,6 @@ export const ServerProvider = Schema.Struct({
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   reportsContextWindow: Schema.optional(Schema.Boolean),
   supportedRuntimeModes: Schema.optional(ForwardCompatibleArray(RuntimeMode)),
-  requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   // How this provider forks a conversation mid-history. Open string for
   // forward compatibility: values today are "native" | "unsupported", and
   // clients must treat unknown values (or absence) as unsupported.
@@ -654,7 +653,6 @@ export const ServerConfig = Schema.Struct({
   threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Send window fields only when advertised. */
   threadSnapshotPagination: Schema.optionalKey(Schema.Boolean),
-  reasoningMessages: Schema.optionalKey(Schema.Boolean),
   threadFind: Schema.optionalKey(Schema.Boolean),
   threadFindProgressive: Schema.optionalKey(Schema.Boolean),
   scratchWorkspaceRoot: Schema.optionalKey(TrimmedNonEmptyString),
@@ -899,7 +897,6 @@ export class ServerProviderUpdateError extends Schema.TaggedError<ServerProvider
 export const ServerSelfUpdateInput = Schema.Struct({
   /** Exact npm version, never a dist-tag, so server and client agree on the request. */
   targetVersion: TrimmedNonEmptyString,
-  continueRunningThreads: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type;
 

@@ -3,9 +3,9 @@ import {
   buildProjectGroups,
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
+  resolveScratchProjectScopeKey,
   type ProjectGroupingSettings,
-} from "./logicalProject";
-import { resolveScratchProjectScopeKey } from "@lecturn/client-runtime/state/project-grouping";
+} from "@lecturn/client-runtime/state/project-grouping";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";

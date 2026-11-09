@@ -119,7 +119,6 @@ interface EnvironmentOption {
   readonly connectionState: EnvironmentConnectionPhase;
   readonly connectionError: string | null;
   readonly connectionErrorTraceId: string | null;
-  readonly supportsCloneTracking: boolean;
 }
 
 const environmentOptionOrder = Order.mapInput(
@@ -405,7 +404,6 @@ function useEnvironmentOptions(
         connectionState: runtime?.connectionState ?? "available",
         connectionError: runtime?.connectionError ?? null,
         connectionErrorTraceId: runtime?.connectionErrorTraceId ?? null,
-        supportsCloneTracking: config?.environment.capabilities.projectCloneTracking === true,
       };
     });
     return Arr.sort(
@@ -1402,9 +1400,6 @@ export function AddProjectDestinationScreen(props: {
   readonly prompt?: string | string[];
 }) {
   const openNewTaskDraft = useOpenNewTaskDraft();
-  const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
-    reportFailure: false,
-  });
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
   });
@@ -1419,7 +1414,6 @@ export function AddProjectDestinationScreen(props: {
     AuthOrchestrationOperateScope,
   );
   const canCloneProject = canWriteSourceControl && canCreateProject;
-  const createProject = useCreateProject(environment);
   const remoteUrl = stringParam(props.remoteUrl);
   const repositoryTitle = stringParam(props.repositoryTitle);
   const prompt = stringParam(props.prompt);
@@ -1455,65 +1449,46 @@ export function AddProjectDestinationScreen(props: {
 
     const originRoute = getActiveRoute(navigation);
     setIsSubmitting(true);
-    if (environment.supportsCloneTracking) {
-      const projectId = ProjectId.make(uuidv4());
-      const title = inferProjectTitleFromPath(resolved.path);
-      const startResult = await startProjectClone({
-        environmentId: environment.environmentId,
-        input: {
-          projectId,
-          title,
-          createdAt: new Date().toISOString(),
-          remoteUrl,
-          destinationPath: resolved.path,
-        },
-      });
-      if (AsyncResult.isFailure(startResult)) {
-        setError(errorMessage(Cause.squash(startResult.cause)));
-      } else {
-        // Wait for the create event; the client store otherwise falls back to the project picker and loses clone controls.
-        const project = await waitForProject(
-          { environmentId: environment.environmentId, projectId },
-          15_000,
-        );
-        if (project === null) {
-          setError(
-            "The project was created but has not reached this device yet. It will appear in the project list once the connection catches up.",
-          );
-        } else {
-          openNewTaskDraft(
-            {
-              environmentId: environment.environmentId,
-              projectId,
-              title,
-              cloning: "1",
-              ...(prompt
-                ? await draftWithPrompt(environment.environmentId, projectId, prompt).then(
-                    (draftId) => ({ draftId }),
-                    () => ({}),
-                  )
-                : {}),
-            },
-            originRoute,
-          );
-        }
-      }
-      setIsSubmitting(false);
-      return;
-    }
-    const cloneResult = await cloneRepository({
+    const projectId = ProjectId.make(uuidv4());
+    const title = inferProjectTitleFromPath(resolved.path);
+    const startResult = await startProjectClone({
       environmentId: environment.environmentId,
       input: {
+        projectId,
+        title,
+        createdAt: new Date().toISOString(),
         remoteUrl,
         destinationPath: resolved.path,
       },
     });
-    if (AsyncResult.isFailure(cloneResult)) {
-      setError(errorMessage(Cause.squash(cloneResult.cause)));
+    if (AsyncResult.isFailure(startResult)) {
+      setError(errorMessage(Cause.squash(startResult.cause)));
     } else {
-      const createResult = await createProject(cloneResult.value.cwd, originRoute);
-      if (createResult && AsyncResult.isFailure(createResult)) {
-        setError(errorMessage(Cause.squash(createResult.cause)));
+      // Wait for the create event; the client store otherwise falls back to the project picker and loses clone controls.
+      const project = await waitForProject(
+        { environmentId: environment.environmentId, projectId },
+        15_000,
+      );
+      if (project === null) {
+        setError(
+          "The project was created but has not reached this device yet. It will appear in the project list once the connection catches up.",
+        );
+      } else {
+        openNewTaskDraft(
+          {
+            environmentId: environment.environmentId,
+            projectId,
+            title,
+            cloning: "1",
+            ...(prompt
+              ? await draftWithPrompt(environment.environmentId, projectId, prompt).then(
+                  (draftId) => ({ draftId }),
+                  () => ({}),
+                )
+              : {}),
+          },
+          originRoute,
+        );
       }
     }
     setIsSubmitting(false);

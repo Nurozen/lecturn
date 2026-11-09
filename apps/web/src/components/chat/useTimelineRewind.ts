@@ -15,10 +15,6 @@ import { scopeThreadRef } from "@lecturn/client-runtime/environment";
 import { resolveRevertTargetCheckpoint } from "@lecturn/client-runtime/state/thread-checkpoints";
 import type { ThreadForkPoint } from "@lecturn/client-runtime/state/thread-fork-points";
 import { useState } from "react";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@lecturn/client-runtime/state/runtime";
 import { readLocalApi } from "../../localApi";
 import { findRevertCheckpoint } from "../../session-logic";
 import { type ChatMessage } from "../../types";
@@ -57,7 +53,6 @@ interface TimelineRewindInput {
   readonly forkPointByRunlessReplyId: ReadonlyMap<MessageId, ThreadForkPoint>;
   readonly timelineMessages: ReadonlyArray<ChatMessage>;
   readonly phase: SessionPhase;
-  readonly isConnecting: boolean;
   readonly isSendBusy: boolean;
   readonly isRevertingCheckpoint: boolean;
   readonly supportsConversationRollback: boolean;
@@ -71,7 +66,7 @@ interface TimelineRewindInput {
 
 /**
  * Going back in a thread's timeline: reverting to an earlier turn (restoring that message into
- * the composer), rolling back a provider checkpoint, and forking a new thread from a run.
+ * the composer) and forking a new thread from a run.
  */
 export function useTimelineRewind(input: TimelineRewindInput) {
   const {
@@ -87,7 +82,6 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     forkPointByRunlessReplyId,
     timelineMessages,
     phase,
-    isConnecting,
     isSendBusy,
     isRevertingCheckpoint,
     supportsConversationRollback,
@@ -147,7 +141,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       );
       return;
     }
-    if (phase === "running" || isSendBusy || isConnecting) {
+    if (phase === "running" || isSendBusy) {
       setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
       return;
     }
@@ -230,57 +224,6 @@ export function useTimelineRewind(input: TimelineRewindInput) {
   };
   const onRevertToTurnCountStable = useStableCallback(onRevertToTurnCount);
 
-  const onRollbackCheckpoint = async (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => {
-    if (!activeThread || isRevertingCheckpoint) return;
-    if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
-      setThreadError(
-        activeThread.id,
-        `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
-      );
-      return;
-    }
-    if (phase === "running" || isSendBusy || isConnecting) {
-      setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-      return;
-    }
-    const localApi = readLocalApi();
-    const confirmed =
-      localApi == null
-        ? window.confirm("Roll back this thread to the selected checkpoint?")
-        : await localApi.dialogs.confirm(
-            "Roll back this thread to the selected checkpoint?\nThis action cannot be undone.",
-          );
-    if (!confirmed) return;
-
-    useComposerDraftStore.setState((store) => ({
-      rewindingThreadKeys: new Set(store.rewindingThreadKeys).add(routeThreadKey),
-    }));
-    setThreadError(activeThread.id, null);
-    const result = await revertThreadCheckpoint({
-      environmentId,
-      input: {
-        threadId: activeThread.id,
-        checkpointId: input.checkpointId,
-        scopeId: input.scopeId,
-      },
-    });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      setThreadError(
-        activeThread.id,
-        error instanceof Error ? error.message : "Failed to revert thread state.",
-      );
-    }
-    useComposerDraftStore.setState((store) => {
-      const remaining = new Set(store.rewindingThreadKeys);
-      remaining.delete(routeThreadKey);
-      return { rewindingThreadKeys: remaining };
-    });
-  };
-
   // Upstream's per-response fork goes through the Lecturn fork dispatcher so every
   // entry point mints the same "(fork)" title, seeds, admits and navigates alike.
   const onForkFromRun = async (input: {
@@ -299,13 +242,6 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     });
   };
   const onForkFromRunStable = useStableCallback(onForkFromRun);
-  const onTimelineRollbackCheckpoint = (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => {
-    void onRollbackCheckpoint(input);
-  };
-  const onTimelineRollbackCheckpointStable = useStableCallback(onTimelineRollbackCheckpoint);
   const onRevertTimelineTurn = (targetTurnCount: number, messageId: MessageId) => {
     void onRevertToTurnCountStable(targetTurnCount, messageId);
   };
@@ -348,6 +284,5 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     onForkFromMessageStable,
     onForkFromRunStable,
     onRevertTimelineTurnStable,
-    onTimelineRollbackCheckpointStable,
   };
 }

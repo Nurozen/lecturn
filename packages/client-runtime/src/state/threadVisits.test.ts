@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId } from "@lecturn/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import type { VisitThreadInput } from "./threadCommands.ts";
+import type { VisitThreadInput } from "../operations/commands.ts";
 import { claimThreadOpen } from "./threadSearch.ts";
 import {
   createThreadVisitTracker,

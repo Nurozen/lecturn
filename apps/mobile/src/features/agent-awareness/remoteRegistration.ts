@@ -24,7 +24,6 @@ import {
   squashAtomCommandFailure,
 } from "@lecturn/client-runtime/state/runtime";
 
-import type { SavedRemoteConnection } from "../../lib/connection";
 import { runtime } from "../../lib/runtime";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -81,7 +80,6 @@ export class AgentAwarenessOperationError extends Schema.TaggedError<AgentAwaren
 
 export type AgentAwarenessRegistrationStatus = "unknown" | "pending" | "registered" | "failed";
 const registrationStatusListeners = new Set<() => void>();
-const environmentConnections = new Map<EnvironmentId, SavedRemoteConnection>();
 // APNs device tokens are shared across owners. Claims must finish in order,
 // including membership changes, before another owner can preserve that token.
 const registrationMutationLock = Semaphore.makeUnsafe(1);
@@ -213,7 +211,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
   function readRelayConfig(): { readonly url: string } | null {
     const relayUrl = resolveCloudPublicConfig().relay.url;
     if (!relayUrl) {
-      logRegistrationDebug("relay registration skipped; relay config missing");
       return null;
     }
 
@@ -477,10 +474,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       expectedGeneration: number,
     ): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
       if (expectedGeneration !== deviceRegistrationGeneration) {
-        logRegistrationDebug("device registration cancelled before relay request", {
-          expectedGeneration,
-          currentGeneration: deviceRegistrationGeneration,
-        });
         return;
       }
       const relayConfig = readRelayConfig();
@@ -492,14 +485,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       }
       const token = yield* relayToken("read-device-registration-relay-token");
       if (expectedGeneration !== deviceRegistrationGeneration) {
-        logRegistrationDebug("device registration cancelled after auth lookup", {
-          expectedGeneration,
-          currentGeneration: deviceRegistrationGeneration,
-        });
         return;
       }
       if (!token) {
-        logRegistrationDebug("relay device registration skipped; user is not signed in");
         setRegistrationStatus("unknown");
         return;
       }
@@ -518,10 +506,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
           if (expectedGeneration !== deviceRegistrationGeneration) {
             // Signed out while the record loaded — do not resurrect the cleared
             // record or report the previous account's registration as current.
-            logRegistrationDebug("device registration cancelled after record lookup", {
-              expectedGeneration,
-              currentGeneration: deviceRegistrationGeneration,
-            });
             return;
           }
           const payload = {
@@ -551,28 +535,15 @@ function makeAccountRegistration(scopeAccountId: string | null) {
               "registered",
               Boolean(payload.pushToken) && payload.preferences.notificationsEnabled,
             );
-            logRegistrationDebug(
-              "relay device registration skipped; already registered for account",
-              {
-                expectedGeneration,
-              },
-            );
             return;
           }
 
           const client = yield* ManagedRelay.ManagedRelayClient;
-          logRegistrationDebug("relay device registration request started", {
-            expectedGeneration,
-          });
           yield* client.registerDevice({ clerkToken: token, payload });
           if (expectedGeneration !== deviceRegistrationGeneration) {
             // Signed out while the request was in flight: the sign-out path already
             // reset the status and cleared the record for the next account, so a
             // stale success must not overwrite either.
-            logRegistrationDebug("device registration completed after sign-out; result discarded", {
-              expectedGeneration,
-              currentGeneration: deviceRegistrationGeneration,
-            });
             return;
           }
           if (payload.platform === "android") androidDeviceReplayedAt = Date.now();
@@ -588,9 +559,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
               logRegistrationError("persist registration record failed", error);
             }),
           );
-          logRegistrationDebug("relay device registration request completed", {
-            expectedGeneration,
-          });
         }),
       );
     },
@@ -667,9 +635,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     )
       return;
     if (!environmentPublishesAgentActivity(input.environmentId)) {
-      logRegistrationDebug("live activity arming skipped; environment does not publish", {
-        environmentId: input.environmentId,
-      });
       return;
     }
     const generation = deviceRegistrationGeneration;
@@ -718,9 +683,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       if (!activity) {
         return;
       }
-      logRegistrationDebug("live activity card armed for local work", {
-        threadTitle: input.threadTitle,
-      });
       runRegistrationInBackground(
         registerLiveActivityPushToken({ activity }).pipe(Effect.asVoid),
         "live activity arming after local task start failed",
@@ -762,7 +724,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     const token = yield* relayToken("read-live-activity-registration-relay-token");
     if (generation !== deviceRegistrationGeneration) return false;
     if (!token) {
-      logRegistrationDebug("relay live activity registration skipped; user is not signed in");
       return false;
     }
 
@@ -791,13 +752,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       traceId: findErrorTraceId(error),
       error,
     });
-  }
-
-  function logRegistrationDebug(context: string, details?: unknown): void {
-    if (!__DEV__) {
-      return;
-    }
-    console.log(`[agent-awareness] ${context}`, details ?? "");
   }
 
   function runRegistrationInBackground(
@@ -837,10 +791,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     const next = pendingDeviceRegistration;
     pendingDeviceRegistration = null;
     const generation = deviceRegistrationGeneration;
-    logRegistrationDebug("device registration started", {
-      generation,
-      hasObservedPushToken: next.input.observedPushToken !== undefined,
-    });
     if (registrationStatus !== "registered") {
       setRegistrationStatus("pending");
     }
@@ -867,7 +817,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
         }
         logRegistrationError(next.context, squashAtomCommandFailure(result));
       }
-      logRegistrationDebug("device registration finished", { generation });
       if (activeDeviceRegistration === registration) {
         activeDeviceRegistration = null;
       }
@@ -880,17 +829,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       activeDeviceRegistration &&
       !registrationAddsInformation(activeDeviceRegistration.input, input)
     ) {
-      logRegistrationDebug("device registration coalesced with active request", {
-        generation: deviceRegistrationGeneration,
-      });
       return;
     }
 
-    logRegistrationDebug("device registration enqueued", {
-      generation: deviceRegistrationGeneration,
-      hasActiveRegistration: activeDeviceRegistration !== null,
-      hasPendingRegistration: pendingDeviceRegistration !== null,
-    });
     pendingDeviceRegistration = pendingDeviceRegistration
       ? {
           input: mergeDeviceRegistrationInput(pendingDeviceRegistration.input, input),
@@ -905,11 +846,9 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     expectedGeneration: number,
   ): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
     if (!canRegisterPushNotifications()) {
-      logRegistrationDebug("device registration skipped; platform does not support it");
       return;
     }
 
-    logRegistrationDebug("device registration loading local state", { expectedGeneration });
     const [deviceId, storedPreferences] = yield* Effect.all([
       Effect.tryPromise({
         try: () => loadOrCreateAgentAwarenessDeviceId(),
@@ -944,10 +883,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
       input?.observedPushToken,
       expectedGeneration,
     );
-    logRegistrationDebug("device registration local state ready", {
-      expectedGeneration,
-      notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-    });
     const bundleId =
       Platform.OS === "android"
         ? Constants.expoConfig?.android?.package?.trim()
@@ -1049,29 +984,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     } catch (error) {
       logRegistrationError(context, error);
     }
-  }
-
-  function registerAgentAwarenessConnection(connection: SavedRemoteConnection): void {
-    if (!canRegisterPushNotifications()) {
-      return;
-    }
-
-    environmentConnections.set(connection.environmentId, connection);
-    ensurePushTokenListener();
-    ensureAppStateListener();
-    enqueueDeviceRegistration({}, "device registration failed");
-    runRegistrationInBackground(
-      refreshActiveLiveActivityRemoteRegistration(),
-      "active live activity registration after environment connection failed",
-    );
-  }
-
-  function removeAgentAwarenessConnection(environmentId: EnvironmentId): void {
-    environmentConnections.delete(environmentId);
-  }
-
-  function unregisterAgentAwarenessConnection(environmentId: EnvironmentId): void {
-    removeAgentAwarenessConnection(environmentId);
   }
 
   function refreshAgentAwarenessRegistration(): Effect.Effect<
@@ -1186,10 +1098,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
         });
         if (generation !== deviceRegistrationGeneration || !relayTokenProvider) return false;
         if (!activityPushToken) {
-          logRegistrationDebug(
-            "live activity push token not available yet; waiting for token event",
-            { connectionCount: environmentConnections.size },
-          );
           return false;
         }
 
@@ -1213,9 +1121,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     const subscription = activity.addPushTokenListener((event) => {
       if (!event.pushToken || generation !== deviceRegistrationGeneration || !relayTokenProvider)
         return;
-      logRegistrationDebug("live activity push token event received", {
-        tokenSuffix: event.pushToken.slice(-8),
-      });
       runRegistrationInBackground(
         lock.withPermit(registerLiveActivityPushTokenValue({ activityPushToken: event.pushToken })),
         "live activity token listener registration failed",
@@ -1254,9 +1159,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     if (generation !== deviceRegistrationGeneration || !relayTokenProvider) return false;
     if (registered) {
       registeredActivityPushTokens.set(input.activityPushToken, Date.now());
-      logRegistrationDebug("live activity push token registered", {
-        tokenSuffix: input.activityPushToken.slice(-8),
-      });
     }
     return registered;
   });
@@ -1363,9 +1265,6 @@ function makeAccountRegistration(scopeAccountId: string | null) {
             ),
           );
           if (primed) {
-            logRegistrationDebug("live activity card primed", {
-              activeCount: aggregate.activeCount,
-            });
             activities = [primed];
           }
         }
@@ -1395,27 +1294,18 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     getAgentNotificationRegistrationEnabled,
     setAgentAwarenessRelayTokenProvider,
     releaseAgentAwarenessRelayTokenProvider,
-    registerAgentAwarenessConnection,
-    unregisterAgentAwarenessConnection,
     refreshAgentAwarenessRegistration,
     updateAgentAwarenessRegistrationPreferences,
     __resetAgentAwarenessRemoteRegistrationForTest,
     unregisterAgentAwarenessDeviceForCurrentUser,
     unregisterAgentAwarenessDeviceStrict,
     registerLiveActivityPushToken,
-    refreshActiveLiveActivityRemoteRegistration,
     armAgentAwarenessLiveActivityForLocalWork,
-    mergeAgentAwarenessRegistrationPreferences,
-    shouldRegisterAgentAwarenessDeviceForProvider,
   };
 }
 
 const legacy = makeAccountRegistration(null);
 const registrations = () => (accounts.size > 0 ? [...accounts.values()] : [legacy]);
-export const mergeAgentAwarenessRegistrationPreferences =
-  legacy.mergeAgentAwarenessRegistrationPreferences;
-export const shouldRegisterAgentAwarenessDeviceForProvider =
-  legacy.shouldRegisterAgentAwarenessDeviceForProvider;
 export const setAgentAwarenessRelayTokenProvider = legacy.setAgentAwarenessRelayTokenProvider;
 export const releaseAgentAwarenessRelayTokenProvider =
   legacy.releaseAgentAwarenessRelayTokenProvider;
@@ -1539,12 +1429,6 @@ export const unregisterAgentAwarenessAccount = Effect.fn(
       ),
     );
 });
-export function registerAgentAwarenessConnection(connection: SavedRemoteConnection): void {
-  for (const state of registrations()) state.registerAgentAwarenessConnection(connection);
-}
-export function unregisterAgentAwarenessConnection(environmentId: EnvironmentId): void {
-  for (const state of registrations()) state.unregisterAgentAwarenessConnection(environmentId);
-}
 export function armAgentAwarenessLiveActivityForLocalWork(
   input: Parameters<typeof legacy.armAgentAwarenessLiveActivityForLocalWork>[0],
 ): void {
@@ -1557,10 +1441,6 @@ export const refreshAgentAwarenessRegistration = () =>
 export const updateAgentAwarenessRegistrationPreferences = (preferences: Partial<Preferences>) =>
   Effect.forEach(registrations(), (state) =>
     state.updateAgentAwarenessRegistrationPreferences(preferences),
-  ).pipe(Effect.asVoid);
-export const refreshActiveLiveActivityRemoteRegistration = () =>
-  Effect.forEach(registrations(), (state) =>
-    state.refreshActiveLiveActivityRemoteRegistration(),
   ).pipe(Effect.asVoid);
 export function registerLiveActivityPushToken(
   input: Parameters<typeof legacy.registerLiveActivityPushToken>[0],
@@ -1578,7 +1458,6 @@ export function registerLiveActivityPushToken(
 export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   for (const state of registrations()) state.__resetAgentAwarenessRemoteRegistrationForTest();
   legacy.__resetAgentAwarenessRemoteRegistrationForTest();
-  environmentConnections.clear();
   accounts.clear();
   activityOwners.clear();
   accountAppearances.clear();

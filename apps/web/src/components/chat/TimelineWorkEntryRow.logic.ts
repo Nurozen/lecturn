@@ -1,7 +1,9 @@
 import type { Root, RootContent } from "mdast";
-import { resolveWorkEntryToolPresentation } from "@lecturn/client-runtime/work-log/presentation";
+import {
+  resolveWorkEntryToolPresentation,
+  toolGroupAction,
+} from "@lecturn/client-runtime/work-log/presentation";
 import { isJavaScriptReplTool } from "@lecturn/shared/toolActivity";
-import { toolGroupAction } from "./MessagesTimeline.logic";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { type TimelineWorkEntry, type TimelineRow } from "./timelineRowContext";
 import { type WorkEntryIconName } from "./TimelineToolActivityIcon";

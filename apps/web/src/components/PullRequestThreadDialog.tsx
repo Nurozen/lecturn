@@ -16,8 +16,8 @@ import { useRef, useState } from "react";
 import {
   readCachedPullRequestResolution,
   usePreparePullRequestThreadAction,
-  usePullRequestResolution,
-} from "~/lib/sourceControlActions";
+  usePullRequestResolutionState,
+} from "~/state/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { parsePullRequestReference } from "@lecturn/client-runtime/pull-request-link-input";
@@ -111,7 +111,7 @@ export function PullRequestThreadDialog({
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);
-  const pullRequestResolution = usePullRequestResolution({
+  const pullRequestResolution = usePullRequestResolutionState({
     environmentId,
     cwd,
     reference: open && canPrepare ? parsedDebouncedReference : null,

@@ -12,14 +12,12 @@ import {
   RunId,
   ThreadId,
 } from "@lecturn/contracts";
-import { CursorSettings } from "../settings.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as TestProviderHost from "@lecturn/provider-testing/TestProviderHost";
@@ -37,8 +35,6 @@ import {
 } from "./adapter.ts";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 import * as CursorSdk from "./CursorSdk.ts";
-
-const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 
 describe("CursorAdapterV2", () => {
   it.effect.each([
@@ -76,7 +72,6 @@ describe("CursorAdapterV2", () => {
         });
         const adapter = yield* makeCursorAdapterV2({
           instanceId,
-          settings: yield* decodeCursorSettings({}),
           environment: { HOME: workspace },
         }).pipe(
           Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -339,7 +334,6 @@ describe("CursorAdapterV2", () => {
       });
       const adapter = yield* makeCursorAdapterV2({
         instanceId,
-        settings: yield* decodeCursorSettings({}),
         environment: { HOME: workspace },
       }).pipe(
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -473,7 +467,6 @@ describe("CursorAdapterV2", () => {
         });
         const adapter = yield* makeCursorAdapterV2({
           instanceId,
-          settings: yield* decodeCursorSettings({}),
           environment: { HOME: workspace },
         }).pipe(
           Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -615,7 +608,6 @@ describe("CursorAdapterV2", () => {
       });
       const adapter = yield* makeCursorAdapterV2({
         instanceId,
-        settings: yield* decodeCursorSettings({}),
         environment: { HOME: workspace },
       }).pipe(
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -957,7 +949,6 @@ describe("CursorAdapterV2", () => {
       ];
       const adapter = yield* makeCursorAdapterV2({
         instanceId,
-        settings: yield* decodeCursorSettings({}),
         environment: { HOME: workspace },
       }).pipe(
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -1181,7 +1172,6 @@ describe("CursorAdapterV2", () => {
             );
       const adapter = yield* makeCursorAdapterV2({
         instanceId,
-        settings: yield* decodeCursorSettings({}),
         environment: { HOME: workspace },
       }).pipe(
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
@@ -1300,7 +1290,6 @@ describe("CursorAdapterV2", () => {
       );
       const adapter = yield* makeCursorAdapterV2({
         instanceId,
-        settings: yield* decodeCursorSettings({}),
         environment: { HOME: workspace, CURSOR_API_KEY: "test-cursor-key" },
       }).pipe(
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, runner),

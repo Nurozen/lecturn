@@ -87,7 +87,6 @@ export interface ServerProviderPresentation {
   readonly showInteractionModeToggle?: boolean;
   readonly reportsContextWindow?: boolean;
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
-  readonly requiresNewThreadForModelChange?: boolean;
   readonly conversationFork?: "native" | "unsupported";
   readonly conversationForkRequiresAnchor?: boolean;
   // Must agree with whether the driver's `ProviderInstance` carries a
@@ -260,9 +259,6 @@ export function buildServerProvider(input: {
     ...(input.presentation.supportedRuntimeModes === undefined
       ? {}
       : { supportedRuntimeModes: [...input.presentation.supportedRuntimeModes] }),
-    ...(typeof input.presentation.requiresNewThreadForModelChange === "boolean"
-      ? { requiresNewThreadForModelChange: input.presentation.requiresNewThreadForModelChange }
-      : {}),
     ...(input.presentation.conversationFork
       ? { conversationFork: input.presentation.conversationFork }
       : {}),

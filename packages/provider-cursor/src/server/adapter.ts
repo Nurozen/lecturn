@@ -86,7 +86,7 @@ import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 import { isCursorSdkNotInstalledError } from "./CursorSdk.ts";
 export { cursorSdkModelSelection } from "./sdkModel.ts";
 
-export const CURSOR_DRIVER_KIND = CursorAgentSdk.CURSOR_PROVIDER;
+const CURSOR_DRIVER_KIND = CursorAgentSdk.CURSOR_PROVIDER;
 export const CURSOR_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CURSOR_DRIVER_KIND);
 const DEFAULT_CURSOR_SETTINGS = Schema.decodeSync(CursorSettings)({});
 
@@ -932,7 +932,6 @@ interface CursorLiveAgent {
 
 export interface CursorAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
-  readonly settings: CursorSettings;
   readonly environment: NodeJS.ProcessEnv;
   /** Lecturn: Stave memory wiring for a session cwd. */
   readonly resolveStaveMemory?: StaveMemoryResolver;
@@ -2860,10 +2859,6 @@ export const CursorAdapterV2Driver: ProviderAdapterDriver<
       return yield* makeCursorAdapterV2({
         resolveStaveMemory,
         instanceId: input.instanceId,
-        settings: {
-          ...input.config,
-          enabled: input.enabled,
-        },
         environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
       });
     },

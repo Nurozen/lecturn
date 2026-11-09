@@ -163,6 +163,7 @@ function RepoRow({
                 />
                 <GitActionsControl
                   key={target.key}
+                  displayMode="toolbar"
                   gitCwd={target.cwd}
                   activeThreadRef={threadRef}
                   syncThreadBranch={false}

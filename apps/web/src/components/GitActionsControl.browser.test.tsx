@@ -115,7 +115,7 @@ vi.mock(import("~/state/server"), async (original) => {
     serverEnvironment: { ...actual.serverEnvironment, configValueAtom: (() => config) as never },
   };
 });
-vi.mock(import("~/lib/sourceControlActions"), async (original) => ({
+vi.mock(import("~/state/sourceControlActions"), async (original) => ({
   ...(await original()),
   useSourceControlActionRunning: () => false,
   useGitStackedAction: ((scope: { cwd: string | null }) => ({
@@ -166,9 +166,11 @@ import GitActionsControl from "./GitActionsControl";
 
 const MemoGitActionsControl = memo(GitActionsControl);
 
+// Result toasts only run in the toolbar mode Stave Space Git rows use.
 function control(thread = "thread", cwd = "/repo") {
   return (
     <MemoGitActionsControl
+      displayMode="toolbar"
       gitCwd={cwd}
       activeThreadRef={{
         environmentId: EnvironmentId.make("environment"),

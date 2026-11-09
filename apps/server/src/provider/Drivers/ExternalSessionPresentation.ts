@@ -5,8 +5,21 @@
  *
  * @module provider/Drivers/ExternalSessionPresentation
  */
-import type { CanonicalItemType } from "@lecturn/contracts";
+import type { ToolLifecycleItemType } from "@lecturn/contracts";
 import { isWorkspaceImagePreviewPath } from "@lecturn/shared/filePreview";
+
+/** Item kinds an imported history row can carry. */
+type CanonicalItemType =
+  | "user_message"
+  | "assistant_message"
+  | "reasoning"
+  | "plan"
+  | ToolLifecycleItemType
+  | "review_entered"
+  | "review_exited"
+  | "context_compaction"
+  | "error"
+  | "unknown";
 
 /** An import shows the tail of the session: only its last messages are copied. */
 export const IMPORT_HISTORY_MAX_MESSAGES = 200;

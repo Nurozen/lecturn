@@ -1,10 +1,10 @@
 import { SourceControlProviderKind, type VcsStatusResult } from "@lecturn/contracts";
 import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
+import { resolveAutoFeatureBranchName } from "@lecturn/shared/git";
 import { assert, describe, it } from "vite-plus/test";
 import {
   buildMenuItems,
   requiresDefaultBranchConfirmation,
-  resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
   resolveQuickAction,

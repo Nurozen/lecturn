@@ -151,7 +151,7 @@ it.layer(TestLayer)("effect worker deferral (Lecturn)", (it) => {
       const outbox = yield* EffectOutbox.EffectOutboxV2;
       const workerId = "order-test";
       const claim = outbox
-        .claimNext({ workerId, leaseDurationMs: 30_000 })
+        .claimNext({ workerId })
         .pipe(Effect.map((claimed) => Option.getOrUndefined(claimed)?.id));
       const cleanup = (name: string): EffectOutbox.PendingOrchestrationEffectV2 => ({
         id: `effect:cleanup:${name}`,
