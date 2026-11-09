@@ -44,6 +44,7 @@ const fixture = vi.hoisted(() => ({
   providers: new Map<string, unknown>(),
   respondToApproval: (async () => undefined) as unknown,
   contextual: false,
+  threadStatus: "live" as string,
   contextualStatusReads: new Map<string, unknown>(),
   annotation: {
     id: "annotation-1",
@@ -77,7 +78,7 @@ vi.mock(import("../../state/entities"), async (original) => ({
     ref === null ? fixture.noItems : fixture.items) as never,
   useThreadCheckpointSummaries: ((ref: unknown) =>
     ref === null ? [] : fixture.summaries) as never,
-  useThreadStatus: (() => "live") as never,
+  useThreadStatus: (() => fixture.threadStatus) as never,
   useProject: ((ref: unknown) => (ref === null ? null : fixture.project)) as never,
 }));
 vi.mock(import("../../state/environments"), async (original) => ({
@@ -164,6 +165,7 @@ import {
   type ChatViewControls,
 } from "./chatViewControls";
 import { QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON } from "./composerApprovalState";
+import { resetHeldThreadTimeline } from "../ChatView.logic";
 
 /** Like the query family, a thread's status keeps its first answer; not-found until the thread exists. */
 function contextualStatus(threadId: string) {
@@ -243,6 +245,7 @@ function seedHomeThread() {
   });
   fixture.shell = { ...base, squire: { squireId: "squire-release", role: "home" } };
   fixture.contextual = false;
+  fixture.threadStatus = "live";
   fixture.contextualStatusReads.clear();
   const items = [
     turnItem("user-item", 1, RUN_ID, {
@@ -412,19 +415,27 @@ function seedHomeThread() {
   ]);
 }
 
-async function mount(controls?: ChatViewControls) {
+async function mount(controls?: ChatViewControls, draftId?: DraftId) {
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;inset:0;display:flex;";
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => (
-        <ChatView
-          environmentId={ENVIRONMENT_ID}
-          threadId={THREAD_ID}
-          routeKind="server"
-          {...(controls ? { controls } : {})}
-        />
-      ),
+      component: () =>
+        draftId ? (
+          <ChatView
+            environmentId={ENVIRONMENT_ID}
+            threadId={THREAD_ID}
+            routeKind="draft"
+            draftId={draftId}
+          />
+        ) : (
+          <ChatView
+            environmentId={ENVIRONMENT_ID}
+            threadId={THREAD_ID}
+            routeKind="server"
+            {...(controls ? { controls } : {})}
+          />
+        ),
     }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
@@ -695,5 +706,57 @@ describe("Contextual on a sent draft", () => {
     finalizePromotedDraftThreadByRef(threadRef);
 
     await vi.waitFor(() => expect(control()?.disabled).toBe(false));
+  });
+});
+
+describe("chat surface background", () => {
+  const TRANSPARENT = "rgba(0, 0, 0, 0)";
+  // MessagesTimeline's empty-pane placeholder, not the loading conversation area around it.
+  const timelinePlaceholder = () =>
+    document.querySelector<HTMLElement>(
+      '[data-timeline-loading="true"]:not(:has([data-timeline-loading]))',
+    );
+  const surface = () => document.querySelector<HTMLElement>(".lecturn-chat-surface")!;
+  const isOpaque = (color: string) =>
+    color !== TRANSPARENT && !/rgba\(.*,\s*0?\.\d+\)|\/\s*0?\.\d+\)/.test(color);
+
+  it("shows the night sky behind a new thread's draft hero", async () => {
+    seedHomeThread();
+    fixture.shell = null;
+    fixture.projection = null;
+    fixture.items = [];
+    const draftId = DraftId.make("draft-background");
+    const drafts = useComposerDraftStore.getState();
+    drafts.setProjectDraftThreadId(
+      { environmentId: ENVIRONMENT_ID, projectId: PROJECT_ID },
+      draftId,
+      { threadId: THREAD_ID },
+    );
+    using _draft = { [Symbol.dispose]: () => drafts.clearDraftThread(draftId) };
+    await using _screen = await mount(undefined, draftId);
+    await vi.waitFor(() => expect(timelinePlaceholder()).not.toBeNull());
+
+    expect(surface().dataset.chatHasMessages).toBeUndefined();
+    expect(getComputedStyle(timelinePlaceholder()!).backgroundColor).toBe(TRANSPARENT);
+    expect(getComputedStyle(surface()).backgroundImage).toContain("lecturn-night-sky");
+  });
+
+  it("keeps an opaque theme surface behind a huge thread that is still loading", async () => {
+    seedHomeThread();
+    fixture.shell = { ...(fixture.shell as object), squire: undefined };
+    fixture.projection = null;
+    fixture.items = [];
+    fixture.threadStatus = "synchronizing";
+    // Earlier tests opened this thread; a remembered timeline would stand in for the placeholder.
+    resetHeldThreadTimeline();
+    await using _screen = await mount();
+    const pane = () =>
+      timelinePlaceholder()?.parentElement?.closest<HTMLElement>("[data-timeline-loading]");
+    await vi.waitFor(() => expect(pane()).toBeTruthy());
+
+    expect(timelinePlaceholder()!.getBoundingClientRect().height).toBe(
+      pane()!.getBoundingClientRect().height,
+    );
+    expect(isOpaque(getComputedStyle(surface()).backgroundColor)).toBe(true);
   });
 });

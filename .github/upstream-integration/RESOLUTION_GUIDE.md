@@ -676,6 +676,10 @@ from upstream's side.
   `useComposerProviderModel`.
 - **MessagesTimeline.** `CollapsibleUserMessageBody` stays controlled by its
   parent so citations can expand it.
+- **MessagesTimeline empty placeholder.** The `hideEmptyPlaceholder`
+  `[data-timeline-loading]` div stays transparent (no upstream `bg-background`,
+  #11169). ChatView's `.lecturn-chat-surface` root paints the opaque fill and the
+  night sky, so new-thread drafts keep the art (test: "chat surface background").
 - **ConnectOnboardingDialog.** The multi-account request queue stays in effects
   (time-stamped); the rest is render-phase like upstream.
 - **Mobile app store row (#20422).** Not taken until Lecturn store links exist.

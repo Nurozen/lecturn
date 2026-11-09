@@ -1595,7 +1595,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       return (
         <>
           {activityAnnouncer}
-          <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />
+          {/* Lecturn: no fill; ChatView's root paints the theme surface and the night sky. */}
+          <div className="h-full min-h-0" data-timeline-loading="true" />
         </>
       );
     }
