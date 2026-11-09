@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AppId,
+  type AppsEnsureWorkspaceInput,
   CommandId,
   type ConnectedAppThreadsStreamEvent,
   EventId,
@@ -267,6 +268,50 @@ it.layer(layerTest)("AppProjectService", (it) => {
 
       const owner = Option.getOrThrow(yield* store.findActiveByWorkspaceRoot("/work/shared"));
       assert.strictEqual(owner.projectId, normal.id);
+    }),
+  );
+
+  it.effect("follows the app when it ensures a workspace under a new title", () =>
+    Effect.gen(function* () {
+      const service = yield* AppProjects;
+      const store = yield* ProjectStore.ProjectStoreV2;
+      const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const workspaceRoot = "/work/retitle";
+      const { projectId } = yield* service.ensureWorkspace(app, { workspaceRoot, title: "Before" });
+      const stored = store.get(projectId).pipe(Effect.map(Option.getOrThrow));
+      const sequenceBefore = yield* events.latestApplicationSequence;
+
+      const renamed = yield* service.ensureWorkspace(app, { workspaceRoot, title: "After" });
+      assert.strictEqual(renamed.projectId, projectId);
+      const row = yield* stored;
+      assert.strictEqual(row.title, "After");
+      assert.deepStrictEqual(row.appBinding, { appId: app, workspaceRoot });
+      assert.isAbove(yield* events.latestApplicationSequence, sequenceBefore);
+
+      // A rename back must not be deduplicated against the first one.
+      yield* service.ensureWorkspace(app, { workspaceRoot, title: "Before" });
+      assert.strictEqual((yield* stored).title, "Before");
+    }),
+  );
+
+  it.effect("writes nothing when the title is unchanged or absent", () =>
+    Effect.gen(function* () {
+      const service = yield* AppProjects;
+      const store = yield* ProjectStore.ProjectStoreV2;
+      const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const workspaceRoot = "/work/same-title";
+      const { projectId } = yield* service.ensureWorkspace(app, { workspaceRoot, title: "Same" });
+      const sequenceBefore = yield* events.latestApplicationSequence;
+
+      const unchanged = yield* service.ensureWorkspace(app, { workspaceRoot, title: "Same" });
+      const absent = yield* service.ensureWorkspace(app, {
+        workspaceRoot,
+      } as AppsEnsureWorkspaceInput);
+
+      assert.strictEqual(unchanged.projectId, projectId);
+      assert.strictEqual(absent.projectId, projectId);
+      assert.strictEqual(yield* events.latestApplicationSequence, sequenceBefore);
+      assert.strictEqual(Option.getOrThrow(yield* store.get(projectId)).title, "Same");
     }),
   );
 
