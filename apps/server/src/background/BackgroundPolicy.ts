@@ -40,7 +40,6 @@ export class BackgroundPolicy extends Context.Service<
     ) => Effect.Effect<void>;
     readonly reportHostPowerState: (snapshot: HostPowerSnapshot) => Effect.Effect<void>;
     readonly snapshot: Effect.Effect<BackgroundPolicySnapshot>;
-    readonly streamChanges: Stream.Stream<BackgroundPolicySnapshot>;
     readonly subscribe: Effect.Effect<
       {
         readonly latest: BackgroundPolicySnapshot;
@@ -49,7 +48,6 @@ export class BackgroundPolicy extends Context.Service<
       never,
       Scope.Scope
     >;
-    readonly hasDemand: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
     /** Durable queued work respects host power policy without requiring an open client. */
@@ -171,8 +169,7 @@ function isClientConstrained(
   lease: ClientActivityLease,
   settings: ResolvedBackgroundActivitySettings,
 ): boolean {
-  if (settings.pauseWhenClientLowPower && lease.lowPowerMode === "true") return true;
-  return settings.pauseWhenOnBattery && lease.batteryState === "unplugged";
+  return settings.pauseWhenClientLowPower && lease.lowPowerMode === "true";
 }
 
 function leaseMayRunScopedWork(
@@ -272,8 +269,6 @@ export const make = Effect.fn("background.policy.make")(function* () {
           recentlyInteracted: input.recentlyInteracted,
           ...(input.appState !== undefined ? { appState: input.appState } : {}),
           ...(input.lowPowerMode !== undefined ? { lowPowerMode: input.lowPowerMode } : {}),
-          ...(input.batteryState !== undefined ? { batteryState: input.batteryState } : {}),
-          ...(input.networkType !== undefined ? { networkType: input.networkType } : {}),
           scopes: input.scopes,
           updatedAt: now,
           expiresAt,
@@ -298,9 +293,6 @@ export const make = Effect.fn("background.policy.make")(function* () {
         return next;
       }).pipe(Effect.andThen(publishSnapshotUnlocked), Effect.asVoid),
     );
-
-  const hasDemand: BackgroundPolicy["Service"]["hasDemand"] = (scope) =>
-    Effect.map(snapshot, (current) => current.activeScopeKeys.includes(scopeKey(scope)));
 
   const shouldRunScopeWork: BackgroundPolicy["Service"]["shouldRunScopeWork"] = Effect.fn(
     "BackgroundPolicy.shouldRunScopeWork",
@@ -367,9 +359,7 @@ export const make = Effect.fn("background.policy.make")(function* () {
     removeRpcClient,
     reportHostPowerState: hostPowerMonitor.report,
     snapshot,
-    streamChanges: Stream.fromPubSub(changes),
     subscribe: subscribeBeforeSnapshot(changes, snapshot, publishMutex),
-    hasDemand,
     shouldRunScopeWork,
     shouldRunOpportunisticWork,
     shouldRunDurableWork,

@@ -565,7 +565,6 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const windowMetrics = useNativeLayoutMetrics();
   const nativeMetrics = usesNativeWorkspaceColumns ? columnMetrics : screenMetrics;
   const controlInsets = deriveBottomControlInsets(nativeMetrics);
-  const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const childThreadInputs = useChildThreadInputs({
     environmentId: props.environmentId,
@@ -596,14 +595,14 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   // frames on the UI thread through onComposerLayout; this is only an estimate, so committing
   // each frame would re-render the whole screen for the length of the animation.
   const composerHeightSettle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleComposerHeightChange = useCallback((height: number) => {
+  const handleComposerHeightChange = (height: number) => {
     setComposerHeight((current) => current ?? height);
     if (composerHeightSettle.current !== null) clearTimeout(composerHeightSettle.current);
     composerHeightSettle.current = setTimeout(() => {
       composerHeightSettle.current = null;
       setComposerHeight(height);
     }, COMPOSER_HEIGHT_SETTLE_MS);
-  }, []);
+  };
   const [anchorMessageId, setAnchorMessageId] = useState<MessageId | null>(null);
   const feedRef = useRef<ThreadFeedHandle>(null);
   const [endFollowEnabled, setEndFollowEnabled] = useState(true);
@@ -660,9 +659,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       return () => clearInterval(timer);
     }, []),
   );
-  const snoozed =
-    props.serverConfig?.environment.capabilities.threadSnooze === true &&
-    effectiveSnoozed(props.selectedThread, { now: lifecycleNow });
+  const configLoaded = props.serverConfig !== null;
+  const snoozed = configLoaded && effectiveSnoozed(props.selectedThread, { now: lifecycleNow });
   const snoozedUntil = props.selectedThread.snoozedUntil;
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- arms a timer that refreshes the lifecycle clock when the thread's snooze expires
   useEffect(() => {
@@ -676,13 +674,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   }, [snoozed, snoozedUntil, lifecycleNow]);
   // Lecturn: the settled card above the composer owns Unsettle, so the floating status only
   // reports snoozed and woke threads; settlement still decides whether a wake is unseen.
-  const lifecycleSettled =
-    props.serverConfig?.environment.capabilities.threadSettlement === true &&
-    props.selectedThread.settledOverride === "settled";
-  const wokeAt =
-    props.serverConfig?.environment.capabilities.threadSnooze === true
-      ? threadWokeAt(props.selectedThread, { now: lifecycleNow })
-      : null;
+  const lifecycleSettled = configLoaded && props.selectedThread.settledOverride === "settled";
+  const wokeAt = configLoaded ? threadWokeAt(props.selectedThread, { now: lifecycleNow }) : null;
   const woke = isThreadWokeUnseen({
     wokeAt,
     settled: lifecycleSettled,
@@ -979,9 +972,9 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   // Android lays the screen out below its opaque header and reports a zero
   // header height, so the window height overstates the room by the header.
   const [screenHeight, setScreenHeight] = useState<number | null>(null);
-  const handleScreenLayout = useCallback((event: LayoutChangeEvent) => {
+  const handleScreenLayout = (event: LayoutChangeEvent) => {
     setScreenHeight(event.nativeEvent.layout.height);
-  }, []);
+  };
   const screenAreaHeight = screenHeight ?? windowHeight;
   // The question card reads the keyboard frame on the UI thread, in the same frame the sticky
   // view translates, so it gets the full height while the keyboard is closed and never crosses
@@ -1000,21 +993,18 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   // so typing in the composer does not re-render the screen.
   const usageLimitsOpen = usageLimitsReport !== null && activeUserInputRequestId === null;
   const [usageLimitsLayout, setUsageLimitsLayout] = useState({ overlay: 0, panel: 0 });
-  const handleComposerOverlayLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      onComposerLayout(event);
-      if (!usageLimitsOpen) return;
-      const overlay = event.nativeEvent.layout.height;
-      setUsageLimitsLayout((current) =>
-        current.overlay === overlay ? current : { ...current, overlay },
-      );
-    },
-    [onComposerLayout, usageLimitsOpen],
-  );
-  const handleUsageLimitsLayout = useCallback((event: LayoutChangeEvent) => {
+  const handleComposerOverlayLayout = (event: LayoutChangeEvent) => {
+    onComposerLayout(event);
+    if (!usageLimitsOpen) return;
+    const overlay = event.nativeEvent.layout.height;
+    setUsageLimitsLayout((current) =>
+      current.overlay === overlay ? current : { ...current, overlay },
+    );
+  };
+  const handleUsageLimitsLayout = (event: LayoutChangeEvent) => {
     const panel = event.nativeEvent.layout.height;
     setUsageLimitsLayout((current) => (current.panel === panel ? current : { ...current, panel }));
-  }, []);
+  };
   const overlayBesideUsageLimits =
     usageLimitsLayout.overlay > 0
       ? usageLimitsLayout.overlay - usageLimitsLayout.panel
@@ -1453,7 +1443,6 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
               planSaveEnabled={allows("files")}
               turnDiffEnabled={allows("git")}
               contentPresentation={props.contentPresentation}
-              agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}
               latestRun={props.activityRun}
               importedFrom={props.selectedThread.importedFrom ?? null}

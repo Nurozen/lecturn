@@ -6,9 +6,7 @@ import {
   deriveThreadRelationshipGraph,
   immediateThreadRelationships,
   orderWebThreadLineageRows,
-  relatedThreadIds,
   resolveMergeBackTargetThreadId,
-  walkThreadRelationships,
   threadRelationshipRowStatus,
 } from "./threadRelationships.ts";
 
@@ -60,10 +58,12 @@ describe("thread relationships", () => {
       projection: null,
       capabilities: { squire: true },
     });
-    expect(relatedThreadIds(hidden, parent)).toEqual([]);
+    expect(immediateThreadRelationships(hidden, parent)).toEqual([]);
     expect(hidden.nodes.has(probe)).toBe(false);
     const listed = deriveThreadRelationshipGraph({ threads, projection: null });
-    expect(relatedThreadIds(listed, parent)).toEqual([probe]);
+    expect(immediateThreadRelationships(listed, parent).map(({ threadId }) => threadId)).toEqual([
+      probe,
+    ]);
   });
 
   it("does not label a missing parent with its child's running status", () => {
@@ -135,14 +135,6 @@ describe("thread relationships", () => {
     });
 
     expect(graph.nodes.get(missing)?.missing).toBe(true);
-    expect(relatedThreadIds(graph, root)).toEqual([child]);
-    expect(relatedThreadIds(graph, child)).toEqual([root, missing]);
-    expect(
-      walkThreadRelationships(graph, root).map(({ threadId, depth }) => [threadId, depth]),
-    ).toEqual([
-      [child, 1],
-      [missing, 2],
-    ]);
     expect(immediateThreadRelationships(graph, root).map(({ threadId }) => threadId)).toEqual([
       child,
     ]);

@@ -246,7 +246,7 @@ import {
   useThreadJumpHintsVisible,
   ThreadStatusPill,
 } from "./Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
+import { sortThreads } from "@lecturn/client-runtime/state/thread-sort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { AppsModeSwitch } from "./apps/AppsModeSwitch";
 import {
@@ -267,7 +267,7 @@ import {
   deriveProjectGroupingOverrideKey,
   getProjectOrderKey,
   selectProjectGroupingSettings,
-} from "../logicalProject";
+} from "@lecturn/client-runtime/state/project-grouping";
 import type { SidebarThreadSummary } from "../types";
 import {
   buildPhysicalToLogicalProjectKeyMap,

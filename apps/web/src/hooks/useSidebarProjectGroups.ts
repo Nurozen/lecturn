@@ -1,6 +1,9 @@
 import { isHiddenSquireThread } from "@lecturn/client-runtime/state/thread-shell";
 import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
-import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
+import {
+  getProjectOrderKey,
+  selectProjectGroupingSettings,
+} from "@lecturn/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import {

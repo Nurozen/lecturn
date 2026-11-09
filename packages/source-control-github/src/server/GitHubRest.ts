@@ -1,3 +1,4 @@
+import { normalizeHost } from "@lecturn/source-control-core/server/pullRequestUtils";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -20,7 +21,7 @@ import * as SourceControlRateLimit from "@lecturn/source-control-core/server/Sou
 
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
-const { gitHubApiUrls, normalizeHost } = GitHubRequestPolicy;
+const { gitHubApiUrls } = GitHubRequestPolicy;
 type GitHubApiError = GitHubRequestPolicy.GitHubApiError;
 
 export interface GitHubRestResponse {

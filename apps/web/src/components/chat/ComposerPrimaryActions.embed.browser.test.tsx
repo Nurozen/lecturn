@@ -48,7 +48,6 @@ it("paints the running turn's stop button in the host's --destructive", async ()
       promptHasText={false}
       isSendBusy={false}
       sendDisabledReason={null}
-      isConnecting={false}
       isEnvironmentUnavailable={false}
       isPreparingWorktree={false}
       hasSendableContent={false}
@@ -87,7 +86,6 @@ async function renderHeldTurn(width: number, embedded: boolean) {
       promptHasText={false}
       isSendBusy={false}
       sendDisabledReason="Approve or decline the app tool above to send."
-      isConnecting={false}
       isEnvironmentUnavailable={false}
       isPreparingWorktree={false}
       hasSendableContent={false}

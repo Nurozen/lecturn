@@ -23,7 +23,6 @@ import * as Stream from "effect/Stream";
 import * as NodePath from "node:path";
 import { rpcInitialItems } from "./rpcInitialItems.ts";
 import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
-import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
   AcpRegistryOperationError,
   CommandId,
@@ -42,7 +41,6 @@ import {
   type DiscoveredLocalServerList,
   type EditorId,
   type FileManagerRevealKind,
-  type OrchestrationClientOrigin,
   type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -136,11 +134,9 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
 import {
-  archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
   bufferShellLiveStream,
   coalesceShellApplicationEvents,
-  coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
   loadOlderSettledThreadsPage,
@@ -156,7 +152,6 @@ import {
   type ShellApplicationEvent,
 } from "./orchestration-v2/ShellStream.ts";
 import { ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION } from "./orchestration-v2/ProjectionStore.ts";
-import { bufferLiveStream } from "./orchestration-v2/LiveStreamBudget.ts";
 import { coalesceThreadLiveStream } from "./orchestration-v2/ThreadLiveEventCoalescer.ts";
 import {
   buildBoundedThreadStreamSnapshot,
@@ -198,7 +193,6 @@ import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
-import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
@@ -797,23 +791,6 @@ function shouldUseBoundedThreadSnapshot(input: {
   return input.acceptBoundedSnapshot === true;
 }
 
-function readClientConnectionOrigin(
-  request: HttpServerRequest.HttpServerRequest,
-): OrchestrationClientOrigin {
-  const url = HttpServerRequest.toURL(request);
-  if (Option.isNone(url)) {
-    return {};
-  }
-  const surface = url.value.searchParams.get("clientSurface");
-  const appVersion = url.value.searchParams.get("clientAppVersion")?.trim() ?? "";
-  return {
-    ...(isClientSurface(surface) ? { surface } : {}),
-    ...(appVersion !== "" && appVersion.length <= MAX_CLIENT_APP_VERSION_LENGTH
-      ? { appVersion }
-      : {}),
-  };
-}
-
 // Keep telemetry per socket; several client types can connect simultaneously.
 function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) {
   const url = HttpServerRequest.toURL(request);
@@ -1397,9 +1374,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
 
 const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   currentSession: EnvironmentAuth.AuthenticatedSession,
-  clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
-  previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) {
   const currentSessionId = currentSession.sessionId;
@@ -2084,40 +2059,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     return { snapshotSequence, threads: threads.threads };
   });
 
-  const subscribeOrchestrationV2ArchivedShell = Effect.fn(
-    "ws.orchestrationV2.subscribeArchivedShell",
-  )(function* () {
-    const snapshot = yield* getOrchestrationV2ArchivedShellSnapshot;
-    const live = threadManagement
-      .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
-      .pipe(
-        Stream.groupedWithin(512, Duration.millis(50)),
-        Stream.mapEffect((events) =>
-          Effect.forEach(
-            coalesceStoredThreadEvents(Array.from(events)),
-            (stored) =>
-              threadManagement
-                .getThreadShell(stored.event.threadId)
-                .pipe(
-                  Effect.map((shell) => archivedShellStreamItemFromThreadShell({ stored, shell })),
-                ),
-            { concurrency: 8 },
-          ),
-        ),
-        Stream.flatMap(Stream.fromIterable),
-        Stream.filterMap((item) => (item === null ? Result.failVoid : Result.succeed(item))),
-        (stream) => bufferLiveStream(stream),
-        Stream.mapError(
-          (cause) =>
-            new OrchestrationV2GetShellSnapshotError({
-              message: "Failed while streaming archived threads",
-              cause,
-            }),
-        ),
-      );
-    return Stream.concat(rpcInitialItems([{ kind: "snapshot" as const, snapshot }]), live);
-  });
-
   const mutateProject = Effect.fn("ws.projects.mutate")(function* (mutation: ProjectMutation) {
     // Lecturn: a delete carries the client's Stave teardown choices; the
     // project service binds the space identity of the row it deletes.
@@ -2490,8 +2431,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
             ),
         ),
       ),
-    [ORCHESTRATION_V2_WS_METHODS.subscribeArchivedShell]: (_input) =>
-      Stream.unwrap(subscribeOrchestrationV2ArchivedShell()),
     [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
       Stream.unwrap(
         subscribeOrchestrationV2Shell(
@@ -2513,8 +2452,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           Effect.as(commandOutputHub.subscribe(input)),
         ),
       ),
-    [WS_METHODS.scheduledTasksList]: (_input) =>
-      scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
     [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
       scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
     [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),
@@ -2841,7 +2778,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.chatGptImportProfile]: (input) => providerAuth.importProfile(input),
     [WS_METHODS.chatGptHandoffSubscribe]: (input) =>
       subscribeChatGptHandoff(input, currentSessionId),
-    [WS_METHODS.codexAuthCallbackSubscribe]: (input) => subscribeCodexAuthCallback(input),
     [WS_METHODS.providerAuthCancel]: (input) => providerAuth.cancel(input, currentSessionId),
     [WS_METHODS.providerAuthLogout]: (input) => providerAuth.logout(input),
     [WS_METHODS.providerAuthSubscribe]: (input) => providerAuth.subscribe(input, currentSessionId),
@@ -2877,8 +2813,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
         Effect.andThen(peerLinkRequests.answer(input)),
       ),
-    [WS_METHODS.serverGetSettings]: (_input) =>
-      serverSettings.getSettings.pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
     [WS_METHODS.serverUpdateSettings]:
       /* Request instrumentation already owns the span; keep this helper in that context. */
       Effect.fnUntraced(function* ({ patch, providerInstanceMutation }) {
@@ -2922,9 +2856,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           ),
         ),
       ),
-    [WS_METHODS.serverReportHostPowerState]: (input) =>
-      backgroundPolicy.reportHostPowerState(input),
-    [WS_METHODS.serverGetBackgroundPolicy]: (_input) => backgroundPolicy.snapshot,
     [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
     [WS_METHODS.cloudInstallRelayClient]: (_input) =>
       Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>
@@ -3393,7 +3324,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     [WS_METHODS.terminalWrite]: (input) => terminalManager.write(input),
     [WS_METHODS.terminalResize]: (input) => terminalManager.resize(input),
     [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
-    [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
     [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
     [WS_METHODS.terminalObserve]: (input) =>
       terminalOutputStream(
@@ -3402,8 +3332,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         (listener, registerCleanup) =>
           terminalManager.resyncStream(input, listener, registerCleanup),
       ),
-    [WS_METHODS.subscribeTerminalEvents]: (_input) =>
-      terminalOutputStream(terminalManager.subscribe),
     [WS_METHODS.subscribeTerminalMetadata]: (_input) =>
       Stream.callback<TerminalMetadataStreamEvent>((queue) =>
         Effect.acquireRelease(
@@ -3412,10 +3340,8 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         ),
       ),
     [WS_METHODS.previewOpen]: (input) => previewManager.open(input),
-    [WS_METHODS.previewNavigate]: (input) => previewManager.navigate(input),
     [WS_METHODS.previewResize]: (input) => previewManager.resize(input),
     [WS_METHODS.previewAdjust]: (input) => previewManager.adjust(input),
-    [WS_METHODS.previewRefresh]: (input) => previewManager.refresh(input),
     [WS_METHODS.previewClose]: (input) => previewManager.close(input),
     [WS_METHODS.previewList]: (input) => previewManager.list(input),
     [WS_METHODS.previewClearProfile]: (input) => serverBrowser.clearProfile(input.profileId),
@@ -3635,12 +3561,6 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           );
         }),
       ),
-    [WS_METHODS.subscribeBackgroundPolicy]: (_input) =>
-      Stream.unwrap(
-        Effect.map(backgroundPolicy.subscribe, ({ latest, changes }) =>
-          Stream.concat(Stream.make(latest), changes),
-        ),
-      ),
     [WS_METHODS.subscribeResourceTelemetry]: (_input) =>
       Stream.unwrap(
         Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
@@ -3749,19 +3669,11 @@ export const WS_RPC_HANDLER_GROUPS = {
 
 export const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
-  clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
-  previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) =>
   Layer.unwrap(
-    makeWsRpcHandlers(
-      currentSession,
-      clientOrigin,
-      clientAnalyticsProps,
-      previewAutomationBroker,
-      serverBrowser,
-    ).pipe(
+    makeWsRpcHandlers(currentSession, clientAnalyticsProps, serverBrowser).pipe(
       Effect.map((handlers) => {
         const coreHandlers: Omit<
           typeof handlers,
@@ -3792,7 +3704,6 @@ export const WS_RPC_SERVER_OPTIONS = {
 
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
-    const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
@@ -3863,9 +3774,7 @@ export const layer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
-        const clientOrigin = readClientConnectionOrigin(request);
         const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* sessions.recordClientConnection(session.sessionId, clientOrigin);
         yield* analytics.recordOwners(readClientOwners(request), "client");
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
@@ -3896,13 +3805,7 @@ export const layer = Layer.unwrap(
           return httpEffect;
         }).pipe(
           Effect.provide(
-            layerWsRpc(
-              session,
-              clientOrigin,
-              clientAnalyticsProps,
-              previewAutomationBroker,
-              serverBrowser,
-            ).pipe(
+            layerWsRpc(session, clientAnalyticsProps, serverBrowser).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),

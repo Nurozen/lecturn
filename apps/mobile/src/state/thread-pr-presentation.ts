@@ -1,7 +1,6 @@
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { resolveThreadPullRequestRef } from "@lecturn/client-runtime/state/threadPullRequests";
 import type {
-  ExecutionEnvironmentCapabilities,
   OrchestrationProjectShell,
   ThreadPullRequestLink,
   VcsStatusResult,
@@ -125,12 +124,10 @@ export function presentThreadLinkedPullRequests(
 /** Branch fallback and legacy references still require one editable Stave checkout. */
 export function resolveThreadPrSource(
   thread: Pick<EnvironmentThreadShell, "pullRequests" | "linkedPullRequest" | "branchPullRequest">,
-  capabilities:
-    | Pick<ExecutionEnvironmentCapabilities, "threadPullRequests" | "threadPullRequestLinking">
-    | undefined,
+  /** False until the server config loads; the stored references serve until then. */
+  supportsSnapshots: boolean,
   project: Pick<OrchestrationProjectShell, "workspaceRoot" | "stave"> | null = null,
 ) {
-  const supportsSnapshots = capabilities?.threadPullRequests === true;
   const linkedPresentation = supportsSnapshots
     ? presentThreadLinkedPullRequests(thread.pullRequests)
     : null;

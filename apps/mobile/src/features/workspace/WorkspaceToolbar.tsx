@@ -60,7 +60,7 @@ export function WorkspaceToolbar(props: {
   const edge = width < 360 ? 12 : WORKSPACE_TOOLBAR.edge;
   const gap = width < 360 ? 6 : WORKSPACE_TOOLBAR.gap;
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
-  const focusSearch = useCallback(() => {
+  const focusSearch = () => {
     if (!workspace) return false;
     const tab = workspace.state.selectedTab;
     if (!isWorkspaceTab(tab)) return false;
@@ -68,10 +68,10 @@ export function WorkspaceToolbar(props: {
     workspace.dispatch({ type: "search" });
     setFocusRequest((request) => request + 1);
     return true;
-  }, [workspace]);
+  };
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   useFocusEffect(useCallback(() => () => Keyboard.dismiss(), []));
-  const cancelSearch = useCallback(() => {
+  const cancelSearch = () => {
     Keyboard.dismiss();
     if (workspace)
       workspace.recordScrollOffset(
@@ -79,7 +79,7 @@ export function WorkspaceToolbar(props: {
         workspace.state.tabs[workspace.state.selectedTab].searchEntryOffset,
       );
     workspace?.dispatch({ type: "cancel" });
-  }, [workspace]);
+  };
   const searchOpen =
     workspace !== null &&
     workspace.state.tabs[workspace.state.selectedTab].searchMode !== "resting";

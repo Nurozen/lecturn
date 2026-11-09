@@ -23,7 +23,7 @@ const DISMISS_AFTER_SECONDS = 5 * 60;
 // Without final content, the card freezes at stale state; dismiss it promptly.
 const CONTENTLESS_DISMISS_AFTER_SECONDS = 15;
 
-const ApnsLiveActivityEventSchema = Schema.Literals(["start", "update", "end"]);
+const ApnsLiveActivityEventSchema = Schema.Literals(["update", "end"]);
 export type ApnsLiveActivityEvent = typeof ApnsLiveActivityEventSchema.Type;
 
 const ApnsRequestKindSchema = Schema.Literals(["live-activity", "push-notification"]);
@@ -83,7 +83,6 @@ function contentState(state: RelayAgentActivityAggregateState) {
 }
 
 interface LiveActivityRequestBase {
-  readonly accountId?: string;
   readonly token: string;
   readonly nowEpochSeconds: number;
   readonly nowIso: string;
@@ -96,7 +95,7 @@ type MakeLiveActivityRequestInput =
       readonly alert?: ApnsLiveActivityAlert | null;
     })
   | (LiveActivityRequestBase & {
-      readonly event: "start" | "update";
+      readonly event: "update";
       readonly state: RelayAgentActivityAggregateState;
       readonly alert?: ApnsLiveActivityAlert | null;
     });
@@ -141,17 +140,6 @@ function makeLiveActivityRequest(input: MakeLiveActivityRequestInput): ApnsLiveA
       aps: {
         timestamp,
         event: input.event,
-        ...(input.event === "start"
-          ? {
-              "attributes-type": "LiveActivityAttributes",
-              attributes: input.accountId ? { accountId: input.accountId } : {},
-              "input-push-token": 1,
-              alert: {
-                title: state.title,
-                body: state.subtitle,
-              },
-            }
-          : {}),
         ...(input.event === "update" && input.alert ? liveActivityAlertPayload(input.alert) : {}),
         "content-state": contentState(state),
         "stale-date": timestamp + STALE_AFTER_SECONDS,

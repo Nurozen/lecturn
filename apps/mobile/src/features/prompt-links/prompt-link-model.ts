@@ -7,7 +7,7 @@ import type { PromptLinkRepository } from "@lecturn/shared/promptLinks";
 
 import { listedProjects } from "../../state/listed-entities";
 
-export const PROMPT_LINK_PARAM_KEYS = ["prompt", "repo", "pr", "provider", "model"] as const;
+const PROMPT_LINK_PARAM_KEYS = ["prompt", "repo", "pr", "provider", "model"] as const;
 
 type RouteParams = Readonly<Record<string, unknown>> | undefined;
 

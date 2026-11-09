@@ -80,7 +80,6 @@ describe("pi Lecturn MCP injection", () => {
       "--extension",
       "/tmp/cache/pi-lecturn-mcp-extension.ts",
     ]);
-    assert.isFalse(permissionOnly.hasLecturnMcp);
     assert.isUndefined(permissionOnly.env[LECTURN_MCP_URL_ENV]);
     assert.isUndefined(permissionOnly.env[LECTURN_MCP_BEARER_ENV]);
     assert.equal(permissionOnly.env[LECTURN_PI_RUNTIME_MODE_ENV], "auto-accept-edits");
@@ -118,7 +117,6 @@ describe("pi Lecturn MCP injection", () => {
       "--no-extensions",
       "--no-tools",
     ]);
-    assert.isFalse(launch.hasLecturnMcp);
     assert.deepInclude(resolvePiLaunchArgs("--mode text"), {
       ok: false,
       message: "Pi launch argument '--mode' is controlled by Lecturn and cannot be overridden.",

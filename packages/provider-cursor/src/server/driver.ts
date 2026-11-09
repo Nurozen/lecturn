@@ -174,7 +174,6 @@ export const CursorDriver: ProviderDriver<
     const orchestrationAdapter = yield* makeCursorAdapterV2({
       resolveStaveMemory: yield* currentStaveMemoryResolver,
       instanceId,
-      settings: effectiveConfig,
       environment: processEnv,
       getModels: () => catalogModels,
     }).pipe(

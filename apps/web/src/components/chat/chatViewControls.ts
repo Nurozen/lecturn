@@ -45,7 +45,6 @@ export type ChatViewControl =
   | "queued-runs"
   | "contextual"
   | "fork"
-  | "rollback"
   | "edit-from-here"
   | "cite"
   | "notes"

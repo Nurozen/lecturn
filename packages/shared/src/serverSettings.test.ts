@@ -10,7 +10,7 @@ import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
 import { createModelSelection } from "./model.ts";
-import { resolveProjectScripts, projectScriptsInheritDefaults } from "./projectScripts.ts";
+import { resolveProjectScripts } from "./projectScripts.ts";
 import {
   applyServerSettingsPatch,
   fallbackTextGenerationModelSelection,
@@ -18,9 +18,8 @@ import {
   resolveModelPreferences,
   isModelSelectionProviderEnabled,
   parsePersistedServerObservabilitySettings,
-  resolveSourceControlWriterModelSelection,
-  resolveProjectAgentBrowserAccess,
   resolveProjectAutoPull,
+  resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
 
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
@@ -111,18 +110,15 @@ describe("serverSettings helpers", () => {
       defaultProjectScripts: [action],
     });
     expect(resolveProjectScripts(unfolded, existing)).toEqual(existing.scripts);
-    expect(projectScriptsInheritDefaults(unfolded, existing)).toBe(false);
     const defaults = applyServerSettingsPatch(FOLDED_SERVER_SETTINGS, {
       defaultProjectScripts: [action],
     });
     expect(resolveProjectScripts(defaults, project)).toEqual([action]);
-    expect(projectScriptsInheritDefaults(defaults, project)).toBe(true);
     expect(resolveProjectScripts(defaults, existing)).toEqual([action]);
     const disabled = applyServerSettingsPatch(defaults, {
       projectScriptOverrides: { [project.id]: [] },
     });
     expect(resolveProjectScripts(disabled, project)).toEqual([]);
-    expect(projectScriptsInheritDefaults(disabled, project)).toBe(false);
     const changedDefault = applyServerSettingsPatch(disabled, {
       defaultProjectScripts: [{ ...action, command: "npm run build" }],
     });
@@ -131,7 +127,6 @@ describe("serverSettings helpers", () => {
       projectScriptOverrides: { [project.id]: null },
     });
     expect(resolveProjectScripts(reset, existing)).toEqual(changedDefault.defaultProjectScripts);
-    expect(projectScriptsInheritDefaults(reset, existing)).toBe(true);
     expect(
       resolveProjectScripts(
         applyServerSettingsPatch(reset, { defaultProjectScripts: [] }),
@@ -212,23 +207,25 @@ describe("serverSettings helpers", () => {
       projectAutoPullOverrides: { [secondProjectId]: false },
       projectAgentBrowserAccessOverrides: { [secondProjectId]: false },
     });
-    for (const projectId of [firstProjectId, secondProjectId]) {
-      expect(resolveProjectAutoPull(secondUpdate, projectId, false)).toBe(false);
-      expect(resolveProjectAgentBrowserAccess(secondUpdate, projectId)).toBe(false);
-    }
+    expect(secondUpdate.projectAutoPullOverrides).toEqual({
+      [firstProjectId]: false,
+      [secondProjectId]: false,
+    });
+    expect(secondUpdate.projectAgentBrowserAccessOverrides).toEqual({
+      [firstProjectId]: false,
+      [secondProjectId]: false,
+    });
 
     const reset = applyServerSettingsPatch(secondUpdate, {
       projectAutoPullOverrides: { [firstProjectId]: null },
       projectAgentBrowserAccessOverrides: { [firstProjectId]: null },
     });
-    expect(resolveProjectAutoPull(reset, firstProjectId, false)).toBe(true);
-    expect(resolveProjectAgentBrowserAccess(reset, firstProjectId)).toBe(true);
-    expect(resolveProjectAutoPull(reset, secondProjectId, false)).toBe(false);
-    expect(resolveProjectAgentBrowserAccess(reset, secondProjectId)).toBe(false);
     expect(reset.projectAutoPullOverrides[firstProjectId]).toBeUndefined();
     expect(reset.projectAgentBrowserAccessOverrides[firstProjectId]).toBeUndefined();
-    expect(resolveProjectAutoPull(secondUpdate, firstProjectId, false)).toBe(false);
-    expect(resolveProjectAgentBrowserAccess(secondUpdate, firstProjectId)).toBe(false);
+    expect(reset.projectAutoPullOverrides[secondProjectId]).toBe(false);
+    expect(reset.projectAgentBrowserAccessOverrides[secondProjectId]).toBe(false);
+    expect(secondUpdate.projectAutoPullOverrides[firstProjectId]).toBe(false);
+    expect(secondUpdate.projectAgentBrowserAccessOverrides[firstProjectId]).toBe(false);
   });
 
   it("parses lenient persisted settings JSON and trims observability URLs", () => {

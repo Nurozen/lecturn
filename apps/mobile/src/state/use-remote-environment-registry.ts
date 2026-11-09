@@ -3,7 +3,6 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useCallback } from "react";
 import { runAtomCommand } from "@lecturn/client-runtime/state/runtime";
 
 import { useConnectionController } from "../features/connection/useConnectionController";
@@ -149,74 +148,60 @@ export function useRemoteConnections() {
   const connectionPairingUrl = useAtomValue(connectionPairingUrlAtom);
   const { connectedEnvironments, connectionError, connectionState } = useRemoteConnectionStatus();
 
-  const onChangeConnectionPairingUrl = useCallback((pairingUrl: string) => {
+  const onChangeConnectionPairingUrl = (pairingUrl: string) => {
     appAtomRegistry.set(connectionPairingUrlAtom, pairingUrl);
-  }, []);
+  };
 
-  const onConnectPress = useCallback(
-    (pairingUrl?: string, expectedEnvironmentId?: EnvironmentId) =>
-      pairEnvironment(pairingUrl ?? connectionPairingUrl, expectedEnvironmentId),
-    [connectionPairingUrl],
-  );
+  const onConnectPress = (pairingUrl?: string, expectedEnvironmentId?: EnvironmentId) =>
+    pairEnvironment(pairingUrl ?? connectionPairingUrl, expectedEnvironmentId);
 
-  const onReconnectEnvironment = useCallback(
-    (environmentId: EnvironmentId) => controller.retryEnvironment(environmentId),
-    [controller],
-  );
-  const onSetEnvironmentEnabled = useCallback(
-    (environmentId: EnvironmentId, enabled: boolean) =>
-      controller.setEnvironmentEnabled(environmentId, enabled),
-    [controller],
-  );
-  const onUpdateEnvironment = useCallback(
-    (
-      environmentId: EnvironmentId,
-      updates: { readonly label: string; readonly displayUrl: string },
-    ) => controller.updateEnvironment(environmentId, updates),
-    [controller],
-  );
+  const onReconnectEnvironment = (environmentId: EnvironmentId) =>
+    controller.retryEnvironment(environmentId);
+  const onSetEnvironmentEnabled = (environmentId: EnvironmentId, enabled: boolean) =>
+    controller.setEnvironmentEnabled(environmentId, enabled);
+  const onUpdateEnvironment = (
+    environmentId: EnvironmentId,
+    updates: { readonly label: string; readonly displayUrl: string },
+  ) => controller.updateEnvironment(environmentId, updates);
 
-  const onRemoveEnvironmentPress = useCallback(
-    (environmentId: EnvironmentId) => {
-      const environment = connectedEnvironments.find(
-        (candidate) => candidate.environmentId === environmentId,
-      );
-      if (!environment) {
-        return;
-      }
-      const remove = {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          void controller.removeEnvironment(environmentId);
-        },
-      } as const;
-      // Removing a Lecturn Connect environment here leaves its account
-      // registration and host space, so point to where it can be deregistered.
-      if (environment.isRelayManaged) {
-        Dialog.alert(
-          "Remove from this device?",
-          `Forget ${environment.environmentLabel} and its cached threads on this device.\n\nIt stays on your Lecturn Connect account and keeps its host space. Deregister it under Settings → Manage account → Lecturn Connect to free it.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Open Settings",
-              // From the Connections sheet, Settings would otherwise open under it.
-              onPress: () => openWorkspaceTab("settings", { closeSheets: true }),
-            },
-            remove,
-          ],
-        );
-        return;
-      }
+  const onRemoveEnvironmentPress = (environmentId: EnvironmentId) => {
+    const environment = connectedEnvironments.find(
+      (candidate) => candidate.environmentId === environmentId,
+    );
+    if (!environment) {
+      return;
+    }
+    const remove = {
+      text: "Remove",
+      style: "destructive",
+      onPress: () => {
+        void controller.removeEnvironment(environmentId);
+      },
+    } as const;
+    // Removing a Lecturn Connect environment here leaves its account
+    // registration and host space, so point to where it can be deregistered.
+    if (environment.isRelayManaged) {
       Dialog.alert(
         "Remove from this device?",
-        `Forget ${environment.environmentLabel} and its cached threads on this device. Switch it off instead to keep it saved.`,
-        [{ text: "Cancel", style: "cancel" }, remove],
+        `Forget ${environment.environmentLabel} and its cached threads on this device.\n\nIt stays on your Lecturn Connect account and keeps its host space. Deregister it under Settings → Manage account → Lecturn Connect to free it.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Settings",
+            // From the Connections sheet, Settings would otherwise open under it.
+            onPress: () => openWorkspaceTab("settings", { closeSheets: true }),
+          },
+          remove,
+        ],
       );
-    },
-    [connectedEnvironments, controller, openWorkspaceTab],
-  );
+      return;
+    }
+    Dialog.alert(
+      "Remove from this device?",
+      `Forget ${environment.environmentLabel} and its cached threads on this device. Switch it off instead to keep it saved.`,
+      [{ text: "Cancel", style: "cancel" }, remove],
+    );
+  };
 
   return {
     connectionPairingUrl,

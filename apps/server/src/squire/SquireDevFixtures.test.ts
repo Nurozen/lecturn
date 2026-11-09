@@ -911,9 +911,7 @@ describe("SquireDevFixtures", () => {
         while ((yield* runOf)?.status !== "waiting") yield* nextEvent;
         const runId = (yield* runOf)!.id;
         // The live effect daemon holds the capture, so the fixture's own drain finds nothing.
-        const held = Option.getOrThrow(
-          yield* outbox.claimNext({ workerId: "daemon", leaseDurationMs: 3_600_000 }),
-        );
+        const held = Option.getOrThrow(yield* outbox.claimNext({ workerId: "daemon" }));
         assert.strictEqual(held.id, `effect:checkpoint.capture:${runId}`);
 
         const injecting = yield* service.inject(event).pipe(Effect.forkChild);

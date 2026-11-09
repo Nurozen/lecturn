@@ -15,11 +15,10 @@ const EMPTY_CLONE_ATOM = Atom.make<ProjectCloneSnapshot | null>(null).pipe(
 
 export const environmentProjectClonesAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make((get): ReadonlyArray<ProjectCloneSnapshot> => {
-    const supported =
-      get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
-        .projectCloneTracking === true;
     // The clone stream spans every project, so an embedded chat is refused it.
-    if (!supported || isEmbedLocation()) return EMPTY_CLONES;
+    if (!get(environmentServerConfigsAtom).has(environmentId) || isEmbedLocation()) {
+      return EMPTY_CLONES;
+    }
     const result = get(sourceControlEnvironment.projectClones({ environmentId, input: {} }));
     return Option.getOrElse(AsyncResult.value(result), () => EMPTY_CLONES);
   }).pipe(Atom.withLabel(`web-project-clones:${environmentId}`)),

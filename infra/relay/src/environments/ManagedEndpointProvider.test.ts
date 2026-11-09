@@ -61,7 +61,6 @@ interface AllocationCall {
     | "markReady"
     | "claimRelease"
     | "claimDeprovision"
-    | "remove"
     | "removeClaimed";
   readonly input: unknown;
 }
@@ -325,11 +324,6 @@ function makeAllocations(calls: AllocationCall[] = []) {
         }
         mutate(allocationKey(input), (current) => current);
         return allocations.get(allocationKey(input))?.generation ?? null;
-      }),
-    remove: (input) =>
-      Effect.sync(() => {
-        calls.push({ operation: "remove", input });
-        allocations.delete(allocationKey(input));
       }),
     removeClaimed: (input) =>
       Effect.sync(() => {
@@ -1025,7 +1019,6 @@ describe("ManagedEndpointProvider", () => {
         "createRecord",
         "updateRecord",
       ]);
-      expect(allocationCalls.map((call) => call.operation)).not.toContain("remove");
       const claims = allocationCalls.filter((call) => call.operation === "claimRelease");
       expect(claims.map((call) => (call.input as { markReleased?: boolean }).markReleased)).toEqual(
         [undefined, undefined],

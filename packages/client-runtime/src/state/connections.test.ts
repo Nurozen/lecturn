@@ -107,7 +107,6 @@ function makeCatalog(initialTargets: ReadonlyArray<ConnectionTarget>) {
         Layer.succeed(ConnectionWakeups.ConnectionWakeups, { changes: Stream.never }),
         Layer.succeed(ConnectionDriver.ConnectionDriver, {
           connect: () => Effect.never,
-          checkRoute: () => Effect.never,
           preflight: () => Effect.succeed(false),
           checkHost: () => Effect.succeed<ConnectionDriver.RouteCheck>("unchecked"),
         }),

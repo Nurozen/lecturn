@@ -167,19 +167,14 @@ function harness(options: { readonly concurrent: boolean }) {
       updateDevice(input.deviceId, {
         last_aggregate_json: input.aggregate === null ? null : encodeJson(input.aggregate),
         last_live_activity_delivery_at: input.deliveredAt,
-        // As the store does: a start or an end retires the update token.
-        ...(input.kind === "live_activity_start" || input.kind === "live_activity_end"
-          ? { activity_push_token: null }
-          : {}),
+        // As the store does: an end retires the update token.
+        ...(input.kind === "live_activity_end" ? { activity_push_token: null } : {}),
         ...(input.kind === "live_activity_end" ? { ended_at: input.deliveredAt } : {}),
       }),
     withPushNotificationLock: (target, use) =>
       Effect.suspend(() => use(devices.get(target.device_id) ?? target)),
     markPushNotified: (input) =>
       updateDevice(input.deviceId, { notified_push_events_json: encodeJson(input.events) }),
-    markStartQueued: (input) =>
-      updateDevice(input.deviceId, { remote_start_queued_at: input.queuedAt }),
-    clearStartQueued: (input) => updateDevice(input.deviceId, { remote_start_queued_at: null }),
     invalidateDeliveryToken: () => Effect.void,
   });
 

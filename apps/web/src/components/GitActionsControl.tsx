@@ -77,16 +77,7 @@ import {
 } from "~/components/ui/dialog";
 import { Group, GroupSeparator } from "~/components/ui/group";
 import { Input } from "~/components/ui/input";
-import {
-  Menu,
-  MenuItem,
-  MenuItemLabel,
-  MenuPopup,
-  MenuSub,
-  MenuSubTrigger,
-  MenuSubPopup,
-  MenuTrigger,
-} from "~/components/ui/menu";
+import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
@@ -99,7 +90,7 @@ import {
   useSourceControlPublishRepositoryAction,
   useVcsInitAction,
   useVcsPullAction,
-} from "~/lib/sourceControlActions";
+} from "../state/sourceControlActions";
 import { useThreadProjection, useQuietThreadShell } from "~/state/entities";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
@@ -125,13 +116,12 @@ import { useOpenLink } from "~/browser/useOpenLink";
 import { useClientSettings } from "~/hooks/useSettings";
 
 interface GitActionsControlProps {
-  presentation?: "toolbar" | "menu";
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
   /** False for Stave Space Git rows: a repo checkout is not the thread's branch. */
   syncThreadBranch?: boolean;
-  onOpenPullRequest?: ((number: number) => void) | undefined;
+  /** Lecturn: Stave Space Git rows use the toolbar; the thread details panel is the default. */
   displayMode?: "toolbar" | "panel";
   compact?: boolean;
   onOpenChanges?: () => void;
@@ -961,11 +951,10 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
 }
 
 export default function GitActionsControl({
-  presentation = "toolbar",
   gitCwd,
   activeThreadRef,
   draftId,
-  displayMode = "toolbar",
+  displayMode = "panel",
   compact = false,
   onOpenChanges,
   syncThreadBranch = true,
@@ -1539,17 +1528,6 @@ export default function GitActionsControl({
           isBusy: isGitActionRunning,
           hasPrimaryRemote,
         });
-        if (item.disabled && disabledReason && presentation === "menu") {
-          return (
-            <div key={`${item.id}-${item.label}`}>
-              <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-                <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-                <MenuItemLabel>{item.label}</MenuItemLabel>
-              </MenuItem>
-              <p className="max-w-64 px-2 pb-2 text-xs text-muted-foreground">{disabledReason}</p>
-            </div>
-          );
-        }
         if (item.disabled && disabledReason) {
           return (
             <Popover key={`${item.id}-${item.label}`}>
@@ -1558,11 +1536,7 @@ export default function GitActionsControl({
                 nativeButton={false}
                 render={<span className="block w-full cursor-not-allowed" />}
               >
-                <MenuItem
-                  density={presentation === "menu" ? "touch" : "default"}
-                  className="w-full"
-                  disabled
-                >
+                <MenuItem className="w-full" disabled>
                   <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
                   <MenuItemLabel>{item.label}</MenuItemLabel>
                 </MenuItem>
@@ -1576,7 +1550,6 @@ export default function GitActionsControl({
 
         return (
           <MenuItem
-            density={presentation === "menu" ? "touch" : "default"}
             key={`${item.id}-${item.label}`}
             disabled={!canWriteSourceControl || item.disabled}
             onClick={() => {
@@ -1590,7 +1563,6 @@ export default function GitActionsControl({
       })}
       {canPublishRepository ? (
         <MenuItem
-          density={presentation === "menu" ? "touch" : "default"}
           disabled={isGitActionRunning}
           onClick={() => {
             setIsPublishDialogOpen(true);
@@ -1621,53 +1593,7 @@ export default function GitActionsControl({
 
   return (
     <>
-      {presentation === "menu" ? (
-        !isRepo ? (
-          <MenuItem
-            density={presentation === "menu" ? "touch" : "default"}
-
-            disabled={initAction.isPending}
-            onClick={initializeGit}
-          >
-            <GitBranchPlusIcon className="size-4" />
-            <MenuItemLabel>
-              {initAction.isPending ? "Initializing..." : "Initialize Git"}
-            </MenuItemLabel>
-          </MenuItem>
-        ) : (
-          <>
-            <MenuItem
-              density={presentation === "menu" ? "touch" : "default"}
-
-              disabled={isGitActionRunning || quickAction.disabled || !!quickActionDisabledReason}
-              onClick={runQuickAction}
-            >
-              <GitQuickActionIcon
-                className="size-4"
-                quickAction={quickAction}
-                SourceControlIcon={SourceControlIcon}
-              />
-              <MenuItemLabel>{quickAction.label}</MenuItemLabel>
-            </MenuItem>
-            {quickActionDisabledReason && (
-              <p className="max-w-64 px-2 py-1.5 text-xs text-warning">
-                {quickActionDisabledReason}
-              </p>
-            )}
-            <MenuSub
-              onOpenChange={(open) => {
-                if (open) requestVcsStatusRefresh(refreshVcsStatus, activeEnvironmentId, gitCwd);
-              }}
-            >
-              <MenuSubTrigger density="touch" disabled={isGitActionRunning}>
-                <SourceControlIcon className="size-4" />
-                <MenuItemLabel>Git actions</MenuItemLabel>
-              </MenuSubTrigger>
-              <MenuSubPopup>{gitItems}</MenuSubPopup>
-            </MenuSub>
-          </>
-        )
-      ) : !isRepo ? (
+      {!isRepo ? (
         <ThreadDetailsControl
           size="xs"
           variant={isPanel ? "ghost" : "outline"}

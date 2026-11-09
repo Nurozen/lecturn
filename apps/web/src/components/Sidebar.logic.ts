@@ -21,17 +21,17 @@ import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@lecturn/sh
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@lecturn/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@lecturn/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
-import { planPinnedReorder } from "@lecturn/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
 } from "@lecturn/client-runtime/state/thread-settled";
 import {
   getThreadSortTimestamp,
+  planPinnedReorder,
   sortThreads,
   toSortableTimestamp,
   type ThreadSortInput,
-} from "../lib/threadSort";
+} from "@lecturn/client-runtime/state/thread-sort";
 import type { SidebarThreadSummary, Thread } from "../types";
 import { normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
@@ -218,7 +218,7 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
   return section;
 }
 
-export type SidebarDropTarget = {
+type SidebarDropTarget = {
   readonly section: "pinned" | "active" | "settled";
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];
@@ -485,7 +485,7 @@ type LogicalSidebarProject = SidebarProject & {
   }[];
 };
 
-export type ThreadTraversalDirection = "previous" | "next";
+type ThreadTraversalDirection = "previous" | "next";
 
 /** Exclude only successful deletions from shared-worktree checks. */
 export async function deleteSelectedThreadEntries<
@@ -918,43 +918,6 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
-export type SidebarV2TopStatusKind =
-  | "approval"
-  | "done"
-  | "failed"
-  | "limited"
-  | "input"
-  | "request"
-  | "waiting"
-  | "woke"
-  | "working";
-
-export function resolveSidebarV2TopStatus(input: {
-  readonly status: SidebarThreadStatus;
-  readonly isUnread: boolean;
-  readonly isWoke: boolean;
-}): SidebarV2TopStatusKind | null {
-  if (input.status === "working") {
-    return "working";
-  }
-  if (input.status === "waiting") {
-    return "waiting";
-  }
-  if (input.status === "approval") {
-    return "approval";
-  }
-  if (input.status === "input" || input.status === "request") {
-    return input.status;
-  }
-  if (input.status === "failed" || input.status === "limited") {
-    return input.status;
-  }
-  if (input.isWoke) {
-    return "woke";
-  }
-  return input.isUnread ? "done" : null;
-}
-
 export function firstValidTimestampMs(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): number {
@@ -968,7 +931,6 @@ export function firstValidTimestampMs(
 
 export { sortActiveThreadsByOrderKey as sortThreadsForSidebar } from "@lecturn/client-runtime/state/thread-sort";
 export {
-  isThreadWorking as isSidebarThreadWorking,
   sortInboxThreadsByReturn,
   sortWorkingThreadsBySend,
 } from "@lecturn/client-runtime/state/thread-inbox";
@@ -1037,12 +999,12 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
   return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
 }
 
-export interface SidebarProjectScopeMenuState {
+interface SidebarProjectScopeMenuState {
   readonly open: boolean;
   readonly query: string;
 }
 
-export type SidebarProjectScopeMenuAction =
+type SidebarProjectScopeMenuAction =
   | { readonly type: "query-changed"; readonly query: string }
   | { readonly type: "open-changed"; readonly open: boolean }
   | { readonly type: "project-settings-opened" };

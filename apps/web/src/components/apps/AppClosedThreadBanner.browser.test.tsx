@@ -111,7 +111,6 @@ async function renderAppThread({
   const props: TimelineProps = {
     timelineEntries,
     isWorking: false,
-    activeTurnInProgress: false,
     emptyPlaceholderInset: 0,
     listRef,
     latestRun: null,
@@ -121,7 +120,6 @@ async function renderAppThread({
     onOpenTurnDiff: () => {},
     onOpenThread: () => {},
     onForkFromRun: async () => {},
-    onRollbackCheckpoint: () => {},
     supportsConversationRollback: false,
     onRevertToTurnCount: () => {},
     isRevertingCheckpoint: false,

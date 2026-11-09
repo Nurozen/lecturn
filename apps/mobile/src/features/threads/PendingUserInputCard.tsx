@@ -2,7 +2,7 @@ import { Button } from "../../components/ui/Button";
 import { QuestionAttachments } from "./QuestionAttachments";
 import type { RuntimeRequestId } from "@lecturn/contracts";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
-import { useCallback, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   Easing,
@@ -82,29 +82,23 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   const barHeightRef = useRef(0);
   const cardHeightRef = useRef(0);
   const cardHeight = useSharedValue(0);
-  const notifyCoverage = useCallback(() => {
+  const notifyCoverage = () => {
     if (!cardCoverage) {
       return;
     }
     // The card resizes with the keyboard every frame, so easing each sample would leave the
     // feed inset and floating controls trailing it.
     cardCoverage.set(Math.max(0, cardHeightRef.current - barHeightRef.current));
-  }, [cardCoverage]);
-  const handleBarLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      barHeightRef.current = event.nativeEvent.layout.height;
-      notifyCoverage();
-    },
-    [notifyCoverage],
-  );
-  const handleCardLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      cardHeightRef.current = event.nativeEvent.layout.height;
-      cardHeight.set(event.nativeEvent.layout.height);
-      notifyCoverage();
-    },
-    [cardHeight, notifyCoverage],
-  );
+  };
+  const handleBarLayout = (event: LayoutChangeEvent) => {
+    barHeightRef.current = event.nativeEvent.layout.height;
+    notifyCoverage();
+  };
+  const handleCardLayout = (event: LayoutChangeEvent) => {
+    cardHeightRef.current = event.nativeEvent.layout.height;
+    cardHeight.set(event.nativeEvent.layout.height);
+    notifyCoverage();
+  };
   const cardProgress = props.cardProgress;
   const maxHeight = props.maxHeight;
   const cardAnimatedStyle = useAnimatedStyle(() => {

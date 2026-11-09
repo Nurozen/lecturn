@@ -3,7 +3,7 @@ import { EnvironmentId, ThreadId, TurnItemId } from "@lecturn/contracts";
 import type { EnvironmentThreadShell } from "@lecturn/client-runtime/state/shell";
 import { turnItemDetailRevision } from "@lecturn/client-runtime/work-log/item-detail";
 import { mcpAppFromToolItem } from "@lecturn/shared/toolOutput";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,13 +29,9 @@ function useConversationThreadId(
   requested: string | undefined,
 ): ThreadId {
   const shells = useThreadShells();
-  return useMemo(
-    () =>
-      requested !== undefined && descendsFrom(shells, environmentId, requested, threadId)
-        ? ThreadId.make(requested)
-        : threadId,
-    [shells, environmentId, threadId, requested],
-  );
+  return requested !== undefined && descendsFrom(shells, environmentId, requested, threadId)
+    ? ThreadId.make(requested)
+    : threadId;
 }
 
 function descendsFrom(

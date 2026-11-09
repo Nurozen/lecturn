@@ -48,33 +48,6 @@ describe("ApnsClient", () => {
     ],
   };
 
-  it.effect("requests an update push token when remotely starting a Live Activity", () =>
-    Effect.gen(function* () {
-      const apns = yield* ApnsClient.ApnsClient;
-      const request = apns.makeLiveActivityRequest({
-        event: "start",
-        accountId: "account-A",
-        token: "token",
-        state,
-        nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
-        nowIso: DateTime.formatIso(now),
-      });
-
-      expect(request.priority).toBe("10");
-      expect(request.payload).toMatchObject({
-        aps: {
-          event: "start",
-          "attributes-type": "LiveActivityAttributes",
-          attributes: { accountId: "account-A" },
-          "input-push-token": 1,
-          "content-state": {
-            name: "AgentActivity",
-          },
-        },
-      });
-    }).pipe(Effect.provide(layerTest)),
-  );
-
   it.effect("builds a high-priority alerting update payload when an alert is attached", () =>
     Effect.gen(function* () {
       const apns = yield* ApnsClient.ApnsClient;

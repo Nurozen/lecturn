@@ -1,6 +1,6 @@
 import { DEFAULT_HOSTED_APP_URL } from "@lecturn/shared/connectAuth";
 
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
+import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@lecturn/shared/remote";
 
 export interface HostedPairingRequest {
   readonly host: string;

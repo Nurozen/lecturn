@@ -134,13 +134,26 @@ export function providerContextIdForSession(driver: string, resumeCursor: unknow
     return nonempty(cursor.sessionId) ?? null;
   return null;
 }
+/** The runtime event fields compaction detection reads; local identity fields are ignored. */
+export interface ContextualCompactionEvent {
+  readonly type: string;
+  readonly eventId?: string;
+  readonly provider: string;
+  readonly threadId?: string;
+  readonly createdAt?: string;
+  readonly payload: { readonly state?: string };
+  readonly providerRefs?: { readonly providerTurnId?: string | undefined } | undefined;
+  readonly raw?:
+    | { readonly source: string; readonly method?: string | undefined; readonly payload: unknown }
+    | undefined;
+}
 /** Host persists this key atomically with advancing its logical context epoch.
  * Unknown native identity returns null: never infer compaction from token count, reconnect, local
  * event UUID, command completion, or a session-only event. Codex aliases collapse per native turn,
  * so multiple compactions in one turn count as one boundary (no duplicate evidence re-supply).
  */
 export function contextualCompactionBoundaryKey(
-  event: import("@lecturn/contracts").ProviderRuntimeEvent,
+  event: ContextualCompactionEvent,
   providerContextId: string | null,
 ): string | null {
   if (

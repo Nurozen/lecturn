@@ -236,7 +236,7 @@ describe("thread outbox attachment preparation", () => {
     });
     await harness.manager.enqueue(message);
     harness.prepareTurnAttachments.mockRejectedValueOnce(new Error("Connection lost"));
-    await expect(prepareQueuedMessageAttachments(message, true)).rejects.toThrow("Connection lost");
+    await expect(prepareQueuedMessageAttachments(message)).rejects.toThrow("Connection lost");
     expect(remainingMessages()).toEqual([message]);
     expect(harness.removePersistedFile).not.toHaveBeenCalled();
     expect(harness.removeOutboxMessage).not.toHaveBeenCalled();
@@ -262,7 +262,7 @@ describe("thread outbox attachment preparation", () => {
       expect(await input.persistUploadedReferences?.(attachments)).toBe("abandon");
       return { status: "abandoned" };
     });
-    const preparing = prepareQueuedMessageAttachments(message, true);
+    const preparing = prepareQueuedMessageAttachments(message);
     await started.promise;
     const edited = { ...message, text: "after edit" };
     await harness.manager.update(edited);

@@ -17,7 +17,7 @@ import { ArcaneBackdrop } from "../../components/ArcaneBackdrop";
 import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useNavigation, useNavigationState, type NavigationProp } from "@react-navigation/native";
-import { Fragment, use, useMemo, type ComponentProps, type ReactNode } from "react";
+import { Fragment, use, type ComponentProps, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
@@ -68,7 +68,7 @@ export function SettingsListScreen(props: {
   const workspace = useWorkspaceTabs();
   const inSidebar = props.sidebar;
   const selected = props.selected;
-  const sidebar = useMemo(() => (inSidebar ? { selected } : null), [inSidebar, selected]);
+  const sidebar = inSidebar ? { selected } : null;
   const content = hasCloudPublicConfig() ? (
     <ConfiguredSettingsRouteScreen />
   ) : (

@@ -77,7 +77,7 @@ export class Devices extends Context.Service<
 
 const isDeviceRegistrationPersistenceError = Schema.is(DeviceRegistrationPersistenceError);
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
 
   return Devices.of({

@@ -176,21 +176,15 @@ describe("Stave change request links", () => {
     ).toEqual({ project: space, repository: "Acme/API", host: "github.com" });
   });
 
-  it("opens a secondary checkout's link with that checkout's selector and host on every server", () => {
-    const resolve = (threadPullRequests: boolean) =>
+  it("opens a secondary checkout's link with the URL's repository and that checkout's host", () => {
+    expect(
       resolveChangeRequestLinkTarget({
         url: "https://github.acme.test/acme/api/pull/7",
         projects: [space],
-        capabilities: () => ({ pullRequests: true, threadPullRequests }),
+        configLoaded: () => true,
         lendHostProject: false,
-      });
-    expect(resolve(false)).toEqual({
-      project: space,
-      repository: "Acme/API",
-      number: 7,
-      host: "github.acme.test",
-    });
-    expect(resolve(true)).toEqual({
+      }),
+    ).toEqual({
       project: space,
       repository: "acme/api",
       number: 7,

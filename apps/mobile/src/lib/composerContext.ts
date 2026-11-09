@@ -1,6 +1,5 @@
 import { isProviderSkillUserInvocable } from "@lecturn/client-runtime/providerSkills";
 import { sourceControlClients } from "@lecturn/client-runtime/source-control-clients";
-import { serializeLegacyContextMessage } from "@lecturn/shared/composerContextLegacySend";
 import { filePreviewKind } from "@lecturn/shared/filePreview";
 import { videoMimeType } from "@lecturn/shared/video";
 import {
@@ -255,16 +254,12 @@ export function reidentifyComposerContext(
   };
 }
 
-/** Keep queued records canonical; select wire format at dispatch against the host. */
 export function serializeComposerMessageForServer(
   composerText: string,
   context: OrchestrationMessageContext | undefined,
-  supportsInlineMessageContext: boolean,
 ): { text: string; context?: OrchestrationMessageContext } {
   const text = isImageReferencesOnly(composerText)
     ? ATTACHMENT_ONLY_BOOTSTRAP_PROMPT
     : composerText;
-  return supportsInlineMessageContext
-    ? { text, ...(context ? { context } : {}) }
-    : { text: serializeLegacyContextMessage({ text, records: context?.records ?? [] }) };
+  return { text, ...(context ? { context } : {}) };
 }

@@ -194,7 +194,6 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
   return (
     <MessagesTimeline
       isWorking={live}
-      activeTurnInProgress={live}
       emptyPlaceholderInset={0}
       awaitingUser={approvals.length > 0 ? "approval" : null}
       activeTurnStartedAt={at(0)}
@@ -212,7 +211,6 @@ function Timeline(props: { stage: Stage; parallel: boolean; raced: boolean; thre
       onOpenTurnDiff={() => {}}
       onOpenThread={() => {}}
       onForkFromRun={async () => {}}
-      onRollbackCheckpoint={() => {}}
       supportsConversationRollback={false}
       onRevertToTurnCount={() => {}}
       isRevertingCheckpoint={false}

@@ -120,9 +120,11 @@
     },
     "infra/relay": {
       // The multi-account push probe is run by hand; see infra/relay/README.md.
+      // Alchemy loads src/worker.ts as the Worker entry and reads its default export.
       "entry": [
         "alchemy.run.ts!",
         "src/persistence/schema.ts!",
+        "src/worker.ts!",
         "scripts/verify-multi-account-push.ts",
       ],
     },

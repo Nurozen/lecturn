@@ -190,9 +190,7 @@ const makeHarness = Effect.fn("makeSquireHarness")(function* (input: {
     runOpenCodeCommand: unused("runOpenCodeCommand"),
     createOpenCodeSdkClient: () => client,
     loadOpenCodeInventory: unused("loadOpenCodeInventory"),
-    loadInventoryFromCli: unused("loadInventoryFromCli"),
     loadOpenCodeSkills: unused("loadOpenCodeSkills"),
-    loadSkillsFromCli: unused("loadSkillsFromCli"),
   };
   // The Squire credential's capabilities mark it; a probe has one too when
   // the thread is issued a session, and must still get no server.

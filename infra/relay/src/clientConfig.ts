@@ -32,7 +32,7 @@ export class RelayUrlUnavailableError extends Schema.TaggedError<RelayUrlUnavail
   }
 }
 
-export const relayClientConfigEnv = (config: RelayClientConfig & { readonly url: string }) =>
+const relayClientConfigEnv = (config: RelayClientConfig & { readonly url: string }) =>
   ({
     LECTURN_RELAY_URL: config.url,
     LECTURN_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl,

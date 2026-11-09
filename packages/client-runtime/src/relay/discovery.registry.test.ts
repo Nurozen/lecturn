@@ -148,7 +148,6 @@ const makeHarness = Effect.fn("TestDiscoveryRegistry.makeHarness")(function* () 
       ConnectionDriver.ConnectionDriver,
       ConnectionDriver.ConnectionDriver.of({
         connect: () => unused("The connection driver"),
-        checkRoute: () => unused("The connection driver"),
         preflight: () => unused("The connection driver"),
         checkHost: () => unused("The connection driver"),
       }),

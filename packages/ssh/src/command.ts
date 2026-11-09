@@ -161,7 +161,7 @@ function normalizeSshErrorMessage(input: {
   return cleanedStdout.length > 0 ? cleanedStdout : input.fallbackMessage;
 }
 
-function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
+export function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   return {
     alias: target.alias,
     hostname: target.hostname,

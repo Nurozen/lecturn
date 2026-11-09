@@ -1,7 +1,10 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveLogicalProjectKeyFromSettings, derivePhysicalProjectKey } from "./logicalProject";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKey,
+} from "@lecturn/client-runtime/state/project-grouping";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectPickerEntries,

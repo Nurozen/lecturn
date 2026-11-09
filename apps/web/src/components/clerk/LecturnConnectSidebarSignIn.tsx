@@ -31,21 +31,18 @@ function ConfiguredLecturnConnectSidebarSignIn({
   readonly labelClassName: string | undefined;
 }) {
   const { isLoaded, isSignedIn } = useAuth();
-  const { authPrompt, openAuthPrompt } = useLecturnConnectAuthPrompt();
+  const { openAuthPrompt } = useLecturnConnectAuthPrompt();
 
   if (!isLoaded || isSignedIn) return null;
 
   return (
-    <>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton onClick={openAuthPrompt}>
-            <LogInIcon />
-            <span className={labelClassName}>Sign in to Lecturn Connect</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-      {authPrompt}
-    </>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton onClick={openAuthPrompt}>
+          <LogInIcon />
+          <span className={labelClassName}>Sign in to Lecturn Connect</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }

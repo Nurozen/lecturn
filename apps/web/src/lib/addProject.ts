@@ -20,8 +20,8 @@ import { readProjects, readThreadShells } from "../state/entities";
 import type { projectEnvironment } from "../state/projects";
 import { waitForStaveProjectVisible } from "../state/staveOperations";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { getLatestThreadForProject } from "./threadSort";
-import { inferProjectTitleFromPath } from "./projectPaths";
+import { getLatestThreadForProject } from "@lecturn/client-runtime/state/thread-sort";
+import { inferProjectTitleFromPath } from "@lecturn/client-runtime/state/projects";
 import { newProjectId } from "./utils";
 
 /**
