@@ -31,8 +31,10 @@ export function SettingsWorkspaceLayout(props: { readonly children: ReactNode })
         </Activity>
       ) : null}
       <View className="flex-1">
+        {/* The empty-detail props would unflatten this view and move the navigator's stack. */}
         <View
           className="flex-1"
+          collapsable={false}
           pointerEvents={emptyDetail ? "none" : "auto"}
           accessibilityElementsHidden={emptyDetail}
           importantForAccessibility={emptyDetail ? "no-hide-descendants" : "auto"}
