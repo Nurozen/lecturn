@@ -193,7 +193,7 @@ export function ComposerControlsBar(props: {
     planModeEnabled,
     isComposerOwned: true,
     effortDisplay: props.effortDisplay,
-    triggerClassName: cn("ps-1.5 pe-1", TEXT_CONTROL_STATES),
+    triggerClassName: cn("redesign:ps-1.5 redesign:pe-1", TEXT_CONTROL_STATES),
     // In the new design Permissions always live here, so the section never unmounts while open.
     extraMenuContent: effortMenuPermissions ? (
       <ComposerPermissionsSection
