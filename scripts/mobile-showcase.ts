@@ -259,6 +259,10 @@ async function finalizeCapture(destination: string, device: ShowcaseDevice): Pro
   );
 }
 
+// Capture-only: "<scene>~N" repeats a scene in one sequence; its frame is "<scene>-rN.png".
+export const showcaseBaseScene = (shot: string) => shot.replace(/~\d+$/, "") as ShowcaseScene;
+const showcaseShotFile = (shot: string) => `${shot.replace(/~(\d+)$/, "-r$1")}.png`;
+
 async function validateCaptureSet(
   capture: ShowcaseCapture,
   outputDirectory: string,
@@ -266,7 +270,7 @@ async function validateCaptureSet(
 ): Promise<void> {
   const directory = showcaseCaptureDirectory(outputDirectory, capture);
   const files = (await NodeFSP.readdir(directory)).filter((file) => file.endsWith(".png")).sort();
-  const expectedFiles = capture.scenes.map((scene) => `${scene}.png`).sort();
+  const expectedFiles = capture.scenes.map((scene) => showcaseShotFile(scene)).sort();
   const missingFiles = expectedFiles.filter((file) => !files.includes(file));
   if (missingFiles.length > 0) {
     throw new Error(`${capture.device.id} is missing ${missingFiles.join(", ")} in ${directory}.`);
@@ -320,7 +324,7 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
       index += 1;
     } else if (argument === "--scene") {
       const value = argumentValue(args, index, argument);
-      if (!SHOWCASE_SCENES.includes(value as ShowcaseScene)) {
+      if (!SHOWCASE_SCENES.includes(showcaseBaseScene(value))) {
         throw new Error(`Unsupported scene '${value}'. Use ${SHOWCASE_SCENES.join(", ")}.`);
       }
       scenes.add(value as ShowcaseScene);
@@ -399,7 +403,7 @@ export function planShowcaseCaptures(
             options.scenes.size === 0
               ? device.scenes
               : [...options.scenes].filter(
-                  (scene) => scene === "pr-watch" || device.scenes.includes(scene),
+                  (scene) => scene === "pr-watch" || device.scenes.includes(showcaseBaseScene(scene)),
                 ),
         })),
       );
@@ -1906,7 +1910,8 @@ async function captureAndroid(
     capture.theme,
     ANDROID_PACKAGE,
   ]);
-  for (const [sceneIndex, scene] of capture.scenes.entries()) {
+  for (const [sceneIndex, shot] of capture.scenes.entries()) {
+    const scene = showcaseBaseScene(shot);
     if (sceneIndex > 0) await writeAndroidShowcaseScene(serial, scene);
     await waitForAndroidShowcaseScene(serial, scene);
     if (scene === "agent-activity") {
@@ -2052,7 +2057,7 @@ async function captureAndroid(
     }
     const destination = NodePath.join(
       showcaseCaptureDirectory(outputDirectory, capture),
-      `${scene}.png`,
+      showcaseShotFile(shot),
     );
     const png = await new Promise<Buffer>((resolve, reject) => {
       NodeChildProcess.execFile(
@@ -2071,6 +2076,9 @@ async function captureAndroid(
     }
     await finalizeCapture(destination, capture.device);
   }
+  // Capture-only: print the crash buffer so native crashes show in the run log.
+  const crash = await adbOutput(serial, ["logcat", "-d", "-b", "crash"]).catch(() => "");
+  NodeProcess.stdout.write(`ANDROID-CRASH-BUFFER ${capture.device.id} lines=${crash.trim() ? crash.trim().split("\n").length : 0}\n${crash}\n`);
 }
 
 async function cleanupAndroidViewport(
