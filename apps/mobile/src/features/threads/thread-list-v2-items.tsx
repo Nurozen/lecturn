@@ -639,6 +639,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const statusLabel = resolveThreadStatusLabel(thread);
   const visibleStatusLabel = resolveThreadStatusBadge(thread);
   const recede = shouldRecedeThreadRow({ status, selected });
+  const isRegeneratingTitle = thread.titleRegeneration != null;
   // The item blanks the time for status-labelled cards; Lecturn hides the "Working"
   // label behind the active border, so working cards draw their activity time.
   const timeLabel =
@@ -795,7 +796,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       { id: "rename", title: "Rename", image: "square.and.pencil" },
       ...buildThreadTitleRegenerationMenuItems({
         supported: props.titleRegenerationSupported,
-        isRegenerating: thread.titleRegeneration != null,
+        isRegenerating: isRegeneratingTitle,
       }),
       ...(canTurnIntoProject
         ? [
@@ -808,12 +809,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           ]
         : []),
     ],
-    [
-      canTurnIntoProject,
-      props.titleRegenerationSupported,
-      thread.runtime,
-      thread.titleRegeneration,
-    ],
+    [canTurnIntoProject, props.titleRegenerationSupported, thread.runtime, isRegeneratingTitle],
   );
   const threadForkMenuItems = useMemo<MenuAction[]>(
     () =>
@@ -1047,7 +1043,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           </View>
         ) : null}
         <Text
-          className={cn("flex-1 text-base text-foreground", !recede && "font-lecturn-medium")}
+          className={cn(
+            "flex-1 text-base text-foreground",
+            !recede && "font-lecturn-medium",
+            isRegeneratingTitle && "opacity-55",
+          )}
           numberOfLines={2}
         >
           {thread.title}
@@ -1213,6 +1213,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           thread.title,
           thread.settledOverride === "settled" ? "settled" : statusLabel?.label,
           props.hasQueuedMessages ? "messages queued to send" : null,
+          isRegeneratingTitle ? "regenerating title" : null,
         ]
           .filter(Boolean)
           .join(", ")}
@@ -1248,6 +1249,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           thread.title,
           thread.settledOverride === "settled" ? "settled" : null,
           props.hasQueuedMessages ? "messages queued to send" : null,
+          isRegeneratingTitle ? "regenerating title" : null,
         ]
           .filter(Boolean)
           .join(", ")}
@@ -1273,7 +1275,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             />
             <View className="min-w-0 flex-1">
               <Text
-                className={cn("text-base", selected ? "text-foreground" : "text-foreground-muted")}
+                className={cn(
+                  "text-base",
+                  selected ? "text-foreground" : "text-foreground-muted",
+                  isRegeneratingTitle && "opacity-55",
+                )}
                 numberOfLines={1}
               >
                 {thread.title}

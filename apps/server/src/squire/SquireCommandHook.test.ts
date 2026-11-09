@@ -85,6 +85,8 @@ const ALLOWED_FROM_ANY_CALLER: ReadonlySet<string> = new Set([
   "thread.stop",
   // Records that a user's `runtime-request.respond` could not reach the provider.
   "runtime-request.delivery.fail",
+  // Records that a user's Stop went unconfirmed by the provider.
+  "thread.interrupt.unresponsive",
 ]);
 
 const CONTRACT_COMMAND_TYPES: ReadonlyArray<string> = [
@@ -342,6 +344,22 @@ describe("SquireCommandHook allowlist", () => {
           sourcePoint: { type: "latest_stable" },
         };
         assert.equal(yield* outcome(fork), "Managed by Squire Release");
+      }),
+    );
+
+    it.effect("refuses a side chat whose source is a home thread", () =>
+      Effect.gen(function* () {
+        const sideChat: OrchestrationV2ServerCommand = {
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("cmd:side-chat-home"),
+          sourceThreadId: homeThread,
+          targetThreadId: ThreadId.make("thread:user-side-chat"),
+          sourcePoint: { type: "latest_stable" },
+          sideChat: true,
+        };
+        assert.equal(yield* outcome(sideChat), "Managed by Squire Release");
       }),
     );
 

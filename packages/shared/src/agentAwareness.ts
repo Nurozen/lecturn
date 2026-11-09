@@ -1,8 +1,9 @@
-import type {
-  EnvironmentId,
-  OrchestrationV2ThreadShell,
-  Project,
-  ThreadId,
+import {
+  isListedThreadLineage,
+  type EnvironmentId,
+  type OrchestrationV2ThreadShell,
+  type Project,
+  type ThreadId,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -61,7 +62,7 @@ export function projectThreadAwarenessV2(
   input: ProjectThreadAwarenessV2Input,
 ): AgentAwarenessState | null {
   const { environmentId, project, thread } = input;
-  if (thread.lineage.relationshipToParent === "subagent") return null;
+  if (!isListedThreadLineage(thread.lineage)) return null;
   // Lecturn: a Squire's own threads wake on every batch; publishing them would
   // turn each into an "Agent working" Live Activity and push. Checked here
   // rather than on clients so apps that predate the marker are covered too.

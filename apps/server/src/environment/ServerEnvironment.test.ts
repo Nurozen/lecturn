@@ -370,6 +370,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
             logWebSocketEvents: Option.none(),
             tailscaleServeEnabled: Option.none(),
             tailscaleServePort: Option.none(),
+            lan: Option.none(),
           },
           Option.none(),
         ).pipe(

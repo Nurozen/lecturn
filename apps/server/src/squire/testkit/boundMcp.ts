@@ -44,6 +44,7 @@ import * as RemoteDelegation from "../../peer/RemoteDelegation.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
@@ -79,6 +80,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GitVcsDriver.GitVcsDriver)({}),
   Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
   Layer.mock(PreviewManager.PreviewManager)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),

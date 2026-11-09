@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Platform, View } from "react-native";
 
 import { ArcaneBackdrop } from "../../../components/ArcaneBackdrop";
+import { AndroidSheetHeader } from "../../../components/ui/AndroidScreenHeader";
 import type { AppBarProps } from "../../../components/ui/AppBar.types";
 import { AppBar } from "../../../components/ui/AppBar";
 import { ScreenContent as SettingsScreenContent } from "../../../components/ui/ScreenContent";
@@ -45,19 +46,29 @@ export function SettingsScreen(
   return (
     <View collapsable={false} className={`flex-1 ${surfaceClassName}`}>
       <ArcaneBackdrop emphasis="sidebar" />
-      <AppBar
-        title={props.title}
-        actions={props.actions}
-        search={props.search}
-        trailing={Platform.OS === "android" ? props.trailing : undefined}
-        sidebar={false}
-        onBack={workspaceRoot ? undefined : () => navigation.goBack()}
-        hideBottomBorder={!props.formSheet}
-      />
+      {Platform.OS === "android" && props.formSheet ? (
+        <AndroidSheetHeader
+          title={props.title}
+          actions={props.actions}
+          trailing={props.trailing}
+          onBack={() => navigation.goBack()}
+          hideBottomBorder
+        />
+      ) : (
+        <AppBar
+          title={props.title}
+          actions={props.actions}
+          search={props.search}
+          trailing={Platform.OS === "android" ? props.trailing : undefined}
+          sidebar={false}
+          onBack={workspaceRoot ? undefined : () => navigation.goBack()}
+          hideBottomBorder={!props.formSheet}
+        />
+      )}
       <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
         {/* Lecturn: page scroll views stay clear so the ArcaneBackdrop shows behind them. */}
         <ScreenScrollViewSurface value="bg-transparent">
-          {props.formSheet ? (
+          {props.formSheet && Platform.OS !== "android" ? (
             props.children
           ) : (
             <SettingsScreenContent

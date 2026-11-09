@@ -75,6 +75,7 @@ import {
   type AssistantCitation,
   type ChatFileAttachment,
   isProviderNativeSubagentThread,
+  orchestrationV2WorktreePending,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -218,6 +219,7 @@ import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { resolveCheckpointsUnavailableReason, resolveThreadGitTarget } from "~/lib/threadGitTarget";
 import { newMessageId } from "~/lib/utils";
+import { isInSideChatPane, type SideChatParentPanel } from "~/lib/sideChatPane";
 import {
   NO_PROVIDER_MODEL_SELECTION,
   providerInstanceEntriesFor,
@@ -308,6 +310,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -465,6 +468,8 @@ type ChatViewProps =
       openAtNewestAppCard?: boolean;
       /** Lecturn: this Squire's approvals, shown in the timeline when they were raised. */
       squireApprovals?: SquireChatApprovalsInput;
+      /** A side chat in its parent's right panel; the parent keeps the keyboard and workspace UI. */
+      embedded?: SideChatParentPanel;
       routeKind: "server";
       draftId?: never;
     }
@@ -477,6 +482,7 @@ type ChatViewProps =
       controls?: never;
       openAtNewestAppCard?: never;
       squireApprovals?: never;
+      embedded?: never;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -494,11 +500,14 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
+    embedded: parentPanel,
   } = props;
   // Lecturn: absent `controls` allows every control.
   const controls = routeKind === "server" ? props.controls : undefined;
   const openAtNewestAppCard = routeKind === "server" && props.openAtNewestAppCard === true;
   const allows = (control: ChatViewControl) => allowsChatViewControl(controls, control);
+  const embedded = parentPanel !== undefined;
+  const forkAllowed = allows("fork") && !embedded;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -957,7 +966,29 @@ export default function ChatView(props: ChatViewProps) {
       : scopeThreadRef(delegatedFrom.environmentId, delegatedFrom.threadId);
   // The title it had at delegation, until this client sees the parent itself.
   const delegatedFromThread = useQuietThreadShell(delegatedFromRef);
+  const sideChatParentRef =
+    activeThread?.lineage.sideChat === true && activeThread.lineage.parentThreadId !== null
+      ? scopeThreadRef(activeThread.environmentId, activeThread.lineage.parentThreadId)
+      : null;
+  const sideChatParent = useQuietThreadShell(sideChatParentRef);
   const parentThreadLink = (() => {
+    if (sideChatParentRef !== null) {
+      return {
+        title: sideChatParent?.title ?? "Parent thread",
+        sideChat: true,
+        // Embedded, the parent is the view around it.
+        ...(embedded
+          ? {}
+          : {
+              open: (): void => {
+                void navigate({
+                  to: "/$environmentId/$threadId",
+                  params: buildThreadRouteParams(sideChatParentRef),
+                });
+              },
+            }),
+      };
+    }
     if (parentSubagentThreadRef !== null) {
       return {
         title: parentSubagentThread?.title ?? "Parent thread",
@@ -1100,7 +1131,12 @@ export default function ChatView(props: ChatViewProps) {
   useLayoutEffect(() => {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
-    if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
+    if (
+      diffOpen &&
+      activeThreadRef &&
+      explicitThreadRef !== activeThreadRef &&
+      !useDiffPanelStore.getState().consumeKeepSelectionOnOpen(activeThreadRef)
+    ) {
       useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
     }
   }, [activeThreadRef, diffOpen]);
@@ -1155,7 +1191,9 @@ export default function ChatView(props: ChatViewProps) {
       renderedRightPanelSurface,
     );
   const canMaximizeRightPanel = rightPanelOpen;
-  const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
+  // An embedded side chat has no panel; a stale maximized flag would hide its own column.
+  const rightPanelMaximized =
+    !embedded && canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
@@ -1981,15 +2019,17 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
-  const showComposerContextStrip = shouldShowComposerContextStrip({
-    isDraftHeroState,
-    persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject:
-      allows("branch-toolbar") && activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
-    isStaveProject: Boolean(activeProject?.stave),
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-  });
+  const showComposerContextStrip =
+    !embedded &&
+    shouldShowComposerContextStrip({
+      isDraftHeroState,
+      persistInActiveThreads: settings.persistComposerContextStrip,
+      hasActiveProject:
+        allows("branch-toolbar") && activeProject !== null && !showProviderSubagentBar,
+      isGitRepo,
+      isStaveProject: Boolean(activeProject?.stave),
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+    });
   const terminalShortcutLabelOptions = {
     context: {
       terminalFocus: true,
@@ -2082,7 +2122,10 @@ export default function ChatView(props: ChatViewProps) {
     focusComposer: focusComposerStable,
   });
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window listener for the desktop snapshot event that focuses the composer
-  useEffect(() => subscribeSnapShotComposerFocus(focusComposerStable), [focusComposerStable]);
+  useEffect(
+    () => (embedded ? undefined : subscribeSnapShotComposerFocus(focusComposerStable)),
+    [embedded, focusComposerStable],
+  );
   const scheduleComposerFocus = () => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -2278,8 +2321,8 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   useProactivePanels({
-    threadRef: isServerThread ? activeThreadRef : null,
-    enabled: settings.proactivePanelsEnabled && !shouldUsePlanSidebarSheet,
+    threadRef: isServerThread && !embedded ? activeThreadRef : null,
+    enabled: settings.proactivePanelsEnabled && !shouldUsePlanSidebarSheet && !embedded,
     settingsHydrated: clientSettingsHydrated,
     threadDetailLoading,
     runningTurnId: activeRunningTurnId,
@@ -2410,18 +2453,18 @@ export default function ChatView(props: ChatViewProps) {
 
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- schedules a frame to focus the composer DOM element when a thread opens with the terminal closed
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    if (embedded || !activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposerStable();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposerStable, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, embedded, focusComposerStable, terminalUiState.terminalOpen]);
 
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- window focus listener that refocuses the composer after the window regains focus
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
+    if (embedded || !activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
     let frame: number | null = null;
     const onWindowFocus = () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
@@ -2430,7 +2473,12 @@ export default function ChatView(props: ChatViewProps) {
         frame = window.requestAnimationFrame(() => {
           frame = null;
           if (document.querySelector("[data-mcp-app-fullscreen]") !== null) return;
-          if (shouldRefocusComposerOnWindowFocus(document.activeElement)) focusComposerStable();
+          if (
+            !isInSideChatPane(document.activeElement) &&
+            shouldRefocusComposerOnWindowFocus(document.activeElement)
+          ) {
+            focusComposerStable();
+          }
         });
       });
     };
@@ -2439,7 +2487,13 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("focus", onWindowFocus);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposerStable, isMobileViewport, terminalUiState.terminalOpen]);
+  }, [
+    activeThread?.id,
+    embedded,
+    focusComposerStable,
+    isMobileViewport,
+    terminalUiState.terminalOpen,
+  ]);
 
   // Promotion drops draftId while a send may still be dispatching, so key by thread.
   const [localDispatchThreadId, setLocalDispatchThreadId] = useState(threadId);
@@ -2655,6 +2709,7 @@ export default function ChatView(props: ChatViewProps) {
     pullRequestPanelTarget,
     threadPanelPresentation,
     isServerThread,
+    embedded,
     isGitRepo,
     browserAvailable,
     canOperatePreview,
@@ -2675,7 +2730,8 @@ export default function ChatView(props: ChatViewProps) {
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
-    backgroundWorkNow,
+    attentionNow,
+    workNow,
     childInputNow,
     goalNow,
     handleSwitchCheckoutToThread,
@@ -2699,6 +2755,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThread,
     activeThreadId,
     activeThreadRef,
+    threadDetailRef: routeThreadDetailRef,
     activeThreadKey,
     activeThreadShell,
     activeLatestRun,
@@ -2721,7 +2778,6 @@ export default function ChatView(props: ChatViewProps) {
     clearUsageLimitsFor,
     beginLocalDispatch,
     resetLocalDispatch,
-    scheduleComposerFocus,
     scrollToEnd,
     persistThreadSettingsForNextTurn,
   });
@@ -2944,8 +3000,8 @@ export default function ChatView(props: ChatViewProps) {
   // composer effect above.
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- focuses the open drawer terminal when entering a thread
   useEffect(() => {
-    if (activeThreadRef) return focusTerminalOnThreadEnter(activeThreadRef);
-  }, [activeThreadRef]);
+    if (activeThreadRef && !embedded) return focusTerminalOnThreadEnter(activeThreadRef);
+  }, [activeThreadRef, embedded]);
 
   const getShortcutContext = (eventTarget: EventTarget | null = document.activeElement) => ({
     terminalFocus: getTerminalFocusOwner() !== null,
@@ -2954,7 +3010,9 @@ export default function ChatView(props: ChatViewProps) {
     previewOpen: previewPanelOpen,
     editableFocus: isEditableFocused(eventTarget),
     modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
-    composerFocus: document.activeElement?.getAttribute("data-testid") === "composer-editor",
+    composerFocus:
+      document.activeElement?.getAttribute("data-testid") === "composer-editor" &&
+      isInSideChatPane(document.activeElement) === embedded,
     draftThreadRoute: routeKind === "draft",
     turnRunning: phase === "running",
     composerRequiresModifier: composerRequiresModifier(settings.sendShortcut, promptRef.current),
@@ -2975,6 +3033,8 @@ export default function ChatView(props: ChatViewProps) {
 
   useChatViewShortcuts(controls, {
     enabled: activeThreadId !== null && !backgroundThread,
+    embedded,
+    composerElement: composerOverlayElement,
     keybindings,
     scriptKeybindings,
     getShortcutContext,
@@ -3030,14 +3090,62 @@ export default function ChatView(props: ChatViewProps) {
   // A focused desktop browser page forwards these chords as menu actions.
   // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- subscribes to desktop bridge menu actions that toggle the right panel
   useEffect(() => {
+    if (embedded) return;
     return window.desktopBridge?.onMenuAction((action) => {
       if (!allowsChatViewControl(controls, "right-panel")) return;
       if (action === "rightPanel.toggle") toggleRightPanelStable();
       else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximizedStable();
     });
-  }, [controls, toggleRightPanelStable, toggleRightPanelMaximizedStable]);
+  }, [controls, embedded, toggleRightPanelStable, toggleRightPanelMaximizedStable]);
 
-  usePasteToFocusComposer(activeThreadId, composerRef);
+  usePasteToFocusComposer(embedded ? null : activeThreadId, composerRef);
+  // A delegated task is a remote thread's subagent.
+  const isSubagentThread =
+    activeThread?.lineage.relationshipToParent === "subagent" || delegatedFrom !== null;
+  // Side chats do not nest or start from subagents, and older servers would fork a listed thread.
+  // Lecturn: views without the right panel (a Squire's home) and app threads offer none.
+  const sideChatsExcluded = !allows("right-panel") || activeProject?.appBinding !== undefined;
+  const sideChatsOffered =
+    !embedded &&
+    !sideChatsExcluded &&
+    canOperateThread &&
+    activeThread?.lineage.sideChat !== true &&
+    !isSubagentThread &&
+    serverConfig?.environment.capabilities.sideChats === true;
+  const sideChat = useSideChat({
+    threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
+    onError: (message) => {
+      if (activeThread) setThreadError(activeThread.id, message);
+    },
+  });
+  // A maximized panel covers the terminal drawer the command runs in.
+  const runSideChatShellCommandStable = useStableCallback((command: string) => {
+    if (activeThreadRef) useRightPanelStore.getState().setMaximized(activeThreadRef, false);
+    runShellCommandStable(command);
+  });
+  // Main-thread surfaces show this reason; `/side` sent anyway gets it as a toast.
+  const sideChatDisabledReason =
+    activeThread?.lineage.sideChat === true
+      ? "Side chats cannot start side chats."
+      : isSubagentThread
+        ? "Subagent threads cannot start side chats."
+        : sideChatsExcluded
+          ? "Side chats are not available in this thread."
+          : serverConfig === null
+            ? "Side chats are not ready yet. Try again in a moment."
+            : serverConfig.environment.capabilities.sideChats !== true
+              ? "Update this environment's Lecturn server to use side chats."
+              : sideChatsOffered && !isServerThread
+                ? "Side chats start after the first message."
+                : sideChat.available &&
+                    orchestrationV2WorktreePending(
+                      activeThread?.worktreePath ?? null,
+                      serverProjection?.runs ?? [],
+                    )
+                  ? "Available once the thread's worktree is set up."
+                  : null;
+  const openSideChatStable = useStableCallback(() => void sideChat.open());
+  const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
   const {
     pendingRevert,
     setPendingRevert,
@@ -3216,6 +3324,8 @@ export default function ChatView(props: ChatViewProps) {
     anchorNewTurn,
     acknowledgeActiveThreadWoke,
     handleInteractionModeChange,
+    onSideChat: sideChat.available ? sendSideChatStable : undefined,
+    sideChatDisabledReason,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
   });
@@ -3340,10 +3450,7 @@ export default function ChatView(props: ChatViewProps) {
   const onExpandTimelineImageStable = useStableCallback(onExpandTimelineImage);
   const shownThreadSyncPhase = activeEnvironmentUnavailable ? null : delayedThreadSyncPhase;
   const hasThreadNow =
-    childInputNow !== null ||
-    backgroundWorkNow !== null ||
-    goalNow !== null ||
-    shownThreadSyncPhase !== null;
+    attentionNow !== null || workNow !== null || goalNow !== null || shownThreadSyncPhase !== null;
   const queuedRunCount = serverProjection ? getUserQueuedThreadRuns(serverProjection).length : 0;
   // The queue control is mounted for every server thread but joins the footer only while it shows
   // something, by its own rule: an optimistic message stops counting once the server has it.
@@ -3358,7 +3465,7 @@ export default function ChatView(props: ChatViewProps) {
   const showQueuedTurns = hasQueuedTurns && allows("queued-runs");
   const scrollToEndSummary =
     [
-      childInputNow === null ? null : "Subagent waiting",
+      childInputNow?.waitingLabel ?? null,
       showQueuedTurns && queuedRunCount > 0 ? `${queuedRunCount} queued` : null,
     ]
       .filter((part) => part !== null)
@@ -3384,8 +3491,8 @@ export default function ChatView(props: ChatViewProps) {
         )}
         <ThreadNow
           key={routeThreadKey}
-          attention={childInputNow}
-          work={backgroundWorkNow}
+          attention={attentionNow}
+          work={workNow}
           syncPhase={shownThreadSyncPhase}
           goal={goalNow}
         />
@@ -3445,7 +3552,7 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   if (!activeThread) {
-    return <NoActiveThreadState />;
+    return embedded ? null : <NoActiveThreadState />;
   }
 
   const rightPanelContent = activeThreadRef ? (
@@ -3464,6 +3571,10 @@ export default function ChatView(props: ChatViewProps) {
       onCloseSurface={closeRightPanelSurface}
       staveProject={activeProject?.stave ? activeProject : undefined}
       notesAvailable={notesAvailable}
+      sideChatParentPanel={{
+        openToolDiff: onOpenToolDiffStable,
+        runShellCommand: runSideChatShellCommandStable,
+      }}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
@@ -3634,12 +3745,14 @@ export default function ChatView(props: ChatViewProps) {
         ref={setWorkspaceLayoutElement}
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
       >
-        <DeviceSetupDialogHost
-          threadKey={activeThreadKey}
-          threadRef={activeThreadRef}
-          state={deviceState}
-        />
-        {rightPanelControlsAtRoot ? panelLayoutControls : null}
+        {embedded ? null : (
+          <DeviceSetupDialogHost
+            threadKey={activeThreadKey}
+            threadRef={activeThreadRef}
+            state={deviceState}
+          />
+        )}
+        {rightPanelControlsAtRoot && !embedded ? panelLayoutControls : null}
         <div
           className={cn(
             "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -3649,48 +3762,50 @@ export default function ChatView(props: ChatViewProps) {
           data-chat-column
           inert={rightPanelMaximized}
         >
-          <header
-            ref={threadPanelPopoverAnchorRef}
-            data-chat-header
-            hidden={embedPresentation !== null || !allows("thread-actions")}
-            className={cn(
-              "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
-              isElectron
-                ? cn(
-                    "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
-                    reserveTitleBarControlInset &&
-                      !inlineRightPanelOwnsTitleBar &&
-                      "wco:pr-(--workspace-native-controls-inset)",
-                  )
-                : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
-              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            )}
-          >
-            {isElectron && rightPanelControlsAtRoot ? (
-              <span
-                aria-hidden
-                className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
+          {embedded ? null : (
+            <header
+              ref={threadPanelPopoverAnchorRef}
+              data-chat-header
+              hidden={embedPresentation !== null || !allows("thread-actions")}
+              className={cn(
+                "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+                isElectron
+                  ? cn(
+                      "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
+                      reserveTitleBarControlInset &&
+                        !inlineRightPanelOwnsTitleBar &&
+                        "wco:pr-(--workspace-native-controls-inset)",
+                    )
+                  : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
+                COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+              )}
+            >
+              {isElectron && rightPanelControlsAtRoot ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
+                />
+              ) : null}
+              {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+              {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
+              <ChatHeader
+                activeThreadEnvironmentId={activeThread.environmentId}
+                activeThreadId={activeThread.id}
+                isServerThread={isServerThread}
+                activeThreadTitle={activeThread.title}
+                activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
+                activeProject={activeProject ?? null}
+                parentThreadLink={headerParentThreadLink}
+                onOpenThread={onOpenRelatedThreadStable}
+                rightPanelOpen={inlineRightPanelOwnsTitleBar}
+                onNewThreadInProject={handleNewThreadInActiveProjectStable}
+                {...(activeDraftLogicalProjectKey
+                  ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
+                  : {})}
+                {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
               />
-            ) : null}
-            {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
-            {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
-            <ChatHeader
-              activeThreadEnvironmentId={activeThread.environmentId}
-              activeThreadId={activeThread.id}
-              isServerThread={isServerThread}
-              activeThreadTitle={activeThread.title}
-              activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
-              activeProject={activeProject ?? null}
-              parentThreadLink={headerParentThreadLink}
-              onOpenThread={onOpenRelatedThreadStable}
-              rightPanelOpen={inlineRightPanelOwnsTitleBar}
-              onNewThreadInProject={handleNewThreadInActiveProjectStable}
-              {...(activeDraftLogicalProjectKey
-                ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
-                : {})}
-              {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
-            />
-          </header>
+            </header>
+          )}
 
           {supportsPullRequests &&
           allows("git") &&
@@ -3764,7 +3879,7 @@ export default function ChatView(props: ChatViewProps) {
                   citationHistory={citationHistory}
                   {...(allows("cite") ? { onCiteAssistantText: citeAssistantTextStable } : {})}
                   {...(activeProject && allows("run-command")
-                    ? { onRunShellCommand: runShellCommandStable }
+                    ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }
                     : {})}
                   isWorking={isWorking}
                   runlessWorkActive={runlessWorkStartedAt !== null}
@@ -3812,16 +3927,19 @@ export default function ChatView(props: ChatViewProps) {
                   routeThreadKey={displayedTimelineKey}
                   displayThreadKey={displayedTimelineKey}
                   announceTurnStatus={!isProviderSubagent}
-                  onOpenToolDiff={allows("diff") ? onOpenToolDiffStable : undefined}
-                  onOpenTurnDiff={allows("diff") ? onOpenTurnDiffStable : undefined}
+                  onOpenToolDiff={
+                    allows("diff") ? (parentPanel?.openToolDiff ?? onOpenToolDiffStable) : undefined
+                  }
+                  // Side chat runs keep no checkpoints to diff, and a fork would promote the side chat.
+                  onOpenTurnDiff={allows("diff") && !embedded ? onOpenTurnDiffStable : undefined}
                   forkPointByUserMessageId={
-                    allows("fork") ? forkPointByUserMessageId : EMPTY_FORK_POINTS
+                    forkAllowed ? forkPointByUserMessageId : EMPTY_FORK_POINTS
                   }
                   onForkFromMessage={onForkFromMessageStable}
                   forkPointByRunlessReplyId={
-                    allows("fork") ? forkPointByRunlessReplyId : EMPTY_FORK_POINTS
+                    forkAllowed ? forkPointByRunlessReplyId : EMPTY_FORK_POINTS
                   }
-                  forkFromRunEnabled={environmentSupportsForking && allows("fork")}
+                  forkFromRunEnabled={environmentSupportsForking && forkAllowed}
                   forkWarning={forkWarning}
                   revertDisabledReason={revertDisabledReason}
                   importDivider={importDivider}
@@ -3830,7 +3948,7 @@ export default function ChatView(props: ChatViewProps) {
                   onOpenThread={onOpenRelatedThreadStable}
                   parentThreadLink={parentThreadLink}
                   workflowOpening={workflowOpening}
-                  onForkFromRun={onForkFromRunStable}
+                  {...(embedded ? {} : { onForkFromRun: onForkFromRunStable })}
                   supportsConversationRollback={
                     supportsConversationRollback && allows("edit-from-here")
                   }
@@ -4065,6 +4183,8 @@ export default function ChatView(props: ChatViewProps) {
                                   resumeCompactionTokens={resumeCompactionTokens}
                                   keepFullHistory={keepFullHistory}
                                   onToggleKeepFullHistory={toggleKeepFullHistoryStable}
+                                  sideChatAvailable={sideChat.available}
+                                  sideChatDisabledReason={sideChatDisabledReason}
                                   onUsageLimitsCommand={
                                     allows("usage-limits") &&
                                     usageLimitsOffered &&
@@ -4263,10 +4383,13 @@ export default function ChatView(props: ChatViewProps) {
                 </div>
               </div>
 
-              {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser ? (
+              {canOperatePreview &&
+              activeThreadRef &&
+              activeEnvironmentServerBrowser &&
+              !embedded ? (
                 <PreviewSessionSync threadRef={activeThreadRef} />
               ) : null}
-              {activeThreadRef && shownPreviewMiniPlayer ? (
+              {activeThreadRef && shownPreviewMiniPlayer && !embedded ? (
                 <ThreadPreviewMiniPlayer
                   key={`${activeThreadKey}:${previewMiniPlayerSourceKey(shownPreviewMiniPlayer.source)}`}
                   threadRef={activeThreadRef}
@@ -4274,28 +4397,32 @@ export default function ChatView(props: ChatViewProps) {
                 />
               ) : null}
 
-              <BranchRestoreConfirmHost
-                threadKey={activeThreadKey}
-                threadBranch={localCheckoutBranchMismatch?.threadBranch ?? ""}
-                canWriteSourceControl={canWriteSourceControl}
-                onConfirm={handleSwitchCheckoutToThreadStable}
-              />
+              {embedded ? null : (
+                <>
+                  <BranchRestoreConfirmHost
+                    threadKey={activeThreadKey}
+                    threadBranch={localCheckoutBranchMismatch?.threadBranch ?? ""}
+                    canWriteSourceControl={canWriteSourceControl}
+                    onConfirm={handleSwitchCheckoutToThreadStable}
+                  />
 
-              {embedPresentation === null && allows("thread-panel") ? (
-                <ThreadDetailsPanel {...threadDetailsPanelProps} />
-              ) : null}
+                  {embedPresentation === null && allows("thread-panel") ? (
+                    <ThreadDetailsPanel {...threadDetailsPanelProps} />
+                  ) : null}
 
-              <PullRequestThreadDialogHost
-                threadKey={activeThreadKey}
-                environmentId={activeThread.environmentId}
-                threadId={activeThread.id}
-                cwd={activeProject?.workspaceRoot ?? null}
-                onPrepared={handlePreparedPullRequestThreadStable}
-              />
+                  <PullRequestThreadDialogHost
+                    threadKey={activeThreadKey}
+                    environmentId={activeThread.environmentId}
+                    threadId={activeThread.id}
+                    cwd={activeProject?.workspaceRoot ?? null}
+                    onPrepared={handlePreparedPullRequestThreadStable}
+                  />
+                </>
+              )}
             </ThreadFindCanvas>
           </div>
 
-          {embedPresentation === null && allows("terminal") ? (
+          {embedPresentation === null && allows("terminal") && !embedded ? (
             <ChatTerminalDrawers
               activeThreadKey={activeThreadKey}
               activeTerminalOpen={Boolean(terminalUiState.terminalOpen)}
@@ -4311,7 +4438,7 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
         </div>
 
-        {rightPanelPresent && activeThreadRef ? (
+        {rightPanelPresent && activeThreadRef && !embedded ? (
           <ChatRightPanel
             sheet={shouldUsePlanSidebarSheet}
             workspaceLayoutElement={workspaceLayoutElement}
@@ -4362,6 +4489,7 @@ export default function ChatView(props: ChatViewProps) {
             notesAvailable={notesAvailable}
             onAddPullRequests={addPullRequestsSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}
+            onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
             diffAvailable={isServerThread && isGitRepo}
@@ -4369,6 +4497,8 @@ export default function ChatView(props: ChatViewProps) {
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             deviceAvailable={activeThreadRef !== null}
+            sideChatAvailable={sideChat.available}
+            sideChatDisabledReason={sideChatDisabledReason}
           >
             {rightPanelContent}
           </ChatRightPanel>
@@ -4443,7 +4573,7 @@ export default function ChatView(props: ChatViewProps) {
             </AlertDialogFooter>
           </AlertDialogPopup>
         </AlertDialog>
-        <LinkPullRequestDialogHost />
+        {embedded ? null : <LinkPullRequestDialogHost />}
         <ThreadVisitWatermark threadRef={routeThreadRef} />
         <ExpandedImageDialogHost threadKey={routeThreadKey} />
       </div>

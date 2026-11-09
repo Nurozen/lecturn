@@ -286,6 +286,8 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [90, "WaitingLinkRequestIndex"],
           [91, "SquireChatFirst"],
           [92, "ActiveTurnItemIndexes"],
+          [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+          [94, "SubagentDeliveryState"],
         ]);
         for (const table of [
           "orchestration_v2_events",

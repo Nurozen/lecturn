@@ -38,6 +38,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -198,7 +199,7 @@ export async function issueWebSocketTicket(
   if (!response.ok) {
     throw new Error(`Lecturn refused a socket ticket: ${await readError(response)}`);
   }
-  return decodeTicket(await response.json()).ticket;
+  return Redacted.value(decodeTicket(await response.json()).ticket);
 }
 
 const socketUrl = (origin: string, ticket: string | null) => {

@@ -7,13 +7,14 @@ import {
   type SquireMobileTransportGap,
 } from "../squire/SquireMobileAttention.ts";
 import { TeamPolicy, TeamPolicyLive } from "../cloud/TeamPolicy.ts";
-import type {
-  EnvironmentId,
-  OrchestrationV2DomainEvent,
-  OrchestrationV2ThreadShell,
-  OrchestrationV2TurnItem,
-  Project,
-  ThreadId,
+import {
+  isListedThreadLineage,
+  type EnvironmentId,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2ThreadShell,
+  type OrchestrationV2TurnItem,
+  type Project,
+  type ThreadId,
 } from "@lecturn/contracts";
 import {
   RelayApi,
@@ -813,11 +814,11 @@ export const make = Effect.gen(function* () {
     const threadShell = yield* threads.getThreadShell(threadId);
     if (
       threadShell !== null &&
-      (threadShell.lineage.relationshipToParent === "subagent" || isSquireThread(threadShell)) &&
+      (!isListedThreadLineage(threadShell.lineage) || isSquireThread(threadShell)) &&
       !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
     ) {
-      // Subagents and Squire threads never project activity, so the relay
-      // holds no row to clear. Their events would otherwise publish a
+      // Subagents, side chats and Squire threads never project activity, so the
+      // relay holds no row to clear. Their events would otherwise publish a
       // tombstone each, and every publish re-delivers the user's aggregate.
       return;
     }
@@ -1028,10 +1029,15 @@ export const make = Effect.gen(function* () {
       return "unlinked" as const;
     }
     const environmentId = yield* serverEnvironment.getEnvironmentId;
-    const [projectSnapshot, shellSnapshot] = yield* Effect.all([
-      projects.snapshot,
-      threads.getShellSnapshot(),
-    ]);
+    const projectSnapshot = yield* projects.snapshot;
+    // Subagents and side chats never publish awareness, and subagents are most threads.
+    const topLevelThreadIds = (yield* threads.listActiveShellIndex()).flatMap((thread) =>
+      isListedThreadLineage(thread.lineage) ? [thread.id] : [],
+    );
+    const shellSnapshot = yield* threads.getShellSnapshot({
+      location: "active",
+      threadIds: topLevelThreadIds,
+    });
     const activeThreadIds = resolveAgentAwarenessRelayActiveThreadIds({
       environmentId,
       startedAt,

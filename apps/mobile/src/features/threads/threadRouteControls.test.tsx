@@ -255,6 +255,8 @@ function interactiveLabels(resolved: typeof homeControls): ReadonlyArray<string>
     failedRunIds: new Set(),
     runlessForkPoints: new Map(),
     unsettledTurnId: null,
+    userMessageGrouping: { continuesSteer: false, groupedWithNext: false },
+    replyActionSize: { button: 32, icon: 13 },
     workflowOpening: null,
     markdownStyles: { user: {}, assistant: {} },
     duoColumns: false,

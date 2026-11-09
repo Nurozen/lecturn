@@ -452,7 +452,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const environment = useEnvironmentPresentation(environmentId);
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
-  const { draftMessage } = useThreadDraftForThread({ environmentId, threadId });
+  const { draftMessage, draftContext } = useThreadDraftForThread({ environmentId, threadId });
   const { selectedThreadProject } = useThreadSelection();
   const { selectedThreadGitCwd } = useSelectedThreadWorktree(props.route.params.repoKey);
   const reviewCache = useReviewCacheForThread({
@@ -500,6 +500,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     cwd: selectedThreadGitCwd,
     selectedSection,
     draftMessage,
+    draftContext,
   });
   // Expo may return null before registration or in older binaries; use the fallback.
   const NativeReviewDiffView = resolveNativeReviewDiffView();
@@ -511,6 +512,16 @@ export function ReviewSheet(props: ReviewSheetProps) {
     await refreshSelectedSection();
     setIsPullRefreshing(false);
   };
+  const isRefreshing = isPullRefreshing || isSelectedSectionPending || areFilePatchesPending;
+  // A refresh that starts programmatically adds its height to the native top inset and
+  // subtracts it when it ends. If topContentInset changes in between, the inset ends up
+  // short and the content sits under the header, so the fallback ScrollView starts over.
+  const [fallbackInset, setFallbackInset] = useState(topContentInset);
+  const [fallbackScrollViewKey, setFallbackScrollViewKey] = useState(0);
+  if (fallbackInset !== topContentInset) {
+    setFallbackInset(topContentInset);
+    if (isRefreshing) setFallbackScrollViewKey((key) => key + 1);
+  }
   const reviewFileNavigatorRef = useRef<ReviewFileNavigatorHandle>(null);
   const reviewFiles = parsedDiff.kind === "files" ? parsedDiff.files : [];
   const fileVisibility = useReviewFileVisibility({
@@ -772,6 +783,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
             </View>
           ) : (
             <ScrollView
+              key={fallbackScrollViewKey}
               contentContainerStyle={
                 Platform.OS === "android" && (parsedDiff.kind === "empty" || !selectedSection)
                   ? { flexGrow: 1, justifyContent: "center" }
@@ -787,7 +799,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
               refreshControl={
                 // Fallback and empty states need refresh controls; only Android has an explicit refresh menu.
                 <RefreshControl
-                  refreshing={isPullRefreshing || isSelectedSectionPending || areFilePatchesPending}
+                  refreshing={isRefreshing}
                   onRefresh={() => void handlePullToRefresh()}
                 />
               }

@@ -209,11 +209,11 @@ else
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
+  expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
+  [ -n "$expected" ] || fail "lecturn ${version} has no release archive for ${platform}-${arch}"
   download "${base_url}/v${version}/${archive}" "${staging}/${archive}"
 
   step "Verifying the download..."
-  expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
-  [ -n "$expected" ] || fail "${archive} is not listed in SHA256SUMS"
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
@@ -238,6 +238,6 @@ grep -qxF "$launcher" "$launchers" 2>/dev/null || printf '%s\n' "$launcher" >> "
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled Lecturn %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %slecturn%s to get started.\n\n' "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %slecturn%s to use Lecturn here, or %slecturn up%s to use it from your other devices.\n\n' "$bold" "$reset" "$bold" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %slecturn%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
 esac

@@ -122,6 +122,8 @@ export const SQUIRE_COMMAND_RULES = {
   "thread.guest-message.dismiss": "squire",
   // EffectWorker dispatches it outside `SquireDispatchOrigin` when a request cannot be delivered.
   "runtime-request.delivery.fail": "plumbing",
+  // EffectWorker records an unconfirmed Stop, outside `SquireDispatchOrigin`.
+  "thread.interrupt.unresponsive": "plumbing",
 } as const satisfies Record<OrchestrationV2ServerCommand["type"], SquireCommandRule>;
 
 // A type the table does not know (a newer peer, a decode gap) is Squire-only.
