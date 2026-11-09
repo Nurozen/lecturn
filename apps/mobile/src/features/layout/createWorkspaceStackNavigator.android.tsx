@@ -31,6 +31,11 @@ type ViewProps = ComponentProps<typeof NativeStackView>;
 type Descriptor = ViewProps["descriptors"][string];
 type Route = ViewProps["state"]["routes"][number];
 
+// Not keyed by the root state: a keyless reset (a deep link) mints a new state key, replacing
+// this screen, and a view Fabric moves inside the outgoing screen in that frame crashes the
+// mount with "View already has a parent" (react-native-screens#4677).
+const WORKSPACE_SCREEN_ROUTE = { key: "workspace", name: "Workspace" };
+
 function WorkspaceStackView(props: ViewProps) {
   const renderColumns = use(WorkspaceColumnsRendererContext);
   if (!renderColumns) return <NativeStackView {...props} />;
@@ -46,7 +51,7 @@ function WorkspaceStackView(props: ViewProps) {
   if (!visibleRoute) return <NativeStackView {...props} />;
 
   const visibleDescriptor = props.descriptors[visibleRoute.key]!;
-  const baseRoute = { key: `${props.state.key}:workspace`, name: "Workspace" };
+  const baseRoute = WORKSPACE_SCREEN_ROUTE;
   const baseDescriptor: Descriptor = {
     ...visibleDescriptor,
     options: { headerShown: false, freezeOnBlur: false },
