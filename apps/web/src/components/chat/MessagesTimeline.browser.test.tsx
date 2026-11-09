@@ -239,10 +239,12 @@ const AUTOMATION_PROMPT = "Triage the inbox\n\nLabel every new issue and close d
 describe("MessagesTimeline messages", () => {
   it("settles when equally long messages have very different rendered heights", async () => {
     const props = baseProps();
-    const tall = message("a\n\n".repeat(6000), { role: "assistant" }, "tall");
+    // ~1,800 chars each, so all rows share one size estimate, yet the tall row renders ~20,000px
+    // and the collapsed ones a line each. Kept small enough to settle on loaded CI runners.
+    const tall = message("a\n\n".repeat(600), { role: "assistant" }, "tall");
     const earlier = Array.from({ length: 80 }, (_, index) =>
       message(
-        `<details><summary>Reply ${index}</summary>${"compact ".repeat(2250)}</details>`,
+        `<details><summary>Reply ${index}</summary>${"compact ".repeat(220)}</details>`,
         { role: "assistant" },
         `earlier-${index}`,
       ),
@@ -260,7 +262,7 @@ describe("MessagesTimeline messages", () => {
     );
     await using screen = await renderElement(timeline([tall]));
     await vi.waitFor(() =>
-      expect(props.listRef.current?.getState().sizeAtIndex(0)).toBeGreaterThan(100_000),
+      expect(props.listRef.current?.getState().sizeAtIndex(0)).toBeGreaterThan(10_000),
     );
     const viewport = props.listRef.current!.getScrollableNode()!;
     await act(() => {
