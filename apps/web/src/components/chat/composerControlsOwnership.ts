@@ -4,23 +4,19 @@
  * The rule: Permissions have exactly one visible home and composer.mode exactly one target.
  */
 export function resolveComposerControlsOwnership(input: {
+  /** The new design moves Permissions into the effort menu; the Lecturn look keeps the chip. */
+  readonly permissionsInEffortMenu: boolean;
   /** Permissions hide while the mode is the default, or while the new-thread strip names it. */
   readonly matchesDefault: boolean;
-  /** The model has an effort (traits) menu, which then always holds Permissions. */
+  /** The model has an effort (traits) menu, which holds Permissions in the new design. */
   readonly hasTraits: boolean;
   readonly planModeUiEnabled: boolean;
   readonly collapsed: boolean;
   /** How many trailing blocks the width measurement moved into the overflow menu. */
   readonly measuredHiddenBlockCount: number;
 }) {
-  const accessDisplay = !input.matchesDefault
-    ? input.collapsed
-      ? ("icon" as const)
-      : ("label" as const)
-    : // Without traits there is no effort menu to hold Permissions, so keep an icon.
-      input.hasTraits
-      ? ("hidden" as const)
-      : ("icon" as const);
+  const effortHoldsPermissions = input.permissionsInEffortMenu && input.hasTraits;
+  const accessDisplay = resolveAccessDisplay(input);
   const showModeBlock = !(accessDisplay === "hidden" && !input.planModeUiEnabled);
   const blockIds = [
     ...(input.hasTraits ? ["traits" as const] : []),
@@ -28,7 +24,7 @@ export function resolveComposerControlsOwnership(input: {
   ];
   const hiddenFor = (count: number) => blockIds.slice(blockIds.length - count);
   const overflowShowsPermissionsFor = (hidden: ReadonlyArray<string>) =>
-    hidden.includes(input.hasTraits ? "traits" : "mode");
+    hidden.includes(effortHoldsPermissions ? "traits" : "mode");
   const overflowHasContent = (hidden: ReadonlyArray<string>) =>
     hidden.includes("traits") ||
     (input.planModeUiEnabled && hidden.includes("mode")) ||
@@ -57,7 +53,21 @@ export function resolveComposerControlsOwnership(input: {
      * The effort chip answers composer.mode while the chip is hidden or overflowed, until the
      * effort chip overflows too; then the overflow menu (which holds Permissions) answers it.
      */
-    effortOwnsModeShortcut: (input.matchesDefault || modeHidden) && !traitsHidden,
+    effortOwnsModeShortcut:
+      effortHoldsPermissions && (input.matchesDefault || modeHidden) && !traitsHidden,
     overflowShowsPermissions: overflowShowsPermissionsFor(hiddenBlockIds),
   };
+}
+
+function resolveAccessDisplay(input: {
+  readonly permissionsInEffortMenu: boolean;
+  readonly matchesDefault: boolean;
+  readonly hasTraits: boolean;
+  readonly collapsed: boolean;
+}): "label" | "icon" | "hidden" {
+  // The Lecturn look keeps the labelled chip at every mode, as before the new design.
+  if (!input.permissionsInEffortMenu) return "label";
+  if (!input.matchesDefault) return input.collapsed ? "icon" : "label";
+  // Without traits there is no effort menu to hold Permissions, so keep an icon.
+  return input.hasTraits ? "hidden" : "icon";
 }

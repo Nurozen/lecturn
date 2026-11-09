@@ -12,7 +12,12 @@ import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerControl, ComposerControlIcon, ComposerControlSeparator } from "./ComposerControl";
+import {
+  ComposerControl,
+  ComposerControlChevron,
+  ComposerControlIcon,
+  ComposerControlSeparator,
+} from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
@@ -118,7 +123,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
                   data-composer-shortcut="composer.mode"
                   size={size}
                   // Mirrors the effort chip's trailing pe-1 so both gaps around the bars match.
-                  className="ps-1.5"
+                  className="redesign:ps-1.5"
                   aria-label={`Permissions: ${runtimeModeOption.label}`}
                 />
               }
@@ -137,6 +142,10 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
           >
             {runtimeModeOption.label}
           </span>
+          {/* The Lecturn look keeps the select chevron on the labelled chip. */}
+          {accessDisplay === "label" ? (
+            <ComposerControlChevron size={size} className="redesign:hidden" />
+          ) : null}
         </TooltipTrigger>
         <TooltipPopup side="top">{permissionsTooltip}</TooltipPopup>
       </Tooltip>

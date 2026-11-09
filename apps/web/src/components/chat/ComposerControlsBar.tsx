@@ -59,6 +59,8 @@ export function ComposerControlsBar(props: {
   effortDisplay: EffortDisplay;
   /** The strip under a new thread names the permissions, so the row does not repeat them. */
   permissionsShownInStrip: boolean;
+  /** The new design: Permissions live in the effort menu. The Lecturn look keeps its chip. */
+  permissionsInEffortMenu: boolean;
   interactionMode: ProviderInteractionMode;
   compatibleRuntimeMode: RuntimeMode;
   defaultRuntimeMode: RuntimeMode | undefined;
@@ -172,8 +174,11 @@ export function ComposerControlsBar(props: {
     onPromptEdit,
     planModeEnabled,
   });
+  const { permissionsInEffortMenu } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
-  const permissionsChipHidden = accessMatchesDefault || props.permissionsShownInStrip;
+  const permissionsChipHidden =
+    permissionsInEffortMenu && (accessMatchesDefault || props.permissionsShownInStrip);
+  const effortMenuPermissions = permissionsInEffortMenu && runtimeModeAllowed;
   const providerTraitsPickerInput = {
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -189,15 +194,15 @@ export function ComposerControlsBar(props: {
     isComposerOwned: true,
     effortDisplay: props.effortDisplay,
     triggerClassName: cn("ps-1.5 pe-1", TEXT_CONTROL_STATES),
-    // Permissions always live in the effort menu, so the section never unmounts while open.
-    extraMenuContent: runtimeModeAllowed ? (
+    // In the new design Permissions always live here, so the section never unmounts while open.
+    extraMenuContent: effortMenuPermissions ? (
       <ComposerPermissionsSection
         runtimeMode={compatibleRuntimeMode}
         runtimeModeOptions={compatibleRuntimeModeOptions}
         onRuntimeModeChange={handleRuntimeModeChange}
       />
     ) : undefined,
-    ...(permissionsChipHidden && runtimeModeAllowed
+    ...(permissionsChipHidden && effortMenuPermissions
       ? {
           extraMenuHint: [
             `Permissions: ${
@@ -221,6 +226,7 @@ export function ComposerControlsBar(props: {
     effortOwnsModeShortcut,
     overflowShowsPermissions,
   } = resolveComposerControlsOwnership({
+    permissionsInEffortMenu,
     matchesDefault: permissionsChipHidden,
     hasTraits: providerTraitsPicker !== null && modelPickerAllowed,
     planModeUiEnabled: interactionModeAllowed,
@@ -269,7 +275,7 @@ export function ComposerControlsBar(props: {
                 size={composerControlsCollapsed ? "xs" : "sm"}
                 hidden={composerControlsHidden || ownedHiddenBlockCount > 0}
                 accessDisplay={runtimeModeAllowed ? accessDisplay : "hidden"}
-                emphasized={!accessMatchesDefault}
+                emphasized={permissionsInEffortMenu && !accessMatchesDefault}
                 onToggleInteractionMode={toggleInteractionMode}
                 onRuntimeModeChange={handleRuntimeModeChange}
               />

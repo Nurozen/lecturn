@@ -40,6 +40,10 @@ function Shell({
 const outlineClasses =
   "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-(--chat-composer-outline) dark:after:inset-shadow-2xs dark:after:inset-shadow-(color:--chat-composer-highlight)";
 
+// Lecturn look only: open the outline where the notched drawer attaches. The new design's row is bare.
+const contextSeamClasses =
+  "[:root:not([data-redesign])_&]:group-data-context-row/composer-surface:after:[clip-path:polygon(0_0,100%_0,100%_100%,calc(100%-22px)_100%,calc(100%-22px)_calc(100%-2px),22px_calc(100%-2px),22px_100%,0_100%)]";
+
 function Host({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
@@ -48,6 +52,7 @@ function Host({ className, ...props }: ComponentProps<"div">) {
         "relative z-10 w-full rounded-3xl redesign:rounded-2xl shadow-composer after:z-1 dark:shadow-none",
         "redesign:group-data-context-row/composer-surface:before:pointer-events-none redesign:group-data-context-row/composer-surface:before:absolute redesign:group-data-context-row/composer-surface:before:inset-0 redesign:group-data-context-row/composer-surface:before:-z-1 redesign:group-data-context-row/composer-surface:before:rounded-2xl redesign:group-data-context-row/composer-surface:before:bg-(--chat-composer-glass-surface)/(--glass-opacity) redesign:group-data-context-row/composer-surface:before:backdrop-blur-(--glass-blur) redesign:group-data-context-row/composer-surface:before:backdrop-saturate-(--glass-saturation)",
         outlineClasses,
+        contextSeamClasses,
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none group-has-data-[composer-banner-surface=attached]/composer-surface:before:hidden group-has-data-[composer-banner-surface=attached]/composer-surface:after:hidden",
         className,
       )}
@@ -63,6 +68,7 @@ function Main({ className, ...props }: ComponentProps<"div">) {
       className={cn(
         "group relative z-10 rounded-3xl redesign:rounded-2xl p-px",
         outlineClasses,
+        contextSeamClasses,
         "after:z-20 after:hidden group-has-data-[composer-banner-surface=attached]/composer-surface:after:block",
         "group-has-data-[composer-banner-surface=attached]/composer-surface:bg-(--chat-composer-glass-surface)/(--glass-opacity) group-has-data-[composer-banner-surface=attached]/composer-surface:backdrop-blur-(--glass-blur) group-has-data-[composer-banner-surface=attached]/composer-surface:backdrop-saturate-(--glass-saturation)",
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-composer dark:group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none",

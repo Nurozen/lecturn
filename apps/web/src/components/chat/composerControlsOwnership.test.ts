@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
 const base = {
+  permissionsInEffortMenu: true,
   matchesDefault: true,
   hasTraits: true,
   planModeUiEnabled: false,
@@ -86,5 +87,26 @@ describe("resolveComposerControlsOwnership", () => {
       collapsed: true,
     });
     expect(result.accessDisplay).toBe("icon");
+  });
+
+  it("keeps the labelled chip at the default in the Lecturn look", () => {
+    const lecturn = { ...base, permissionsInEffortMenu: false };
+    expect(resolveComposerControlsOwnership(lecturn)).toMatchObject({
+      accessDisplay: "label",
+      showModeBlock: true,
+      hiddenBlockIds: [],
+      effortOwnsModeShortcut: false,
+    });
+    expect(resolveComposerControlsOwnership({ ...lecturn, collapsed: true }).accessDisplay).toBe(
+      "label",
+    );
+    // The overflowed chip takes Permissions into the overflow menu, not the effort menu.
+    const overflowed = resolveComposerControlsOwnership({
+      ...lecturn,
+      measuredHiddenBlockCount: 1,
+    });
+    expect(overflowed.hiddenBlockIds).toEqual(["mode"]);
+    expect(overflowed.overflowShowsPermissions).toBe(true);
+    expect(overflowed.effortOwnsModeShortcut).toBe(false);
   });
 });

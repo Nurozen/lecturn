@@ -2089,6 +2089,8 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const scheduleComposerFocusStable = useStableCallback(scheduleComposerFocus);
+  // The new design names a draft's permissions in the strip; the Lecturn look keeps the row chip.
+  const permissionsInContextStrip = settings.redesignEnabled && !isServerThread;
   const openComposerPermissionsStable = useStableCallback(() =>
     composerRef.current?.openControl("composer.mode"),
   );
@@ -4118,7 +4120,7 @@ export default function ChatView(props: ChatViewProps) {
                                   }
                                   onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
                                   permissionsShownInStrip={
-                                    showComposerContextStrip && !isServerThread
+                                    permissionsInContextStrip && showComposerContextStrip
                                   }
                                   promptRef={promptRef}
                                   composerImagesRef={composerImagesRef}
@@ -4215,7 +4217,7 @@ export default function ChatView(props: ChatViewProps) {
                                         : undefined
                                     }
                                     availableEnvironments={logicalProjectEnvironments}
-                                    {...(isServerThread
+                                    {...(!permissionsInContextStrip
                                       ? {}
                                       : {
                                           trailing: (
