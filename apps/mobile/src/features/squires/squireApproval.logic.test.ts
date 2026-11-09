@@ -13,7 +13,7 @@ import {
 } from "@lecturn/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { togglePendingUserInputOptionSelection } from "../../lib/threadActivity";
+import { togglePendingUserInputOptionSelection } from "@lecturn/client-runtime/state/pending-user-input";
 import {
   squireActOutcome,
   squireApprovalAnswer,

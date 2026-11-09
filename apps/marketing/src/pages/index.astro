@@ -449,6 +449,7 @@ import {
     margin: 0 auto 36px;
     letter-spacing: -0.005em;
     line-height: 1.55;
+    text-wrap: balance;
   }
 
   .hero-actions {
@@ -696,6 +697,7 @@ import {
   .harness-tag {
     font-family: var(--font-mono);
     font-size: 11px; color: var(--fg-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
   .harness-footer {
@@ -896,13 +898,14 @@ import {
     overflow: hidden; margin-bottom: 16px;
   }
   .pr-files > div {
-    display: flex; justify-content: space-between;
+    display: flex; justify-content: space-between; gap: 12px;
     padding: 8px 12px; font-family: var(--font-mono);
     font-size: 11px; border-top: 1px solid var(--border);
     color: var(--fg-muted);
   }
   .pr-files > div:first-child { border-top: 0; }
-  .pr-files span { color: var(--fg-dim); }
+  .pr-files code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr-files span { flex: none; color: var(--fg-dim); }
   .pr-foot { display: flex; justify-content: flex-end; gap: 8px; }
 
   .pr-trail {
@@ -1165,6 +1168,10 @@ import {
     }
     .endorsement-card p {
       font-size: 13px;
+    }
+    .open-term-body {
+      padding: 16px;
+      font-size: 11px;
     }
   }
 </style>

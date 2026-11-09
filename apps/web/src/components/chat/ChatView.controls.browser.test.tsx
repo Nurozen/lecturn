@@ -164,7 +164,7 @@ import {
   type ChatViewControl,
   type ChatViewControls,
 } from "./chatViewControls";
-import { QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON } from "./composerApprovalState";
+import { APP_TOOL_APPROVAL_SEND_BLOCK_REASON } from "./composerApprovalState";
 import { resetHeldThreadTimeline } from "../ChatView.logic";
 
 /** Like the query family, a thread's status keeps its first answer; not-found until the thread exists. */
@@ -480,7 +480,7 @@ const DENIED_NAMES = new Set([
   "Edit from here",
   "Open diff",
   "Expand all folders",
-  "Runtime mode",
+  "Permissions: Full access",
   "Attach files",
   "Toggle terminal drawer",
   "Toggle right panel",
@@ -529,7 +529,7 @@ describe("ChatView controls", () => {
       "Fork from this response",
       "Edit from here",
       "Open diff",
-      "Runtime mode",
+      "Permissions: Full access",
       "Toggle terminal drawer",
       "Toggle right panel",
       "Thread actions for Release",
@@ -636,7 +636,8 @@ describe("sends and pending approvals", () => {
     await using _screen = screen;
     using add = vi.spyOn(toastManager, "add");
 
-    expect(document.body.innerHTML).toContain(QUEUED_APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
+    // The provider approval asks on its timeline row, so the card above is the app tool's.
+    expect(document.body.innerHTML).toContain(APP_TOOL_APPROVAL_SEND_BLOCK_REASON);
     expect(document.body.innerHTML).not.toContain(REDIRECT_PLACEHOLDER);
     expect((await sendButtonWithDraft()).disabled).toBe(true);
 

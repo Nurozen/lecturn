@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@lecturn/provider-core/server/handoffBudget";
@@ -90,6 +91,7 @@ import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -491,6 +493,12 @@ function codexMcpToolOutput(
   return resultOutput === undefined
     ? { error: item.error.message }
     : { error: item.error.message, result: resultOutput };
+}
+
+/** A failed MCP app call keeps its result but marks it as an error for the app frame. */
+function failedMcpToolResult(result: unknown, status: string): unknown {
+  if (status !== "failed") return result;
+  return { ...(Predicate.isObject(result) ? result : {}), isError: true };
 }
 
 // A hung MCP resource read must not hold run ingestion open.
@@ -1583,8 +1591,11 @@ function redactCodexProtocolValue(value: unknown): unknown {
       return value;
     }
     try {
-      return JSON.stringify(
-        redactCodexProtocolValue(boundProviderEventForLogging(JSON.parse(trimmed) as unknown)),
+      return pipe(
+        JSON.parse(trimmed) as unknown,
+        boundProviderEventForLogging,
+        redactCodexProtocolValue,
+        JSON.stringify,
       );
     } catch {
       return value;
@@ -2965,15 +2976,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             readonly emitInitialPrompt: boolean;
           }) {
             const registeredSubagents = yield* Ref.get(subagentThreads);
-            if (registeredSubagents.has(input.nativeThreadId)) {
-              return;
-            }
             if (input.model && !subagentSelections.has(input.nativeThreadId)) {
               yield* updateSubagentSelection(
                 input.nativeThreadId,
                 input.model,
                 input.reasoningEffort,
               );
+            }
+            if (registeredSubagents.has(input.nativeThreadId)) {
+              return;
             }
 
             const now = yield* DateTime.now;
@@ -3051,9 +3062,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               parentNodeId: subagentNodeId,
               activeProviderThreadId: providerThread.id,
               providerInstanceId: input.context.input.modelSelection.instanceId,
-              modelSelection: {
+              // A child's effort can differ from the parent's. Until Codex reports it, show none.
+              modelSelection: task.modelSelection ?? {
                 ...input.context.input.modelSelection,
                 model: task.model ?? input.context.input.modelSelection.model,
+                options: (input.context.input.modelSelection.options ?? []).filter(
+                  ({ id }) => id !== "reasoningEffort",
+                ),
               },
               title: subagentThreadTitle({
                 parentTitle: input.context.projectionAppThread.title,
@@ -3988,7 +4003,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
               const reference =
-                item.status === "completed" && item.result != null && item.error == null
+                item.result != null && item.error == null
                   ? yield* restore(
                       getNativeThreadId(context.providerThread).pipe(
                         Effect.flatMap((threadId) =>
@@ -4044,7 +4059,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...artifacts.turnItem,
                       output: {
                         [MCP_APP_OUTPUT_KEY]: reference,
-                        result: codexMcpToolResult(item),
+                        result: failedMcpToolResult(codexMcpToolResult(item), item.status),
                       },
                     };
               yield* emitProviderEvent({
@@ -4564,7 +4579,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
           Effect.gen(function* () {
-            yield* Ref.update(rateLimitSnapshot, (previous) =>
+            const previous = yield* Ref.getAndUpdate(rateLimitSnapshot, (previous) =>
               mergeCodexRateLimits(previous, payload.rateLimits),
             );
             const resetAt = codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot));
@@ -4584,7 +4599,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 turnItem: updated,
               });
             }
-            const update = codexRateLimitsToUpdate(payload.rateLimits);
+            const update = codexRateLimitsToUpdate(payload.rateLimits, previous);
             if (update && adapterOptions.onUsageLimits) {
               const checkedAt = DateTime.formatIso(yield* DateTime.now);
               yield* adapterOptions.onUsageLimits({ ...update, checkedAt });

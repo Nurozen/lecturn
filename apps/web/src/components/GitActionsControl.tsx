@@ -124,6 +124,8 @@ interface GitActionsControlProps {
   /** Lecturn: Stave Space Git rows use the toolbar; the thread details panel is the default. */
   displayMode?: "toolbar" | "panel";
   compact?: boolean;
+  showActions?: boolean;
+  showChanges?: boolean;
   onOpenChanges?: () => void;
 }
 
@@ -956,6 +958,8 @@ export default function GitActionsControl({
   draftId,
   displayMode = "panel",
   compact = false,
+  showActions = true,
+  showChanges = true,
   onOpenChanges,
   syncThreadBranch = true,
 }: GitActionsControlProps) {
@@ -1593,7 +1597,7 @@ export default function GitActionsControl({
 
   return (
     <>
-      {!isRepo ? (
+      {!showActions ? null : !isRepo ? (
         <ThreadDetailsControl
           size="xs"
           variant={isPanel ? "ghost" : "outline"}
@@ -1744,7 +1748,7 @@ export default function GitActionsControl({
         </ActionGroup>
       )}
 
-      {isPanel && isRepo && !quietEmptyDraft ? (
+      {isPanel && showChanges && isRepo && !quietEmptyDraft ? (
         <ThreadDetailsControl
           type="button"
           variant="ghost"
@@ -1954,13 +1958,16 @@ export default function GitActionsControl({
         </DialogPopup>
       </Dialog>
 
-      <PublishRepositoryDialog
-        open={isPublishDialogOpen}
-        onOpenChange={setIsPublishDialogOpen}
-        environmentId={activeEnvironmentId}
-        threadRef={activeThreadRef}
-        gitCwd={gitCwd}
-      />
+      {/* Its discovery query should stop when the Git actions row that opens it is hidden. */}
+      {showActions ? (
+        <PublishRepositoryDialog
+          open={isPublishDialogOpen}
+          onOpenChange={setIsPublishDialogOpen}
+          environmentId={activeEnvironmentId}
+          threadRef={activeThreadRef}
+          gitCwd={gitCwd}
+        />
+      ) : null}
 
       <Dialog
         open={pendingDefaultBranchAction !== null}

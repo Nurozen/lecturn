@@ -48,6 +48,9 @@ import {
 } from "~/versionSkew";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
+import { useManagedRelayEnvironments, useManagedTunnelUsage } from "~/cloud/managedRelayState";
+import { useLecturnConnectAccountPage } from "../clerk/LecturnConnectAccountPage";
+import { TunnelLimitAlert, TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { environmentCatalog } from "~/connection/catalog";
 import { readEnvironmentScope } from "~/state/session";
 import {
@@ -476,6 +479,49 @@ function CloudLinkSwitch({
   );
 }
 
+/** Tunnel meter, plus the alert after the relay refuses a tunnel at the cap. */
+function LecturnConnectTunnelUsage({
+  accountId,
+  tunnelLimit,
+}: {
+  readonly accountId: string | null | undefined;
+  readonly tunnelLimit: number | null;
+}) {
+  const usage = useManagedTunnelUsage();
+  const usageAccountId = useManagedRelayEnvironments().accountId;
+  const accountPage = useLecturnConnectAccountPage();
+  // Usage and the account page follow the session account; hide them for another picked account.
+  const ownsUsage = Boolean(accountId) && accountId === usageAccountId;
+  const used = ownsUsage ? usage.used : null;
+  const limit = ownsUsage ? usage.limit : null;
+  // Usage when the relay refused. The relay also counts tunnels still being set up, so only
+  // a freed tunnel or a higher cap clears the alert, not a meter that merely shows room.
+  const [usedAtRefusal, setUsedAtRefusal] = useState<number | null>(null);
+  if (tunnelLimit === null) {
+    if (usedAtRefusal !== null) setUsedAtRefusal(null);
+  } else if (usedAtRefusal === null && used !== null) {
+    setUsedAtRefusal(used);
+  }
+  const showLimitAlert =
+    tunnelLimit !== null &&
+    !(usedAtRefusal !== null && used !== null && used < usedAtRefusal) &&
+    !(limit !== null && limit > tunnelLimit);
+  return (
+    <>
+      {(used !== null && limit !== null) || showLimitAlert ? (
+        <div className="flex flex-col gap-3 pb-3">
+          {used !== null && limit !== null ? <TunnelUsageMeter used={used} limit={limit} /> : null}
+          {showLimitAlert ? (
+            <TunnelLimitAlert onManageTunnels={ownsUsage ? accountPage.open : null} />
+          ) : null}
+        </div>
+      ) : null}
+      {/* Kept outside the conditional so an open account page does not remount. */}
+      {accountPage.portals}
+    </>
+  );
+}
+
 function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) {
   const account = useConnectAccountPicker("publish", { label: "Publish as", labelHidden: true });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -492,6 +538,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     accountMismatchMessage,
     accountMismatchAction,
     unlinkBlocked,
+    tunnelLimit,
     reconcileCloudState,
     subscriptionRequired,
     checkSubscription,
@@ -676,7 +723,11 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             />
           )
         }
-      />
+      >
+        {signedOut ? null : (
+          <LecturnConnectTunnelUsage accountId={account.accountId} tunnelLimit={tunnelLimit} />
+        )}
+      </SettingsRow>
       {linked &&
       (managedTunnelActive || publishAgentActivity) &&
       primaryCloudLinkState.data?.deviceRelayConflict ? (

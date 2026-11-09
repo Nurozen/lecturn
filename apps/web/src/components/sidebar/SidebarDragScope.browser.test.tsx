@@ -120,6 +120,7 @@ const actions = {
   confirmAndUnpinThread: vi.fn<Actions["confirmAndUnpinThread"]>(),
   setThreadAutoSettle: vi.fn<Actions["setThreadAutoSettle"]>(),
   markThreadUnread: vi.fn<Actions["markThreadUnread"]>(),
+  turnThreadIntoProject: vi.fn<Actions["turnThreadIntoProject"]>(),
 } satisfies Actions;
 const key = (row: EnvironmentThreadShell) =>
   scopedThreadKey(scopeThreadRef(row.environmentId, row.id));

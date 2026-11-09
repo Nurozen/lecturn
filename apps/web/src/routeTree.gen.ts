@@ -33,6 +33,7 @@ import { Route as ChatSettingsStorageRouteImport } from './routes/_chat.settings
 import { Route as ChatSettingsSquiresRouteImport } from './routes/_chat.settings.squires'
 import { Route as ChatSettingsSourceControlRouteImport } from './routes/_chat.settings.source-control'
 import { Route as ChatSettingsSnapShotRouteImport } from './routes/_chat.settings.snap-shot'
+import { Route as ChatSettingsSecretsRouteImport } from './routes/_chat.settings.secrets'
 import { Route as ChatSettingsScheduledTasksRouteImport } from './routes/_chat.settings.scheduled-tasks'
 import { Route as ChatSettingsRelayRouteImport } from './routes/_chat.settings.relay'
 import { Route as ChatSettingsProvidersRouteImport } from './routes/_chat.settings.providers'
@@ -185,6 +186,11 @@ const ChatSettingsSourceControlRoute =
 const ChatSettingsSnapShotRoute = ChatSettingsSnapShotRouteImport.update({
   id: '/snap-shot',
   path: '/snap-shot',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
+const ChatSettingsSecretsRoute = ChatSettingsSecretsRouteImport.update({
+  id: '/secrets',
+  path: '/secrets',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
 const ChatSettingsScheduledTasksRoute =
@@ -386,6 +392,7 @@ export interface FileRoutesByFullPath {
   '/settings/providers': typeof ChatSettingsProvidersRoute
   '/settings/relay': typeof ChatSettingsRelayRoute
   '/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
+  '/settings/secrets': typeof ChatSettingsSecretsRoute
   '/settings/snap-shot': typeof ChatSettingsSnapShotRoute
   '/settings/source-control': typeof ChatSettingsSourceControlRoute
   '/settings/squires': typeof ChatSettingsSquiresRoute
@@ -441,6 +448,7 @@ export interface FileRoutesByTo {
   '/settings/providers': typeof ChatSettingsProvidersRoute
   '/settings/relay': typeof ChatSettingsRelayRoute
   '/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
+  '/settings/secrets': typeof ChatSettingsSecretsRoute
   '/settings/snap-shot': typeof ChatSettingsSnapShotRoute
   '/settings/source-control': typeof ChatSettingsSourceControlRoute
   '/settings/squires': typeof ChatSettingsSquiresRoute
@@ -498,6 +506,7 @@ export interface FileRoutesById {
   '/_chat/settings/providers': typeof ChatSettingsProvidersRoute
   '/_chat/settings/relay': typeof ChatSettingsRelayRoute
   '/_chat/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
+  '/_chat/settings/secrets': typeof ChatSettingsSecretsRoute
   '/_chat/settings/snap-shot': typeof ChatSettingsSnapShotRoute
   '/_chat/settings/source-control': typeof ChatSettingsSourceControlRoute
   '/_chat/settings/squires': typeof ChatSettingsSquiresRoute
@@ -555,6 +564,7 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/relay'
     | '/settings/scheduled-tasks'
+    | '/settings/secrets'
     | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/squires'
@@ -610,6 +620,7 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/relay'
     | '/settings/scheduled-tasks'
+    | '/settings/secrets'
     | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/squires'
@@ -666,6 +677,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/providers'
     | '/_chat/settings/relay'
     | '/_chat/settings/scheduled-tasks'
+    | '/_chat/settings/secrets'
     | '/_chat/settings/snap-shot'
     | '/_chat/settings/source-control'
     | '/_chat/settings/squires'
@@ -867,6 +879,13 @@ declare module '@tanstack/react-router' {
       path: '/snap-shot'
       fullPath: '/settings/snap-shot'
       preLoaderRoute: typeof ChatSettingsSnapShotRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
+    '/_chat/settings/secrets': {
+      id: '/_chat/settings/secrets'
+      path: '/secrets'
+      fullPath: '/settings/secrets'
+      preLoaderRoute: typeof ChatSettingsSecretsRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
     '/_chat/settings/scheduled-tasks': {
@@ -1105,6 +1124,7 @@ interface ChatSettingsRouteChildren {
   ChatSettingsProvidersRoute: typeof ChatSettingsProvidersRoute
   ChatSettingsRelayRoute: typeof ChatSettingsRelayRoute
   ChatSettingsScheduledTasksRoute: typeof ChatSettingsScheduledTasksRoute
+  ChatSettingsSecretsRoute: typeof ChatSettingsSecretsRoute
   ChatSettingsSnapShotRoute: typeof ChatSettingsSnapShotRoute
   ChatSettingsSourceControlRoute: typeof ChatSettingsSourceControlRoute
   ChatSettingsSquiresRoute: typeof ChatSettingsSquiresRoute
@@ -1136,6 +1156,7 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsProvidersRoute: ChatSettingsProvidersRoute,
   ChatSettingsRelayRoute: ChatSettingsRelayRoute,
   ChatSettingsScheduledTasksRoute: ChatSettingsScheduledTasksRoute,
+  ChatSettingsSecretsRoute: ChatSettingsSecretsRoute,
   ChatSettingsSnapShotRoute: ChatSettingsSnapShotRoute,
   ChatSettingsSourceControlRoute: ChatSettingsSourceControlRoute,
   ChatSettingsSquiresRoute: ChatSettingsSquiresRoute,

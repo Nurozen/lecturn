@@ -7,6 +7,7 @@ import {
   type ScopedThreadRef,
   type ServerProviderModel,
 } from "@lecturn/contracts";
+import type { EffortDisplay } from "@lecturn/contracts/settings";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentValue,
@@ -63,6 +64,10 @@ type TraitsRenderInput = {
   triggerClassName?: string;
   isComposerOwned?: boolean;
   hidden?: boolean;
+  effortDisplay?: EffortDisplay;
+  extraMenuContent?: ReactNode;
+  extraMenuOwnsModeShortcut?: boolean;
+  extraMenuHint?: string;
 };
 
 export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
@@ -232,6 +237,10 @@ function renderTraitsControl(
     triggerClassName,
     isComposerOwned,
     hidden,
+    effortDisplay,
+    extraMenuContent,
+    extraMenuOwnsModeShortcut,
+    extraMenuHint,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   const { selections: resolvedModelOptions } = resolveComposerOptionSelections(
@@ -271,6 +280,10 @@ function renderTraitsControl(
       {...(triggerClassName !== undefined ? { triggerClassName } : {})}
       {...(isComposerOwned ? { isComposerOwned } : {})}
       {...(hidden !== undefined ? { hidden } : {})}
+      {...(effortDisplay ? { effortDisplay } : {})}
+      {...(extraMenuContent ? { extraMenuContent } : {})}
+      {...(extraMenuOwnsModeShortcut ? { extraMenuOwnsModeShortcut } : {})}
+      {...(extraMenuHint ? { extraMenuHint } : {})}
     />
   );
 }

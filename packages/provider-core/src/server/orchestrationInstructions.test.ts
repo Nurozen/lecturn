@@ -1,10 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 
 import {
+  LECTURN_DEVICE_TOOL_INSTRUCTIONS,
+  LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   LECTURN_ORCHESTRATION_INSTRUCTIONS,
   lecturnAcpInstructionState,
   lecturnAcpPromptWithInstructions,
-  lecturnOrchestrationPromptForFirstRun,
+  lecturnOrchestrationPrompt,
   lecturnOrchestrationSystemPrompt,
 } from "./orchestrationInstructions.ts";
 
@@ -15,6 +17,7 @@ describe("Lecturn orchestration provider instructions", () => {
     const state = lecturnAcpInstructionState({
       interactionMode: "default",
       hasLecturnMcp: true,
+      hasDeviceTools: false,
       appInstructions,
     });
 
@@ -30,6 +33,7 @@ describe("Lecturn orchestration provider instructions", () => {
     const changedState = lecturnAcpInstructionState({
       interactionMode: "default",
       hasLecturnMcp: true,
+      hasDeviceTools: false,
       appInstructions: changed,
     });
     assert.include(
@@ -43,17 +47,22 @@ describe("Lecturn orchestration provider instructions", () => {
     );
 
     // Threads outside an app keep the state, and so the bytes, they had.
-    assert.deepEqual(lecturnAcpInstructionState({ interactionMode: "plan", hasLecturnMcp: true }), {
-      interactionMode: "plan",
-      hasLecturnMcp: true,
-    });
     assert.deepEqual(
       lecturnAcpInstructionState({
         interactionMode: "plan",
         hasLecturnMcp: true,
+        hasDeviceTools: false,
+      }),
+      { interactionMode: "plan", hasLecturnMcp: true, hasDeviceTools: false },
+    );
+    assert.deepEqual(
+      lecturnAcpInstructionState({
+        interactionMode: "plan",
+        hasLecturnMcp: true,
+        hasDeviceTools: false,
         appInstructions: "  ",
       }),
-      { interactionMode: "plan", hasLecturnMcp: true },
+      { interactionMode: "plan", hasLecturnMcp: true, hasDeviceTools: false },
     );
   });
 
@@ -63,12 +72,14 @@ describe("Lecturn orchestration provider instructions", () => {
     const state = lecturnAcpInstructionState({
       interactionMode: "default",
       hasLecturnMcp: true,
+      hasDeviceTools: true,
       squireInstructions,
     });
     const first = lecturnAcpPromptWithInstructions({ prompt, state, squireInstructions });
     assert.include(first, squireInstructions.join("\n\n"));
     assert.notInclude(first, LECTURN_ORCHESTRATION_INSTRUCTIONS.trim());
     assert.notInclude(first, "## Lecturn browser");
+    assert.notInclude(first, "## Lecturn devices");
     assert.notInclude(first, "acp-mcp-call");
     assert.equal(
       lecturnAcpPromptWithInstructions({ prompt, state, previousState: state, squireInstructions }),
@@ -76,17 +87,101 @@ describe("Lecturn orchestration provider instructions", () => {
     );
 
     assert.equal(
-      lecturnOrchestrationSystemPrompt(true, squireInstructions),
+      lecturnOrchestrationSystemPrompt(true, true, squireInstructions),
       squireInstructions.join("\n\n"),
     );
     assert.include(
-      lecturnOrchestrationPromptForFirstRun({
+      lecturnOrchestrationPrompt({
         prompt,
-        runOrdinal: 1,
         hasLecturnMcp: true,
+        hasDeviceTools: true,
+        orchestrationDelivered: false,
+        deviceInstructionsDelivered: false,
         squireInstructions,
       }),
       "Stay quiet by default.",
+    );
+  });
+});
+
+describe("Lecturn device instructions", () => {
+  it("route device work through device_open and give Claude the line that loads the tools", () => {
+    for (const intent of ["`device_list`", "`device_open`", "`agent-device`", "ssh", "`hostId`"]) {
+      assert.include(LECTURN_DEVICE_TOOL_INSTRUCTIONS, intent);
+    }
+    assert.notInclude(LECTURN_DEVICE_TOOL_INSTRUCTIONS, "ToolSearch");
+    const loadLine =
+      " Load them with ToolSearch `select:mcp__lecturn__device_list,mcp__lecturn__device_open,mcp__lecturn__device_screenshot,mcp__lecturn__device_close`.";
+    assert.include(LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH, loadLine);
+    assert.equal(
+      LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH.replace(loadLine, ""),
+      LECTURN_DEVICE_TOOL_INSTRUCTIONS,
+    );
+  });
+
+  it("open the app before the returned command's snapshots, screenshots and input", () => {
+    assert.include(
+      LECTURN_DEVICE_TOOL_INSTRUCTIONS,
+      "its snapshots, screenshots and input need `open <app>` first,",
+    );
+  });
+
+  it("keep the failure rule from taking over or closing a session another thread holds", () => {
+    // agent-device's DEVICE_IN_USE advice is to rerun with the owner's --session or close it first.
+    assert.include(
+      LECTURN_DEVICE_TOOL_INSTRUCTIONS,
+      "follow its advice once, but never reuse or close another session; if it still fails,",
+    );
+  });
+
+  it("reach OpenCode and Cursor only when the session holds device access", () => {
+    assert.include(lecturnOrchestrationSystemPrompt(true, true), LECTURN_DEVICE_TOOL_INSTRUCTIONS);
+    assert.notInclude(lecturnOrchestrationSystemPrompt(true, false), "## Lecturn devices");
+    assert.isUndefined(lecturnOrchestrationSystemPrompt(false, true));
+
+    const firstRun = (hasDeviceTools: boolean) =>
+      lecturnOrchestrationPrompt({
+        prompt: "Check the login screen.",
+        hasLecturnMcp: true,
+        hasDeviceTools,
+        orchestrationDelivered: false,
+        deviceInstructionsDelivered: false,
+      });
+    assert.include(firstRun(true), LECTURN_DEVICE_TOOL_INSTRUCTIONS);
+    assert.notInclude(firstRun(false), "## Lecturn devices");
+
+    const laterRun = (deviceInstructionsDelivered: boolean) =>
+      lecturnOrchestrationPrompt({
+        prompt: "Check the login screen.",
+        hasLecturnMcp: true,
+        hasDeviceTools: true,
+        orchestrationDelivered: true,
+        deviceInstructionsDelivered,
+      });
+    assert.include(laterRun(false), LECTURN_DEVICE_TOOL_INSTRUCTIONS);
+    assert.notInclude(laterRun(false), LECTURN_ORCHESTRATION_INSTRUCTIONS.trim());
+    assert.equal(laterRun(true), "Check the login screen.");
+  });
+
+  it("reach ACP agents again when device access changes mid-thread", () => {
+    const state = {
+      interactionMode: "default",
+      hasLecturnMcp: true,
+      hasDeviceTools: false,
+    } as const;
+    const withDevices = lecturnAcpPromptWithInstructions({
+      prompt: "Check the login screen.",
+      state: { ...state, hasDeviceTools: true },
+      previousState: state,
+    });
+    assert.include(withDevices, LECTURN_DEVICE_TOOL_INSTRUCTIONS);
+    assert.equal(
+      lecturnAcpPromptWithInstructions({ prompt: "Again.", state, previousState: state }),
+      "Again.",
+    );
+    assert.notInclude(
+      lecturnAcpPromptWithInstructions({ prompt: "Hi.", state }),
+      "## Lecturn devices",
     );
   });
 });

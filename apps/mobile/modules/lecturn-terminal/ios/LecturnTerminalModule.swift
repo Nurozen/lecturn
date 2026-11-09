@@ -63,7 +63,15 @@ public class LecturnTerminalModule: Module {
       Prop("captureRequest") { (view: LecturnTerminalView, request: Double) in
         view.captureRequest = request
       }
+
+      Prop("sharedGrid") { (view: LecturnTerminalView, sharedGrid: [Int]) in
+        view.sharedGrid = sharedGrid
+      }
       Events("onInput", "onResize", "onCapture")
+
+      OnViewDidUpdateProps { (view: LecturnTerminalView) in
+        view.applyPendingBuffer()
+      }
     }
   }
 }

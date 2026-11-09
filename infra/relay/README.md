@@ -1,7 +1,7 @@
 # Lecturn Connect Relay
 
 > [!NOTE]
-> Sign in to Lecturn Connect from the app under Settings > Connections.
+> Sign in to Lecturn Connect from the app under Settings > Relay (in the Connections group).
 
 The relay is the hosted control plane for Lecturn Connect. It helps clients discover and connect to
 remote environments, manages the cloud-side records needed for those connections, and delivers

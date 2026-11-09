@@ -1,4 +1,9 @@
-import type { WorktreeSetupSnapshot } from "@lecturn/contracts";
+import type { ToolCallDiffTarget } from "../../diffPanelStore";
+import type {
+  ProviderApprovalDecision,
+  RuntimeRequestId,
+  WorktreeSetupSnapshot,
+} from "@lecturn/contracts";
 import {
   type EnvironmentId,
   type MessageId,
@@ -16,6 +21,7 @@ import type { WorkflowOpening } from "@lecturn/client-runtime/state/subagentRunt
 import { createContext, type MouseEvent, type ReactNode } from "react";
 import { type LegendListRef } from "@legendapp/list/react";
 import type { CodexArtifactTemplate } from "@lecturn/shared/codexArtifactTemplates";
+import type { PendingApproval } from "../../session-logic";
 import { type ChatFileAttachment } from "../../types";
 import { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { type AssistantCitationTarget } from "./AssistantCitationSource";
@@ -39,6 +45,12 @@ export interface TurnItemSource {
 }
 
 export interface TimelineRowSharedState {
+  pendingApprovals: ReadonlyMap<RuntimeRequestId, PendingApproval>;
+  respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
+  canOperateThread: boolean;
+  onRespondToApproval:
+    | ((requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => Promise<unknown>)
+    | undefined;
   citationRequest: AssistantCitationTarget | null;
   noteHighlights: ReadonlyMap<string, readonly ThreadNoteHighlightSelector[]>;
   notesViewport: HTMLElement | null;
@@ -68,6 +80,7 @@ export interface TimelineRowSharedState {
   findActive: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   displayThreadKey?: string;
+  onOpenToolDiff: ((target: ToolCallDiffTarget) => void) | undefined;
   /** Unset where there is no diff to open, so the timeline shows no "Open diff" button. */
   onOpenTurnDiff: ((runId: RunId, filePath?: string) => void) | undefined;
   /**

@@ -74,6 +74,7 @@ import {
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
   type RunAttemptId,
+  type RuntimeRequestId,
   RunId,
   type ThreadId,
   type TurnItemId,
@@ -656,7 +657,7 @@ type MessagesTimelineRowContent =
       id: string;
       createdAt: string | null;
       /** A running compaction owns the working row, so its divider appears only once it ends. */
-      compacting?: string;
+      compacting?: true;
     }
   | {
       kind: "thinking";
@@ -694,6 +695,7 @@ type MessagesTimelineRowContent =
     }
   | {
       kind: "turn-fold";
+      deferredWorkItemIds?: ReadonlyArray<string>;
       id: string;
       createdAt: string;
       runId: RunId;
@@ -702,6 +704,7 @@ type MessagesTimelineRowContent =
     }
   | {
       kind: "attempt-fold";
+      deferredWorkItemIds?: ReadonlyArray<string>;
       id: string;
       createdAt: string;
       runId: RunId;
@@ -863,6 +866,7 @@ interface TurnFold {
 }
 
 interface SupersededAttemptFold {
+  readonly deferredWorkItemIds: ReadonlyArray<string>;
   readonly runId: RunId;
   readonly attemptId: RunAttemptId;
   readonly anchorEntryId: string;
@@ -885,6 +889,18 @@ function completeSupersededReplyEntryIds(
     ) {
       continue;
     }
+    const previous = lastOutputByAttemptId.get(entry.attempt.id);
+    const deferredEnd =
+      previous?.kind === "work"
+        ? previous.entry.projectedItem?.item.deferredWork?.lastOrdinal
+        : undefined;
+    const ordinal =
+      entry.kind === "work"
+        ? entry.entry.projectedItem?.item.ordinal
+        : entry.kind === "message"
+          ? entry.projectedItem?.item.ordinal
+          : undefined;
+    if (deferredEnd !== undefined && ordinal !== undefined && deferredEnd > ordinal) continue;
     lastOutputByAttemptId.set(entry.attempt.id, entry);
   }
   const replyEntryIds = new Set<string>();
@@ -924,6 +940,7 @@ function deriveSupersededAttemptFolds(
       completeAttemptIds.has(entry.attempt.id) ||
       unfoldedRunIds.has(entry.attempt.runId) ||
       (entry.kind === "message" && entry.message.role === "user") ||
+      (entry.kind === "event" && entry.projectedItem.item.type === "handoff") ||
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
       timelineEntryHeadsAppCard(entry) ||
@@ -944,6 +961,11 @@ function deriveSupersededAttemptFolds(
     const attempt = firstEntry?.attempt;
     if (firstEntry === undefined || attempt === undefined) continue;
     foldsByAnchorEntryId.set(firstEntry.id, {
+      deferredWorkItemIds: entries.flatMap((entry) =>
+        entry.kind === "work" && entry.entry.projectedItem?.item.deferredWork
+          ? [String(entry.entry.projectedItem.sourceItemId)]
+          : [],
+      ),
       runId: attempt.runId,
       attemptId: attempt.id,
       anchorEntryId: firstEntry.id,
@@ -1130,6 +1152,24 @@ function failedTimelineRunIds(
     if (runId) failed.add(runId);
   }
   return failed;
+}
+
+/** Usage-limit pauses keep their tool groups; any other failure itemizes the run's work. */
+function itemizedFailedRunIds(
+  entries: ReadonlyArray<TimelineEntry>,
+  failedRunIds: ReadonlySet<RunId>,
+) {
+  const usageLimited = new Set<RunId>();
+  const otherFailures = new Set<RunId>();
+  for (const entry of entries) {
+    const item = timelineEntryFailedItem(entry);
+    if (item?.runId) {
+      (item.failure.class === "usage_limit" ? usageLimited : otherFailures).add(item.runId);
+    }
+  }
+  return new Set(
+    [...failedRunIds].filter((runId) => !usageLimited.has(runId) || otherFailures.has(runId)),
+  );
 }
 
 function deriveTurnFolds(input: {
@@ -1544,6 +1584,7 @@ function deriveTimelineTurnFolds(
 
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  pendingApprovalRequestIds?: ReadonlySet<RuntimeRequestId>;
   latestRun?: TimelineLatestRun | null;
   runningRunId?: RunId | null;
   expandedRunIds?: ReadonlySet<RunId>;
@@ -1585,6 +1626,13 @@ export function deriveMessagesTimelineRows(input: {
   compactSquireEvents?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
+  const isPendingApproval = (entry: WorkLogEntry) => {
+    const item = entry.projectedItem?.item;
+    return (
+      item?.type === "approval_request" &&
+      input.pendingApprovalRequestIds?.has(item.requestId) === true
+    );
+  };
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {
@@ -1604,6 +1652,7 @@ export function deriveMessagesTimelineRows(input: {
   const nextRows: MessagesTimelineRow[] = [];
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
+  const itemizedRunIds = itemizedFailedRunIds(timelineEntries, failedRunIds);
   const liveSubagentEntryIds = liveSubagentCardEntryIds(timelineEntries);
   const completeSupersededReplyIds = completeSupersededReplyEntryIds(timelineEntries);
   const supersededFoldsByAnchorEntryId = deriveSupersededAttemptFolds(
@@ -1611,6 +1660,9 @@ export function deriveMessagesTimelineRows(input: {
     failedRunIds,
     liveSubagentEntryIds,
     completeSupersededReplyIds,
+  );
+  const supersededWorkItemIds = new Set(
+    [...supersededFoldsByAnchorEntryId.values()].flatMap((fold) => fold.deferredWorkItemIds),
   );
   const activeVisualResponseRunIds = deriveActiveVisualResponseRunIds({
     timelineEntries: timelineEntries,
@@ -1637,6 +1689,7 @@ export function deriveMessagesTimelineRows(input: {
     liveSubagentEntryIds,
     completeSupersededReplyEntryIds: completeSupersededReplyIds,
   });
+  const timelineEntryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
   const collapsedEntryIds = new Set<string>();
   const collapsedFoldMemberIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
@@ -1654,6 +1707,14 @@ export function deriveMessagesTimelineRows(input: {
     if (!input.expandedAttemptIds?.has(fold.attemptId)) {
       for (const entryId of fold.hiddenEntryIds) {
         collapsedSupersededEntryIds.add(entryId);
+      }
+    }
+  }
+  if (input.pendingApprovalRequestIds?.size) {
+    for (const entry of timelineEntries) {
+      if (entry.kind === "work" && isPendingApproval(entry.entry)) {
+        collapsedEntryIds.delete(entry.id);
+        collapsedSupersededEntryIds.delete(entry.id);
       }
     }
   }
@@ -1705,6 +1766,7 @@ export function deriveMessagesTimelineRows(input: {
         entry.entry.itemType === "system_notice" ||
         entry.entry.itemType === "notification" ||
         entry.entry.questionAnswer !== undefined ||
+        isPendingApproval(entry.entry) ||
         !runIdIsActiveResponse(entry.entry.runId) ||
         entry.entry.sourceActivityKind === "context-compaction" ||
         collapsedEntryIds.has(entry.id) ||
@@ -1735,7 +1797,8 @@ export function deriveMessagesTimelineRows(input: {
     latestRunningToolEntry !== undefined ||
     (!waitingOnUser &&
       latestVisibleToolEntry !== undefined &&
-      workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
+      workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry) &&
+      !input.pendingApprovalRequestIds?.size);
   const latestToolFailed =
     latestRunningToolEntry === undefined &&
     latestVisibleToolEntry !== undefined &&
@@ -1829,20 +1892,17 @@ export function deriveMessagesTimelineRows(input: {
     activeRunIsCompaction && !compactionRunFinished ? unsettledRunId : null;
   // Compacting on return holds back the message the user just sent, so the working row says why
   // it is waiting. Any other compaction shows only its live divider, never both.
-  const activeCompactionRunId =
-    runningCompactionRunId !== null && compactionRuns.get(runningCompactionRunId) === "onReturn"
-      ? runningCompactionRunId
-      : activeCompactionEntry?.entry.runId != null &&
-          resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
-        ? activeCompactionEntry.entry.runId
-        : null;
-  const compactingLabel = (() => {
-    if (activeCompactionRunId === null) return undefined;
-    const age = activeCompactionEntry
-      ? resumeCompactionAgeByEntryId.get(activeCompactionEntry.id)
+  const compactsOnReturn =
+    runningCompactionRunId !== null && compactionRuns.get(runningCompactionRunId) === "onReturn";
+  // The question is answered mid-turn, so the row times this compaction, not the turn.
+  const resumeCompactionEntry =
+    activeCompactionEntry?.entry.runId != null &&
+    resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
+      ? activeCompactionEntry
       : undefined;
-    return age ? `Compacting after ${age} idle…` : IDLE_COMPACTING_LABELS.onReturn;
-  })();
+  const activeCompactionRunId = compactsOnReturn
+    ? runningCompactionRunId
+    : (resumeCompactionEntry?.entry.runId ?? null);
   const appendWorkingRow = () => {
     if (waitingOnUser && input.hideWaitingRow === true) return;
     if (compactionOnlyRunFinished) return;
@@ -1850,8 +1910,11 @@ export function deriveMessagesTimelineRows(input: {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
-      createdAt: input.activeTurnStartedAt ?? null,
-      ...(compactingLabel ? { compacting: compactingLabel } : {}),
+      createdAt:
+        (compactsOnReturn ? undefined : resumeCompactionEntry?.entry.createdAt) ??
+        input.activeTurnStartedAt ??
+        null,
+      ...(activeCompactionRunId !== null ? { compacting: true as const } : {}),
     });
   };
   let hasActivityRow = false;
@@ -1955,9 +2018,18 @@ export function deriveMessagesTimelineRows(input: {
 
     const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
     if (turnFold) {
+      const deferredWorkItemIds = [...turnFold.entryIds].flatMap((entryId) => {
+        const entry = timelineEntryById.get(entryId);
+        return entry?.kind === "work" &&
+          entry.entry.projectedItem?.item.deferredWork &&
+          !supersededWorkItemIds.has(String(entry.entry.projectedItem.sourceItemId))
+          ? [String(entry.entry.projectedItem.sourceItemId)]
+          : [];
+      });
       nextRows.push({
         kind: "turn-fold",
         id: `turn-fold:${turnFold.runId}`,
+        ...(deferredWorkItemIds.length > 0 ? { deferredWorkItemIds } : {}),
         createdAt: turnFold.createdAt,
         runId: turnFold.runId,
         label: input.compactSquireEvents
@@ -1975,6 +2047,7 @@ export function deriveMessagesTimelineRows(input: {
     if (supersededFold) {
       nextRows.push({
         kind: "attempt-fold",
+        deferredWorkItemIds: supersededFold.deferredWorkItemIds,
         id: `attempt-fold:${supersededFold.attemptId}`,
         createdAt: supersededFold.createdAt,
         runId: supersededFold.runId,
@@ -2036,7 +2109,8 @@ export function deriveMessagesTimelineRows(input: {
 
     if (timelineEntry.kind === "work") {
       if (
-        (timelineEntry.entry.runId != null && failedRunIds.has(timelineEntry.entry.runId)) ||
+        isPendingApproval(timelineEntry.entry) ||
+        (timelineEntry.entry.runId != null && itemizedRunIds.has(timelineEntry.entry.runId)) ||
         (timelineEntry.entry.itemType === "error" &&
           timelineEntry.entry.toolLifecycleStatus === "failed") ||
         timelineEntry.entry.tone === "error" ||
@@ -2070,11 +2144,14 @@ export function deriveMessagesTimelineRows(input: {
           (openRunId !== null && nextEntry.entry.runId === openRunId) ||
           timelineEntryHeadsAppCard(nextEntry) ||
           nextEntry.entry.sourceActivityKind === "context-compaction" ||
+          (nextEntry.entry.itemType === "error" &&
+            nextEntry.entry.toolLifecycleStatus === "failed") ||
           nextEntry.entry.tone === "error" ||
           nextEntry.entry.sourceActivityKind === "runtime.error" ||
           nextEntry.entry.itemType === "system_notice" ||
           nextEntry.entry.itemType === "notification" ||
           nextEntry.entry.questionAnswer !== undefined ||
+          isPendingApproval(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           collapsedSupersededEntryIds.has(nextEntry.id) ||
@@ -2366,7 +2443,7 @@ export function deriveMessagesTimelineRows(input: {
     !setupOwnsWorkingSlot &&
     !hasActiveCompaction &&
     !compactionOnlyRunFinished &&
-    (!hasActivityRow || latestToolFailed)
+    (latestToolFailed || (!hasActivityRow && !input.pendingApprovalRequestIds?.size))
   ) {
     const failedGroupAnchor = latestToolFailed ? activeWorkAnchor : undefined;
     if (failedGroupAnchor) {
@@ -2521,6 +2598,7 @@ function replaceStreamingMessageRows(
     expandedRunIds: previousExpandedRuns,
     expandedAttemptIds: previousExpandedAttempts,
     expandedWorkGroupIds: previousExpandedGroups,
+    pendingApprovalRequestIds: previousPendingApprovalRequestIds,
     availableRevertTurnCounts: previousAvailableRevertTurnCounts,
     ...previousContext
   } = previous.input;
@@ -2531,6 +2609,7 @@ function replaceStreamingMessageRows(
     expandedRunIds,
     expandedAttemptIds,
     expandedWorkGroupIds,
+    pendingApprovalRequestIds,
     availableRevertTurnCounts,
     ...context
   } = input;
@@ -2542,6 +2621,7 @@ function replaceStreamingMessageRows(
     !shallow(previousExpandedRuns, expandedRunIds) ||
     !shallow(previousExpandedAttempts, expandedAttemptIds) ||
     !shallow(previousExpandedGroups, expandedWorkGroupIds) ||
+    !shallow(previousPendingApprovalRequestIds, pendingApprovalRequestIds) ||
     !shallow(previousAvailableRevertTurnCounts, availableRevertTurnCounts) ||
     !sameCheckpointSummaries(previousCheckpoints, turnDiffSummaries)
   ) {
@@ -2666,14 +2746,18 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "unread-divider":
       return a.createdAt === (b as typeof a).createdAt;
 
+    case "attempt-fold":
     case "turn-fold": {
       const bf = b as typeof a;
-      return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
-    }
-
-    case "attempt-fold": {
-      const bf = b as typeof a;
-      return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
+      const anchors = a.deferredWorkItemIds ?? [];
+      const nextAnchors = bf.deferredWorkItemIds ?? [];
+      return (
+        a.createdAt === bf.createdAt &&
+        a.label === bf.label &&
+        a.expanded === bf.expanded &&
+        anchors.length === nextAnchors.length &&
+        anchors.every((id, index) => id === nextAnchors[index])
+      );
     }
 
     case "context-compaction": {

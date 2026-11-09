@@ -774,7 +774,7 @@ export function BranchToolbarBranchSelector({
               />
             </ComposerContextLabel>
             {displayMode !== "panel" ? (
-              <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:opacity-100" />
+              <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:hidden" />
             ) : null}
           </ComboboxTrigger>
         </span>

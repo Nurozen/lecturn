@@ -8,6 +8,7 @@ import {
   type ServerProvider,
 } from "@lecturn/contracts";
 import { settlePromise, squashAtomCommandFailure } from "@lecturn/client-runtime/state/runtime";
+import { sessionPermissionsUnavailableMessage } from "@lecturn/shared/authScopeOptions";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import { AsyncResult } from "effect/reactivity";
@@ -208,11 +209,14 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
               </Text>
             ) : !allowed ? (
               <Text className="px-2 text-sm text-foreground-muted">
-                {AsyncResult.isFailure(sessionResult)
-                  ? "Could not verify your permissions. Reconnect to try again."
-                  : session === null
-                    ? "Checking permissions…"
-                    : "This connection does not have permission to manage the environment."}
+                {AsyncResult.isFailure(sessionResult) || session === null || !session.authenticated
+                  ? sessionPermissionsUnavailableMessage({
+                      connected,
+                      failed: AsyncResult.isFailure(sessionResult),
+                      rejected:
+                        !AsyncResult.isFailure(sessionResult) && session?.authenticated === false,
+                    })
+                  : "This connection does not have permission to manage the environment."}
               </Text>
             ) : null}
             {error ? (

@@ -36,7 +36,7 @@ import {
 import type { PullRequestExpectedHost } from "./PullRequestListFilters";
 import type { PullRequestListPreferences, PullRequestListSort } from "./pullRequestListPreferences";
 import { assignProjectsToEnvironments } from "./pullRequestProjectAssignment.logic";
-import { pullRequestFilterProjects } from "./pullRequestProjectFilter.logic";
+import { pullRequestFilterProjects } from "@lecturn/client-runtime/pull-request-project-filter";
 import { pullRequestListEntryId } from "./pullRequestListGroups.logic";
 import { useSagaRepositoryIndex } from "../../state/stave";
 import { scopedPullRequestProjectIds } from "./desktopActivity.logic";

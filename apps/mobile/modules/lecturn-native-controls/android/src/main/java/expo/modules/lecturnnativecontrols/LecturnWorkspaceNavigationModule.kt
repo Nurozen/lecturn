@@ -332,11 +332,14 @@ class LecturnWorkspaceNavigationView(
             )
           }
         }
+        // Other tabs keep the button's slot so the destinations below never move between tabs.
         if (selectedTab == "threads") {
           newThreadButton(fraction) {
             expanded = false
             onNewThread(emptyMap<String, Any>())
           }
+        } else {
+          Spacer(Modifier.padding(top = 12.dp).height(FAB_SIZE))
         }
         Spacer(Modifier.weight(1f))
         tabs.forEach { tab ->

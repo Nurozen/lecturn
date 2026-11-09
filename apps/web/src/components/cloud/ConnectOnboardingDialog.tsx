@@ -25,7 +25,9 @@ import {
 import { environmentSession, readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useConnectAccountPicker } from "../clerk/ConnectAccountPicker";
 import { ConnectSubscriptionGate } from "./ConnectSubscriptionGate";
+import { useLecturnConnectAccountPage } from "../clerk/LecturnConnectAccountPage";
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
+import { TunnelLimitAlert } from "./TunnelUsage";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog } from "../ui/dialog";
@@ -81,6 +83,7 @@ function ConfiguredConnectOnboardingDialog() {
     accountId: account.accountId,
     onSelectAccount: account.select,
   });
+  const accountPage = useLecturnConnectAccountPage();
   const showPublishStep = canManageRelay && controller.linkState.target !== null;
   const steps: ReadonlyArray<OnboardingStep> = showPublishStep
     ? ["publish", "devices"]
@@ -236,6 +239,15 @@ function ConfiguredConnectOnboardingDialog() {
     setStep("devices");
   };
 
+  const openAccountPage = accountPage.open;
+  // The account page is a Clerk modal, so close this dialog before it opens.
+  const leaveForAccountPage = openAccountPage
+    ? () => {
+        complete();
+        openAccountPage();
+      }
+    : null;
+
   return (
     <Dialog
       open={openForAccount !== null}
@@ -289,6 +301,8 @@ function ConfiguredConnectOnboardingDialog() {
                   controller.accountMismatchMessage ??
                   controller.linkState.error
                 }
+                tunnelLimit={controller.tunnelLimit}
+                onOpenAccountPage={account.accountId === userId ? leaveForAccountPage : null}
                 onExposeEnvironmentChange={(enabled) => {
                   if (
                     primaryEnvironmentId !== null &&
@@ -351,6 +365,8 @@ function ConfiguredConnectOnboardingDialog() {
           )}
         </WizardFooter>
       </WizardPopup>
+      {/* Base UI renders Root children while closed, so this keeps the account page mounted. */}
+      {accountPage.portals}
     </Dialog>
   );
 }
@@ -365,6 +381,8 @@ function PublishStep({
   publishAgentActivity,
   disabled,
   operationError,
+  tunnelLimit,
+  onOpenAccountPage,
   onExposeEnvironmentChange,
   onPublishAgentActivityChange,
 }: {
@@ -372,6 +390,8 @@ function PublishStep({
   readonly publishAgentActivity: boolean;
   readonly disabled: boolean;
   readonly operationError: string | null;
+  readonly tunnelLimit: number | null;
+  readonly onOpenAccountPage: (() => void) | null;
   readonly onExposeEnvironmentChange: (enabled: boolean) => void;
   readonly onPublishAgentActivityChange: (enabled: boolean) => void;
 }) {
@@ -394,8 +414,19 @@ function PublishStep({
         />
       </div>
       {operationError ? <p className="text-xs text-destructive">{operationError}</p> : null}
+      {tunnelLimit !== null ? (
+        <OnboardingTunnelLimitAlert onOpenAccountPage={onOpenAccountPage} />
+      ) : null}
     </div>
   );
+}
+
+function OnboardingTunnelLimitAlert({
+  onOpenAccountPage,
+}: {
+  readonly onOpenAccountPage: (() => void) | null;
+}) {
+  return <TunnelLimitAlert onManageTunnels={onOpenAccountPage} />;
 }
 
 function OnboardingToggleRow({

@@ -19,8 +19,8 @@ export function createRelayEnvironmentDiscoveryAtoms<R, E>(
     { initialValue: RelayEnvironmentDiscovery.EMPTY_RELAY_ENVIRONMENT_DISCOVERY_STATE },
   );
   const stateValueAtom = Atom.make((get) =>
-    Option.getOrElse(
-      AsyncResult.value(get(stateAtom)),
+    AsyncResult.getOrElse(
+      get(stateAtom),
       () => RelayEnvironmentDiscovery.EMPTY_RELAY_ENVIRONMENT_DISCOVERY_STATE,
     ),
   ).pipe(Atom.withLabel("relay-environment-discovery-value"));

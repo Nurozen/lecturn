@@ -1,7 +1,7 @@
 import { recognizeRemoteWith } from "@lecturn/source-control-core/shared/definition";
 import { describe, expect, it } from "vite-plus/test";
 
-import { definition } from "./definition.ts";
+import { APP_SIGN_IN, definition } from "./definition.ts";
 
 const parse = (url: string) => definition.parseChangeRequestUrl(new URL(url));
 
@@ -157,5 +157,13 @@ describe("GitHub media URLs", () => {
     ]) {
       expect(media(url), url).toBeNull();
     }
+  });
+});
+
+describe("GitHub app sign-in", () => {
+  it("links no install page while no Lecturn app is registered on GitHub", () => {
+    expect(definition.credentials?.appSignIn).toBe(APP_SIGN_IN);
+    expect(APP_SIGN_IN.installUrl).toBeUndefined();
+    expect(JSON.stringify(APP_SIGN_IN)).not.toContain("github.com/apps/");
   });
 });

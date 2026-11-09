@@ -1,4 +1,4 @@
-import { UnknownUnionMember } from "@lecturn/contracts";
+import { UnknownUnionMember, type EnvironmentId } from "@lecturn/contracts";
 import { useState } from "react";
 import { View } from "react-native";
 
@@ -7,7 +7,7 @@ import {
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
-} from "../../lib/threadActivity";
+} from "@lecturn/client-runtime/state/pending-user-input";
 import { PendingApprovalOptions } from "../threads/PendingApprovalCard";
 import { PendingUserInputQuestionList } from "../threads/PendingUserInputCard";
 import { RequestActionButton } from "../threads/RequestActionButton";
@@ -26,6 +26,7 @@ import {
  * and answered through `squire.items.act`, so the thread need not be the selected one.
  */
 export function SquireQuestionAnswer(props: {
+  readonly environmentId: EnvironmentId;
   readonly payload: SquireQuestionPayload;
   /** The card's title, which the card already shows. */
   readonly title: string;
@@ -49,6 +50,7 @@ export function SquireQuestionAnswer(props: {
 }
 
 function UserInputAnswer(props: {
+  readonly environmentId: EnvironmentId;
   readonly request: SquireUserInputRequest;
   readonly title: string;
   readonly disabled: boolean;
@@ -61,6 +63,7 @@ function UserInputAnswer(props: {
   return (
     <View className="gap-3">
       <PendingUserInputQuestionList
+        environmentId={props.environmentId}
         questions={questions}
         drafts={shown}
         disabled={props.disabled}

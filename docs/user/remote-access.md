@@ -6,8 +6,8 @@ machine. That machine must stay running and reachable while you work.
 ## Lecturn Connect
 
 Lecturn Connect makes an environment available to your other devices without setting
-up router forwarding. In the desktop app on the host, open **Settings →
-Connections**, sign in, and enable **Lecturn Connect** for that environment.
+up router forwarding. In the desktop app on the host, open **Settings → Relay**
+(under Connections), sign in, and enable **Lecturn Connect** under **Publishing**.
 
 For a command-line host with the [`lecturn` CLI](./install.md#command-line),
 run the following (or `npx lecturn@latest connect` without installing):
@@ -32,6 +32,11 @@ Lecturn Connect renews access credentials when needed without disconnecting a he
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
+
+### Machine limit
+
+Each Lecturn Connect account can link up to 3 machines. Phones and browsers do not
+count. To add another, turn off Lecturn Connect for a machine you no longer use.
 
 ## Pair over a LAN or private network
 
@@ -63,6 +68,10 @@ On a computer with the desktop app, you can open the printed `lecturn://pair`
 app link instead. The desktop app asks you to confirm the server address, then
 adds it.
 
+If your HTTPS endpoint uses a certificate from your own certificate authority,
+install that CA on Android as a **CA certificate** in its security settings; the
+Android app then trusts it.
+
 Pairing authorizes that device for future connections. Use a fresh one-time link
 for each new device; you do not need the original token to reconnect. Links
 created in Settings can only be copied from the client that created them while
@@ -76,9 +85,10 @@ URL, SSH, or Lecturn Connect. Tailscale shares its `100.64.0.0/10` address range
 other VPNs such as Cloudflare WARP, so an address in that range shows as VPN
 unless the machine confirms it is on Tailscale. To add a route, choose **Add
 route** in the machine's route list, or next to it in the Lecturn Connect list.
-Pairing the same machine again over another address also adds a route instead
-of a second machine. A new route is placed by speed, in that order, and you can
-reorder routes at any time.
+A pairing link for a saved machine is refused when it comes from an address
+that machine does not have yet; add that address with **Add route** instead.
+Pairing again over an address the machine already has still works. A new route
+is placed by speed, in that order, and you can reorder routes at any time.
 
 While connected through Lecturn Connect or a paired address, Lecturn also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
@@ -275,12 +285,12 @@ off on either machine, agents start nothing over a link between them. A task
 already running on the other machine still finishes, and if that machine has it
 off, its result arrives once it is back on.
 
-On the machine you will work from, open **Settings → Connections → Linked environments**,
+On the machine you will work from, open **Settings → Environments → Linked environments**,
 choose **Link**, and pick the other machine or enter its address. The list
 holds the machines this app knows and those on your Lecturn Connect account. If this
 app is connected to that machine with a session that manages access there, it
 makes the pairing code itself; otherwise paste one from that machine's
-**Settings → Connections**. From a terminal, use
+**Settings → Sharing & access**. From a terminal, use
 `lecturn environment link <address> --pairing-code <code> --access <mode>`.
 
 You can also ask an agent to link a machine by name, such as "delegate this to
@@ -294,7 +304,7 @@ and the access, then approve.
   access, the link's agents can change only threads it started, not that
   machine's own threads, projects or settings, and they skip its project setup
   scripts.
-- The link shows up in that machine's **Settings → Connections** like any
+- The link shows up in that machine's **Settings → Sharing & access** like any
   outside agent. Revoke it there to end it. **Forget** on this machine only
   removes it here.
 - Links last 30 days. Link again with a new pairing code to renew one.

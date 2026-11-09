@@ -9,6 +9,8 @@ import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
 
+const BRAND_MAX_FONT_SCALE = 1.4;
+
 export function brandTitleOffset(): number {
   if (Platform.OS !== "ios") return 0;
   return Platform.isPad && !NATIVE_WORKSPACE_COLUMNS_SUPPORTED ? IPAD_HOME_TITLE_OFFSET : 0;
@@ -49,6 +51,7 @@ export function CompactBrandTitle(
     >
       <Text
         allowFontScaling={props.allowFontScaling}
+        maxFontSizeMultiplier={BRAND_MAX_FONT_SCALE}
         className="font-lecturn-medium text-foreground-muted"
         numberOfLines={1}
         style={{ flexShrink: 1, fontSize: 21 * scale, letterSpacing: -0.5 * scale }}
@@ -66,6 +69,7 @@ export function CompactBrandTitle(
         >
           <Text
             allowFontScaling={props.allowFontScaling}
+            maxFontSizeMultiplier={BRAND_MAX_FONT_SCALE}
             className="font-lecturn-bold text-foreground-muted uppercase"
             style={{ fontSize: 9 * scale, letterSpacing: 0.9 * scale }}
           >

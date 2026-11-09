@@ -7,6 +7,7 @@ import {
   formatSearchToolLabel,
 } from "@lecturn/shared/toolActivity";
 import { field, text } from "../unknownField.ts";
+import { mergeWorkflowAgentMetadata, type WorkflowAgentMetadata } from "../workflowAgentAnswers.ts";
 import {
   initialWorkflowAgentTranscriptCursor,
   readWorkflowAgentTranscript,
@@ -29,6 +30,7 @@ import {
   type ForkSessionResult,
   getSessionMessages,
   getSubagentMessages,
+  type HookCallback,
   query,
   resolveSettings as resolveClaudeSettings,
   type Options as ClaudeQueryOptions,
@@ -104,6 +106,7 @@ import {
   resolveIdleCompaction,
 } from "@lecturn/contracts";
 
+import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -132,7 +135,10 @@ import {
   planClaudeSkillDispatch,
   type ClaudeSkillTarget,
 } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
-import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
+import {
+  claudeLaunchArgDirectories,
+  discoverClaudeSkills,
+} from "../../provider/Drivers/ClaudeSkills.ts";
 import {
   compileClaudeModelSelection,
   type CompiledClaudeModelSelection,
@@ -169,6 +175,7 @@ import {
 import type { ManagedServerProvider } from "@lecturn/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@lecturn/provider-core/server/instanceEnvironment";
 import {
+  LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
   LECTURN_ORCHESTRATION_INSTRUCTIONS,
   squireInstructionsText,
 } from "@lecturn/provider-core/server/orchestrationInstructions";
@@ -1443,6 +1450,15 @@ const CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS = `
 To wait for a background command or Monitor you started (tests, a build), call \`lecturn_background_wait\` with its task ID before you end your turn. Do not mark work you leave running, or PRs. Lecturn MCP tools are deferred: load one with ToolSearch before you call it.
 `;
 
+// Native subagents start from their task, not this session's system prompt.
+const subagentDeviceInstructions: HookCallback = () =>
+  Promise.resolve({
+    hookSpecificOutput: {
+      hookEventName: "SubagentStart",
+      additionalContext: LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH,
+    },
+  });
+
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1454,6 +1470,8 @@ export function makeClaudeQueryOptions(input: {
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
+  /** The thread's Lecturn MCP session holds the `device` capability. */
+  readonly deviceToolsAvailable?: boolean;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -1476,6 +1494,8 @@ export function makeClaudeQueryOptions(input: {
   const launchFlags =
     input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const {
+    // claudeLaunchArgDirectories reads every --add-dir into additionalDirectories.
+    "add-dir": _launchArgAddDir,
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
     "append-system-prompt": launchArgAppendSystemPrompt,
@@ -1529,6 +1549,11 @@ export function makeClaudeQueryOptions(input: {
           ...compactQuerySettings,
           env: { ...compactQuerySettings?.env, ENABLE_TOOL_SEARCH: input.toolSearchOverride },
         } as ClaudeSdkSettings);
+  // Lecturn: a Squire home's skill replaces the device section, as it does orchestration.
+  const deviceInstructions =
+    input.mcpServers !== undefined &&
+    input.deviceToolsAvailable === true &&
+    squireInstructionsText(input.squireInstructions) === undefined;
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1595,17 +1620,25 @@ export function makeClaudeQueryOptions(input: {
       append: withConnectedAppInstructions(
         [
           buildRuntimeInstructions({ harness: "Claude Code" }) +
-            claudeLecturnInstructions(input.mcpServers, input.squireInstructions),
+            claudeLecturnInstructions(
+              input.mcpServers,
+              input.squireInstructions,
+              deviceInstructions,
+            ),
           ...launchAppendSystemPrompt,
         ].join("\n\n"),
         input.appInstructions,
       ),
     },
+    ...(deviceInstructions
+      ? { hooks: { SubagentStart: [{ hooks: [subagentDeviceInstructions] }] } }
+      : {}),
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
     ...(input.attachmentsDir === undefined ? [] : [input.attachmentsDir]),
+    ...claudeLaunchArgDirectories(input.settings?.launchArgs),
   ];
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };
@@ -1636,12 +1669,16 @@ function claudeSquireLaunchFlags(
 function claudeLecturnInstructions(
   mcpServers: ClaudeQueryOptions["mcpServers"] | undefined,
   squireInstructions: ReadonlyArray<string> | undefined,
+  deviceInstructions: boolean,
 ): string {
   const squire = squireInstructionsText(squireInstructions);
   if (squire !== undefined) return `\n\n${squire}`;
-  return mcpServers === undefined || Object.keys(mcpServers).length === 0
-    ? ""
-    : LECTURN_ORCHESTRATION_INSTRUCTIONS + CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS;
+  if (mcpServers === undefined || Object.keys(mcpServers).length === 0) return "";
+  return (
+    LECTURN_ORCHESTRATION_INSTRUCTIONS +
+    CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS +
+    (deviceInstructions ? `\n${LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n` : "")
+  );
 }
 
 /**
@@ -3060,6 +3097,44 @@ function claudeNativeToolOutputValue(output: ClaudeNativeToolOutput): unknown | 
 function claudeNativeToolOutputText(output: ClaudeNativeToolOutput): string {
   const value = claudeNativeToolOutputValue(output);
   return typeof value === "string" ? value : value === undefined ? "" : jsonStringifyForTool(value);
+}
+
+const decodeClaudeFileEditResult = Schema.decodeUnknownOption(
+  Schema.Struct({
+    type: Schema.optional(Schema.String),
+    filePath: Schema.String,
+    content: Schema.optional(Schema.String),
+    structuredPatch: Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          oldStart: Schema.Number,
+          oldLines: Schema.Number,
+          newStart: Schema.Number,
+          newLines: Schema.Number,
+          lines: Schema.mutable(Schema.Array(Schema.String)),
+        }),
+      ),
+    ),
+  }),
+);
+
+function claudeFileChangeText(output: ClaudeNativeToolOutput): string {
+  const result =
+    output.type === "structured_tool_use_result"
+      ? Option.getOrUndefined(decodeClaudeFileEditResult(output.value))
+      : undefined;
+  if (result === undefined) return claudeNativeToolOutputText(output);
+  const patch =
+    result.structuredPatch.length === 0 && result.type === "create" && result.content !== undefined
+      ? structuredPatch("/dev/null", result.filePath, "", result.content)
+      : {
+          oldFileName: result.filePath,
+          newFileName: result.filePath,
+          oldHeader: undefined,
+          newHeader: undefined,
+          hunks: result.structuredPatch,
+        };
+  return patch.hunks.length === 0 ? "" : formatPatch(patch, FILE_HEADERS_ONLY);
 }
 
 function claudeCommandOutputText(output: ClaudeNativeToolOutput): string {
@@ -4645,6 +4720,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               readonly finalTranscriptRead: boolean;
               readonly agentId: string | undefined;
               readonly transcriptCursor: WorkflowAgentTranscriptCursor;
+              readonly transcriptMetadata: WorkflowAgentMetadata;
               readonly nextItemOrdinal: number;
               readonly toolCalls: Map<string, ActiveClaudeToolCall>;
               readonly textShown: boolean;
@@ -5602,7 +5678,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const outputText =
             itemType === "command_execution"
               ? claudeCommandOutputText(input.output)
-              : claudeNativeToolOutputText(input.output);
+              : itemType === "file_change"
+                ? claudeFileChangeText(input.output)
+                : claudeNativeToolOutputText(input.output);
           const turnItem: OrchestrationV2TurnItem =
             itemType === "command_execution"
               ? {
@@ -5832,8 +5910,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const now = yield* DateTime.now;
           const seen = yield* Ref.get(workflowMemberStates);
           const transcriptDir = input.workflow.runHandles?.transcriptDir;
+          const membersWithMetadata = input.workflow.agents.slice();
 
-          for (const member of input.workflow.agents) {
+          for (const [memberIndex, member] of input.workflow.agents.entries()) {
             if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
               return;
             const memberKey = `${input.coordinator.childThreadId}:agent:${member.index}`;
@@ -6019,6 +6098,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               previous === undefined || restarted || previous.agentId !== agentId
                 ? initialWorkflowAgentTranscriptCursor
                 : previous.transcriptCursor;
+            let transcriptMetadata =
+              previous === undefined || restarted || previous.agentId !== agentId
+                ? {}
+                : previous.transcriptMetadata;
             let textShown = !restarted && previous?.textShown === true;
             let resultShown = !restarted && previous?.resultShown === true;
             let turnEnded = !restarted && previous?.turnEnded === true;
@@ -6063,6 +6146,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   transcriptRead = true;
                   const advanced = read.value.cursor.offset !== transcriptCursor.offset;
                   transcriptCursor = read.value.cursor;
+                  transcriptMetadata = mergeWorkflowAgentMetadata(
+                    read.value.lines,
+                    transcriptMetadata,
+                  );
                   for (const line of read.value.lines) {
                     if (yield* projectSubagentTranscriptLine(target, line)) textShown = true;
                     turnEnded = isClaudeTranscriptTurnEnd(line);
@@ -6084,6 +6171,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 yield* Effect.sleep(waitLeft);
                 if (!(yield* drain())) return;
               }
+            }
+            if (
+              transcriptRead &&
+              (transcriptMetadata.effort !== member.effort ||
+                transcriptMetadata.speed !== member.speed)
+            ) {
+              membersWithMetadata[memberIndex] = {
+                ...member,
+                effort: transcriptMetadata.effort,
+                speed: transcriptMetadata.speed,
+              };
             }
             if (settled) {
               // Open calls receive no results after their member settles.
@@ -6127,6 +6225,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     textShown &&
                     input.coordinator.task.status !== "running"),
                 transcriptCursor,
+                transcriptMetadata,
                 nextItemOrdinal,
                 toolCalls,
                 textShown,
@@ -6137,6 +6236,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 completedAt,
               }),
             );
+          }
+          if (
+            membersWithMetadata.some((member, index) => member !== input.workflow.agents[index])
+          ) {
+            if ((yield* Ref.get(sessionSubagentsByTaskId)).get(taskId) !== input.coordinator)
+              return;
+            input.coordinator.task = {
+              ...input.coordinator.task,
+              workflow: { ...input.workflow, agents: membersWithMetadata },
+            };
+            yield* emitProviderEvent({
+              type: "subagent.updated",
+              driver: CLAUDE_PROVIDER,
+              subagent: input.coordinator.task,
+            });
           }
         });
 
@@ -9625,7 +9739,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
 
           const requestKind = providerRequestKindFromClaudeTool(toolName);
+          // The user approves the command itself; Claude's title and description only summarize it.
+          const command = inputRecordValue(nativeToolInput, "command");
           const prompt =
+            (typeof command === "string" && command.trim() !== "" ? command : undefined) ??
             callbackOptions.title ??
             callbackOptions.description ??
             callbackOptions.decisionReason ??
@@ -9983,6 +10100,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(mcpOverrides.mcpServers === undefined
               ? {}
               : { mcpServers: mcpOverrides.mcpServers }),
+            deviceToolsAvailable: mcpSession?.capabilities?.has("device") === true,
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
               ? {}

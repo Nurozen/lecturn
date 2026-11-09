@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ScopedThreadRef,
   type ThreadId,
 } from "@lecturn/contracts";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
@@ -59,6 +60,7 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
+  onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
 }
 
 function resolveRenameCommit(input: {
@@ -85,6 +87,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   onNewThreadInProject,
   onOpenProjectSettings,
+  onFindInThread,
 }: ChatHeaderProps) {
   // An app's workspace is named by its app, as the Apps sidebar names it.
   const breadcrumbApp = useAppEmbedContext(
@@ -247,6 +250,7 @@ export const ChatHeader = memo(function ChatHeader({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     onStartRename: startRename,
+    onFind: onFindInThread,
     canShareWithGuest: canShareWithGuest && isGuestShareableThread(threadShell, activeProject),
   });
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);

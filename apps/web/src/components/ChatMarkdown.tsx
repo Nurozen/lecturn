@@ -65,6 +65,7 @@ import {
 import { mediaUrlReference } from "@lecturn/client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@lecturn/shared/mediaPreview";
 import { InlineAudioPreview } from "./files/InlineAudioPreview";
+import { HostImageUrlContext } from "./chat/hostImageUrl";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -73,6 +74,7 @@ import React, {
   Suspense,
   type ComponentProps,
   type ClipboardEvent as ReactClipboardEvent,
+  type MouseEvent as ReactMouseEvent,
   use,
   memo,
   useLayoutEffect,
@@ -950,6 +952,11 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
   };
 }
 
+// Native word selection stops at hyphens and dots, so a double-click takes the whole span.
+function selectInlineCode(event: ReactMouseEvent<HTMLElement>) {
+  window.getSelection()?.selectAllChildren(event.currentTarget);
+}
+
 const CHAT_MARKDOWN_COMPONENTS = {
   h1: markdownHeadingRenderer(1),
   h2: markdownHeadingRenderer(2),
@@ -1071,13 +1078,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
     if (citation) return <AssistantCitationChip citation={citation} />;
     const appReference = href ? parseAppReferenceHref(href) : null;
     if (appReference) return <AppRefChip reference={appReference} />;
-    const linkedThreadId = href ? parseThreadLinkHref(href) : null;
-    if (linkedThreadId) {
-      const label = hastPlainTextDeep(node) || linkedThreadId;
+    const threadLink = href ? parseThreadLinkHref(href) : null;
+    if (threadLink) {
+      const written = hastPlainTextDeep(node);
+      // An autolink's text is its own URL, which is no label.
+      const label = written && parseThreadLinkHref(written) === null ? written : null;
       return environmentId ? (
-        <MarkdownThreadLink environmentId={environmentId} threadId={linkedThreadId} label={label} />
+        <MarkdownThreadLink environmentId={environmentId} link={threadLink} label={label} />
       ) : (
-        <span>{label}</span>
+        <span>{label ?? "Thread"}</span>
       );
     }
     const contextReference = href ? parseComposerContextHref(href) : null;
@@ -1342,6 +1351,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
           inlineCodeFilePathCandidate(codeText) ?? codeText.trim(),
         );
       }
+      return (
+        <code {...props} className={className} onDoubleClick={selectInlineCode}>
+          {children}
+        </code>
+      );
     }
     return (
       <code {...props} className={className}>
@@ -1488,6 +1502,24 @@ const CHAT_MARKDOWN_COMPONENTS = {
           imageProps={imageProps}
           actionsSource={actionsSource}
           originalUrl={originalUrl}
+          onImageExpand={imageExpand}
+        />
+      );
+    }
+    const hostImageUrl = use(HostImageUrlContext);
+    if (imageSource._tag === "WorkspaceFile" && kind === "image" && hostImageUrl !== null) {
+      const hostSrc = hostImageUrl(imageSource.path);
+      return (
+        <ChatMarkdownImage
+          key={hostSrc}
+          src={hostSrc}
+          alt={altText}
+          copyMarkdown={copyMarkdown}
+          standalone={standalone}
+          className={className}
+          style={authoredSizeStyle}
+          imageProps={imageProps}
+          actionsSource={{ kind, name: altText || kind, src: hostSrc }}
           onImageExpand={imageExpand}
         />
       );

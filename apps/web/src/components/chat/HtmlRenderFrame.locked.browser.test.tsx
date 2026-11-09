@@ -296,12 +296,13 @@ it("fits the frame to a locked page and follows the client's theme", async () =>
   theme.current = withRadius("3px");
   const page = '<div style="height:calc(var(--radius) * 100)"></div>';
   const { boxOf, render } = await showInThread({ ordinary: page, locked: page });
-  // The wrapper themes the page from the URL fragment and passes its height up.
-  await expect.poll(() => boxOf("locked").style.height).toBe("300px");
-  await expect.poll(() => boxOf("ordinary").style.height).toBe("300px");
+  // The wrapper themes the page from the URL fragment and passes its height up. The base
+  // CSS adds an 8px html gutter on each side, so the frame is 16px taller than the content.
+  await expect.poll(() => boxOf("locked").style.height).toBe("316px");
+  await expect.poll(() => boxOf("ordinary").style.height).toBe("316px");
   // A live theme change reaches the page through the wrapper.
   theme.current = withRadius("2px");
   await render();
-  await expect.poll(() => boxOf("locked").style.height).toBe("200px");
-  await expect.poll(() => boxOf("ordinary").style.height).toBe("200px");
+  await expect.poll(() => boxOf("locked").style.height).toBe("216px");
+  await expect.poll(() => boxOf("ordinary").style.height).toBe("216px");
 });

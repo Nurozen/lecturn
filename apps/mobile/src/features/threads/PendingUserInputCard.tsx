@@ -1,6 +1,6 @@
 import { Button } from "../../components/ui/Button";
 import { QuestionAttachments } from "./QuestionAttachments";
-import type { RuntimeRequestId } from "@lecturn/contracts";
+import type { EnvironmentId, RuntimeRequestId } from "@lecturn/contracts";
 import type { ThreadUserInputQuestion } from "@lecturn/client-runtime/state/thread-requests";
 import { useRef, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
@@ -24,13 +24,15 @@ import { cn } from "../../lib/cn";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
+import { useLiveThreadLinkLabels } from "../../state/entities";
 import {
   isPendingUserInputOptionSelected,
-  type PendingUserInput,
   type PendingUserInputDraftAnswer,
-} from "../../lib/threadActivity";
+} from "@lecturn/client-runtime/state/pending-user-input";
+import type { PendingUserInput } from "../../lib/threadActivity";
 
 export interface PendingUserInputCardProps {
+  readonly environmentId: EnvironmentId;
   readonly canOperateThread: boolean;
   readonly pendingUserInput: PendingUserInput;
   readonly maxHeight: DerivedValue<number>;
@@ -60,12 +62,13 @@ export interface PendingUserInputCardProps {
 /** Android cannot hit-test overlays beyond their parent's bounds; render its expanded card in-flow. */
 const EXPANDED_CARD_IS_OVERLAY = Platform.OS === "ios";
 
-function QuestionText(props: { readonly markdown: string }) {
+function QuestionText(props: { readonly markdown: string; readonly environmentId: EnvironmentId }) {
   const styles = useMarkdownPreviewStyles();
+  const markdown = useLiveThreadLinkLabels(props.markdown, props.environmentId);
   const openLink = useOpenPullRequest();
   return (
     <SelectableMarkdownText
-      markdown={props.markdown}
+      markdown={markdown}
       textStyle={styles.nativeTextStyle}
       onLinkPress={(href) => void openLink(href)}
     />
@@ -226,6 +229,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           </Text>
         ) : null}
         <PendingUserInputQuestionList
+          environmentId={props.environmentId}
           questions={props.pendingUserInput.questions}
           drafts={props.drafts}
           disabled={responseDisabled}
@@ -292,6 +296,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
 // exactly the thread's options; the custom answer slot differs because attachments bind to
 // the selected thread.
 export function PendingUserInputQuestionList(props: {
+  readonly environmentId: EnvironmentId;
   readonly questions: ReadonlyArray<ThreadUserInputQuestion>;
   readonly drafts: Record<string, PendingUserInputDraftAnswer>;
   readonly disabled: boolean;
@@ -312,7 +317,9 @@ export function PendingUserInputQuestionList(props: {
               {question.header}
             </Text>
             {/* A Squire card blanks a question that repeats its own title. */}
-            {question.question.trim() === "" ? null : <QuestionText markdown={question.question} />}
+            {question.question.trim() === "" ? null : (
+              <QuestionText markdown={question.question} environmentId={props.environmentId} />
+            )}
             <View className="gap-2">
               {question.options.map((option) => {
                 const optionValue = option.value ?? option.label.trim();

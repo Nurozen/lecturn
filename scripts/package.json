@@ -10,6 +10,7 @@
     "@effect/platform-node": "catalog:",
     "@electron/asar": "^4.3.0",
     "@electron/osx-sign": "2.7.0",
+    "@lecturn/contracts": "workspace:*",
     "@lecturn/shared": "workspace:*",
     "@lecturn/tailscale": "workspace:*",
     "agent-device": "0.21.32",

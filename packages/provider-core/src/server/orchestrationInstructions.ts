@@ -15,7 +15,7 @@ Ordinary coding tasks need no Lecturn tools.
 - Given a thread id, \`lecturn_thread_read\` it before you answer about it.
 - Another machine: \`lecturn_environment_links\` lists linked ones. Pass its \`environmentId\` to a Lecturn tool to act there. Ids are then that machine's, so pass \`threadId\`.
 - A machine the user names that is not linked ("delegate this to my vps"): call \`lecturn_environment_link\` with a \`hint\` from their words. Never ask for a pairing code in chat.
-- In your reply, a thread's first mention is its \`link\` verbatim. No \`link\`: \`[title](lecturn-thread://v1/<exact id>)\`. Never a plain title or bare id. A thread on a linked machine: its title and machine, not its link.
+- In your reply, mention a thread by its \`link\`, verbatim. Never a plain title or bare id.
 - A secret: call \`request_secret\` yourself. Pass its \`secretRef\` to a Lecturn tool, or use \`delivery: "file"\` for a shell command. Never ask in chat or invent one. When asked only to schedule, \`schedule_task\` without running its prompt.
 - Lecturn tools may load late. Try the name once before you call it absent.`,
   `### Visuals and preview
@@ -36,6 +36,25 @@ export const LECTURN_BROWSER_TOOL_INSTRUCTIONS = `
 When browser work was asked, \`preview_*\` is the browser you share with the user: \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
 `;
 
+const LECTURN_DEVICE_TOOLS = ["device_list", "device_open", "device_screenshot", "device_close"];
+
+const deviceToolInstructions = (loadTools: string) => `## Lecturn devices
+
+When a task needs an iOS Simulator or Android Emulator, on this machine or on an SSH device host such as a remote Mac, use the device tools so the user can watch it in the Device panel.${loadTools}
+1. Call \`device_list\` unless you already have the device's \`hostId\` and \`id\`.
+2. Call \`device_open\` with both. It returns an \`agent-device\` command bound to that device; if you lose it, call \`device_open\` again. Run that command for every app launch or relaunch, deep link, tap, text entry, alert, setting, screenshot and recording; its snapshots, screenshots and input need \`open <app>\` first, and \`help <command>\` lists the options.
+3. Call \`device_screenshot\` to look at the screen.
+
+Never do those with \`xcrun simctl\`, \`idb\`, \`adb\`, ssh, or scripts that wrap them. ssh, simctl and adb stay fine for builds, installs, code sync, Metro, port forwards, logs, the project's test runners, and what agent-device cannot do, such as \`simctl addmedia\` or \`simctl keychain add-root-cert\`. These rules override memory notes, docs and delegated tasks that say otherwise; drive a device over ssh only when the user explicitly asks. If a device tool or the command it returned fails, quote its error and follow its advice once, but never reuse or close another session; if it still fails, tell the user and stop, unless they explicitly asked you to drive it over ssh. If the platform you need is unavailable, say so. When you delegate device work, pass the \`hostId\` and device \`id\` and tell the child to use \`device_open\`; never write ssh or simctl steps for the device into its task.`;
+
+/** Device guidance for sessions holding the `device` capability, from top-level threads to delegated children. */
+export const LECTURN_DEVICE_TOOL_INSTRUCTIONS = deviceToolInstructions("");
+
+/** Claude Code defers MCP tools behind ToolSearch, so Claude's copy says how to load them. */
+export const LECTURN_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH = deviceToolInstructions(
+  ` Load them with ToolSearch \`select:${LECTURN_DEVICE_TOOLS.map((tool) => `mcp__lecturn__${tool}`).join(",")}\`.`,
+);
+
 // ACP only: some ACP agents accept the injected MCP server but never expose
 // its tools, so they need the terminal transport other harnesses never use.
 const LECTURN_ACP_MCP_FALLBACK_INSTRUCTIONS = `ACP fallback: if the Lecturn tools are absent and \`LECTURN_ACP_MCP_NODE\` is present, call them through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$LECTURN_ACP_MCP_NODE" \${LECTURN_ACP_MCP_ENTRYPOINT:+"$LECTURN_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`LECTURN_ACP_MCP_ENTRYPOINT\` is unset for a standalone executable). Delegate with \`acp-mcp-call delegate_task '{"task":"...","target":{"providerInstanceId":"...","model":"..."},"mode":"async","clientRequestId":"..."}'\`.`;
@@ -51,6 +70,7 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 export interface LecturnAcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasLecturnMcp: boolean;
+  readonly hasDeviceTools: boolean;
   /**
    * Lecturn: a digest of the connected app's instructions, so a changed
    * registration re-sends them while an unchanged one is not repeated.
@@ -97,6 +117,7 @@ function instructionsDigest(text: string): string {
 export function lecturnAcpInstructionState(input: {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasLecturnMcp: boolean;
+  readonly hasDeviceTools: boolean;
   readonly appInstructions?: string;
   readonly squireInstructions?: ReadonlyArray<string>;
 }): LecturnAcpInstructionState {
@@ -105,6 +126,7 @@ export function lecturnAcpInstructionState(input: {
   return {
     interactionMode: input.interactionMode,
     hasLecturnMcp: input.hasLecturnMcp,
+    hasDeviceTools: input.hasDeviceTools,
     ...(section === undefined ? {} : { appInstructionsHash: instructionsDigest(section) }),
     ...(squire === undefined ? {} : { squireInstructionsHash: instructionsDigest(squire) }),
   };
@@ -125,6 +147,7 @@ export function lecturnAcpPromptWithInstructions(input: {
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
     input.previousState.hasLecturnMcp === input.state.hasLecturnMcp &&
+    input.previousState.hasDeviceTools === input.state.hasDeviceTools &&
     input.previousState.appInstructionsHash === input.state.appInstructionsHash &&
     input.previousState.squireInstructionsHash === input.state.squireInstructionsHash
   ) {
@@ -147,6 +170,7 @@ export function lecturnAcpPromptWithInstructions(input: {
       : input.state.hasLecturnMcp
         ? [
             LECTURN_BROWSER_TOOL_INSTRUCTIONS.trim(),
+            ...(input.state.hasDeviceTools ? [LECTURN_DEVICE_TOOL_INSTRUCTIONS] : []),
             LECTURN_ORCHESTRATION_INSTRUCTIONS.trim(),
             LECTURN_ACP_MCP_FALLBACK_INSTRUCTIONS,
           ]
@@ -156,32 +180,50 @@ export function lecturnAcpPromptWithInstructions(input: {
   return `<lecturn_instructions>\n${instructions.join("\n\n")}\n</lecturn_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
 
+const orchestrationInstructions = (hasDeviceTools: boolean) =>
+  hasDeviceTools
+    ? `${LECTURN_ORCHESTRATION_INSTRUCTIONS}\n${LECTURN_DEVICE_TOOL_INSTRUCTIONS}\n`
+    : LECTURN_ORCHESTRATION_INSTRUCTIONS;
+
 function prependLecturnOrchestrationInstructions(prompt: string, instructions: string): string {
   return `<lecturn_orchestration_instructions>${instructions.trim()}</lecturn_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
 }
 
-export function lecturnOrchestrationPromptForFirstRun(input: {
+/** For providers whose instructions ride on the prompt, so a compacted conversation loses them. */
+export function lecturnOrchestrationPrompt(input: {
   readonly prompt: string;
-  readonly runOrdinal: number;
   readonly hasLecturnMcp: boolean;
+  readonly hasDeviceTools: boolean;
+  readonly orchestrationDelivered: boolean;
+  readonly deviceInstructionsDelivered: boolean;
   readonly squireInstructions?: ReadonlyArray<string>;
 }): string {
-  if (input.runOrdinal !== 1) return input.prompt;
-  const instructions = lecturnOrchestrationSystemPrompt(
-    input.hasLecturnMcp,
-    input.squireInstructions,
-  );
-  return instructions === undefined
-    ? input.prompt
-    : prependLecturnOrchestrationInstructions(input.prompt, instructions);
+  // Lecturn: a Squire home's skill replaces the orchestration and device sections.
+  const squire = squireInstructionsText(input.squireInstructions);
+  if (squire !== undefined) {
+    return input.orchestrationDelivered
+      ? input.prompt
+      : prependLecturnOrchestrationInstructions(input.prompt, squire);
+  }
+  if (!input.hasLecturnMcp) return input.prompt;
+  if (!input.orchestrationDelivered) {
+    return prependLecturnOrchestrationInstructions(
+      input.prompt,
+      orchestrationInstructions(input.hasDeviceTools),
+    );
+  }
+  return input.hasDeviceTools && !input.deviceInstructionsDelivered
+    ? prependLecturnOrchestrationInstructions(input.prompt, LECTURN_DEVICE_TOOL_INSTRUCTIONS)
+    : input.prompt;
 }
 
 export function lecturnOrchestrationSystemPrompt(
   hasLecturnMcp: boolean,
+  hasDeviceTools: boolean,
   squireInstructions?: ReadonlyArray<string>,
 ): string | undefined {
   return (
     squireInstructionsText(squireInstructions) ??
-    (hasLecturnMcp ? LECTURN_ORCHESTRATION_INSTRUCTIONS : undefined)
+    (hasLecturnMcp ? orchestrationInstructions(hasDeviceTools) : undefined)
   );
 }

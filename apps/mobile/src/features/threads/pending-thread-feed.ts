@@ -7,7 +7,11 @@ import type { SquireApprovalEntry } from "@lecturn/client-runtime/state/squire";
 import type { SquireCardRow } from "@lecturn/contracts";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
+import { threadHasCaughtUpTo } from "@lecturn/client-runtime/state/threads";
+import type {
+  AcknowledgedThreadMessage,
+  QueuedThreadMessage,
+} from "../../state/thread-outbox-model";
 
 /**
  * A guest's message waiting for the owner's Send or Dismiss. It is a feed row, not the list
@@ -41,21 +45,25 @@ export interface UnreadDividerFeedEntry {
   readonly createdAt: string;
 }
 
-// An acknowledged row stops being pending once the projection holds its message,
+// An acknowledged row stops being pending once the thread catches up to it,
 // even when the feed hides that message (a rolled-back or cancelled run).
 export function selectPendingAcknowledgedMessages(
-  acknowledged: ReadonlyArray<QueuedThreadMessage>,
+  acknowledged: ReadonlyArray<AcknowledgedThreadMessage>,
   thread: {
     readonly threadKey: string | null;
     readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
+    readonly sequence: number;
     readonly projectedMessages: ReadonlyArray<{ readonly id: string }> | undefined;
   },
-): ReadonlyArray<QueuedThreadMessage> {
+): ReadonlyArray<AcknowledgedThreadMessage> {
   return acknowledged.filter(
     (message) =>
       scopedThreadKey(message.environmentId, message.threadId) === thread.threadKey &&
       !thread.queuedMessages.some((queued) => queued.messageId === message.messageId) &&
-      !thread.projectedMessages?.some((projected) => projected.id === message.messageId),
+      !threadHasCaughtUpTo(message, {
+        sequence: thread.sequence,
+        messages: thread.projectedMessages,
+      }),
   );
 }
 

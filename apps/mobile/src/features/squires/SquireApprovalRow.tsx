@@ -363,6 +363,7 @@ function SquireApprovalBody(props: {
           )}
           {props.answering && (question?.type === "approval" || question?.type === "user-input") ? (
             <SquireQuestionAnswer
+              environmentId={environmentId}
               payload={payload}
               title={card.title}
               disabled={props.busy}

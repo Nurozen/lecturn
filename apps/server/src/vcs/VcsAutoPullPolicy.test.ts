@@ -440,6 +440,7 @@ function makeBroadcasterFixture(remote: VcsStatusRemoteResult | null) {
     Layer.provide(
       Layer.mock(GitWorkflowService.GitWorkflowService)({
         localStatus: () => Effect.succeed(localStatus),
+        currentBranch: () => Effect.succeed(localStatus.refName),
         remoteStatus: () =>
           Effect.sync(() => {
             state.remoteCalls += 1;
@@ -508,7 +509,7 @@ describe("VcsStatusBroadcaster automatic pull eligibility", () => {
       const pulled = yield* Deferred.make<void>();
       yield* broadcaster.streamStatus({ cwd: "/repo" }).pipe(
         Stream.runForEach((event) =>
-          event._tag === "snapshot"
+          event._tag === "snapshot" || event._tag === "remoteUpdated"
             ? Deferred.succeed(event.remote?.behindCount === 0 ? pulled : snapshot, undefined).pipe(
                 Effect.asVoid,
               )

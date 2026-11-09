@@ -294,7 +294,9 @@ npm before users can receive that client.
 The workflow enforces this ordering:
 
 1. `publish_cli` publishes the exact stable or nightly version to npm.
-2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
+2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases. Every
+   channel uploads to a draft and publishes only after all assets are attached, so a new version
+   in the desktop update feed already has its archives.
 
 Hosted web deployment must separately verify npm availability before exposing a new client version.
 

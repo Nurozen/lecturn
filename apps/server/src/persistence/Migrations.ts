@@ -119,6 +119,9 @@ import Migration0088 from "./Migrations/070_PeerLinks.ts";
 import Migration0089 from "./Migrations/071_PeerLinkFence.ts";
 import Migration0090 from "./Migrations/072_WaitingLinkRequestIndex.ts";
 import Migration0091 from "./Migrations/091_SquireChatFirst.ts";
+// Upstream published this as 73, which Lecturn's ledger already used
+// (WebhookRelayDeliveries), so it runs here as 92.
+import Migration0092 from "./Migrations/073_ActiveTurnItemIndexes.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -221,6 +224,18 @@ const WaitingLinkRequestIndexCompatibility = Effect.gen(function* () {
   `;
   if (indexes.length > 0) return;
   yield* Migration0090;
+});
+
+// Upstream 73 creates its indexes without IF NOT EXISTS. A database that already
+// ran it under upstream's id keeps them, so only create them when missing.
+const ActiveTurnItemIndexesCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const indexes = yield* sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'index' AND name = 'orchestration_v2_projection_turn_items_active_ordinal_idx'
+  `;
+  if (indexes.length > 0) return;
+  yield* Migration0092;
 });
 
 /**
@@ -351,6 +366,8 @@ const migrationEntries = [
   [89, "PeerLinkFence", PeerLinkFenceCompatibility],
   [90, "WaitingLinkRequestIndex", WaitingLinkRequestIndexCompatibility],
   [91, "SquireChatFirst", Migration0091],
+  // Upstream 73.
+  [92, "ActiveTurnItemIndexes", ActiveTurnItemIndexesCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

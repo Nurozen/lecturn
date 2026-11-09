@@ -8,6 +8,7 @@ import {
   parseChangeRequestPath,
   projectChangeRequestHost,
   remoteWebOrigin,
+  type SourceControlAppSignIn,
 } from "@lecturn/source-control-core/shared/definition";
 
 import { gitHubMediaUrl } from "./gitHubMedia.ts";
@@ -42,6 +43,16 @@ function isRepositoryPath(repository: string): boolean {
   );
 }
 
+/**
+ * Signing in through the Lecturn for GitHub app lifts the per-user API rate limit to the app's.
+ * No Lecturn app is registered on GitHub yet, so there is no install URL to link.
+ */
+export const APP_SIGN_IN: SourceControlAppSignIn = {
+  appName: "Lecturn for GitHub",
+  hosts: ["github.com"],
+  revokeUrl: "https://github.com/settings/apps/authorizations",
+};
+
 export const settings = makeProviderSettingsSchema(hostCredentialSettingsFields);
 export type GitHubSettings = typeof settings.Type;
 
@@ -58,6 +69,7 @@ export const definition = defineSourceControl({
     tokenEnvVar: "GH_TOKEN",
     tokenAccess: "read and write access to pull requests and contents",
     newTokenUrl: (host) => `https://${host}/settings/personal-access-tokens/new`,
+    appSignIn: APP_SIGN_IN,
   },
   changeRequest: {
     shortLabel: "PR",

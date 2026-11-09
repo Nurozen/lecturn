@@ -10,10 +10,10 @@ import type {
 import { useState } from "react";
 
 import {
-  findFirstUnansweredPendingUserInputQuestionIndex,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
-} from "../../../pendingUserInput";
+} from "@lecturn/client-runtime/state/pending-user-input";
+import { findFirstUnansweredPendingUserInputQuestionIndex } from "../../../pendingUserInput";
 import type { PendingUserInput } from "../../../session-logic";
 import { ComposerPendingApprovalActions } from "../../chat/ComposerPendingApprovalActions";
 import { ComposerPendingUserInputPanel } from "../../chat/ComposerPendingUserInputPanel";

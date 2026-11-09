@@ -412,6 +412,37 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
+    it.effect("expands a home-relative Lecturn home the way the server does", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const homeFor = (lecturnHome: string) =>
+          createDevRunnerEnv({
+            mode: "dev",
+            baseEnv: {},
+            serverOffset: 0,
+            webOffset: 0,
+            lecturnHome,
+            browser: undefined,
+            autoBootstrapProjectFromCwd: undefined,
+            logWebSocketEvents: undefined,
+            host: undefined,
+            port: undefined,
+            devUrl: undefined,
+          }).pipe(
+            Effect.provideService(HostProcess.HomeDirectory, "/home/dev"),
+            Effect.map((env) => env.LECTURN_HOME),
+          );
+
+        assert.equal(yield* homeFor("~/lecturn-dev"), path.join("/home/dev", "lecturn-dev"));
+        assert.equal(yield* homeFor("~"), "/home/dev");
+        assert.equal(yield* homeFor("~\\lecturn-dev"), path.join("/home/dev", "lecturn-dev"));
+        assert.equal(yield* homeFor("  ~/lecturn-dev  "), path.join("/home/dev", "lecturn-dev"));
+        assert.equal(yield* homeFor("~someone/lecturn-dev"), path.resolve("~someone/lecturn-dev"));
+        assert.equal(yield* homeFor("relative/lecturn-dev"), path.resolve("relative/lecturn-dev"));
+        assert.equal(yield* homeFor("/tmp/lecturn-dev"), path.resolve("/tmp/lecturn-dev"));
+      }),
+    );
+
     it.effect("rejects a specific non-loopback --host for browser dev modes", () => {
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,

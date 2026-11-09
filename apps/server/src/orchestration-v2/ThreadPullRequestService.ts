@@ -222,9 +222,16 @@ export const make = Effect.gen(function* () {
   ) {
     const projectShells = yield* listProjectShells;
     const threadSnapshot = yield* readThreadSnapshot(request, projectShells);
+    // Subagent children refresh after their own runs; sweeping them costs a lookup each per minute.
+    const snapshotThreads =
+      request.threadId === null
+        ? threadSnapshot.threads.filter(
+            (thread) => thread.lineage.relationshipToParent !== "subagent",
+          )
+        : threadSnapshot.threads;
     const projects = new Map(projectShells.map((project) => [project.id, project]));
     if (request.backfill) {
-      for (const thread of threadSnapshot.threads) {
+      for (const thread of snapshotThreads) {
         if (
           (thread.settledOverride === "settled" || thread.settledAt !== null) &&
           thread.branchPullRequest == null
@@ -234,7 +241,7 @@ export const make = Effect.gen(function* () {
       }
     }
     const visibleThreadIds = new Set(
-      threadSnapshot.threads
+      snapshotThreads
         .filter((thread) => thread.branch !== null || projects.get(thread.projectId)?.stave != null)
         .map((thread) => thread.id),
     );
@@ -242,7 +249,7 @@ export const make = Effect.gen(function* () {
     for (const threadId of checkedIds) {
       if (!visibleThreadIds.has(threadId)) pendingBackfill.delete(threadId);
     }
-    const threads = threadSnapshot.threads.filter(
+    const threads = snapshotThreads.filter(
       (thread) =>
         thread.archivedAt === null &&
         ((thread.settledOverride !== "settled" && thread.settledAt === null) ||

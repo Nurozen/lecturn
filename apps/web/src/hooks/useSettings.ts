@@ -422,6 +422,10 @@ export function useLegacySidebarEnabled(): boolean {
   return settingsHydrated && legacySidebarEnabled;
 }
 
+export function useBoringSidebarEnabled(): boolean {
+  return useClientSettings((settings) => settings.boringSidebarEnabled);
+}
+
 export async function prepareModelPreferencesPatch(
   settings: ServerSettings,
   patch: ServerSettingsPatch,
@@ -574,7 +578,7 @@ function useSharedSettingsSyncTargetIds(includePending = false): ReadonlyArray<E
     if (includePending && result._tag === "Initial") {
       return [environmentId];
     }
-    const session = result._tag === "Failure" ? null : Option.getOrNull(AsyncResult.value(result));
+    const session = result._tag === "Failure" ? null : AsyncResult.getOrElse(result, () => null);
     return session !== null && sessionGrantsScope(session, AuthSettingsWriteScope)
       ? [environmentId]
       : [];

@@ -513,6 +513,13 @@ jobs:
           LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      # The Linux archive ships libatomic.so.1 and points lecturn's RUNPATH at it.
+      - name: Install patchelf
+        shell: bash
+        run: command -v patchelf || { sudo apt-get update && sudo apt-get install -y patchelf; }
+
       - name: Build CLI archive
         run: |
           node scripts/build-cli-archive.ts \

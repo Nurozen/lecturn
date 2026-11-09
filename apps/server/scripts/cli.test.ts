@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { npmReleaseDatabaseMigration } from "@lecturn/shared/cliRelease";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -45,6 +46,16 @@ it("builds the default manifest from the workspace package.json", () => {
     "overrides",
   ]);
   assert.isFalse(Object.values(manifest.dependencies).some((spec) => spec.startsWith("catalog:")));
+});
+
+it("records the database migration head the update track switch reads from npm", () => {
+  const manifest = buildPublishManifest({
+    version: "1.2.3",
+    workspaceConfig,
+    databaseMigration: 92,
+  });
+
+  assert.equal(npmReleaseDatabaseMigration(manifest), 92);
 });
 
 it("publishes bundled workspace modules without private registry dependencies", () => {

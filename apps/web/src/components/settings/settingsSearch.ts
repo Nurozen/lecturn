@@ -1,5 +1,5 @@
 import { HOSTED_APP_CHANNEL } from "~/branding";
-import { isElectron } from "~/env";
+import { isElectron, isSecretsFeatureEnabled } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@lecturn/contracts";
 import type { EnvironmentId } from "@lecturn/contracts";
@@ -36,6 +36,7 @@ export type SettingsPath =
   | "/settings/connections"
   | "/settings/apps"
   | "/settings/access"
+  | "/settings/secrets"
   | "/settings/maintenance"
   | "/settings/labs"
   | "/settings/about"
@@ -60,6 +61,7 @@ export interface SettingsSearchItem {
   readonly macOnly?: boolean;
   readonly windowsOnly?: boolean;
   readonly releaseChannelOnly?: boolean;
+  readonly secretsFeatureOnly?: boolean;
   readonly cloudOnly?: boolean;
   // Its action lives in the Connect account menu, which only exists in a
   // multi-account build with at least one known account.
@@ -122,6 +124,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/apps": "Connected apps",
   "/settings/relay": "Relay",
   "/settings/access": "Sharing & access",
+  "/settings/secrets": "Secrets",
   "/settings/maintenance": "Maintenance",
   "/settings/labs": "Labs",
   "/settings/about": "About",
@@ -161,7 +164,13 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   },
   {
     heading: "Connections",
-    paths: ["/settings/connections", "/settings/apps", "/settings/relay", "/settings/access"],
+    paths: [
+      "/settings/connections",
+      "/settings/apps",
+      "/settings/relay",
+      "/settings/access",
+      ...(isSecretsFeatureEnabled ? (["/settings/secrets"] as const) : []),
+    ],
   },
   {
     heading: null,
@@ -349,6 +358,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
+    id: "thread-details-items",
+    title: "Thread details",
+    to: "/settings/appearance",
+    searchTerms: [
+      "customize show hide panel card environment editor scripts branch pull request git changes servers automations lineage usage limits 5 hour weekly quota tokens context window",
+    ],
+  },
+  {
+    id: "effort-display",
+    title: "Effort display",
+    to: "/settings/appearance",
+    searchTerms: ["reasoning effort thinking bars graph word label level composer"],
+  },
+  {
     id: "math-rendering",
     title: "Render math",
     to: "/settings/appearance",
@@ -407,7 +430,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "word-wrap",
     title: "Word wrap",
     to: "/settings/appearance",
-    searchTerms: ["long lines code blocks tables diffs file previews"],
+    searchTerms: ["long lines code blocks diffs file previews"],
   },
   {
     id: "composer-context",
@@ -459,6 +482,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
   },
   {
+    id: "boring-sidebar",
+    title: "Boring sidebar (group by project)",
+    to: "/settings/labs",
+    searchTerms: ["beta folders project tree classic sidebar"],
+  },
+  {
+    id: "boring-sidebar-multiline",
+    title: "Two-line folder rows",
+    to: "/settings/labs",
+    searchTerms: ["beta boring sidebar folder rows multiline branch pull request details"],
+  },
+  {
     id: "guest-links",
     title: "Guest links",
     to: "/settings/labs",
@@ -471,6 +506,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/labs",
     scope: "environment",
     searchTerms: ["beta link another machine vps peer agents work there delegate"],
+  },
+  {
+    id: "simlock-hosts",
+    title: "Simlock device hosts (alpha)",
+    to: "/settings/labs",
+    scope: "environment",
+    searchTerms: ["beta alpha simlock callstack simulator emulator ios android pool lease gateway"],
   },
   {
     id: "auto-settle-inactive-threads",
@@ -655,12 +697,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Rich text composer",
     to: "/settings/chat",
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
-  },
-  {
-    id: "composer-collapse",
-    title: "Collapse composer on scroll",
-    to: "/settings/chat",
-    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
     id: "send-shortcut",
@@ -917,31 +953,33 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
-    id: "device-hosts",
-    title: "Device hosts",
+    id: "device-sources",
+    title: "Device sources",
     to: "/settings/devices",
-    searchTerms: ["ssh remote simulator emulator ios android mac mini identity key connection"],
+    searchTerms: [
+      "device hosts ssh remote mac mini identity key connection eas expo cloud simlock pool gateway local simulators",
+    ],
   },
   {
     id: "agent-device-access",
-    title: "Agent device access",
+    title: "Agents can use devices",
     to: "/settings/devices",
     targetId: "devices",
     searchTerms: ["allow simulator emulator ios android drive tools sessions"],
   },
   {
     id: "device-hub",
-    title: "Device hub",
+    title: "Use devices",
     to: "/settings/devices",
     targetId: "devices",
-    searchTerms: ["simulator emulator ios android install start"],
+    searchTerms: ["device hub simulator emulator ios android install start version"],
   },
   {
     id: "device-platform-support",
-    title: "Simulator support",
+    title: "Local simulators",
     to: "/settings/devices",
-    targetId: "devices",
-    searchTerms: ["xcode android studio sdk avd runtime"],
+    targetId: "device-sources",
+    searchTerms: ["simulator support xcode android studio sdk avd runtime"],
   },
   {
     id: "browser-profiles",
@@ -1175,7 +1213,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Lecturn Connect",
     to: "/settings/relay",
     targetId: "relay-publishing",
-    searchTerms: ["managed tunnel cloud other devices remote"],
+    searchTerms: ["managed tunnel cloud other devices remote tunnels limit"],
     cloudOnly: true,
   },
   {
@@ -1299,6 +1337,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["squire rooms routing jev funding rules extensions"],
   },
   {
+    id: "secret-providers",
+    title: "Secret providers",
+    to: "/settings/secrets",
+    searchTerms: ["1password vault credentials api key"],
+    secretsFeatureOnly: true,
+  },
+  {
+    id: "secret-providers-add",
+    title: "Add secret provider",
+    to: "/settings/secrets",
+    targetId: "secret-providers",
+    searchTerms: ["new 1password vault op cli account"],
+    secretsFeatureOnly: true,
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
@@ -1330,6 +1383,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   // Relay health and publishing belong to this device's Connect account.
   "/settings/relay": null,
   "/settings/access": "connections",
+  "/settings/secrets": null,
   "/settings/scheduled-tasks": null,
   "/settings/squires": null,
   "/settings/maintenance": null,
@@ -1482,6 +1536,7 @@ export function settingsForThisPlatform(
     (item) =>
       (isElectron || item.desktopOnly !== true) &&
       (!item.releaseChannelOnly || isElectron || HOSTED_APP_CHANNEL !== null) &&
+      (!item.secretsFeatureOnly || isSecretsFeatureEnabled) &&
       (!item.macOnly || isMacPlatform(platform)) &&
       (!item.windowsOnly || isWindowsPlatform(platform)),
   );

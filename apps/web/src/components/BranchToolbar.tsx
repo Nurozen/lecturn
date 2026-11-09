@@ -17,6 +17,7 @@ import {
 import {
   type Ref,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   memo,
   useImperativeHandle,
   useRef,
@@ -74,8 +75,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { useComposerMenuProps } from "./chat/composerEventScope";
-import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
-import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
 import { describeStaveWorkspace } from "./stave/staveWorkspaceContext.logic";
@@ -109,10 +108,10 @@ interface BranchToolbarProps {
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
+  /** Shown at the end of the composer strip, such as the new thread's permissions. */
+  trailing?: ReactNode;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
-  composerControlsHostRef?: (element: HTMLDivElement | null) => void;
-  contextStripVisible?: boolean;
 }
 
 function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string) {
@@ -345,7 +344,7 @@ const RunContextSelector = memo(function RunContextSelector({
       >
         {triggerContent}
         {!isPanel ? (
-          <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:mx-0! redesign:opacity-100" />
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50 redesign:hidden" />
         ) : null}
       </MenuTrigger>
       <MenuPopup
@@ -575,16 +574,7 @@ function useLabelsOverflow(): readonly [
       let groups = 0;
       for (const child of current.children) {
         if (!(child instanceof HTMLElement)) continue;
-        // Reserve overflowed controls' width to prevent repeated hiding and expansion.
-        const hostedControls = child.matches('[data-chat-resting-composer-controls-host="true"]')
-          ? child.querySelector<HTMLElement>('[data-chat-composer-resting-controls="true"]')
-          : null;
-        const hostedMeasurement = hostedControls
-          ? measureRestingComposerControls(hostedControls)
-          : null;
-        const width = hostedMeasurement
-          ? resolveRestingComposerControlsNaturalWidth(hostedMeasurement)
-          : contentWidth(hostedControls ?? child);
+        const width = contentWidth(child);
         if (width <= 1) continue;
         groups += 1;
         needed += width;
@@ -616,7 +606,6 @@ function useLabelsOverflow(): readonly [
         [
           current,
           ...Array.from(current.children),
-          ...Array.from(current.querySelectorAll("[data-chat-composer-resting-controls='true']")),
           ...Array.from(current.querySelectorAll(COMPOSER_CONTEXT_LABEL_SELECTOR)),
         ],
         measure,
@@ -671,8 +660,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
-  composerControlsHostRef,
-  contextStripVisible = true,
+  trailing,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = scopeThreadRef(environmentId, threadId);
@@ -812,11 +800,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     <ComposerSurface.ContextStrip
       ref={attachStrip}
       data-compact={labelsOverflow ? "" : undefined}
-      className={cn(
-        "gap-1 text-xs font-normal text-muted-foreground/70 redesign:text-foreground/70 redesign:dark:text-muted-foreground",
-        // Hide empty non-Git strips while retaining host width so controls can reappear as the chat grows.
-        !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
-      )}
+      className="gap-1 text-xs font-normal text-muted-foreground/70 redesign:text-foreground/70 redesign:dark:text-muted-foreground"
     >
       {showGitControls && !staveContext ? (
         <div className="contents @3xl/composer-surface:hidden">
@@ -848,7 +832,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
             showGitControls && !staveContext ? "hidden @3xl/composer-surface:flex" : "flex",
-            composerControlsHostRef ? "shrink" : "flex-1",
+            "flex-1",
           )}
         >
           {showEnvironmentIndicator && availableEnvironments && (
@@ -888,15 +872,6 @@ export const BranchToolbar = memo(function BranchToolbar({
         </div>
       ) : null}
 
-      {composerControlsHostRef ? (
-        <div
-          ref={composerControlsHostRef}
-          data-composer-context-control
-          data-chat-resting-composer-controls-host="true"
-          className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
-        />
-      ) : null}
-
       {showGitControls && !staveContext ? (
         <BranchToolbarBranchSelector
           forceNewWorktree={forceNewWorktree}
@@ -915,6 +890,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       ) : null}
+      {trailing}
     </ComposerSurface.ContextStrip>
   );
 });

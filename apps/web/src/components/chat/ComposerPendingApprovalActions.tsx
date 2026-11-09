@@ -6,12 +6,13 @@ import {
 import { memo } from "react";
 import { EllipsisIcon, TriangleAlertIcon } from "lucide-react";
 import { useEmbedPresentation } from "../../embed/EmbedPresentationContext";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 interface ComposerPendingApprovalActionsProps {
+  presentation?: "composer" | "inline";
   requestId: RuntimeRequestId;
   isResponding: boolean;
   canRespond: boolean;
@@ -34,6 +35,7 @@ const DEFAULT_APPROVAL_OPTIONS = [
 ] satisfies ReadonlyArray<ProviderApprovalOption>;
 
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
+  presentation = "composer",
   requestId,
   isResponding,
   canRespond,
@@ -58,24 +60,43 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   return (
     <>
       {primaryOptions.map((option) => {
-        const button = (
-          <Button
-            key={option.decision}
-            // The embed pane is narrow: compact buttons leave the tool's name room to show whole.
-            size={embedded ? "micro" : "xs"}
-            variant={option.decision === "accept" ? "default" : outlineVariant}
-            disabled={disabled || isResponding || !canRespond}
-            aria-description={option.warning}
-            onClick={() => {
-              if (!disabled && !isResponding) {
-                void onRespondToApproval(requestId, option.decision);
-              }
-            }}
-          >
+        const buttonProps = {
+          disabled: disabled || isResponding || !canRespond,
+          "aria-description": option.warning,
+          onClick: () => {
+            if (!disabled && !isResponding && canRespond) {
+              void onRespondToApproval(requestId, option.decision);
+            }
+          },
+        };
+        const content = (
+          <>
             {option.warning ? <TriangleAlertIcon className="size-3 shrink-0" /> : null}
-            <span className="max-w-40 truncate">{option.label}</span>
-          </Button>
+            <span className={presentation === "inline" ? "whitespace-normal" : "max-w-40 truncate"}>
+              {option.label}
+            </span>
+          </>
         );
+        const button =
+          presentation === "inline" ? (
+            <InlineButton
+              key={option.decision}
+              {...buttonProps}
+              tone={option.decision === "accept" ? "default" : "muted"}
+            >
+              {content}
+            </InlineButton>
+          ) : (
+            <Button
+              key={option.decision}
+              {...buttonProps}
+              // The embed pane is narrow: compact buttons leave the tool's name room to show whole.
+              size={embedded ? "micro" : "xs"}
+              variant={option.decision === "accept" ? "default" : outlineVariant}
+            >
+              {content}
+            </Button>
+          );
         return option.warning ? (
           <Tooltip key={option.decision}>
             <TooltipTrigger render={button} />
@@ -88,27 +109,36 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       {moreOptions.length > 0 || stopTurn !== undefined ? (
         <Menu>
           <MenuTrigger
-            disabled={disabled || isResponding}
+            // Stop turn stays reachable when the provider process is gone.
+            disabled={disabled || isResponding || (!canRespond && stopTurn === undefined)}
             render={
-              <Button
-                size={embedded ? "icon-micro" : "icon-xs"}
-                variant={outlineVariant}
-                aria-label="More approval options"
-                data-testid={moreTestId}
-              />
+              presentation === "inline" ? (
+                <InlineButton
+                  tone="muted"
+                  aria-label="More approval options"
+                  data-testid={moreTestId}
+                />
+              ) : (
+                <Button
+                  size={embedded ? "icon-micro" : "icon-xs"}
+                  variant={outlineVariant}
+                  aria-label="More approval options"
+                  data-testid={moreTestId}
+                />
+              )
             }
           >
-            <EllipsisIcon />
+            {presentation === "inline" ? "More" : <EllipsisIcon />}
           </MenuTrigger>
           <MenuPopup {...composerFloatingLayerProps} side="top" align="end" width="content">
             {moreOptions.map((option) => {
               const item = (
                 <MenuItem
                   key={option.decision}
-                  disabled={disabled || isResponding}
+                  disabled={disabled || isResponding || !canRespond}
                   aria-description={option.warning}
                   onClick={() => {
-                    if (!disabled && !isResponding)
+                    if (!disabled && !isResponding && canRespond)
                       void onRespondToApproval(requestId, option.decision);
                   }}
                 >

@@ -64,6 +64,7 @@ export const SQUIRE_COMMAND_RULES = {
   "thread.visit": "user",
   "thread.mark-unread": "user",
   "thread.metadata.update": "squire",
+  "thread.project.adopt-folder": "squire",
   "thread.pull-request.link": "squire",
   "thread.pull-request.unlink": "squire",
   "thread.pull-request-link.sync": "squire",

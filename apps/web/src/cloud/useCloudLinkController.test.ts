@@ -68,12 +68,15 @@ vi.mock("react", () => ({
     effect();
   },
 }));
-vi.mock("@lecturn/client-runtime/relay", () => ({
+vi.mock("@lecturn/client-runtime/relay", async (importOriginal) => ({
+  ManagedRelay: (await importOriginal<typeof import("@lecturn/client-runtime/relay")>())
+    .ManagedRelay,
   createBillingClient: () => ({ getStatus: mocks.billingStatus }),
   selectedTeam: () => mocks.selectedTeam,
   createTeamsClient: () => ({ list: mocks.teamList }),
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
+vi.mock("./managedRelayState", () => ({ refreshManagedTunnelUsage: vi.fn() }));
 vi.mock("../state/relay", () => ({
   relayEnvironmentDiscovery: { refresh: "refresh", stateValueAtom: "relay-discovery" },
 }));

@@ -14,6 +14,7 @@ import {
   type ThreadPullRequestLink,
 } from "@lecturn/contracts";
 import * as SourceControlRateLimit from "@lecturn/source-control-core/server/SourceControlRateLimit";
+import * as GitHubAppSignIn from "@lecturn/source-control-github/server/GitHubAppSignIn";
 import * as GitHubCiFailure from "@lecturn/source-control-github/server/gitHubCiFailure";
 import * as GitHubCredentials from "@lecturn/source-control-github/server/GitHubCredentials";
 import * as GitHubQuota from "@lecturn/source-control-github/server/GitHubQuota";
@@ -87,9 +88,16 @@ const gitHubHarness = (route: Route) => {
           source: "gh" as const,
           fingerprint: `${host}:seeded`,
         }),
+      saved: () => Effect.succeedNone,
+      fingerprint: (host, token) => Effect.succeed(`${host}:${token}`),
       invalidate: () => Effect.void,
     }),
   );
+  const appSignedOut = Layer.mock(GitHubAppSignIn.GitHubAppSignIn)({
+    enabled: false,
+    token: () => Effect.succeedNone,
+    invalidate: () => Effect.void,
+  });
   const http = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) => {
@@ -100,7 +108,7 @@ const gitHubHarness = (route: Route) => {
   );
   const layer = Layer.mergeAll(
     GitHubRest.layer.pipe(
-      Layer.provide(Layer.mergeAll(credentials, http)),
+      Layer.provide(Layer.mergeAll(credentials, http, appSignedOut)),
       Layer.provideMerge(GitHubQuota.layer),
       Layer.provideMerge(SourceControlRateLimit.layer),
     ),

@@ -137,7 +137,7 @@ export function usePrimaryCloudLinkState() {
   }
 
   return {
-    data: result._tag === "Failure" ? null : Option.getOrNull(AsyncResult.value(result)),
+    data: result._tag === "Failure" ? null : AsyncResult.getOrElse(result, () => null),
     error,
     isPending: result.waiting,
     refresh,
