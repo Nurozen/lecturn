@@ -152,8 +152,23 @@ const make = Effect.gen(function* () {
     const existing = yield* projects
       .findActiveByAppWorkspace(appId, input.workspaceRoot)
       .pipe(Effect.mapError(unavailable("Could not look up the app project")));
-    if (Option.isSome(existing)) return { projectId: existing.value.projectId };
-    const id = yield* crypto.randomUUIDv4().pipe(Effect.mapError(unavailable("No random id")));
+    const randomId = crypto.randomUUIDv4().pipe(Effect.mapError(unavailable("No random id")));
+    if (Option.isSome(existing)) {
+      const { projectId, title } = existing.value;
+      if (input.title === undefined || input.title === title) return { projectId };
+      const updateId = yield* randomId;
+      return yield* projectService
+        .update({
+          commandId: CommandId.make(`apps:retitle-workspace:${updateId}`),
+          projectId,
+          title: input.title,
+        })
+        .pipe(
+          Effect.as({ projectId }),
+          Effect.mapError(unavailable("Could not rename the app project")),
+        );
+    }
+    const id = yield* randomId;
     const projectId = ProjectId.make(id);
     return yield* projectService
       .create({
