@@ -259,7 +259,9 @@ export function SourceControlAppSignInSettings({
           <span className="min-w-0 flex-1">
             Reaches repositories in accounts and organizations that installed the app.
           </span>
-          <ExternalLink href={appSignIn.installUrl}>Install on an organization</ExternalLink>
+          {appSignIn.installUrl === undefined ? null : (
+            <ExternalLink href={appSignIn.installUrl}>Install on an organization</ExternalLink>
+          )}
           <ExternalLink href={appSignIn.revokeUrl}>Manage on GitHub</ExternalLink>
         </div>
       ) : null}

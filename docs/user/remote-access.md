@@ -6,8 +6,8 @@ machine. That machine must stay running and reachable while you work.
 ## Lecturn Connect
 
 Lecturn Connect makes an environment available to your other devices without setting
-up router forwarding. In the desktop app on the host, open **Settings →
-Sharing & access**, sign in, and enable **Lecturn Connect** for that environment.
+up router forwarding. In the desktop app on the host, open **Settings → Relay**
+(under Connections), sign in, and enable **Lecturn Connect** under **Publishing**.
 
 For a command-line host with the [`lecturn` CLI](./install.md#command-line),
 run the following (or `npx lecturn@latest connect` without installing):

@@ -20,7 +20,8 @@ export async function suggestAppAccessForRemote(
   remoteUrl: string,
 ): Promise<void> {
   const target = appSignInTargetForRemote(remoteUrl);
-  if (target === null) return;
+  const installUrl = target?.appSignIn.installUrl;
+  if (target === null || installUrl === undefined) return;
   const result = await check({ environmentId, input: target.input });
   if (result._tag !== "Success" || result.value.status !== "not-covered") return;
   const owner = target.input.repository.split("/")[0] ?? target.input.repository;
@@ -31,7 +32,7 @@ export async function suggestAppAccessForRemote(
       { text: "Not now", style: "cancel" },
       {
         text: "Install",
-        onPress: () => void Linking.openURL(target.appSignIn.installUrl).catch(() => undefined),
+        onPress: () => void Linking.openURL(installUrl).catch(() => undefined),
       },
     ],
   );

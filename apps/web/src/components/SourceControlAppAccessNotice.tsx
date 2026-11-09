@@ -56,13 +56,15 @@ export function SourceControlAppAccessNotice(props: {
         {appSignIn.appName} isn't installed on <span className="text-foreground">{owner}</span>, so
         requests here use your own GitHub login and its lower rate limit.
       </p>
-      <InlineButton
-        className="shrink-0"
-        render={<a href={appSignIn.installUrl} target="_blank" rel="noreferrer noopener" />}
-      >
-        Install on {owner}
-        <ExternalLinkIcon aria-hidden className="size-3" />
-      </InlineButton>
+      {appSignIn.installUrl === undefined ? null : (
+        <InlineButton
+          className="shrink-0"
+          render={<a href={appSignIn.installUrl} target="_blank" rel="noreferrer noopener" />}
+        >
+          Install on {owner}
+          <ExternalLinkIcon aria-hidden className="size-3" />
+        </InlineButton>
+      )}
     </div>
   );
 }

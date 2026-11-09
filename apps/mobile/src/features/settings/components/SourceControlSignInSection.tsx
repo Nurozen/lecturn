@@ -169,13 +169,16 @@ function AppSignInRow(props: {
       },
     });
 
+  const installUrl = appSignIn.installUrl;
   const onPress = () => {
     if (signedIn) {
       Alert.alert(
         appSignIn.appName,
         "Signed in. GitHub requests use the app's higher rate limit, in repositories where the app is installed.",
         [
-          { text: "Install on an organization", onPress: () => openUrl(appSignIn.installUrl) },
+          ...(installUrl === undefined
+            ? []
+            : [{ text: "Install on an organization", onPress: () => openUrl(installUrl) }]),
           { text: "Sign out", style: "destructive", onPress: signOut },
           { text: "Cancel", style: "cancel" },
         ],

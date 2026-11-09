@@ -43,11 +43,13 @@ function isRepositoryPath(repository: string): boolean {
   );
 }
 
-/** Signing in through the Lecturn for GitHub app lifts the per-user API rate limit to the app's. */
+/**
+ * Signing in through the Lecturn for GitHub app lifts the per-user API rate limit to the app's.
+ * No Lecturn app is registered on GitHub yet, so there is no install URL to link.
+ */
 export const APP_SIGN_IN: SourceControlAppSignIn = {
   appName: "Lecturn for GitHub",
   hosts: ["github.com"],
-  installUrl: "https://github.com/apps/lecturn-for-github/installations/new",
   revokeUrl: "https://github.com/settings/apps/authorizations",
 };
 

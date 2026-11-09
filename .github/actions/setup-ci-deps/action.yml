@@ -27,7 +27,7 @@ runs:
         echo "node=$(jq -r '.engines.node' package.json)" >> "$GITHUB_OUTPUT"
         echo "pnpm=$(jq -r '.packageManager' package.json)" >> "$GITHUB_OUTPUT"
 
-    # Pinned because release-desktop.yml signs builds with this action in the job.
+    # Actions here are pinned to commits: release.yml runs this with a task-cache token.
     - name: Cache Vite+
       id: vp_cache
       if: steps.vp.outputs.version != ''

@@ -1309,8 +1309,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/embed
       electron:
-        specifier: 44.9.3
-        version: 44.9.3(supports-color@8.1.1)
+        specifier: 44.10.0
+        version: 44.10.0(supports-color@8.1.1)
       lecturn:
         specifier: workspace:*
         version: link:../../apps/server
@@ -1619,8 +1619,8 @@ importers:
         specifier: 24.12.4
         version: 24.12.4
       electron:
-        specifier: 44.9.3
-        version: 44.9.3(supports-color@8.1.1)
+        specifier: 44.10.0
+        version: 44.10.0(supports-color@8.1.1)
       vite-plus:
         specifier: 1.4.0
         version: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
@@ -8547,11 +8547,6 @@ packages:
 
   electron@44.10.0:
     resolution: {integrity: sha512-ss4pCfrQKV4TWkuVYtWB4HmeysPZgB96cSYNKYZv1UVCRP4vQMGNW5oopFbvx6Bbfce1XtP5pm5RDuKehp0svQ==}
-    engines: {node: '>= 22.12.0'}
-    hasBin: true
-
-  electron@44.9.3:
-    resolution: {integrity: sha512-Cv9/yMnZxNWsMlIe8T4v//NKHdUvbeyoTJoXE3BIcRxus2meeFaO9h/P3zB5d4cBXum51IgAYrT2QjpIDWKpJA==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -18280,14 +18275,6 @@ snapshots:
       - supports-color
 
   electron@44.10.0(supports-color@8.1.1):
-    dependencies:
-      '@electron-internal/extract-zip': 1.0.5
-      '@electron/get': 5.1.0(supports-color@8.1.1)
-      '@types/node': 24.12.4
-    transitivePeerDependencies:
-      - supports-color
-
-  electron@44.9.3(supports-color@8.1.1):
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0(supports-color@8.1.1)

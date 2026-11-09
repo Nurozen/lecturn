@@ -818,6 +818,8 @@ from upstream's side.
     filter), `AppsToolbar.android` is a plain brand row, and the
     `CompactBrandTitle` wordmark stays single-line.
     `ThreadNavigationSidebar` also takes the sidebar half of 325a7e2ae4.
+    If upstream changes the Android workspace navigator key or the Settings workspace
+    wrapper, keep the fixed `workspace` key and `collapsable={false}` (#200).
   - Mobile Apps code follows the compiler rules: promise `.finally` instead of
     try/finally; LegendList rows built in `renderItem` keep `memo`.
   - `ChatComposer` phone viewport is `useComposerPhoneViewport` (the embed keeps
@@ -1503,6 +1505,10 @@ from upstream's side.
   keep the composer card (`ComposerPendingApprovalPanel`, `onRespondToApproval`), and the embed
   card answers every approval. Contextual is the last block outside
   `composerControlsOwnership`; `ComposerBanner` keeps `placement="floating"` for Squire.
+  Permissions move into the effort menu and the new-thread strip only in the new design
+  (`permissionsInEffortMenu`, `permissionsInContextStrip` from `redesignEnabled`). The
+  Lecturn look keeps main's labelled chip with its chevron at every mode, and the card
+  outline stays clipped open over the drawer (`contextSeamClasses`, Lecturn look only).
 - **T3 Chat (#25931, #26186, #26320, #26369).** T3 Chat is a separate upstream product, never
   "Lecturn Chat": identifiers, relay paths and copy keep upstream's `T3Chat*`/`T3CHAT_*` names
   (`infra/relay/src/t3chat/T3ChatAccounts.ts`). The relay never configures the link (no
@@ -1510,10 +1516,10 @@ from upstream's side.
   `DEFAULT_MANAGED_TUNNEL_LIMIT`. The web UI has no T3 Chat tab or upsell (`TunnelLimitAlert`
   takes only `onManageTunnels`), and the tunnel-limit error names no plan.
 - **GitHub app sign-in (#26245).** Inert unless `LECTURN_GITHUB_APP_CLIENT_ID` is set, and
-  nothing sets it. `github.com/apps/lecturn-for-github` does not exist; every install link
-  (web and mobile settings, access notice, clone toast) shows only when the server reports
-  `appSignIn` or a `not-covered` access check, which needs that variable. Register the app
-  under that slug before setting it.
+  nothing sets it. No Lecturn app exists on GitHub, so `APP_SIGN_IN` has no `installUrl`
+  (optional in `SourceControlAppSignIn`); without it, web and mobile settings, the access
+  notice and the clone toast show no install link. Never map upstream's app slug to a
+  Lecturn name; add `installUrl` only once a Lecturn app is registered.
 - **Simlock (#25259).** Labs alpha, off by default; it reaches only hosts listed in
   `simlockDeviceHosts`.
 - **Device instructions (#25661).** Shared as `LECTURN_DEVICE_TOOL_INSTRUCTIONS[_WITH_TOOL_SEARCH]`

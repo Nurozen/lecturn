@@ -40,6 +40,7 @@ export function SourceControlAppAccessNotice(props: {
       : null,
   );
   if (appSignIn === undefined || access.data?.status !== "not-covered") return null;
+  const installUrl = appSignIn.installUrl;
   const owner = props.repository.split("/")[0] ?? props.repository;
 
   return (
@@ -48,12 +49,14 @@ export function SourceControlAppAccessNotice(props: {
         {appSignIn.appName} isn't installed on {owner}, so requests here use your own GitHub login
         and its lower rate limit.
       </Text>
-      <Pressable
-        accessibilityRole="link"
-        onPress={() => void Linking.openURL(appSignIn.installUrl).catch(() => undefined)}
-      >
-        <Text className="text-sm font-lecturn-bold text-foreground">Install on {owner}</Text>
-      </Pressable>
+      {installUrl === undefined ? null : (
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(installUrl).catch(() => undefined)}
+        >
+          <Text className="text-sm font-lecturn-bold text-foreground">Install on {owner}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

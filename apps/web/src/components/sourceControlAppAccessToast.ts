@@ -14,7 +14,8 @@ export async function suggestAppAccessForRemote(
   remoteUrl: string,
 ): Promise<void> {
   const target = appSignInTargetForRemote(remoteUrl);
-  if (target === null) return;
+  const installUrl = target?.appSignIn.installUrl;
+  if (target === null || installUrl === undefined) return;
   const result = await runAtomCommand(
     appAtomRegistry,
     sourceControlEnvironment.checkAppAccess,
@@ -31,7 +32,7 @@ export async function suggestAppAccessForRemote(
       children: "Install",
       onClick: () => {
         toastManager.close(id);
-        window.open(target.appSignIn.installUrl, "_blank", "noopener,noreferrer");
+        window.open(installUrl, "_blank", "noopener,noreferrer");
       },
     },
   });
