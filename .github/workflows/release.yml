@@ -559,9 +559,14 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            # macos-26 arm64 runners have been capacity-starved since 2026-11-02
-            # (jobs never acquired a runner); macos-15 is arm64 with more capacity.
-            runner: macos-15
+            # Hosted arm64 macOS runners (macos-26, macos-15) stopped being
+            # acquired for this repo on 2026-11-02, so arm64 cross-builds on the
+            # Intel runner. Native addons are arm64 prebuilds or rebuilt by
+            # electron-builder with --arm64, and the CLI executable is injected
+            # into a downloaded arm64 Node. arm64 code cannot run on Intel, so
+            # the CLI smoke test is replaced by an architecture check.
+            runner: macos-26-intel
+            cross_compile: true
             platform: mac
             target: dmg
             arch: arm64
@@ -949,7 +954,8 @@ jobs:
           # The executable bundles the server again, so it needs the same stamp
           # as the desktop artifact's server bundle.
           LECTURN_TELEMETRY_CHANNEL: ${{ github.repository == 'Nurozen/lecturn' && needs.preflight.outputs.release_channel || 'dev' }}
-        run: node apps/server/scripts/cli.ts build-exe --verbose
+          SEA_TARGET: ${{ matrix.cross_compile && format('{0}-{1}', matrix.platform == 'mac' && 'darwin' || matrix.platform, matrix.arch) || '' }}
+        run: node apps/server/scripts/cli.ts build-exe --verbose ${SEA_TARGET:+--target "$SEA_TARGET"}
 
       # Without signing secrets the archive's executable is signed ad hoc,
       # which Apple Silicon accepts but Gatekeeper warns about on download.
@@ -1023,9 +1029,39 @@ jobs:
             --output-dir release-cli
 
       - name: Smoke-test CLI archive
-        if: matrix.cli_archive
+        if: matrix.cli_archive && !matrix.cross_compile
         shell: bash
         run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ needs.preflight.outputs.version }}"
+
+      # A cross-built app cannot be launched here, and a host-arch addon would
+      # only fail on users' machines. Fail if any Mach-O lacks the target arch.
+      # Other-arch prebuilds/ folders are skipped: their loaders pick by arch
+      # (objc-js ships darwin-x64 in every build).
+      - name: Verify cross-compiled architectures
+        if: matrix.cross_compile && matrix.platform == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_dir="$RUNNER_TEMP/arch-check"
+          mkdir -p "$check_dir/app" "$check_dir/cli"
+          ditto -x -k release/*.zip "$check_dir/app"
+          if [[ "${{ matrix.cli_archive }}" == "true" ]]; then
+            tar -xzf release-cli/*.tar.gz -C "$check_dir/cli"
+          fi
+          want="${{ matrix.arch == 'x64' && 'x86_64' || matrix.arch }}"
+          other="${{ matrix.arch == 'x64' && 'arm64' || 'x64' }}"
+          checked=0
+          bad=0
+          while IFS= read -r -d '' file; do
+            archs="$(lipo -archs "$file" 2>/dev/null)" || continue
+            checked=$((checked + 1))
+            if [[ " $archs " != *" $want "* ]]; then
+              echo "::error::$file is $archs, not $want"
+              bad=$((bad + 1))
+            fi
+          done < <(find "$check_dir" -type f -not -path "*/prebuilds/darwin-$other/*" -print0)
+          echo "Checked $checked Mach-O files for $want; $bad mismatched."
+          [[ "$checked" -gt 0 && "$bad" -eq 0 ]]
 
       - name: Upload CLI archive
         if: matrix.cli_archive
