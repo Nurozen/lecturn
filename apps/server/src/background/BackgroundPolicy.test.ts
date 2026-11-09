@@ -7,9 +7,12 @@ import {
   type ClientActivityReportInput,
 } from "@lecturn/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -128,6 +131,74 @@ describe("BackgroundPolicy", () => {
       assert.equal(snapshot.leases[0]?.sessionId, AuthSessionId.make("session-2"));
       assert.equal(snapshot.leases[0]?.clientId, "client-2");
     }).pipe(Effect.provide(layerFor(nominalHostPower))),
+  );
+
+  it.effect("serializes lease mutation publications", () =>
+    Effect.gen(function* () {
+      const blockNextSettingsRead = yield* Ref.make(false);
+      const blockedSnapshotStarted = yield* Deferred.make<void>();
+      const releaseBlockedSnapshot = yield* Deferred.make<void>();
+      const layerHost = Layer.succeed(
+        HostPowerMonitor.HostPowerMonitor,
+        HostPowerMonitor.HostPowerMonitor.of({
+          snapshot: Effect.succeed(nominalHostPower),
+          report: () => Effect.void,
+          streamChanges: Stream.empty,
+        }),
+      );
+      // Settings are read after the leases, so a held read keeps a stale lease set in flight.
+      const layerSettings = Layer.effect(
+        ServerSettings.ServerSettingsService,
+        Effect.gen(function* () {
+          const settings = yield* ServerSettings.ServerSettingsService;
+          const gate = Ref.getAndSet(blockNextSettingsRead, false).pipe(
+            Effect.flatMap((block) =>
+              block
+                ? Deferred.succeed(blockedSnapshotStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseBlockedSnapshot)),
+                  )
+                : Effect.void,
+            ),
+          );
+          return ServerSettings.ServerSettingsService.of({
+            ...settings,
+            getSettings: gate.pipe(Effect.andThen(settings.getSettings)),
+          });
+        }),
+      ).pipe(Layer.provide(ServerSettings.layerTest()));
+      const layer = BackgroundPolicy.layer.pipe(
+        Layer.provide(Layer.merge(layerHost, layerSettings)),
+      );
+
+      yield* Effect.gen(function* () {
+        const policy = yield* BackgroundPolicy.BackgroundPolicy;
+        const subscription = yield* policy.subscribe;
+        const updatesFiber = yield* subscription.changes.pipe(
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        // Hold the report's publication open while the removal queues behind it.
+        yield* Ref.set(blockNextSettingsRead, true);
+        const reportFiber = yield* policy
+          .reportClientActivity(AuthSessionId.make("session-1"), RpcClientId.make(1), makeReport())
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(blockedSnapshotStarted);
+        const removeFiber = yield* policy
+          .removeRpcClient(AuthSessionId.make("session-1"), RpcClientId.make(1))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseBlockedSnapshot, undefined);
+        yield* Fiber.join(reportFiber);
+        yield* Fiber.join(removeFiber);
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+
+        assert.equal(subscription.latest.activeForegroundLeaseCount, 0);
+        assert.equal(updates.at(-1)?.activeForegroundLeaseCount, 0);
+        assert.deepStrictEqual(updates.at(-1)?.activeScopeKeys, []);
+      }).pipe(Effect.scoped, Effect.provide(layer));
+    }),
   );
 
   it.effect("bounds client-id churn for one websocket connection", () =>
