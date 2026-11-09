@@ -35,6 +35,8 @@ export interface RelayDiscoveredEnvironment {
 
 export interface RelayEnvironmentDiscoveryState {
   readonly environments: ReadonlyMap<string, RelayDiscoveredEnvironment>;
+  // Only a loaded account list distinguishes a missing registration from an unknown one.
+  readonly listed: boolean;
   readonly refreshing: boolean;
   readonly offline: boolean;
   readonly error: Option.Option<ConnectionAttemptError>;
@@ -55,6 +57,7 @@ export class RelayEnvironmentDiscovery extends Context.Service<
 
 export const EMPTY_RELAY_ENVIRONMENT_DISCOVERY_STATE: RelayEnvironmentDiscoveryState = {
   environments: new Map(),
+  listed: false,
   refreshing: false,
   offline: false,
   error: Option.none(),
@@ -65,6 +68,8 @@ function mergeAccountStates(
   offline: boolean,
 ): RelayEnvironmentDiscoveryState {
   const environments = new Map<string, RelayDiscoveredEnvironment>();
+  // A registration is known missing only once every account's list has loaded.
+  let listed = accounts.size > 0;
   let refreshing = false;
   let error = Option.none<ConnectionAttemptError>();
   for (const account of accounts.values()) {
@@ -73,10 +78,21 @@ function mergeAccountStates(
         environments.set(environmentId, environment);
       }
     }
+    listed = listed && account.listed;
     refreshing = refreshing || account.refreshing;
     error = Option.orElse(error, () => account.error);
   }
-  return { environments, refreshing, offline, error };
+  return { environments, listed, refreshing, offline, error };
+}
+
+export type RelayEnvironmentRegistration = "registered" | "unregistered" | "unknown";
+
+export function relayEnvironmentRegistration(
+  state: RelayEnvironmentDiscoveryState,
+  environmentId: string,
+): RelayEnvironmentRegistration {
+  if (state.environments.has(environmentId)) return "registered";
+  return state.listed ? "unregistered" : "unknown";
 }
 
 function validateStatus(
@@ -298,6 +314,7 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
     yield* Effect.gen(function* () {
       yield* updateAccount(accountId, generation, () => ({
         environments: new Map(),
+        listed: false,
         refreshing: true,
         offline: false,
         error: Option.none(),
@@ -339,6 +356,7 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
       yield* updateAccount(accountId, generation, (current) => ({
         ...current,
         environments: next,
+        listed: true,
       }));
 
       // The listing is the evidence of ownership the catalog adopts entries

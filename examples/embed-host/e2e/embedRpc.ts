@@ -11,6 +11,7 @@ import {
 } from "@lecturn/contracts/environment";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcGroup from "effect/rpc/RpcGroup";
@@ -34,7 +35,7 @@ export async function ticketedSocketUrl(origin: string, bearer: string): Promise
   const url = new URL("/ws", origin);
   url.protocol = "ws:";
   url.searchParams.set(ORCHESTRATION_PROTOCOL_QUERY_PARAM, ORCHESTRATION_PROTOCOL_VERSION_TEXT);
-  url.searchParams.set("wsTicket", ticket);
+  url.searchParams.set("wsTicket", Redacted.value(ticket));
   return url.toString();
 }
 

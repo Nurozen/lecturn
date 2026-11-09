@@ -224,5 +224,5 @@ if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
 if (($env:PATH -split ";") -notcontains $binDir) {
   Write-Host "  Add $binDir to your PATH, then run ${bold}lecturn$reset.`n"
 } else {
-  Write-Host "  Run ${bold}lecturn$reset to get started.`n"
+  Write-Host "  Run ${bold}lecturn$reset to use Lecturn here, or ${bold}lecturn up$reset to use it from your other devices.`n"
 }

@@ -5,6 +5,7 @@ import {
 import { fetchRemoteEnvironmentDescriptor } from "@lecturn/client-runtime/environment";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import { Headers, HttpClient } from "effect/http";
 import { afterEach, describe, expect, vi } from "vite-plus/test";
 import { makeWebRemoteHttpClientLayer } from "./remoteHttpLayer";
@@ -69,7 +70,8 @@ describe("web remote HTTP transport", () => {
           accessToken: token.access_token,
           dpopProof: "synthetic-resource-proof",
         };
-        expect((yield* issueRemoteDpopWebSocketTicket(auth)).ticket).toBe("synthetic-ticket");
+        const { ticket } = yield* issueRemoteDpopWebSocketTicket(auth);
+        expect(Redacted.value(ticket)).toBe("synthetic-ticket");
       }).pipe(Effect.provide(makeWebRemoteHttpClientLayer(fetcher)));
 
       expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([

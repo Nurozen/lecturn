@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 
-import { resolveProjectGitCwd } from "@lecturn/client-runtime/state/projectGit";
 import { dedupeRemoteBranchesWithLocalMatches } from "@lecturn/shared/git";
 
 import { useBranches } from "./queries";
@@ -11,7 +10,7 @@ import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
 export function useSelectedThreadGitState(repoKey?: string) {
-  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  const { selectedThread } = useThreadSelection();
   const { selectedThreadGitCwd } = useSelectedThreadWorktree(repoKey);
 
   const selectedThreadGitTarget = {
@@ -28,13 +27,10 @@ export function useSelectedThreadGitState(repoKey?: string) {
         }),
   );
 
-  // Ordinary projects list branches from their root; Stave uses the selected checkout.
-  const selectedThreadGitRootCwd = selectedThreadProject?.stave
-    ? selectedThreadGitCwd
-    : resolveProjectGitCwd({ project: selectedThreadProject });
+  // The thread's checkout (worktree, or a Stave space's selected repo) marks its branch current.
   const selectedThreadBranchTarget = {
     environmentId: selectedThread?.environmentId ?? null,
-    cwd: selectedThreadGitRootCwd,
+    cwd: selectedThreadGitCwd,
     query: null,
   };
   const selectedThreadBranchState = useBranches(selectedThreadBranchTarget);

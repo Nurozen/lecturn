@@ -80,6 +80,14 @@ function makeProject(
   return { environmentId: "environment-test" as EnvironmentId, ...overrides };
 }
 
+// Automatic icons render through an inner component, which reads the favicon and app icon.
+function renderFavicon(project: ProjectFaviconProject): ReactElement {
+  const element = ProjectFavicon({ project }) as ReactElement<{ project?: unknown }>;
+  return typeof element.type === "function" && element.props.project !== undefined
+    ? (element.type as (props: unknown) => ReactElement)(element.props)
+    : element;
+}
+
 describe("ProjectFavicon", () => {
   beforeEach(() => {
     hooks.reset();
@@ -98,23 +106,20 @@ describe("ProjectFavicon", () => {
       appBinding: { appId: "dev.rocketwright.app" as AppId, workspaceRoot: "/rockets/falcon" },
     });
 
-    const element = ProjectFavicon({ project: appProject }) as ReactElement<{
-      readonly src: string;
-    }>;
+    const element = renderFavicon(appProject) as ReactElement<{ readonly src: string }>;
     expect(element.props.src).toBe(testState.appIconUrl);
     expect(testState.lastAppRef).toEqual({
       environmentId: "environment-test",
       projectId: "project-rocket",
     });
 
-    const custom = ProjectFavicon({
-      project: { ...appProject, projectIcon: { kind: "emoji", emoji: "🚀" } },
+    const custom = renderFavicon({
+      ...appProject,
+      projectIcon: { kind: "emoji", emoji: "🚀" },
     }) as ReactElement<{ readonly emoji: string }>;
     expect(custom.props.emoji).toBe("🚀");
 
-    ProjectFavicon({
-      project: makeProject({ workspaceRoot: "/workspace/plain", title: "plain" }),
-    });
+    renderFavicon(makeProject({ workspaceRoot: "/workspace/plain", title: "plain" }));
     expect(testState.lastAppRef).toBeNull();
   });
 });

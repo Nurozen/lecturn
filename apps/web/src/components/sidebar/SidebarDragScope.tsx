@@ -38,6 +38,7 @@ import {
   type ReactNode,
 } from "react";
 import type { useThreadActions } from "../../hooks/useThreadActions";
+import { useConnectedEnvironmentIds } from "../../state/environments";
 import { environmentServerConfigsAtom } from "../../state/server";
 import {
   readEnvironmentScope,
@@ -183,11 +184,14 @@ export function SidebarDragScope(props: {
       ? []
       : environmentKey.split("\n").map((id) => ({ environmentId: id as EnvironmentId }));
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
-  // A drop writes every reassigned row, so a row is only movable when its account is signed in
-  // and its connection may change threads. Checked again before each write.
+  const connected = new Set(useConnectedEnvironmentIds());
+  // A drop writes every reassigned row, so a row is only movable when its account is signed in,
+  // its environment is connected (configs stay cached offline) and its connection may change
+  // threads. Checked again before each write.
   const canAccess = (thread: EnvironmentThreadShell) => {
     const account = accounts.get(thread.environmentId);
     return (
+      connected.has(thread.environmentId) &&
       (!account || !known.needsSignIn.includes(account)) &&
       operable.has(thread.environmentId) &&
       readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)

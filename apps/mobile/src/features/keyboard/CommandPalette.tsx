@@ -10,6 +10,7 @@ import {
   type ShownOrder,
 } from "@lecturn/client-runtime/state/thread-search";
 import {
+  isListedThreadLineage,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type EnvironmentId,
   type SquireId,
@@ -467,10 +468,7 @@ export function CommandPalette(props: {
         }),
     }));
     const threadItems: CommandPaletteItem[] = threads
-      .filter(
-        (thread) =>
-          thread.archivedAt === null && thread.lineage.relationshipToParent !== "subagent",
-      )
+      .filter((thread) => thread.archivedAt === null && isListedThreadLineage(thread.lineage))
       .map((thread) => {
         const project = projectByKey.get(scopedProjectKey(thread.environmentId, thread.projectId));
         const environment =

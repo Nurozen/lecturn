@@ -1045,7 +1045,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Open pull requests in Lecturn",
     to: "/settings/diffs",
     searchTerms: [
-      `pr links ${SOURCE_CONTROL_HOST_LABELS} browser external click default pull request view panel`,
+      `pr commit links ${SOURCE_CONTROL_HOST_LABELS} browser external click default pull request view panel`,
     ],
   },
   {

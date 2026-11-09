@@ -1141,7 +1141,9 @@ from upstream's side.
 - **Workflows not taken.** `relay-preview.yml` and `relay-preview-cleanup.yml` would run PR
   code on the fork's repo-level Cloudflare, PlanetScale and Axiom secrets, with no protected
   `relay-preview` environment on the fork, and cleanup crons on a Blacksmith runner.
-  `stale-needs-more-info.yml` closes public issues, which is not fork policy. Their doc
+  `stale-needs-more-info.yml` closes public issues, which is not fork policy.
+  `mobile-eas-preview-fork.yml` (#27292) runs fork-PR code under `pull_request_target` with an
+  Expo token on a Blacksmith runner. Their doc
   paragraphs go too. Check each new upstream workflow against the fork's runners,
   environments, secrets and crons before keeping it.
 - **Server migrations.** Upstream 68 (`ShellStopRequestIndex`) runs as fork id 86 and 69
@@ -1549,6 +1551,36 @@ from upstream's side.
 - **Marketing (#26960, #26875).** The redesign (Inter, black, blue accent, hero image, font
   deletions) is not taken; the fork keeps DM Sans/JetBrains Mono and its palette and takes
   only the responsive fixes.
+
+**Upstream changes taken in a Lecturn shape (sync to upstream cd7791de).**
+
+- **Side chats (#26901).** They share `thread.fork` with fork lineage. The server gives a side
+  chat no `forkOrigin` (`applyForkDeltas`), keeps it out of the run-less fork path (both have
+  no source run), and refuses `sourceMessageId` or a new worktree for it. Readers of
+  imported history keep `hasRunlessHistory`, not `historyOrigin === "v1_import"`.
+- **Side chat gates.** Client `isListedThread` uses `isListedThreadLineage`, so side chats have
+  no row in the sidebar, palettes, notifications or mobile lists; Squire filters still apply.
+  A user side chat of a Squire thread is refused by `SquireCommandHook` (`thread.fork` names
+  the source). Side chats start `approval-required`, so gated app tools still ask. Web offers
+  none in Squire home views or app-bound projects; mobile shows `ThreadSideChatsRow` only when
+  `allows("agents")`. Inside a side chat, fork and turn diff are off. A side chat's first send
+  seeds its title from the message (`resolveTurnTitleSeed`), as upstream.
+- **GitHub star prompt (#27832).** Kept but off: `recordPromptSent` returns unless enabled
+  (`STAR_PROMPT_ENABLED = false`) pending a product decision. The server starred RPC stays.
+- **Server migrations.** Upstream 74 (`ExcludeAttachmentPlaceholdersFromSearch`) and 75
+  (`SubagentDeliveryState`) run as fork 93 and 94; files keep upstream's numbers. 94 has a
+  column-exists wrapper (its ALTER and index lack IF NOT EXISTS); 74 recreates triggers, so it
+  re-runs safely.
+- **Expo tokens (#27285).** Every mobile workflow keeps `secrets.EXPO_TOKEN`; upstream's
+  `EXPO_PRODUCTION_TOKEN` and `EXPO_PREVIEW_TOKEN` are not fork secrets.
+- **Stave diff commits (#19941).** The Commits list uses the Stave base ref and shows no commit
+  host link in Stave (its `repositoryIdentity` is not per repo).
+- **Mobile.** Branch lists read `selectedThreadGitCwd` (thread worktree or Stave repo, #23436);
+  `threadListEnvironmentsAtom` lives in `state/presentation`.
+- **Identity sweep.** Never map `t3-context://` inside test strings. Socket-path fixtures sized
+  for `t3-` need 5 fewer bytes under `lecturn-`.
+- **Marketing (#27251).** Homepage quotes and their avatars are not taken; `tweets.ts` stays
+  deleted and `public/pfps` keeps main's set.
 
 ## Recurring mechanical conflicts
 

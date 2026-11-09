@@ -73,13 +73,15 @@ export const runDefaultServerCommand = Effect.fn("server.runDefaultServerCommand
 });
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the Lecturn server."),
+  Command.withDescription("Same as `lecturn`."),
+  Command.unlisted,
   Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
+  Command.withShortDescription("Run Lecturn in this terminal, with no browser."),
   Command.withDescription(
-    "Run the Lecturn server without opening a browser and print headless pairing details.",
+    "Run Lecturn in this terminal without opening a browser, and print pairing details. The background service runs this. To set up access from your other devices, run `lecturn up`.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {

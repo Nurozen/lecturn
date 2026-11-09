@@ -365,12 +365,14 @@ export const make = Effect.gen(function* () {
         isAutoSettlementCandidate(thread, nowMs),
     );
 
-    const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
+    // Runs per candidate thread, thousands per sweep on busy servers; the sweep owns the span.
+    const settleThread = Effect.fnUntraced(
       function* (
         thread: (typeof candidates)[number],
         pullRequest: SettlementPullRequest | null,
         sagaMerged = false,
       ) {
+        // thread.auto-settle does not recheck settings, so read them per decision; reads are cached.
         const currentSettings = resolveProjectSettings(
           yield* settingsService.getSettings,
           thread.projectId,
@@ -477,7 +479,8 @@ export const make = Effect.gen(function* () {
     };
     const groups = Map.groupBy(lookupCandidates, lookupKey);
 
-    const wouldSettle = Effect.fn("ThreadSettlementServiceV2.wouldSettle")(function* (
+    // wouldSettle and pullRequestFor run per lookup group; the git and pull request reads they make carry the spans.
+    const wouldSettle = Effect.fnUntraced(function* (
       group: ReadonlyArray<(typeof lookupCandidates)[number]>,
       pullRequest: SettlementPullRequest,
     ) {
@@ -498,7 +501,7 @@ export const make = Effect.gen(function* () {
       });
     });
 
-    const pullRequestFor = Effect.fn("ThreadSettlementServiceV2.pullRequestFor")(function* (
+    const pullRequestFor = Effect.fnUntraced(function* (
       group: ReadonlyArray<(typeof lookupCandidates)[number]>,
     ) {
       const thread = group[0]!;

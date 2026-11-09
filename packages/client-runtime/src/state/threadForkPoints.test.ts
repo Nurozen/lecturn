@@ -291,4 +291,11 @@ describe("Lecturn fork child title seed", () => {
       }),
     ).toBe(messageTitleSeed);
   });
+
+  it("seeds a side chat from its message, like upstream", () => {
+    const sideChat = { ...child("Side chat"), lineage: { sideChat: true } };
+    expect(
+      resolveTurnTitleSeed({ thread: sideChat, parentTitle: "Plan", messageTitleSeed: "Why?" }),
+    ).toBe("Why?");
+  });
 });

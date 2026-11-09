@@ -32,7 +32,7 @@ import {
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
 } from "@lecturn/client-runtime/state/thread-sort";
-import type { EnvironmentId, ProjectId } from "@lecturn/contracts";
+import { isListedThreadLineage, type EnvironmentId, type ProjectId } from "@lecturn/contracts";
 import type { SnoozePresetSetting } from "@lecturn/contracts/settings";
 
 import type { ThreadListProvider } from "../../state/thread-list-environments";
@@ -274,6 +274,7 @@ export function getThreadListV2OrderedSection(input: {
   const threads = input.threads.filter((thread) => {
     if (
       thread.archivedAt !== null ||
+      !isListedThreadLineage(thread.lineage) ||
       !isListedThread(thread, input.listingCapabilities?.get(thread.environmentId))
     )
       return false;
@@ -658,7 +659,7 @@ export function buildThreadListV2Items(input: {
   const listedThreads = input.threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      thread.lineage.relationshipToParent !== "subagent" &&
+      isListedThreadLineage(thread.lineage) &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
       (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
