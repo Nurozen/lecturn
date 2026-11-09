@@ -41,7 +41,11 @@ describe("ThemeImportDialog", () => {
   // StrictMode replays ref attach/detach on mount, which must not end the session.
   it("searches Open VSX under StrictMode", async () => {
     searchOpenVsxThemes.mockReset();
-    searchOpenVsxThemes.mockResolvedValue([extension]);
+    // A keystroke gap past the debounce legitimately searches a prefix like "n" first;
+    // only the final query may produce the heading the test waits on.
+    searchOpenVsxThemes.mockImplementation(async (query: string) =>
+      query === "night" ? [extension] : [],
+    );
     await using _screen = await render(
       <StrictMode>
         <ThemeImportDialog
@@ -56,7 +60,7 @@ describe("ThemeImportDialog", () => {
     await userEvent.type(page.getByLabelText("Search Open VSX themes"), "night");
 
     await expect.element(page.getByRole("heading", { name: "Nightfall" })).toBeVisible();
-    expect(searchOpenVsxThemes).toHaveBeenCalledWith(
+    expect(searchOpenVsxThemes).toHaveBeenLastCalledWith(
       "night",
       expect.objectContaining({ sortBy: "downloadCount" }),
     );
