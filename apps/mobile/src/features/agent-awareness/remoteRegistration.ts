@@ -17,6 +17,7 @@ import {
 } from "@lecturn/contracts/relay";
 import { findErrorTraceId } from "@lecturn/client-runtime/errors";
 import { ManagedRelay } from "@lecturn/client-runtime/relay";
+import { relayRouteTarget } from "@lecturn/client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   settleAsyncResult,
@@ -25,6 +26,7 @@ import {
 
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { runtime } from "../../lib/runtime";
+import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentServerConfigsAtom } from "../../state/server";
 import type { Preferences } from "../../persistence/mobile-preferences";
@@ -638,6 +640,15 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     );
   }
 
+  // The Connect account that owns the environment, read from the connection
+  // catalog like the rest of mobile. Non-relay environments belong to no account.
+  function environmentOwnerAccountId(environmentId: EnvironmentId): string | null {
+    const entry = appAtomRegistry
+      .get(environmentCatalog.catalogValueAtom)
+      .entries.get(environmentId);
+    return (entry && relayRouteTarget(entry)?.accountId) ?? null;
+  }
+
   // Arms the lock-screen card while foregrounded so the token registers immediately; the
   // relay's replay repaints the placeholder seed within seconds. No-ops when a card is
   // armed, and skips environments with publishing disabled, where the seed would sit on
@@ -652,7 +663,7 @@ function makeAccountRegistration(scopeAccountId: string | null) {
     }
     if (
       scopeAccountId !== null &&
-      environmentConnections.get(input.environmentId)?.accountId !== scopeAccountId
+      environmentOwnerAccountId(input.environmentId) !== scopeAccountId
     )
       return;
     if (!environmentPublishesAgentActivity(input.environmentId)) {
