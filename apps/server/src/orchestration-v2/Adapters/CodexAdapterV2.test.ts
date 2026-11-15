@@ -1618,6 +1618,8 @@ describe("CodexAdapterV2 session initialize", () => {
               ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
               CodexAdapterV2.CODEX_DRIVER_KIND,
               version,
+              // Pinned so release version bumps do not change the expected row.
+              "0.0.50",
             ),
           ),
       ).pipe(Effect.flip);
