@@ -31,11 +31,11 @@ describe("add project shared logic", () => {
     );
 
     for (const input of [
-      "Nurozen/lecturn",
+      "pingdotgg/t3code",
       "mona-cat_octo/repo",
       "pingdotgg",
-      "https://github.com/Nurozen/lecturn.git",
-      "git@github.com:Nurozen/lecturn.git",
+      "https://github.com/pingdotgg/t3code.git",
+      "git@github.com:pingdotgg/t3code.git",
     ]) {
       expect(githubIncompleteOwnerRepositoryMessage(github, input)).toBeNull();
     }

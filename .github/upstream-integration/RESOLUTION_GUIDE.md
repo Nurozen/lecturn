@@ -1607,6 +1607,7 @@ from upstream's side.
   link methods (`reconcileDesiredLink`, manual links; `syncManagedEndpointOrigin` false);
   `ws.ts` withholds `managedPolicy` from app and embed sessions; `lecturn update` checks policy
   before the no-archives gate.
+- **Policy providers and LegacySidebar.** `KNOWN_DRIVERS` in `managedProviders.ts` lists fork drivers (`githubCopilot`; a test walks `BUILT_IN_DRIVERS`); opt-in `LegacySidebar` does not apply project pin/archive (known divergence).
 - **Model and effort control (#28057).** One shared control; the Lecturn look keeps the
   labelled permissions chip and model chevron. `permissionsInEffortMenu` now means "the new
   design hides the default-mode chip".
