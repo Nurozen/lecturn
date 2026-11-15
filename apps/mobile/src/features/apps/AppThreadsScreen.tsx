@@ -11,7 +11,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useAppStatusesByEnvironment } from "../../state/apps";
 import { useAppProjects, useAppThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
-import { threadListEnvironmentsAtom } from "../../state/server";
+import { threadListEnvironmentsAtom } from "../../state/presentation";
 import { HierarchyRow } from "../home/HierarchyRow";
 import {
   DEFAULT_GROUP_DISPLAY_STATE,

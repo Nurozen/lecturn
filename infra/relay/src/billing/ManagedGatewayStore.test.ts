@@ -186,6 +186,7 @@ const providerFixture = Effect.gen(function* () {
     Effect.provideService(ManagedTunnelLimits, {
       withCapacity: (_input, reserve) =>
         Effect.suspend(() => hooks.ensureCapacity).pipe(Effect.andThen(reserve)),
+      getOverride: () => Effect.die("unused"),
     }),
     Effect.provideService(Provider.ManagedEndpointTunnelClient, {
       list: () => Effect.sync(() => ({ result: [...tunnels.values()] })),

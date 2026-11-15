@@ -179,6 +179,7 @@ export const LECTURN_PIERRE_ICONS = {
     kt: "lecturn-file-icon-kotlin",
     kts: "lecturn-file-icon-kotlin",
     lua: "lecturn-file-icon-lua",
+    luau: "lecturn-file-icon-lua",
     php: "lecturn-file-icon-php",
     ps1: "lecturn-file-icon-powershell",
     psm1: "lecturn-file-icon-powershell",
@@ -187,6 +188,9 @@ export const LECTURN_PIERRE_ICONS = {
     scala: "lecturn-file-icon-scala",
     toml: "lecturn-file-icon-toml",
     xml: "lecturn-file-icon-xml",
+    xsd: "lecturn-file-icon-xml",
+    xsl: "lecturn-file-icon-xml",
+    xslt: "lecturn-file-icon-xml",
   },
 } satisfies FileTreeIcons;
 

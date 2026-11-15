@@ -11,11 +11,12 @@ import type {
 } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/reactivity";
-import { useMemo } from "react";
+import { use, useMemo } from "react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { serverEnvironment } from "./server";
 import { useEnvironmentQuery } from "./query";
+import { ThreadPrDemandContext } from "./thread-pr-demand";
 import {
   rememberBounded,
   resolveThreadPrSource,
@@ -72,6 +73,7 @@ export function useThreadPr(
   thread: EnvironmentThreadShell,
   project: ThreadPrProject | null,
 ): ThreadPrPresentation | null {
+  const demand = use(ThreadPrDemandContext);
   const supportsLinks = useAtomValue(
     serverEnvironment.configValueAtom(thread.environmentId),
     (config) => config !== null,
@@ -101,7 +103,7 @@ export function useThreadPr(
     key === null ? undefined : current.get(key),
   );
   const pullRequestSummary = useEnvironmentQuery(
-    pullRequestRef === null
+    pullRequestRef === null || !demand
       ? null
       : pullRequestSummaryAtom({
           environmentId: thread.environmentId,

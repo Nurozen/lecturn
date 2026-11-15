@@ -248,6 +248,7 @@ export const make = Effect.gen(function* () {
       projectSettingsOverrides: true,
       projectProviderInstanceOverrides: true,
       threadSnooze: true,
+      threadForceStop: true,
       environmentThemes: true,
       usageLimitSources: true,
       providerWorkspaceSnapshotsOnDemand: true,
@@ -271,7 +272,8 @@ export const make = Effect.gen(function* () {
       threadDecisions: true,
       contextual: true,
       manualCloudLink: true,
-      ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
+      // Side chats are forks, so the same kill switch refuses them.
+      ...(serverConfig.threadForkingEnabled ? { threadForking: true, sideChats: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
       serverResolvedCommandContext: true,
       threadStop: true,
@@ -280,6 +282,7 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       ignoredFileListing: true,
       triage: true,
+      npmReleaseLookup: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverInstallation === null ? {} : { serverInstallation }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate

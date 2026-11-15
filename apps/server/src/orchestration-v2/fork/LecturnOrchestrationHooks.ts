@@ -346,8 +346,18 @@ export function threadLifecycleNotices(input: {
         },
       ];
     }
-    case "thread.delete":
-      return [{ kind: "deleted", threadId: command.threadId }];
+    case "thread.delete": {
+      // Side chats deleted with their parent commit under the same command.
+      const cascaded = input.storedEvents.flatMap((stored) =>
+        stored.event.type === "thread.deleted" && stored.event.threadId !== command.threadId
+          ? [stored.event.threadId]
+          : [],
+      );
+      return [command.threadId, ...new Set(cascaded)].map((threadId) => ({
+        kind: "deleted" as const,
+        threadId,
+      }));
+    }
     case "thread.archive":
       return [{ kind: "archived", threadId: command.threadId }];
     case "thread.unarchive":

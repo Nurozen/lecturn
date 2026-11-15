@@ -73,7 +73,7 @@ export class PreviewBrowserRootError extends Schema.TaggedError<PreviewBrowserRo
   {},
 ) {
   override get message(): string {
-    return "Chrome will not start its sandbox as root, so Lecturn's browser cannot run while the Lecturn server runs as root. Run the server as a nonroot user (for example `User=` in its systemd service), or set `LECTURN_SERVER_BROWSER_SANDBOX=0` to run the browser unsandboxed as root.";
+    return "Lecturn server is running as root; Chrome's sandbox cannot start. Run Lecturn as a nonroot user. Otherwise set `LECTURN_SERVER_BROWSER_SANDBOX=0` in the Lecturn server's environment and restart the server; this disables Chrome's sandbox. Manual: `LECTURN_SERVER_BROWSER_SANDBOX=0 lecturn serve`. Systemd: add `Environment=LECTURN_SERVER_BROWSER_SANDBOX=0` under `[Service]`, reload systemd, then restart the service. `lecturn browser setup` cannot fix root sandboxing.";
   }
 }
 

@@ -224,6 +224,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "squire_room_member",
   "squire_room_post",
   "squire_reactor_cursor",
+  "peer_environment_links",
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";

@@ -8,6 +8,7 @@ import {
   DEFAULT_SQUIRE_COMPANION,
   DEFAULT_SQUIRE_PERMISSIONS,
   SquireEventToggles,
+  isListedThreadLineage,
   type ModelSelection,
   type ProjectId,
   type ProviderInstanceId,
@@ -438,6 +439,24 @@ export function squireScopeCoveringContainer(
     containers.find((container) => squireScopeHas(grants, container.kind, container.targetId)) ??
     null
   );
+}
+
+/** The newest grantable threads: no Squire threads, subagents or side chats. */
+export function squireScopeThreadChoices<
+  Shell extends {
+    readonly squire?: unknown;
+    readonly lineage: Parameters<typeof isListedThreadLineage>[0];
+    readonly updatedAt: string;
+  },
+>(shells: ReadonlyArray<Shell>, limit: number): ReadonlyArray<Shell> {
+  return shells
+    .filter(
+      (shell) =>
+        (shell.squire === undefined || shell.squire === null) &&
+        isListedThreadLineage(shell.lineage),
+    )
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, limit);
 }
 
 /**

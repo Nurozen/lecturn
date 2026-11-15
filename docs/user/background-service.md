@@ -8,13 +8,15 @@ to keep a terminal open.
 Install the `lecturn` CLI first ([Install Lecturn](./install.md#command-line)),
 then run these commands on the machine that will host Lecturn:
 
-| Task                            | Command                     |
-| ------------------------------- | --------------------------- |
-| Install and start               | `lecturn service install`   |
-| Inspect status and log location | `lecturn service status`    |
-| Move to a newer release         | `lecturn update`            |
-| Restart                         | `lecturn service restart`   |
-| Stop and remove from startup    | `lecturn service uninstall` |
+| Task                                  | Command                     |
+| ------------------------------------- | --------------------------- |
+| Set up access from your other devices | `lecturn up`                |
+| See how your other devices reach it   | `lecturn status`            |
+| Install and start                     | `lecturn service install`   |
+| Inspect status and log location       | `lecturn service status`    |
+| Move to a newer release               | `lecturn update`            |
+| Restart                               | `lecturn service restart`   |
+| Stop and remove from startup          | `lecturn service uninstall` |
 
 Without an installed `lecturn`, run the same commands through
 `npx lecturn@latest`, for example `npx lecturn@latest service install`.
@@ -58,13 +60,18 @@ Pass `--yes` from a script.
 
 ## Local network access
 
-The service listens on your local network and Tailscale addresses, so the
-desktop and mobile apps on the same network connect directly instead of through
-Lecturn Connect. The hosted web app at lecturn.cloudgatherer.net stays on Lecturn Connect, because
-browsers block plain HTTP from an HTTPS page. The service does not answer on
-public addresses, and every device still needs to pair or sign in. To keep the service reachable from this machine only, set
-`LECTURN_HOST=127.0.0.1` in `service.env` (below). Any `LECTURN_HOST` value
-replaces this default.
+A new service answers only on this machine. Other devices reach it through
+Lecturn Connect, or directly once you choose the local network in `lecturn up` (or run
+`lecturn up --lan`, which sets `LECTURN_LAN=true` in `service.env`). It then listens on
+your local network and Tailscale addresses, so the desktop and mobile apps on
+the same network connect directly instead of through Lecturn Connect. It still does
+not answer on public addresses. Anyone on the same network can reach the port,
+so a pairing code is all that keeps them out. The hosted web app at lecturn.cloudgatherer.net
+stays on Lecturn Connect, because browsers block plain HTTP from an HTTPS page.
+
+A service installed before `LECTURN_LAN` existed keeps listening on the local
+network. `lecturn status` says so, and `lecturn up --no-lan` turns it off. Any
+`LECTURN_HOST` value replaces this setting.
 
 ## Configure the service environment
 
@@ -102,10 +109,32 @@ Mac logged in and awake for unattended remote access. Installing over SSH while
 nobody is logged in at the Mac's screen can fail at the final start step; the
 service is still installed and will start at the next login.
 
-Windows background services are not supported.
+Windows background services are not supported. To keep a Windows host available
+through Lecturn Connect, leave the desktop app running with its local environment
+enabled, or keep `lecturn serve` running in a terminal. Minimize the desktop app rather
+than closing its last window, which stops its local server. Linking Lecturn Connect
+does not configure automatic startup at Windows sign-in.
 
-Lecturn Connect can offer service installation during setup, but the two are managed
+`lecturn up` installs the service when you set up Lecturn Connect, but the two are managed
 separately. Signing out of Lecturn Connect does not stop or uninstall the service.
+
+## Keep the server responsive when agents use all memory
+
+On Linux, agents already run with lower priority than the server. When they
+fill the machine's memory, though, the kernel may still slow down or stop the
+server, because only an administrator can reserve memory for it. Run, as your
+normal user:
+
+```sh
+lecturn service protect
+```
+
+It shows the system settings it will change, asks before applying them, and
+then asks for your sudo password. If the machine runs Tailscale or SSH, it
+also offers to protect them, so you can still reach the machine. Memory
+protection takes effect at once. The server's protection from the kernel's
+out-of-memory killer takes effect after `lecturn service restart`. `lecturn service status` reports whether
+the protection is in place, and `lecturn service protect --undo` removes it.
 
 ## Troubleshooting
 

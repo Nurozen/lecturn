@@ -1,5 +1,6 @@
 import * as Dialog from "../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
+import { Discovery } from "@lecturn/client-runtime/relay";
 import type { EnvironmentId } from "@lecturn/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -16,7 +17,16 @@ import { environmentSession } from "./session";
 import { environmentCatalog } from "../connection/catalog";
 import { createRemoteEnvironmentProjectionAtoms } from "./remote-environment-projections";
 import { serverEnvironment } from "./server";
+import { relayEnvironmentDiscovery } from "./relay";
 import { connectPairingUrl as connectPairingUrlCommand } from "../connection/onboarding";
+
+const RELAY_REMOVAL_ACCOUNT_NOTE: Record<Discovery.RelayEnvironmentRegistration, string> = {
+  registered:
+    "It stays on your Lecturn Connect account and keeps its host space. Deregister it under Settings → Manage account → Lecturn Connect to free it.",
+  unregistered: "It's no longer on your Lecturn Connect account.",
+  unknown:
+    "This doesn't change your Lecturn Connect account. To deregister it there, use Settings → Manage account → Lecturn Connect.",
+};
 
 const connectionPairingUrlAtom = Atom.make("").pipe(
   Atom.keepAlive,
@@ -178,21 +188,24 @@ export function useRemoteConnections() {
         void controller.removeEnvironment(environmentId);
       },
     } as const;
-    // Removing a Lecturn Connect environment here leaves its account
-    // registration and host space, so point to where it can be deregistered.
+    // Removing a Lecturn Connect environment here leaves any account registration
+    // and host space, so point to where it can be deregistered.
     if (environment.isRelayManaged) {
+      const registration = Discovery.relayEnvironmentRegistration(
+        appAtomRegistry.get(relayEnvironmentDiscovery.stateValueAtom),
+        environmentId,
+      );
+      const openSettings = {
+        text: "Open Settings",
+        // From the Connections sheet, Settings would otherwise open under it.
+        onPress: () => openWorkspaceTab("settings", { closeSheets: true }),
+      };
       Dialog.alert(
         "Remove from this device?",
-        `Forget ${environment.environmentLabel} and its cached threads on this device.\n\nIt stays on your Lecturn Connect account and keeps its host space. Deregister it under Settings → Manage account → Lecturn Connect to free it.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Open Settings",
-            // From the Connections sheet, Settings would otherwise open under it.
-            onPress: () => openWorkspaceTab("settings", { closeSheets: true }),
-          },
-          remove,
-        ],
+        `Forget ${environment.environmentLabel} and its cached threads on this device.\n\n${RELAY_REMOVAL_ACCOUNT_NOTE[registration]}`,
+        registration === "unregistered"
+          ? [{ text: "Cancel", style: "cancel" }, remove]
+          : [{ text: "Cancel", style: "cancel" }, openSettings, remove],
       );
       return;
     }

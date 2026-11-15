@@ -96,6 +96,8 @@ export * from "./connectAccount.ts";
 
 export * from "./worktreeSetup.ts";
 export * from "./secretRequest.ts";
+export * from "./secretReference.ts";
+export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./apps.ts";
 export * from "./appsBundle.ts";

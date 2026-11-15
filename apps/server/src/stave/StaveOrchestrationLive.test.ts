@@ -62,6 +62,7 @@ const insertThread = (input: {
   readonly settledAt?: string | null;
   readonly relationship?: "fork" | "subagent" | null;
   readonly squire?: boolean;
+  readonly sideChat?: boolean;
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -75,6 +76,7 @@ const insertThread = (input: {
         rootThreadId: input.id,
         parentThreadId: input.relationship ? "parent" : null,
         relationshipToParent: input.relationship ?? null,
+        ...(input.sideChat ? { sideChat: true } : {}),
       },
     });
     yield* sql`INSERT INTO orchestration_v2_projection_threads
@@ -118,6 +120,13 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
       });
       // An unsettled Squire thread would hold the space open forever.
       yield* insertThread({ id: "squire", projectId: "anchor-project", squire: true });
+      // A hidden side chat of a pinned parent never settles, and nothing lists it to settle.
+      yield* insertThread({
+        id: "side-chat",
+        projectId: "anchor-project",
+        relationship: "fork",
+        sideChat: true,
+      });
       const orchestration = yield* StaveOrchestration;
       const rows = yield* orchestration.listThreadLifecycleAnchorsByProjectId(
         ProjectId.make("anchor-project"),
@@ -132,6 +141,39 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
       assert.equal(rows[1]?.archivedAt, NOW);
       assert.equal(rows[2]?.deletedAt, NOW);
       assert.isNull(rows[3]?.settledAt);
+    }),
+  );
+
+  it.effect("reports only side chats with a live run, not a held queue", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = "side-chat-project";
+      const thread = (id: string, sideChat: boolean, deletedAt: string | null = null) =>
+        insertThread({ id, projectId, relationship: "fork", sideChat, deletedAt, settledAt: NOW });
+      const run = (threadId: string, status: string) =>
+        sql`INSERT INTO orchestration_v2_projection_runs
+          (run_id, thread_id, ordinal, provider, provider_thread_id, status, requested_at, completed_at, payload_json)
+          VALUES (${`${threadId}-run`}, ${threadId}, 1, 'codex', NULL, ${status}, ${NOW}, NULL, '{}')`;
+      const live = (yield* StaveOrchestration).hasLiveSideChatRunByProjectId(
+        ProjectId.make(projectId),
+      );
+      yield* thread("idle-side", true);
+      yield* run("idle-side", "completed");
+      yield* thread("running-fork", false);
+      yield* run("running-fork", "running");
+      yield* thread("deleted-side", true, NOW);
+      yield* run("deleted-side", "running");
+      assert.isFalse(yield* live);
+      yield* thread("live-side", true);
+      yield* run("live-side", "completed");
+      for (const status of ["preparing", "queued", "starting", "running", "waiting"]) {
+        yield* sql`UPDATE orchestration_v2_projection_runs SET status = ${status} WHERE run_id = 'live-side-run'`;
+        assert.isTrue(yield* live, status);
+      }
+      // A held queue (after stop or recovery) is parked, so it must not block archive.
+      yield* sql`UPDATE orchestration_v2_projection_runs
+        SET status = 'queued', payload_json = '{"queueHeld":true}' WHERE run_id = 'live-side-run'`;
+      assert.isFalse(yield* live);
     }),
   );
 

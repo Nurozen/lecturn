@@ -3,6 +3,7 @@ import { assert, describe, it } from "vite-plus/test";
 import {
   hasSpecificPierreIconForFileName,
   resolvePierreIconForEntry,
+  syntheticFileNameForLanguageId,
   LECTURN_PIERRE_ICONS,
 } from "./pierre-icons";
 
@@ -76,5 +77,23 @@ describe("Pierre file icons", () => {
     for (const iconName of customIconNames) {
       assert.include(LECTURN_PIERRE_ICONS.spriteSheet, `id="${iconName}"`);
     }
+  });
+
+  it.each([
+    ["luau", "lua"],
+    ["xsd", "xml"],
+    ["xsl", "xml"],
+    ["xslt", "xml"],
+  ])("gives %s files and fences the %s icon", (dialect, base) => {
+    const baseIcon = resolvePierreIconForEntry(`file.${base}`, "file")?.name;
+    assert.equal(baseIcon, `lecturn-file-icon-${base}`);
+    for (const path of [`src/init.${dialect}`, `src/INIT.${dialect.toUpperCase()}`]) {
+      assert.equal(resolvePierreIconForEntry(path, "file")?.name, baseIcon);
+      assert.isTrue(hasSpecificPierreIconForFileName(path));
+    }
+    assert.equal(
+      resolvePierreIconForEntry(syntheticFileNameForLanguageId(dialect), "file")?.name,
+      baseIcon,
+    );
   });
 });

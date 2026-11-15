@@ -13,6 +13,7 @@ import {
   squireScopeCoveringContainer,
   squireScopeHas,
   squireScopeThreadChecked,
+  squireScopeThreadChoices,
   squireScopeToggleContainer,
   squireScopeToggleThread,
   squireScopeTree,
@@ -184,10 +185,7 @@ function ProjectThreads(
   const shells = useThreadShellsForProjectRefs([
     { environmentId: props.environmentId, projectId: props.projectId },
   ]);
-  const threads = shells
-    .filter((shell) => shell.squire === undefined || shell.squire === null)
-    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, THREADS_SHOWN);
+  const threads = squireScopeThreadChoices(shells, THREADS_SHOWN);
   if (threads.length === 0) {
     return (
       <p

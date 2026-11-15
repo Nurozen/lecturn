@@ -50,6 +50,25 @@ it("reads the served Lecturn home back out of a rendered unit or plist", () => {
   expect(BootService.bootServiceBaseDirOf("[Service]\nExecStart=/x\n")).toBeUndefined();
 });
 
+it("protects the server unit from agents under CPU and memory pressure", () => {
+  const unit = BootService.renderBootServiceUnit({
+    program: ["/home/theo/.lecturn/runtime/versions/1.2.3/lecturn", "__service-launcher"],
+    baseDir: "/home/theo/.lecturn",
+    logPath: "/home/theo/.lecturn/userdata/logs/boot-service.log",
+    unitPath: "/home/theo/.config/systemd/user/lecturn.service",
+  });
+  const service = unit.slice(unit.indexOf("[Service]"), unit.indexOf("[Install]"));
+  for (const line of [
+    "CPUWeight=1000",
+    "IOWeight=1000",
+    "MemoryLow=1536M",
+    "OOMScoreAdjust=100",
+    "OOMPolicy=continue",
+  ]) {
+    expect(service.split("\n")).toContain(line);
+  }
+});
+
 it.each([
   ["a unit", '/home/theo/Lecturn "Data"/100%\\x', BootService.renderBootServiceUnit],
   [

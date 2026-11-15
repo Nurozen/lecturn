@@ -142,6 +142,10 @@ export interface StaveOrchestrationShape {
   readonly listThreadLifecycleAnchorsByProjectId: (
     projectId: ProjectId,
   ) => Effect.Effect<ReadonlyArray<StaveThreadLifecycleAnchor>, StaveOrchestrationError>;
+  /** Side chats are not anchors, but one with a live run (not a held queue) still uses the worktree. */
+  readonly hasLiveSideChatRunByProjectId: (
+    projectId: ProjectId,
+  ) => Effect.Effect<boolean, StaveOrchestrationError>;
   /** Up to three completed question/response pairs, oldest first. */
   readonly getInferenceTurnPairs: (input: {
     readonly threadId: ThreadId;

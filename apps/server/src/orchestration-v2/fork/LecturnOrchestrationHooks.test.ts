@@ -309,6 +309,20 @@ describe("threadLifecycleNotices", () => {
       [{ kind: "deleted", threadId }],
     );
   });
+  it("reports side chats deleted with their parent", () => {
+    const sideChatId = ThreadId.make("thread:side-chat");
+    const deleted = (id: ThreadId) => stored({ type: "thread.deleted", threadId: id, payload: {} });
+    assert.deepEqual(
+      threadLifecycleNotices({
+        command: { type: "thread.delete", commandId: CommandId.make("cmd-del"), threadId },
+        storedEvents: [deleted(threadId), deleted(sideChatId)],
+      }),
+      [
+        { kind: "deleted", threadId },
+        { kind: "deleted", threadId: sideChatId },
+      ],
+    );
+  });
 });
 
 // Layer composition used by s-surface: a registration layer resolves the same registry.

@@ -177,9 +177,18 @@ export function applyForkDeltas(input: {
   readonly worktree?: { readonly branch: string; readonly worktreePath: string };
 }): OrchestrationV2AppThread {
   const { command } = input;
+  const { forkOrigin: _sourceForkOrigin, ...child } = withoutThreadAppMetadata(input.targetThread);
   return {
-    ...withoutThreadAppMetadata(input.targetThread),
-    forkOrigin: { threadId: command.sourceThreadId, messageId: command.sourceMessageId ?? null },
+    ...child,
+    // A side chat lives in its parent's view; fork lineage would show it as a fork.
+    ...(command.sideChat === true
+      ? {}
+      : {
+          forkOrigin: {
+            threadId: command.sourceThreadId,
+            messageId: command.sourceMessageId ?? null,
+          },
+        }),
     ...(input.worktree === undefined
       ? {}
       : {

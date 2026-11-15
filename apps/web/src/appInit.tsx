@@ -1,9 +1,10 @@
 import { scopedThreadKey, scopeThreadRef } from "@lecturn/client-runtime/environment";
 import type { ClientSettings } from "@lecturn/contracts/settings";
 import { createBrowserHistory, createHashHistory } from "@tanstack/react-router";
+import * as Schema from "effect/Schema";
 
 import { applyAppearanceContrast } from "./appearanceContrast";
-import { applyAppearanceFontVariables } from "./appearanceFonts";
+import { applyAppearanceFontVariables, TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "./appearanceFonts";
 import { startElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { startBrowserProfileReporting } from "./browser/BrowserProfileReporter";
 import { startPreviewTitleRecording } from "./browserHistoryStore";
@@ -31,6 +32,7 @@ import {
 } from "./composerDraftStore";
 import { startDefaultThemeAdoption } from "./hooks/useDefaultTheme";
 import { startEnvironmentThemeRepaint } from "./hooks/useEnvironmentTheme";
+import { readLocalStorageValue, subscribeLocalStorageKey } from "./hooks/useLocalStorage";
 import {
   getClientSettings,
   startModelPreferencesMigration,
@@ -59,10 +61,18 @@ import { resolveThreadRouteTarget } from "./threadRoutes";
 export function startClientAppearance(): () => void {
   const root = document.documentElement;
   let applied: ClientSettings | null = null;
+  let appliedSeparateFonts: boolean | null = null;
   const apply = () => {
     const settings = getClientSettings();
     const previous = applied;
     applied = settings;
+    const separateFonts = readLocalStorageValue(
+      TYPOGRAPHY_ADVANCED_STORAGE_KEY,
+      false,
+      Schema.Boolean,
+    );
+    const previousSeparateFonts = appliedSeparateFonts;
+    appliedSeparateFonts = separateFonts;
     if (previous?.diffColorScheme !== settings.diffColorScheme) {
       root.dataset.diffColorScheme = settings.diffColorScheme;
     }
@@ -90,7 +100,8 @@ export function startClientAppearance(): () => void {
       previous.fontSizeInterface !== settings.fontSizeInterface ||
       previous.fontSizePrompt !== settings.fontSizePrompt ||
       previous.fontSizeCode !== settings.fontSizeCode ||
-      previous.fontSmoothing !== settings.fontSmoothing
+      previous.fontSmoothing !== settings.fontSmoothing ||
+      previousSeparateFonts !== separateFonts
     ) {
       applyAppearanceFontVariables(root, {
         sans: settings.fontFamilySans,
@@ -100,12 +111,17 @@ export function startClientAppearance(): () => void {
         sizePrompt: settings.fontSizePrompt,
         sizeCode: settings.fontSizeCode,
         smoothing: settings.fontSmoothing,
+        separate: separateFonts,
       });
     }
   };
-  const unsubscribe = subscribeClientSettings(apply);
+  const unsubscribeSettings = subscribeClientSettings(apply);
+  const unsubscribeTypography = subscribeLocalStorageKey(TYPOGRAPHY_ADVANCED_STORAGE_KEY, apply);
   apply();
-  return unsubscribe;
+  return () => {
+    unsubscribeSettings();
+    unsubscribeTypography();
+  };
 }
 
 function startDocumentTitle(): void {

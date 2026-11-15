@@ -1,13 +1,21 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off - Hosted handoff test uses a real localhost listener without an OpenAI account.
+import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
-import * as NodePath from "@effect/platform-node/NodePath";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodePathLayer from "@effect/platform-node/NodePath";
 import { codexAuthHandoffUrl, readCodexAuthDelivery } from "@lecturn/shared/codexAuthHandoff";
 import { EnvironmentId, ProviderInstanceId } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { beforeEach, vi } from "vite-plus/test";
+import { afterAll, beforeEach, vi } from "vite-plus/test";
+
+const clerkStateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-desktop-clerk-"));
+afterAll(() => {
+  NodeFS.rmSync(clerkStateDir, { recursive: true, force: true });
+});
 
 const {
   createClerkBridgeMock,
@@ -29,11 +37,18 @@ const {
   storageMock: vi.fn(),
 }));
 
-vi.mock("node:fs", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:fs")>()),
-  existsSync: existsSyncMock,
-  mkdirSync: mkdirSyncMock,
-}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: existsSyncMock,
+    // The Clerk token store creates its private directory under the real temp state dir.
+    mkdirSync: ((path: string, options?: { recursive?: boolean; mode?: number }) =>
+      String(path).includes("lecturn-desktop-clerk-")
+        ? actual.mkdirSync(path, options)
+        : mkdirSyncMock(path, options)) as typeof actual.mkdirSync,
+  };
+});
 
 vi.mock("@clerk/electron", () => ({
   createClerkBridge: createClerkBridgeMock,
@@ -90,7 +105,7 @@ const layerDesktopClerk = (
     events.push(`makeDirectory:${path}`);
   });
   const environment = DesktopEnvironment.DesktopEnvironment.of({
-    stateDir: "/tmp/lecturn-state",
+    stateDir: clerkStateDir,
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
     platform,
@@ -125,7 +140,7 @@ const layerDesktopClerk = (
   return DesktopClerk.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        NodePath.layerPosix,
+        NodePathLayer.layerPosix,
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
         Layer.succeed(ElectronShell.ElectronShell, shell),
@@ -157,16 +172,15 @@ describe("DesktopClerk", () => {
     return Effect.gen(function* () {
       yield* Effect.scoped(Layer.build(layerDesktopClerk(true, events)));
 
-      assert.deepEqual(createClerkBridgeMock.mock.calls, [
-        [
-          {
-            storage: storageAdapter,
-            manageSingleInstanceLock: false,
-            passkeys: true,
-            renderer: { scheme: "lecturn-dev", host: "app" },
-          },
-        ],
-      ]);
+      assert.equal(createClerkBridgeMock.mock.calls.length, 1);
+      const { storage, ...bridgeOptions } = createClerkBridgeMock.mock.calls[0]?.[0] ?? {};
+      assert.deepEqual(bridgeOptions, {
+        manageSingleInstanceLock: false,
+        passkeys: true,
+        renderer: { scheme: "lecturn-dev", host: "app" },
+      });
+      // The token store wraps the SDK storage so the token file stays owner-only.
+      assert.notStrictEqual(storage, storageAdapter);
       assert.equal(cleanup.mock.calls.length, 1);
       // Lecturn owns the profile-scoped single-instance lock, which lives in
       // the userData directory, so the real path must be set before the lock
@@ -273,10 +287,11 @@ describe("DesktopClerk", () => {
       );
 
       assert.deepEqual(events, expected);
-      if (userDataPathOverride !== undefined) {
-        // Clerk storage stays in the Lecturn state dir; only Electron's profile is isolated.
-        assert.deepEqual(storageMock.mock.calls, [[{ path: "/tmp/lecturn-state" }]]);
-      }
+      // Clerk storage stays in the Lecturn state dir; only Electron's profile is isolated.
+      assert.deepEqual(storageMock.mock.calls, [
+        [{ path: NodePath.join(NodePath.resolve(clerkStateDir), "clerk") }],
+      ]);
+      assert.notStrictEqual(createClerkBridgeMock.mock.calls[0]?.[0]?.storage, storageAdapter);
     },
   );
 

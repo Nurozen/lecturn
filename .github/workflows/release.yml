@@ -1407,7 +1407,7 @@ jobs:
               exit 1
             fi
           else
-            git commit -m "chore(release): prepare $RELEASE_TAG"
+            git commit --no-verify -m "chore(release): prepare $RELEASE_TAG"
             git push origin "HEAD:refs/heads/$branch"
           fi
 

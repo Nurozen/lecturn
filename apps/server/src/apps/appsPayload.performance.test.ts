@@ -294,6 +294,7 @@ const measureWorld = Effect.fn(function* (withFixtureApp: boolean) {
 
       const shell = yield* subscribeOrchestrationV2Shell({}).pipe(
         Effect.provideService(ThreadManagement.ThreadManagementService, {
+          listActiveShellIndex: orchestrator.listActiveShellIndex,
           readShellSnapshot: orchestrator.readShellSnapshot,
           getThreadShell: orchestrator.getThreadShell,
         } as unknown as ThreadManagement.ThreadManagementService["Service"]),

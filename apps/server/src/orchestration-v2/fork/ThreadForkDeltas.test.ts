@@ -248,6 +248,13 @@ describe("applyForkDeltas", () => {
       messageId: null,
     });
   });
+  it("gives a side chat no fork origin, not even its parent's", () => {
+    const forked = applyForkDeltas({
+      targetThread: { ...childThread, forkOrigin: { threadId: sourceThreadId, messageId: null } },
+      command: { ...command, sideChat: true },
+    });
+    assert.notProperty(forked, "forkOrigin");
+  });
   it("leaves a fork of a Squire thread unmarked", () => {
     const forked = applyForkDeltas({
       targetThread: {

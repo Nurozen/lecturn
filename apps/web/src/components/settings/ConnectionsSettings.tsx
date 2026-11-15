@@ -1571,6 +1571,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
       {hasCloudPublicConfig() ? (
         <RemoveLecturnConnectEnvironmentDialog
           environmentLabel={pendingLecturnConnectRemoval?.label ?? null}
+          environmentId={pendingLecturnConnectRemoval?.environmentId ?? null}
           onCancel={() => setPendingLecturnConnectRemoval(null)}
           onConfirm={() => {
             if (!pendingLecturnConnectRemoval) return;

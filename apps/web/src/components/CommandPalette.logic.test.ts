@@ -18,6 +18,7 @@ import {
   buildSquireSetupPaletteItems,
   buildSquireTrackPaletteItems,
   buildNestedSearchItems,
+  resolveCommandPaletteProject,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
@@ -1324,4 +1325,23 @@ describe("buildAppsPaletteItems", () => {
       session: 1,
     });
   });
+});
+
+it("resolves project metadata and browse roots within the active environment", () => {
+  const local = { title: "Local project", workspaceRoot: "/local/repo" };
+  const remote = { title: "Remote project", workspaceRoot: "/remote/repo" };
+  const projects = new Map([
+    ["local:shared-project", local],
+    ["remote:shared-project", remote],
+  ]);
+  expect(
+    resolveCommandPaletteProject(projects, EnvironmentId.make("local"), PROJECT_ID),
+  ).toBeUndefined();
+  const sharedId = ProjectId.make("shared-project");
+  expect(resolveCommandPaletteProject(projects, EnvironmentId.make("local"), sharedId)).toBe(local);
+  expect(resolveCommandPaletteProject(projects, EnvironmentId.make("remote"), sharedId)).toBe(
+    remote,
+  );
+  expect(resolveCommandPaletteProject(projects, null, sharedId)).toBeUndefined();
+  expect(resolveCommandPaletteProject(projects, EnvironmentId.make("local"), null)).toBeUndefined();
 });

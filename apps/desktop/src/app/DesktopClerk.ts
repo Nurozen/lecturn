@@ -21,6 +21,7 @@ import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { openClerkTokenStorage } from "./ClerkTokenStore.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 
 declare const __LECTURN_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
@@ -84,9 +85,13 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
     : __LECTURN_BUILD_CLERK_PUBLISHABLE_KEY__,
 );
 
-function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
+function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean, userDataPath: string) {
   return createClerkBridge({
-    storage: storage({ path: stateDir }),
+    storage: openClerkTokenStorage(
+      stateDir,
+      (directory) => storage({ path: directory }),
+      userDataPath,
+    ),
     manageSingleInstanceLock: false,
     passkeys: true,
     renderer: {
@@ -133,7 +138,8 @@ export const make = Effect.gen(function* () {
 
   yield* Effect.acquireRelease(
     Effect.try({
-      try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
+      try: () =>
+        createDesktopClerkBridge(environment.stateDir, environment.isDevelopment, userDataPath),
       catch: (cause) =>
         new DesktopClerkBridgeInitializationError({
           stateDir: environment.stateDir,

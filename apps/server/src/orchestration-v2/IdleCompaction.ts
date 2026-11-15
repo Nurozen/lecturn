@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadProjection } from "@lecturn/contracts";
+import { isListedThreadLineage, type OrchestrationV2ThreadProjection } from "@lecturn/contracts";
 import { COMPACTION_SUGGESTION_MIN_TOKENS } from "@lecturn/shared/claudeCompaction";
 import { derivePendingBackgroundWork } from "@lecturn/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
@@ -51,7 +51,7 @@ export function idleCompactionWindow(
   if (thread.settledAt !== null || thread.settledOverride === "settled") return null;
   if (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
     return null;
-  if (thread.lineage.relationshipToParent === "subagent" || isSquireThread(thread)) return null;
+  if (!isListedThreadLineage(thread.lineage) || isSquireThread(thread)) return null;
   const latestRun = runs.reduce<(typeof runs)[number] | null>(
     (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
     null,

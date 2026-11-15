@@ -279,7 +279,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  it.effect("advertises the Stave capability only when the kill switch is on", () =>
+  it.effect("advertises Stave and side chats only when their kill switches are on", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -307,6 +307,13 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       const disabled = yield* describeWith({ staveEnabled: false });
       expect(disabled.capabilities.stave).toBeUndefined();
+
+      // The fork kill switch refuses side chats too, so they are not advertised.
+      const forking = yield* describeWith({ threadForkingEnabled: true });
+      expect(forking.capabilities.sideChats).toBe(true);
+      const noForking = yield* describeWith({ threadForkingEnabled: false });
+      expect(noForking.capabilities.threadForking).toBeUndefined();
+      expect(noForking.capabilities.sideChats).toBeUndefined();
     }),
   );
 
@@ -370,6 +377,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
             logWebSocketEvents: Option.none(),
             tailscaleServeEnabled: Option.none(),
             tailscaleServePort: Option.none(),
+            lan: Option.none(),
           },
           Option.none(),
         ).pipe(

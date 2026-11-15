@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 
 import type { ServerInstallation } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
-import { isCommandAvailable } from "@lecturn/shared/shell";
+import { resolveCommandPath } from "@lecturn/shared/shell";
 
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -77,9 +77,9 @@ const resolveInstallLauncher = Effect.gen(function* () {
 
 /**
  * `lecturn <subcommand> <args>` for a person to run on this host: `lecturn`
- * when it is on PATH, or else the absolute path of the launcher for this
- * install, such as the one the desktop app installs. `args` are quoted for the
- * host's shell: POSIX, or PowerShell on Windows.
+ * when PATH resolves it to this install, or else the absolute path of this
+ * install's launcher, such as the one the desktop app installs. `args` are
+ * quoted for the host's shell: POSIX, or PowerShell on Windows.
  */
 export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand")(function* (
   subcommand: string,
@@ -90,7 +90,16 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
     [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
   const command = yield* resolveCliCommand(subcommand);
   if (command !== `lecturn ${subcommand}`) return { command: withArgs(command), launcher: false };
-  if (yield* isCommandAvailable("lecturn")) return { command: withArgs(command), launcher: false };
+  const onPath = yield* resolveCommandPath("lecturn");
+  if (onPath !== null) {
+    const shim = (yield* HostProcess.Environment).LECTURN_CLI_PATH?.trim();
+    const fs = yield* FileSystem.FileSystem;
+    const real = (file: string) => fs.realPath(file).pipe(Effect.orElseSucceed(() => null));
+    const shimReal = shim ? yield* real(shim) : null;
+    if (shimReal === null || shimReal === (yield* real(onPath))) {
+      return { command: withArgs(command), launcher: false };
+    }
+  }
   const launcher = yield* resolveInstallLauncher;
   if (Option.isNone(launcher)) return { command: withArgs(command), launcher: false };
   // PowerShell runs a quoted path only through the call operator.
@@ -107,8 +116,9 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
  */
 export const resolveRootCliCommand = Effect.fn("invocation.resolveRootCliCommand")(function* (
   subcommand: string,
+  args: ReadonlyArray<string> = [],
 ) {
-  const { command, launcher } = yield* resolveHostCliCommand(subcommand);
+  const { command, launcher } = yield* resolveHostCliCommand(subcommand, args);
   if (launcher) return `sudo ${command}`;
   const executablePath = yield* HostProcess.ExecutablePath;
   const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>

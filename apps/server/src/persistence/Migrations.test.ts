@@ -14,6 +14,8 @@ import UpstreamThreadMessageSearch from "./Migrations/069_ThreadMessageSearch.ts
 import UpstreamPeerLinks from "./Migrations/070_PeerLinks.ts";
 import UpstreamPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
 import UpstreamWaitingLinkRequestIndex from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import UpstreamExcludeAttachmentPlaceholdersFromSearch from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import UpstreamSubagentDeliveryState from "./Migrations/075_SubagentDeliveryState.ts";
 import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
@@ -206,6 +208,8 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -235,6 +239,8 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
       ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
@@ -257,6 +263,8 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
       ]);
       yield* insertSearchMessage("after-upgrade");
 
@@ -288,6 +296,8 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
       ]);
 
       assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
@@ -309,6 +319,23 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
+      ]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the subagent delivery schema a database built under upstream's ids", () =>
+    Effect.gen(function* () {
+      yield* runMigrations({ toMigrationInclusive: 92 });
+      // Upstream published these as migrations 74 and 75.
+      yield* UpstreamExcludeAttachmentPlaceholdersFromSearch;
+      yield* UpstreamSubagentDeliveryState;
+
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -350,6 +377,8 @@ describe("runMigrations", () => {
         [90, "WaitingLinkRequestIndex"],
         [91, "SquireChatFirst"],
         [92, "ActiveTurnItemIndexes"],
+        [93, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [94, "SubagentDeliveryState"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

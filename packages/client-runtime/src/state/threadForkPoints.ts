@@ -180,7 +180,9 @@ export function resolveMessageForkPoints(input: {
   return { byUserMessage, byRunlessReply };
 }
 
-type ForkChildShell = Pick<EnvironmentThreadShell, "title" | "forkedFrom" | "forkOrigin">;
+type ForkChildShell = Pick<EnvironmentThreadShell, "title" | "forkedFrom" | "forkOrigin"> & {
+  readonly lineage?: { readonly sideChat?: boolean | undefined };
+};
 
 /** The thread a fork child was cut from, or null when `thread` is not a fork child. */
 export function forkParentThreadId(
@@ -206,7 +208,7 @@ export function isDefaultForkChildTitle(title: string, parentTitle?: string | nu
 /**
  * The `titleSeed` a turn on `thread` sends. The server retitles a thread with no stored messages,
  * which a V2 fork child always is on its first send. So a fork child seeds its default title, a
- * renamed one sends no seed so the rename stands, and others seed from the message.
+ * renamed one sends no seed so the rename stands, and others (side chats too) seed from the message.
  */
 export function resolveTurnTitleSeed(input: {
   readonly thread: ForkChildShell;
@@ -214,6 +216,7 @@ export function resolveTurnTitleSeed(input: {
   readonly messageTitleSeed: string;
 }): string | undefined {
   const { thread } = input;
+  if (thread.lineage?.sideChat === true) return input.messageTitleSeed;
   if (thread.forkOrigin == null && thread.forkedFrom == null) return input.messageTitleSeed;
   return isDefaultForkChildTitle(thread.title, input.parentTitle) ? thread.title.trim() : undefined;
 }

@@ -41,6 +41,8 @@ const EMPTY_DEVICE_STATE: DeviceServiceState = {
 export function useDeviceState(environmentId: EnvironmentId | null): {
   readonly state: DeviceServiceState;
   readonly loaded: boolean;
+  readonly error: string | null;
+  readonly refresh: () => void;
 } {
   // Devices are host-wide, so an embedded chat is refused their state and shows none.
   const query = useEnvironmentQuery(
@@ -48,7 +50,12 @@ export function useDeviceState(environmentId: EnvironmentId | null): {
       ? null
       : deviceEnvironment.state({ environmentId, input: {} }),
   );
-  return { state: query.data ?? EMPTY_DEVICE_STATE, loaded: query.data !== undefined };
+  return {
+    state: query.data ?? EMPTY_DEVICE_STATE,
+    loaded: query.data !== null,
+    error: query.error,
+    refresh: query.refresh,
+  };
 }
 
 const deviceHubAccessAtom = Atom.family((environmentId: EnvironmentId) =>

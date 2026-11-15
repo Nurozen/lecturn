@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   accounts: new Map<string, string>(),
   known: { needsSignIn: [] as string[] },
   readOnly: new Set<string>(),
+  offline: new Set<string>(),
   grantListeners: new Set<() => void>(),
   grantVersion: 0,
   setNodeRef: vi.fn(),
@@ -31,6 +32,11 @@ const state = vi.hoisted(() => ({
 vi.mock(import("../../state/server"), async (original) => ({
   ...(await original()),
   environmentServerConfigsAtom: "configs" as never,
+}));
+vi.mock(import("../../state/environments"), async (original) => ({
+  ...(await original()),
+  useConnectedEnvironmentIds: (() =>
+    [...state.configs.keys()].filter((id) => !state.offline.has(id))) as never,
 }));
 vi.mock(import("../../cloud/connectAccounts"), async (original) => ({
   ...(await original()),
@@ -188,6 +194,7 @@ function setup(): AsyncDisposable {
   state.accounts.clear();
   state.known.needsSignIn = [];
   state.readOnly.clear();
+  state.offline.clear();
   state.grantListeners.clear();
   state.configs.clear();
   for (const id of ["source", "target"])
@@ -250,13 +257,14 @@ async function drop(
   );
 }
 
-it.each(["capability", "access", "operate scope"])(
+it.each(["capability", "access", "operate scope", "connection"])(
   "moves next to a destination that lacks %s without ever writing to its environment",
   async (reason) => {
     await using _env = setup();
     if (reason === "capability")
       state.configs.get("target")!.environment.capabilities.threadPinReorder = false;
     else if (reason === "operate scope") state.readOnly.add("target");
+    else if (reason === "connection") state.offline.add("target");
     else {
       state.accounts.set("target", "expired");
       state.known.needsSignIn = ["expired"];

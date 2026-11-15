@@ -116,6 +116,7 @@ const harness = Effect.fn(function* (
   const storageCalls = yield* Ref.make<ReadonlyArray<string>>([]);
   const metadataCommands = yield* Ref.make<ReadonlyArray<string>>([]);
   const anchors = yield* Ref.make<ReadonlyArray<StaveThreadLifecycleAnchor>>([ANCHOR]);
+  const sideChatRunning = yield* Ref.make(false);
   const projects = yield* Ref.make<ReadonlyArray<OrchestrationProjectShell>>(
     options.deleted
       ? []
@@ -227,6 +228,7 @@ const harness = Effect.fn(function* (
           Effect.map((value) => Option.fromNullishOr(value.find((project) => project.id === id))),
         ),
       listThreadLifecycleAnchorsByProjectId: () => Ref.get(anchors),
+      hasLiveSideChatRunByProjectId: () => Ref.get(sideChatRunning),
       dispatch: (command) =>
         Ref.update(metadataCommands, (all) => [...all, command.type]).pipe(
           Effect.as({ sequence: 43 }),
@@ -279,6 +281,7 @@ const harness = Effect.fn(function* (
     storageCalls,
     metadataCommands,
     anchors,
+    sideChatRunning,
     beforeValidate,
     binaryAvailable,
     reconciliation,
@@ -756,6 +759,19 @@ describe("StaveLifecycleService", () => {
     }),
   );
   test(
+    "archive mode waits for a running side chat but not an idle one",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.sideChatRunning, true);
+      yield* h.service.sweep;
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+      assert.isNull((yield* h.row).archiveDeadlineAt);
+      yield* Ref.set(h.sideChatRunning, false);
+      yield* h.service.sweep;
+      assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
+    }),
+  );
+  test(
     "Keep suppresses the current episode until its activity anchor moves",
     Effect.gen(function* () {
       const h = yield* harness();
@@ -770,6 +786,37 @@ describe("StaveLifecycleService", () => {
       yield* h.service.sweep;
       assert.equal((yield* h.row).disposition, "pending_archive");
       assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
+    }),
+  );
+  test(
+    "a side-chat run seen only by archive validation defers instead of refusing",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.beforeValidate, Ref.set(h.sideChatRunning, true));
+      yield* Effect.exit(h.service.sweep);
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+      assert.notEqual((yield* h.row).disposition, "refused");
+      yield* Ref.set(h.beforeValidate, Effect.void);
+      yield* Ref.set(h.sideChatRunning, false);
+      yield* h.service.sweep;
+      assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
+    }),
+  );
+  test(
+    "a side-chat run defers the schedule without clearing Keep",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.sideChatRunning, true);
+      yield* h.service.sweep;
+      yield* h.patch({ disposition: "kept", anchorAt: NOW, scheduledAt: NOW });
+      const kept = yield* h.row;
+      yield* h.service.sweep;
+      yield* Ref.set(h.sideChatRunning, false);
+      yield* h.service.sweep;
+      const row = yield* h.row;
+      assert.equal(row.disposition, "kept");
+      assert.equal(row.scheduledAt, kept.scheduledAt);
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
     }),
   );
   test.each([

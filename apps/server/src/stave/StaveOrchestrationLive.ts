@@ -22,6 +22,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
+import { liveRunCondition } from "../orchestration-v2/ProjectionStore.ts";
 import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import {
@@ -149,11 +150,31 @@ const make = Effect.gen(function* () {
           AND COALESCE(json_extract(payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
           -- A Squire thread is never settled, so it would hold the space open forever.
           AND json_extract(payload_json, '$.squire') IS NULL
+          -- A side chat is hidden and may copy the parent's pin; its parent anchors the space.
+          AND json_extract(payload_json, '$.lineage.sideChat') IS NOT 1
         ORDER BY thread_id
       `.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AnchorRow))),
         Effect.mapError(fail("listThreadLifecycleAnchorsByProjectId")),
       );
+
+  const hasLiveSideChatRunByProjectId: StaveOrchestrationShape["hasLiveSideChatRunByProjectId"] = (
+    projectId,
+  ) =>
+    sql<{ readonly live: number }>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM orchestration_v2_projection_threads AS thread
+        JOIN orchestration_v2_projection_runs AS run ON run.thread_id = thread.thread_id
+        WHERE thread.project_id = ${projectId}
+          AND thread.deleted_at IS NULL
+          AND json_extract(thread.payload_json, '$.lineage.sideChat') IS 1
+          AND ${liveRunCondition(sql, "run")}
+      ) AS live
+    `.pipe(
+      Effect.map((rows) => rows[0]?.live === 1),
+      Effect.mapError(fail("hasLiveSideChatRunByProjectId")),
+    );
 
   const getInferenceTurnPairs: StaveOrchestrationShape["getInferenceTurnPairs"] = (input) =>
     sql<{ question: string; response: string | null }>`
@@ -345,6 +366,7 @@ const make = Effect.gen(function* () {
     }),
     getThreadShellById,
     listThreadLifecycleAnchorsByProjectId,
+    hasLiveSideChatRunByProjectId,
     getInferenceTurnPairs,
     dispatch,
     listSessions,

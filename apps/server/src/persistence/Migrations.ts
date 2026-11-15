@@ -122,6 +122,10 @@ import Migration0091 from "./Migrations/091_SquireChatFirst.ts";
 // Upstream published this as 73, which Lecturn's ledger already used
 // (WebhookRelayDeliveries), so it runs here as 92.
 import Migration0092 from "./Migrations/073_ActiveTurnItemIndexes.ts";
+// Upstream published these as 74 and 75, which Lecturn's ledger already used
+// (McpAppModelContext, ThreadSnapshotWindowIndexes), so they run here as 93 and 94.
+import Migration0093 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import Migration0094 from "./Migrations/075_SubagentDeliveryState.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -236,6 +240,17 @@ const ActiveTurnItemIndexesCompatibility = Effect.gen(function* () {
   `;
   if (indexes.length > 0) return;
   yield* Migration0092;
+});
+
+// Upstream 75 adds a column and an index without IF NOT EXISTS. A database that
+// already ran it under upstream's id keeps that schema, so only add it when missing.
+const SubagentDeliveryStateCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{
+    readonly name: string;
+  }>`PRAGMA table_info(orchestration_v2_projection_subagents)`;
+  if (columns.some((column) => column.name === "completion_delivery_state")) return;
+  yield* Migration0094;
 });
 
 /**
@@ -368,6 +383,9 @@ const migrationEntries = [
   [91, "SquireChatFirst", Migration0091],
   // Upstream 73.
   [92, "ActiveTurnItemIndexes", ActiveTurnItemIndexesCompatibility],
+  // Upstream 74 and 75.
+  [93, "ExcludeAttachmentPlaceholdersFromSearch", Migration0093],
+  [94, "SubagentDeliveryState", SubagentDeliveryStateCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

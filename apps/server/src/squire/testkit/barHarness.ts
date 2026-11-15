@@ -57,6 +57,7 @@ import * as PreviewManager from "../../preview/Manager.ts";
 import * as PortScanner from "../../preview/PortScanner.ts";
 import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
@@ -142,6 +143,7 @@ const layerRouteStubs = Layer.mergeAll(
   Layer.mock(GitVcsDriver.GitVcsDriver)({}),
   Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
   Layer.mock(PreviewManager.PreviewManager)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),

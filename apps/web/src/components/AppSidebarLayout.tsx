@@ -48,6 +48,7 @@ import {
   toggleSidebarMode,
   useSidebarModeSearchLink,
 } from "./apps/sidebarMode";
+import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
 import { SettingsNavigationProvider } from "./settings/SettingsNavigation";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
@@ -474,7 +475,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={sidebarProviderStyle}
       >
         <SettingsNavigationProvider>
-          <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+          <SidebarBrandWidthProbe isElectron={isElectron} onWidthChange={setBrandWidth} />
           <Sidebar
             side="left"
             collapsible="offcanvas"
@@ -507,6 +508,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           {children}
           <BackgroundThreadAnnouncer />
           <SidebarControl />
+          {isElectron ? <HistorySwipeNavigation /> : null}
         </SettingsNavigationProvider>
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>

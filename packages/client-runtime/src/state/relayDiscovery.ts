@@ -48,10 +48,20 @@ export function createRelayEnvironmentDiscoveryAtoms<R, E>(
       ),
   });
 
+  const refreshAfterMutation = createRuntimeCommand(runtime, {
+    label: "relay-environment-discovery:refresh-after-mutation",
+    concurrency: { mode: "serial", key: () => "refresh-after-mutation" },
+    execute: (_input: void) =>
+      RelayEnvironmentDiscovery.RelayEnvironmentDiscovery.pipe(
+        Effect.flatMap((discovery) => discovery.refresh),
+      ),
+  });
+
   return {
     stateAtom,
     stateValueAtom,
     accountStatesValueAtom,
     refresh,
+    refreshAfterMutation,
   };
 }

@@ -52,6 +52,7 @@ instead.
 | ------------------------------------------------ | ---------------------------------------------------------------------------- |
 | Start the server and open the web app            | `lecturn`                                                                    |
 | Start the server without a browser               | `lecturn serve`                                                              |
+| Use it from your other devices                   | `lecturn up` ([details](./remote-access.md))                                 |
 | Keep it running in the background (macOS, Linux) | `lecturn service install` ([details](./background-service.md))               |
 | Move to the newest release                       | `lecturn update`                                                             |
 | Reclaim database space                           | `lecturn doctor` ([details](./background-service.md#reclaim-database-space)) |

@@ -133,6 +133,7 @@ const shell = (id: string, updatedAt: string, extra: Record<string, unknown> = {
   archivedAt: null,
   deletedAt: null,
   source: {},
+  lineage: { relationshipToParent: null },
   ...extra,
 });
 
@@ -348,6 +349,10 @@ describe("EmbedView", () => {
       shell("thread-old", "2026-10-25T00:00:00.000Z"),
       shell("thread-latest", "2026-10-25T03:00:00.000Z"),
       shell("thread-gone", "2026-10-25T04:00:00.000Z", { archivedAt: "2026-10-25T05:00:00.000Z" }),
+      // A side chat lives in its parent's right panel, which an embed does not show.
+      shell("thread-side", "2026-10-25T06:00:00.000Z", {
+        lineage: { relationshipToParent: "fork", sideChat: true },
+      }),
     ];
     await render({ threadId: null, switcher: false });
     expect(container.textContent).not.toContain("New thread");
@@ -356,6 +361,7 @@ describe("EmbedView", () => {
     await render({ threadId: null, switcher: true });
     expect(container.textContent).toContain("New thread");
     expect(container.textContent).toContain("Thread thread-latest");
+    expect(container.textContent).not.toContain("Thread thread-side");
   });
 
   it("names the thread's references through the host, asking once for all the chips on screen", async () => {

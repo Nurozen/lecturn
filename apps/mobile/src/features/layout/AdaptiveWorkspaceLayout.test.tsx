@@ -27,6 +27,7 @@ const navigation = {
   getParent: () => undefined,
   getState: () => navigationState,
 };
+const focusedScreenNavigation = { isFocused: () => true, addListener: () => () => undefined };
 const workspaceTabNavigationState = vi.fn(() => ({ index: 0, routes: [{ name: "Home" }] }));
 const windowSize = { width: 1280, height: 800, scale: 2, fontScale: 1 };
 const openThreadPullRequests = vi.fn();
@@ -93,7 +94,8 @@ const stubModules: Record<string, unknown> = {
     // the callback's identity changes.
     useFocusEffect: (effect: React.EffectCallback) => React.useEffect(() => effect(), [effect]),
     useNavigation: () => navigation,
-    NavigationContext: React.createContext<unknown>(undefined),
+    // Every screen here is focused; the inspector hook registers on navigation focus events.
+    NavigationContext: React.createContext<unknown>(focusedScreenNavigation),
     NavigationRouteContext: React.createContext<unknown>(undefined),
   },
   "react-native": {
