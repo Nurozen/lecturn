@@ -50,7 +50,8 @@ export function WorkspaceRootScreen() {
 
   return (
     <WorkspaceTabsContext value={context}>
-      <View className={layout.usesSplitView ? "flex-1 bg-screen" : "flex-1 bg-header"}>
+      {/* Split view stays transparent so the empty detail pane keeps the chrome tone. */}
+      <View className={layout.usesSplitView ? "flex-1" : "flex-1 bg-header"}>
         {!layout.usesSplitView ? (
           <NativeStackScreenOptions options={{ headerShown: false }} />
         ) : null}

@@ -239,7 +239,8 @@ vi.mock("../settings/appearance/AppearancePreferencesProvider", () => ({
 }));
 vi.mock("react-native", () => ({
   useWindowDimensions: () => ({ width: 400, height: 800 }),
-  View: ({ children }: { children: ReactNode }) => createElement("div", null, children),
+  View: ({ children, className }: { children: ReactNode; className?: string }) =>
+    createElement("div", { className }, children),
 }));
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaInsetsContext: createContext({ top: 0, right: 0, bottom: 24, left: 0 }),
@@ -321,3 +322,15 @@ it.each([
     }
   },
 );
+
+it.each([
+  [true, "flex-1"],
+  [false, "flex-1 bg-header"],
+])("paints no backdrop behind the split view (split: %s)", async (split, className) => {
+  using _actEnvironment = setup(split, false);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  using _root = { [Symbol.dispose]: () => act(() => root.unmount()) };
+  await act(async () => root.render(createElement(WorkspaceRootScreen)));
+  expect(container.firstElementChild?.className).toBe(className);
+});
