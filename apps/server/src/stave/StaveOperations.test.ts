@@ -56,6 +56,7 @@ import type {
   StaveSpaceStatus,
 } from "./staveJson.ts";
 import {
+  deferLifecycle,
   layerWith,
   layer as productionOperationsLayer,
   StaveOperations,
@@ -3865,69 +3866,78 @@ it.effect(
     ),
 );
 
-it.effect("revalidates automatic eligibility after quiescence and prevents the disk verb", () =>
-  scenario(
-    (roots) =>
-      Effect.gen(function* () {
-        const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
-        yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
-        const fixture = lifecycleFixture(root, "pending_archive");
-        let eligible = true;
-        const archiveCalls: string[] = [];
-        return {
-          root,
-          archiveCalls,
-          fixture,
-          lifecycle: fixture.service,
-          readerLoad: () => Effect.succeedSome(infoFor()),
-          onQuiesce: Effect.sync(() => {
-            eligible = false;
-          }),
-          validate: Effect.suspend(() =>
-            eligible
-              ? Effect.void
-              : new StaveRefusalError({
-                  code: "space_transitioning",
-                  message: "Thread became active",
-                  details: null,
+it.effect.each([
+  { deferred: false, disposition: "refused" },
+  { deferred: true, disposition: "live" },
+] as const)(
+  "revalidates automatic eligibility after quiescence and prevents the disk verb (deferred: $deferred)",
+  ({ deferred, disposition }) =>
+    scenario(
+      (roots) =>
+        Effect.gen(function* () {
+          const root = roots.path.join(roots.agentWorkDir, SPACE_ID);
+          yield* roots.fs.makeDirectory(root).pipe(Effect.orDie);
+          const fixture = lifecycleFixture(root, "pending_archive");
+          let eligible = true;
+          const archiveCalls: string[] = [];
+          return {
+            root,
+            archiveCalls,
+            fixture,
+            lifecycle: fixture.service,
+            readerLoad: () => Effect.succeedSome(infoFor()),
+            onQuiesce: Effect.sync(() => {
+              eligible = false;
+            }),
+            validate: Effect.suspend(() =>
+              eligible
+                ? Effect.void
+                : deferred
+                  ? deferLifecycle("A side chat is running")
+                  : new StaveRefusalError({
+                      code: "space_transitioning",
+                      message: "Thread became active",
+                      details: null,
+                    }),
+            ),
+            cliExtra: {
+              spaceList: (input) => Effect.succeed(input?.archived ? [] : [listRow(root)]),
+              spaceArchive: (input) =>
+                Effect.sync(() => {
+                  archiveCalls.push(input.id);
+                  throw new Error("archive must not be invoked");
                 }),
-          ),
-          cliExtra: {
-            spaceList: (input) => Effect.succeed(input?.archived ? [] : [listRow(root)]),
-            spaceArchive: (input) =>
-              Effect.sync(() => {
-                archiveCalls.push(input.id);
-                throw new Error("archive must not be invoked");
-              }),
-          },
-        };
-      }),
-    (harness, options) =>
-      Effect.gen(function* () {
-        const ops = yield* StaveOperations;
-        const error = yield* Effect.flip(
-          ops.executeLifecycle(
-            {
-              kind: "lifecycleAction",
-              projectId: ProjectId.make("p"),
-              workspaceRoot: options.root,
-              expectedManifestCreatedAt: CREATED_AT,
-              action: "retry",
-              target: "archive",
-              force: false,
-              memory: "keep",
             },
-            options.validate,
-          ),
-        );
-        expect(error.code).toBe("space_transitioning");
-        expect(
-          (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
-        ).toEqual([]);
-        expect(options.archiveCalls).toEqual([]);
-        expect(options.fixture.row().disposition).toBe("refused");
-      }),
-  ),
+          };
+        }),
+      (harness, options) =>
+        Effect.gen(function* () {
+          const ops = yield* StaveOperations;
+          const error = yield* Effect.flip(
+            ops.executeLifecycle(
+              {
+                kind: "lifecycleAction",
+                projectId: ProjectId.make("p"),
+                workspaceRoot: options.root,
+                expectedManifestCreatedAt: CREATED_AT,
+                action: "retry",
+                target: "archive",
+                force: false,
+                memory: "keep",
+              },
+              options.validate,
+            ),
+          );
+          expect(error.code).toBe("space_transitioning");
+          expect(
+            (yield* Ref.get(harness.cliCalls)).filter((call) => call.method === "spaceDestroy"),
+          ).toEqual([]);
+          expect(options.archiveCalls).toEqual([]);
+          // A deferral reconciles the row without recording a refusal, so the next sweep retries.
+          expect(options.fixture.row().disposition).toBe(disposition);
+          expect(options.fixture.row().refusalCode).toBe(deferred ? null : "space_transitioning");
+        }),
+    ),
 );
 
 it.effect("requires an explicit reviewed cleanup verb and the recorded incarnation", () =>

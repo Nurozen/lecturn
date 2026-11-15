@@ -37,7 +37,12 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { StaveBinary } from "../StaveBinary.ts";
 import { StaveCli } from "../StaveCli.ts";
-import { StaveOperations, StaveRefusalError } from "../StaveOperations.ts";
+import {
+  deferLifecycle,
+  isDeferred,
+  StaveOperations,
+  StaveRefusalError,
+} from "../StaveOperations.ts";
 import { StaveOrchestration } from "../StaveOrchestration.ts";
 import { StaveSpaceLock } from "../StaveSpaceLock.ts";
 import { StaveWorkspaceReader } from "../StaveWorkspaceReader.ts";
@@ -168,6 +173,8 @@ const readCursor = Effect.gen(function* () {
   return rows[0]?.last_applied_sequence ?? 0;
 });
 
+const SIDE_CHAT_RUNNING = "A side chat is still running in this space; archive waits for it.";
+
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const settings = yield* ServerSettingsService;
@@ -267,8 +274,10 @@ export const make = Effect.gen(function* () {
         !["pending_archive", "archiving"].includes(row.value.disposition)
       )
         return yield* refusal("A saga member has no eligible archive schedule.");
+      const inputs = yield* archiveInputs(projectId);
+      if (inputs.sideChatRunning) return yield* deferLifecycle(SIDE_CHAT_RUNNING);
       const decision = resolveArchiveDeadline({
-        ...(yield* archiveInputs(projectId)),
+        ...inputs,
         row: row.value,
         graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
         now: yield* nowIso,
@@ -374,6 +383,7 @@ export const make = Effect.gen(function* () {
       const inputs = yield* archiveInputs(row.projectId).pipe(
         Effect.mapError((error) => refusal(error.message)),
       );
+      if (inputs.sideChatRunning) return yield* deferLifecycle(SIDE_CHAT_RUNNING);
       const fresh = yield* repo
         .getByProjectId(row.projectId)
         .pipe(Effect.mapError((error) => refusal(error.message)));
@@ -402,6 +412,7 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const failed = yield* repo.getByProjectId(row.projectId);
             if (
+              !isDeferred(error) &&
               Option.isSome(failed) &&
               failed.value.deleteIntentSequence === row.deleteIntentSequence &&
               failed.value.anchorAt === row.anchorAt &&

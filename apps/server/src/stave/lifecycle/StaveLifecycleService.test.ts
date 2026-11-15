@@ -789,6 +789,20 @@ describe("StaveLifecycleService", () => {
     }),
   );
   test(
+    "a side-chat run seen only by archive validation defers instead of refusing",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.beforeValidate, Ref.set(h.sideChatRunning, true));
+      yield* Effect.exit(h.service.sweep);
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+      assert.notEqual((yield* h.row).disposition, "refused");
+      yield* Ref.set(h.beforeValidate, Effect.void);
+      yield* Ref.set(h.sideChatRunning, false);
+      yield* h.service.sweep;
+      assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
+    }),
+  );
+  test(
     "a side-chat run defers the schedule without clearing Keep",
     Effect.gen(function* () {
       const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });

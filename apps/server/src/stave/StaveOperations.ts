@@ -107,6 +107,12 @@ export class StaveRefusalError extends Schema.TaggedError<StaveRefusalError>()(
 const refuse = (code: StaveErrorCode, message: string, details: StaveErrorDetails | null = null) =>
   new StaveRefusalError({ code, message, details });
 
+/** A transient refusal (e.g. a live side-chat run): recovery reconciles rows but never marks them refused. */
+export const deferLifecycle = (message: string) =>
+  refuse("space_transitioning", message, { deferred: true });
+export const isDeferred = (error: { readonly details?: StaveErrorDetails | null | undefined }) =>
+  error.details?.deferred === true;
+
 // ── Pure helpers ──────────────────────────────────────────────
 
 const decodeRemovalEvidence = Schema.decodeUnknownOption(
@@ -1906,13 +1912,14 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               if (lease !== undefined) {
                 const reconciled = yield* reconcileRow(lease).pipe(Effect.option);
                 if (Option.isSome(reconciled)) yield* patch(reconciled.value);
-                yield* patch({
-                  ...(Option.isSome(reconciled) && reconciled.value.disposition !== "destroyed"
-                    ? { disposition: "refused" as const }
-                    : {}),
-                  refusalCode: error.code,
-                  refusalMessage: stableStringify({ message: error.message, removedEdges }),
-                });
+                if (!(isDeferred(error) && Option.isSome(reconciled)))
+                  yield* patch({
+                    ...(Option.isSome(reconciled) && reconciled.value.disposition !== "destroyed"
+                      ? { disposition: "refused" as const }
+                      : {}),
+                    refusalCode: error.code,
+                    refusalMessage: stableStringify({ message: error.message, removedEdges }),
+                  });
               }
               if (removedEdges !== null)
                 return yield* refuse(error.code, error.message, { ...error.details, removedEdges });
@@ -2688,8 +2695,8 @@ export const make = Effect.fn("StaveOperations.make")(function* (
               Effect.gen(function* () {
                 const changes = yield* reconcileRow(row);
                 yield* patch(row, changes);
-                if (Exit.isFailure(result)) {
-                  const error = toOperationError(result.cause);
+                const error = Exit.isFailure(result) ? toOperationError(result.cause) : null;
+                if (error !== null && !isDeferred(error)) {
                   yield* patch(row, {
                     refusalCode: error.code,
                     refusalMessage: stableStringify({

@@ -164,9 +164,12 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
       yield* thread("deleted-side", true, NOW);
       yield* run("deleted-side", "running");
       assert.isFalse(yield* live);
-      yield* thread("queued-side", true);
-      yield* run("queued-side", "queued");
-      assert.isTrue(yield* live);
+      yield* thread("live-side", true);
+      yield* run("live-side", "completed");
+      for (const status of ["preparing", "queued", "starting", "running", "waiting"]) {
+        yield* sql`UPDATE orchestration_v2_projection_runs SET status = ${status} WHERE run_id = 'live-side-run'`;
+        assert.isTrue(yield* live, status);
+      }
     }),
   );
 
