@@ -4,6 +4,7 @@ import {
   CodexSettings,
   defaultInstanceIdForDriver,
   disallowedProviderMessage,
+  GithubCopilotSettings,
   type ManagedProviderInstance,
   type ManagedProviderLimits,
   type ManagedPolicySummary,
@@ -70,6 +71,7 @@ const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
   known("codex", "Codex", CodexSettings),
   known("claudeAgent", "Claude", ClaudeSettings),
   known("antigravity", "Antigravity", AntigravitySettings),
+  known("githubCopilot", "GitHub Copilot", GithubCopilotSettings),
   ...PACKAGED_CLIENTS.map((client) =>
     known(client.driverKind, client.label, client.settingsSchema, client.hasDefaultInstance),
   ),

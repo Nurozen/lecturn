@@ -194,7 +194,7 @@ The limit decides which modes Lecturn asks the provider for. It is not a sandbox
 
 - `desktop`: as the desktop app's own server.
 - `local-browser`: as a server only browsers on this machine reach, such as `npx lecturn`.
-- `remote`: reachable from phones, other computers, and app.t3.codes over the network.
+- `remote`: reachable from phones, other computers, and the hosted web app over the network.
 
 `remote` is the line that matters. A server reachable from the network also accepts browsers on
 this machine, and the two local kinds differ only in how Lecturn was started. On machines with the
@@ -226,13 +226,14 @@ so restart Lecturn after that.
   browser.
 - `telemetry: false`: the server and desktop app send no [product usage data](./telemetry.md) or
   relay connection traces. A policy cannot turn them on. A browser that opens the server, such as
-  app.t3.codes, still sends its own relay traces.
+  the hosted web app, still sends its own relay traces.
 
 ### Providers
 
 `providers.allowedDrivers` lists the providers that may run, by ID: `codex` (Codex),
-`claudeAgent` (Claude), `cursor` (Cursor), `grok` (Grok), `opencode` (OpenCode), `antigravity`
-(Antigravity), `fx` (fx), `pi` (Pi), `muse` (Muse Code), and `acpRegistry` (ACP Registry).
+`claudeAgent` (Claude), `cursor` (Cursor), `grok` (Grok), `githubCopilot` (GitHub Copilot),
+`opencode` (OpenCode), `antigravity` (Antigravity), `fx` (fx), `pi` (Pi), `muse` (Muse Code), and
+`acpRegistry` (ACP Registry).
 `lecturn policy check` rejects an ID this version does not know. Threads on other providers stay,
 marked unavailable, and users can still turn those providers off.
 

@@ -526,7 +526,9 @@ export const withLateConfigDiscovery = <E, R>(
 };
 
 // Discoveries run side by side so the slowest one, not their sum, bounds the
-// server config snapshot. Each degrades on timeout rather than failing it.
+// server config snapshot. Each degrades on timeout rather than failing it. The
+// reveal probe starts with the editor probe (a client abandons a connect after
+// 15 s) and its answer is dropped when the file manager is not available.
 export const resolveOpenDiscoveryForConfig = <T, D, E1, R1, E2, R2, E3, R3, E4, R4>(discovery: {
   readonly editors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
   readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;
@@ -535,21 +537,19 @@ export const resolveOpenDiscoveryForConfig = <T, D, E1, R1, E2, R2, E3, R3, E4, 
 }) =>
   Effect.all(
     {
-      editorConfig: resolveAvailableEditorsForConfig(discovery.editors).pipe(
-        Effect.flatMap((availableEditors) =>
-          resolveEditorConfig(
-            availableEditors,
-            resolveFileManagerRevealKindForConfig(discovery.fileManagerRevealKind),
-          ),
-        ),
-      ),
-      // Same discovery-with-timeout treatment as editors: a slow probe must
-      // not stall server.getConfig, so it degrades to an empty list.
+      availableEditors: resolveAvailableEditorsForConfig(discovery.editors),
+      fileManagerRevealKind: resolveFileManagerRevealKindForConfig(discovery.fileManagerRevealKind),
       remoteOpenTargets: resolveAvailableEditorsForConfig(discovery.remoteOpenTargets),
       directEndpoints: resolveAvailableEditorsForConfig(discovery.directEndpoints),
     },
     { concurrency: "unbounded" },
-  ).pipe(Effect.map(({ editorConfig, ...endpoints }) => ({ ...editorConfig, ...endpoints })));
+  ).pipe(
+    Effect.flatMap(({ availableEditors, fileManagerRevealKind, ...endpoints }) =>
+      resolveEditorConfig(availableEditors, Effect.succeed(fileManagerRevealKind)).pipe(
+        Effect.map((editorConfig) => ({ ...editorConfig, ...endpoints })),
+      ),
+    ),
+  );
 function withoutWorkspaceSnapshots(providers: ReadonlyArray<ServerProvider>): ServerProvider[] {
   return providers.map(({ workspaceSnapshots: _workspaceSnapshots, ...provider }) => provider);
 }

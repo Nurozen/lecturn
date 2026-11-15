@@ -47,16 +47,42 @@ it("surfaces a Lecturn hook refusal from a launch failure", () => {
 it.effect("bounds all stalled config discoveries by one shared timeout", () =>
   Effect.gen(function* () {
     const resolving = yield* resolveOpenDiscoveryForConfig({
-      editors: Effect.never,
+      // Editors answer just before the deadline, so a reveal probe started after them would stall past it.
+      editors: Effect.sleep(Duration.seconds(4)).pipe(Effect.as(["file-manager" as const])),
       fileManagerRevealKind: Effect.never,
       remoteOpenTargets: Effect.never,
       directEndpoints: Effect.never,
     }).pipe(Effect.forkChild);
-    // Serial timeouts would need 15 s; side by side they finish at the first deadline.
     yield* TestClock.adjust(Duration.seconds(5));
+    yield* Effect.yieldNow;
+    assert.isDefined(resolving.pollUnsafe(), "discovery outlived the shared timeout");
     const discovered = yield* Fiber.join(resolving);
     assert.deepEqual(discovered, {
+      availableEditors: ["file-manager"],
+      remoteOpenTargets: [],
+      directEndpoints: [],
+    });
+  }),
+);
+
+it.effect("reports the reveal kind only when the file manager is available", () =>
+  Effect.gen(function* () {
+    const discover = (editors: ReadonlyArray<"file-manager">) =>
+      resolveOpenDiscoveryForConfig({
+        editors: Effect.succeed(editors),
+        fileManagerRevealKind: Effect.succeed("finder" as const),
+        remoteOpenTargets: Effect.succeed([]),
+        directEndpoints: Effect.succeed([]),
+      });
+    assert.deepEqual(yield* discover([]), {
       availableEditors: [],
+      remoteOpenTargets: [],
+      directEndpoints: [],
+    });
+    assert.deepEqual(yield* discover(["file-manager"]), {
+      availableEditors: ["file-manager"],
+      shellRevealInFileManager: true,
+      shellRevealInFileManagerKind: "finder",
       remoteOpenTargets: [],
       directEndpoints: [],
     });
