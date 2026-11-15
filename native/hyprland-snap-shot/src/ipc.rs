@@ -247,7 +247,9 @@ mod tests {
             next_event(&mut events, deadline).unwrap_err().to_string(),
             "Lecturn did not become visible."
         );
-        hyprland.write_all(b"openwindow>>1,1,lecturn,Lecturn\n").unwrap();
+        hyprland
+            .write_all(b"openwindow>>1,1,lecturn,Lecturn\n")
+            .unwrap();
         assert!(next_event(&mut events, deadline).is_ok());
         drop(hyprland);
         assert_eq!(
