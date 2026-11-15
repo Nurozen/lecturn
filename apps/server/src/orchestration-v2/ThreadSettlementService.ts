@@ -417,8 +417,21 @@ export const make = Effect.gen(function* () {
 
     const lookupCandidates = (yield* Effect.forEach(
       candidates,
-      // A live Stave space never settles by inactivity before its member PRs are read.
-      (thread) => (isSpace(thread.projectId) ? Effect.succeed(thread) : settleThread(thread, null)),
+      (thread) => {
+        // A live Stave space never settles by inactivity before its member PRs are read.
+        if (isSpace(thread.projectId)) return Effect.succeed(thread);
+        const projectSettings = resolveProjectSettings(settings, thread.projectId).settings;
+        // Skip no-op decisions; actual settlement still reads fresh settings before dispatch.
+        const settledAt = resolveAutoSettlementAt({
+          thread,
+          pullRequest: null,
+          nowMs,
+          autoSettleAfterDays: projectSettings.sidebarAutoSettleAfterDays,
+          autoSettleOnMerge: projectSettings.sidebarAutoSettleOnMerge,
+          autoSettleKeepPullRequests: projectSettings.sidebarAutoSettleKeepPullRequests,
+        });
+        return settledAt === null ? Effect.succeed(thread) : settleThread(thread, null);
+      },
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
@@ -426,6 +439,15 @@ export const make = Effect.gen(function* () {
         (thread) =>
           isSpace(thread.projectId) ||
           visibleThreadPullRequests(thread.pullRequests ?? []).length === 0,
+      )
+      // Spaces and merged sagas settle through their project, not a branch or PR of their own.
+      .filter(
+        (thread) =>
+          isSpace(thread.projectId) ||
+          staveMerged.has(thread.projectId) ||
+          thread.branch !== null ||
+          thread.linkedPullRequest != null ||
+          thread.branchPullRequest != null,
       );
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(

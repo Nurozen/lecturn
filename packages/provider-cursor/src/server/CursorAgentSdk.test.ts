@@ -3,6 +3,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { ProviderSessionId, ThreadId } from "@lecturn/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Exit from "effect/Exit";
+import * as Cause from "effect/Cause";
 import { vi } from "vite-plus/test";
 
 import * as ProviderEventLoggers from "@lecturn/provider-core/server/ProviderEventLoggers";
@@ -132,6 +134,32 @@ const layerTest = CursorAgentSdk.layer.pipe(
 );
 
 describe("CursorAgentSdkRunner", () => {
+  it.effect("constructs without loading and reports first-use load failures as runner errors", () =>
+    Effect.gen(function* () {
+      const require = vi.fn((id: string) => {
+        throw Object.assign(new Error(`Cannot find module '${id}'`), { code: "MODULE_NOT_FOUND" });
+      });
+      const runner = yield* CursorAgentSdk.makeCursorAgentSdkRunner(() => undefined).pipe(
+        Effect.provide(CursorSdk.layerFromRequire(require)),
+      );
+      assert.strictEqual(require.mock.calls.length, 0);
+      const result = yield* runner
+        .open({
+          operation: "create",
+          options: {},
+          threadId: ThreadId.make("lazy-load"),
+          providerSessionId: ProviderSessionId.make("lazy-load"),
+        })
+        .pipe(Effect.exit);
+      assert(Exit.isFailure(result));
+      const error = Cause.squash(result.cause);
+      assert(CursorAgentSdk.isCursorAgentSdkRunnerError(error));
+      assert.strictEqual(error.method, "agent.create");
+      assert(CursorSdk.isCursorSdkNotInstalledError(error.cause));
+      assert.deepStrictEqual(require.mock.calls, [["@cursor/sdk"]]);
+    }),
+  );
+
   it.effect("retries a resumed send after cancelling its abandoned local run", () =>
     Effect.gen(function* () {
       cursorSdkMock.runOperations.length = 0;

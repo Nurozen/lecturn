@@ -38,6 +38,8 @@ const toRow = (project: OrchestrationProject): ProjectStore.ProjectRow => ({
   createdAt: project.createdAt,
   updatedAt: project.updatedAt,
   deletedAt: project.deletedAt,
+  pinnedAt: null,
+  archivedAt: null,
 });
 
 const makeFixture = Effect.fn("VcsAutoPullPolicy.test.makeFixture")(function* () {

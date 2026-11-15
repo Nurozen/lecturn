@@ -66,6 +66,8 @@ const projectRow = (projectId: ProjectId, workspaceRoot: string): ProjectRow => 
   createdAt: NOW,
   updatedAt: NOW,
   deletedAt: null,
+  pinnedAt: null,
+  archivedAt: null,
 });
 
 const SQUIRE_HOME = ThreadId.make("squire-home");

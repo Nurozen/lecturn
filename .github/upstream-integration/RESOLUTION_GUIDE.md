@@ -1589,6 +1589,52 @@ from upstream's side.
 - **Marketing (#27251).** Homepage quotes and their avatars are not taken; `tweets.ts` stays
   deleted and `public/pfps` keeps main's set.
 
+**Upstream changes taken in a Lecturn shape (sync to upstream e4d1edaa).**
+
+- **Server migrations.** Upstream 76 (`ProjectionProjectsPinArchive`) runs as fork 95 with a
+  column-exists wrapper (its ALTERs lack IF NOT EXISTS); the file keeps upstream's number.
+- **Versions.** `apps/desktop`, `apps/server`, `apps/web`, `packages/contracts` and
+  `packages/embed` stay on the fork's 0.0.x track (0.0.50 here), never upstream's 0.1.x.
+- **Project pin and archive (#26154).** `Sidebar.tsx` is fork-structured
+  (`partitionForkSidebarThreads`, segments, Stave), so upstream sidebar changes are ported by
+  hand. Fork `archivedProjectKeys` means archived Stave spaces (threads hidden everywhere);
+  upstream's archive is `archivedAt`, read as `group.archived`/`archivedScopeKeys` (scope falls
+  back to all, folder sorts last). Fork `ProjectGroup` adapters (`homeListItems`,
+  `homeThreadList`, `sagaWorkbench`, `useSagaSidebarTree`) set `pinned`/`archived` with
+  some/every over member projects. Sidebar jump hints stay the fork `JumpHintBadge`.
+- **Managed policy (#27197).** Names use Lecturn identity (`LECTURN_DEV_MANAGED_POLICY_PATH`,
+  `/etc/lecturn`, `com.cloudgatherer.lecturn`). The policy-off `CloudLink` also refuses fork
+  link methods (`reconcileDesiredLink`, manual links; `syncManagedEndpointOrigin` false);
+  `ws.ts` withholds `managedPolicy` from app and embed sessions; `lecturn update` checks policy
+  before the no-archives gate.
+- **Model and effort control (#28057).** One shared control; the Lecturn look keeps the
+  labelled permissions chip and model chevron. `permissionsInEffortMenu` now means "the new
+  design hides the default-mode chip".
+- **Child approvals (#28516).** Clients answer on the child thread, so server auth is the
+  child's own (embed project ownership, app sessions; guests have no respond RPC). Web drops
+  `connectedAppTool` approvals from `childThreadApprovalsAtom` and renders the panel only with
+  operate scope outside embeds; mobile shows it only when the route `allows("agents")`.
+- **Desktop shell environment (#28556).** Off macOS the backend gets
+  `shellEnvironmentPrepared` and desktop streams the login-shell result over fd4; on macOS the
+  backend still runs its own probe. `LECTURN_DESKTOP_SHELL_DISCOVERY_PENDING` holds telemetry
+  until desktop reports discovery.
+- **Server.** `ws.ts` config discovery uses upstream `resolveOpenDiscoveryForConfig`;
+  `withLateConfigDiscovery` keeps the fork `environmentChanges` stream last. The
+  `ThreadSettlement` lookup filter (#27897) exempts Stave spaces and saga-merged projects.
+- **Cursor (#28718).** The fork loader in `CursorSdk.ts` (`layerFromRequire`,
+  `CursorSdkNotInstalledError`, `load`/`loadSqlite`) stays; upstream `sdk.ts` and its test stay
+  deleted, so port loader changes into `CursorSdk.ts`.
+- **Mobile.** Upstream `t3-native-controls` additions keep Lecturn names
+  (`LecturnBackgroundGraceSubscriber`); `t3-terminal` JVM tests go to
+  `lecturn-terminal/android/src/test` (`expo.modules.lecturnterminal`). Resume (#27662) keeps
+  the `queued-runs` gate. `PendingUserInputQuestionList` computes RTL (#24050) from its own
+  questions, so Squire cards follow it.
+- **Relay (#24679).** The fork sanitizer already drops Live Activity rows past 3.2 KB, so the
+  upstream request-level fit test runs on an unsanitized state.
+- **Tests.** The OpenCode health refresh has fork jitter (up to 10%), so upstream tests that
+  wait one interval wait 330 seconds. `Sidebar.logic.test.ts` keeps the suites #26920 deleted
+  for helpers the fork still uses (R5). `knip.jsonc` keeps one `scripts` workspace block.
+
 ## Recurring mechanical conflicts
 
 **Published migration identities are persistent data.** The fork's

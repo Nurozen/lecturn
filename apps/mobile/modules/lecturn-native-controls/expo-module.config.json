@@ -4,7 +4,8 @@
     "modules": ["LecturnNativeControlsModule", "LecturnKeyboardCommandsModule"],
     "appDelegateSubscribers": [
       "LecturnWorkspaceOrientationSubscriber",
-      "LecturnMenuDismissTouchGateSubscriber"
+      "LecturnMenuDismissTouchGateSubscriber",
+      "LecturnBackgroundGraceSubscriber"
     ]
   },
   "android": {

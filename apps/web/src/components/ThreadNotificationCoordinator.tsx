@@ -72,6 +72,7 @@ interface WatchedEnvironment {
   // The live snapshot's threads and projects: app threads alert under their app's name.
   threads: ReadonlyArray<OrchestrationV2ThreadShell> | null;
   projects: ReadonlyArray<NotificationProject> | null;
+  reconnecting: boolean;
   readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
 }
 
@@ -173,6 +174,8 @@ export function startThreadNotifications(
               <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
             ) : status === "approval" ? (
               <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
+            ) : status === "limited" ? (
+              <CircleAlertIcon aria-hidden className="size-4 text-warning-foreground" />
             ) : status === "failed" ? (
               <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
             ) : (
@@ -245,7 +248,11 @@ export function startThreadNotifications(
       }
       const prior = previous.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
-      if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
+      if (
+        !entry.reconnecting &&
+        prior?.raw === rawThread &&
+        prior.subagentRequest === subagentRequest
+      ) {
         next.set(rawThread.id, prior);
         continue;
       }
@@ -274,6 +281,7 @@ export function startThreadNotifications(
       next.set(thread.id, state);
       changed.push([prior, state]);
     }
+    entry.reconnecting = false;
     entry.previous = next;
     entry.gate.retain(new Set(next.keys()));
     for (const [prior, state] of changed) {
@@ -289,6 +297,7 @@ export function startThreadNotifications(
       previous: new Map(),
       threads: null,
       projects: null,
+      reconnecting: false,
       unsubscribe: () => {},
       gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
         const state = entry.previous.get(threadId);
@@ -306,8 +315,8 @@ export function startThreadNotifications(
           observeThreads(environmentId, entry, entry.threads);
           return;
         }
-        entry.gate.clear();
-        entry.previous = new Map();
+        entry.gate.cancelPending();
+        entry.reconnecting = true;
       },
       { immediate: true },
     );

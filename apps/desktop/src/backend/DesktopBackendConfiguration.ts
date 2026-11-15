@@ -567,10 +567,9 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       host: backendExposure.bindHost,
       desktopBootstrapToken: input.bootstrapToken,
       desktopBootstrapSecret: input.bootstrapSecret,
-      // Off macOS, DesktopApp installs the shell environment into process.env first (a failed Windows
-      // probe reports false, leaving server hydration on). On macOS it loads in the background so a
-      // slow .zprofile does not hide the window, and the backend runs its own login-shell probe.
-      // WSL gets a different environment, so its bootstrap never sets this.
+      // Off macOS the desktop applies its cached shell environment and streams the login-shell
+      // result over fd4, so the backend skips its own probe. On macOS the backend also runs its
+      // own login-shell probe. WSL gets a different environment, so its bootstrap never sets this.
       ...(input.shellEnvironmentPrepared === undefined
         ? {}
         : { shellEnvironmentPrepared: input.shellEnvironmentPrepared }),
@@ -606,6 +605,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        LECTURN_DESKTOP_SHELL_DISCOVERY_PENDING: "1",
         LECTURN_CLI_PATH: Option.getOrUndefined(input.cliPath),
       },
       extendEnv: true,

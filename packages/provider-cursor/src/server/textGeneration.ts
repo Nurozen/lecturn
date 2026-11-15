@@ -83,7 +83,10 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       const { operation, prompt, modelSelection } = input;
 
       const apiKey = yield* resolveCursorApiKey(operation);
-      const { Agent, SqliteLocalAgentStore } = yield* cursorSdk.load.pipe(
+      const [{ Agent }, { SqliteLocalAgentStore }] = yield* Effect.all([
+        cursorSdk.load,
+        cursorSdk.loadSqlite,
+      ]).pipe(
         Effect.mapError(
           (cause) =>
             new TextGenerationError({

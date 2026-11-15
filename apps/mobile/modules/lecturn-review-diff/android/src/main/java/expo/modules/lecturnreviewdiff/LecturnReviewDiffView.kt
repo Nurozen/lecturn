@@ -486,6 +486,7 @@ class LecturnReviewDiffView(context: Context, appContext: AppContext) : ExpoView
       )
       postInvalidateOnAnimation()
     } else {
+      verticalScroller.forceFinished(true)
       canvasView.setVerticalOffset(target)
     }
   }

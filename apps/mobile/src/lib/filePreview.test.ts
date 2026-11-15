@@ -219,6 +219,7 @@ vi.mock("react-native-reanimated", () => {
   return {
     default: { View: ({ children }: { children?: ReactNode }) => children },
     FadeIn: transition,
+    FadeInDown: transition,
     FadeInUp: transition,
     ReduceMotion: { System: "system" },
     useSharedValue: (value: unknown) => ({ value, get: () => value, set: () => {} }),

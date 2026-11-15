@@ -207,6 +207,8 @@ describe("backdrop", () => {
       feedbackSubmissions: [],
       creationState: null,
       queuedRunEdit: null,
+      statusRequests: {},
+      setStatusRequests: () => {},
     };
     for (const draftMode of [undefined, onlyTheFields({ content: () => null })]) {
       backdrops.length = 0;

@@ -272,6 +272,10 @@ describe("app RPC allowlist", () => {
       expect(yield* dispatch({ type: "runtime-request.respond", threadId: rocketThread })).toBe(
         true,
       );
+      // A child approval shown in its parent is answered on, and checked against, its own thread.
+      expect(yield* dispatch({ type: "runtime-request.respond", threadId: normalThread })).toBe(
+        false,
+      );
       expect(yield* dispatch({ type: "run.interrupt", threadId: rocketThread })).toBe(true);
       expect(yield* dispatch({ type: "thread.stop", threadId: rocketThread })).toBe(true);
       expect(yield* dispatch({ type: "thread.stop", threadId: normalThread })).toBe(false);

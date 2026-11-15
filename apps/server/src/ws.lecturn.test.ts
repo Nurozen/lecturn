@@ -15,8 +15,8 @@ import { LecturnHookRejectedError } from "./orchestration-v2/fork/LecturnOrchest
 import {
   findHookRejectionReason,
   findThreadImportFailure,
-  resolveConfigDiscoveries,
-  withLateEditorConfig,
+  resolveOpenDiscoveryForConfig,
+  withLateConfigDiscovery,
 } from "./ws.ts";
 
 it("finds the import failure reason through rejected-command and Cause wrappers", () => {
@@ -46,18 +46,19 @@ it("surfaces a Lecturn hook refusal from a launch failure", () => {
 
 it.effect("bounds all stalled config discoveries by one shared timeout", () =>
   Effect.gen(function* () {
-    const resolving = yield* resolveConfigDiscoveries({
-      availableEditors: Effect.never,
+    const resolving = yield* resolveOpenDiscoveryForConfig({
+      editors: Effect.never,
       fileManagerRevealKind: Effect.never,
       remoteOpenTargets: Effect.never,
+      directEndpoints: Effect.never,
     }).pipe(Effect.forkChild);
     // Serial timeouts would need 15 s; side by side they finish at the first deadline.
     yield* TestClock.adjust(Duration.seconds(5));
     const discovered = yield* Fiber.join(resolving);
     assert.deepEqual(discovered, {
       availableEditors: [],
-      fileManagerRevealKind: undefined,
       remoteOpenTargets: [],
+      directEndpoints: [],
     });
   }),
 );
@@ -69,13 +70,14 @@ it.effect("re-sends the config snapshot when a switch change alters the descript
       capabilities: { squire: true, squireLiveSwitch: true },
     } as ServerConfig["environment"];
     const config = { availableEditors: [], environment: off } as unknown as ServerConfig;
-    const events = yield* withLateEditorConfig(
+    const events = yield* withLateConfigDiscovery(
       config,
       Stream.empty,
       {
         resolveAvailableEditors: () => Effect.succeed([]),
         resolveFileManagerRevealKind: () => Effect.undefined,
       },
+      { resolveTargets: () => Effect.succeed([]) },
       // The switch replays its value on subscribe, then each change.
       Stream.make(off, on, on),
     ).pipe(Stream.runCollect);

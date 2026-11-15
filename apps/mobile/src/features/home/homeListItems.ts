@@ -169,6 +169,8 @@ export function hierarchyGroups(
           environmentId: project.environmentId,
           projectId: project.id,
         })),
+      pinned: group.projects.some((project) => project.pinnedAt != null),
+      archived: group.projects.every((project) => project.archivedAt != null),
     })),
     index,
   );
@@ -220,6 +222,8 @@ function homeHierarchy(input: {
           environmentId: project.environmentId,
           projectId: project.id,
         })),
+      pinned: group.projects.some((project) => project.pinnedAt != null),
+      archived: group.projects.every((project) => project.archivedAt != null),
     })),
     input.sagaIndex ?? [],
   );

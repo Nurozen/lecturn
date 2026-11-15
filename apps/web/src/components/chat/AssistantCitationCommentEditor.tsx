@@ -1,5 +1,6 @@
 import { ASSISTANT_CITATION_MAX_COMMENT_LENGTH } from "@lecturn/contracts";
 import { useState, type Ref } from "react";
+import { textDirection } from "~/textDirection";
 
 import { Button } from "../ui/button";
 
@@ -55,6 +56,7 @@ export function AssistantCitationCommentEditor({
         aria-invalid={commentTooLong || undefined}
         placeholder="Add an optional comment..."
         rows={2}
+        dir={textDirection(comment)}
         className="field-sizing-content block max-h-40 min-h-16 w-full resize-none bg-transparent px-1 py-1.5 text-base outline-none placeholder:text-muted-foreground sm:text-sm"
         value={comment}
         onChange={(event) => {

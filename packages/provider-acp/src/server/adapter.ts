@@ -27,9 +27,11 @@ import {
   type ProviderRequestKind,
   type ProviderThreadId,
   type ProviderUserInputAnswers,
+  type RuntimeMode,
   type RuntimeRequestId,
   type ThreadTokenUsageSnapshot,
   type ThreadId,
+  isRuntimeModeAbove,
   type TurnTokenUsage,
 } from "@lecturn/contracts";
 import { AgentScope, AgentScopeThreadId } from "@lecturn/shared/AgentScope";
@@ -154,6 +156,7 @@ export interface AcpAdapterV2RuntimeInput {
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly httpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
   /**
    * Lecturn: puts the `agent-device` CLI on the agent's PATH. Flavors apply it
@@ -293,6 +296,7 @@ export interface AcpAdapterV2Flavor {
   readonly clientCapabilitiesMeta?: NonNullable<
     EffectAcpSchema.InitializeRequest["clientCapabilities"]
   >["_meta"];
+  readonly mcpOverHttp?: boolean;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => EffectAcpSchema.SessionNotification;
@@ -348,6 +352,11 @@ export interface AcpAdapterV2Flavor {
   readonly sessionModeForPolicy?: (
     policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   ) => string | undefined;
+  /**
+   * The runtime mode a native session mode grants, for flavors whose modes are permission levels.
+   * Under a policy ceiling, a mode the user picks that this does not place under it is not applied.
+   */
+  readonly runtimeModeForSessionMode?: (modeId: string) => RuntimeMode | undefined;
   readonly clientFileSystem?: {
     readonly readTextFile: (
       request: EffectAcpSchema.ReadTextFileRequest,
@@ -437,6 +446,8 @@ export interface AcpAdapterV2Flavor {
   readonly reportsPerTurnPromptUsage?: boolean;
   /** Grok can retain task_already_running until process exit. */
   readonly restartRuntimeAfterInterrupt?: boolean;
+  /** Prompt failures after which the agent process keeps failing until replaced. */
+  readonly restartRuntimeAfterPromptError?: (error: unknown) => boolean;
   readonly restartRuntimeOnEveryInterrupt?: boolean;
   readonly terminateRuntimeProcessGroupOnInterrupt?: boolean;
   readonly preserveRuntimeOnSettledInterrupt?: boolean;
@@ -680,6 +691,7 @@ function negotiatedCapabilities(
 interface AcpMcpContext {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly httpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
   readonly endpoint?: string;
@@ -689,12 +701,13 @@ interface AcpMcpContext {
 function acpMcpContext(
   session: McpProviderSession.McpProviderSessionConfig | undefined,
   self: SelfInvocation,
+  mcpOverHttp: boolean | undefined,
   extraServers: ReadonlyArray<EffectAcpSchema.McpServer> = [],
 ): AcpMcpContext {
   if (session === undefined) {
-    return { servers: extraServers, acpServers: [] };
+    return { servers: extraServers, acpServers: [], httpServers: [] };
   }
-  // codex-acp 1.2.0 and pi-acp drop injected HTTP servers; bridge through stdio instead.
+  // codex-acp 1.2.0 and pi-acp drop injected HTTP servers, so HTTP is opt-in per flavor.
   return {
     servers: [
       {
@@ -710,6 +723,17 @@ function acpMcpContext(
       ...extraServers,
     ],
     acpServers: [{ type: "acp", name: "lecturn", serverId: "lecturn" }],
+    httpServers:
+      mcpOverHttp === true
+        ? [
+            {
+              type: "http",
+              name: "lecturn",
+              url: session.endpoint,
+              headers: [{ name: "Authorization", value: session.authorizationHeader }],
+            },
+          ]
+        : [],
     endpoint: session.endpoint,
     authorization: session.authorizationHeader,
     processEnvironment: {
@@ -725,7 +749,11 @@ function acpMcpContext(
 }
 
 function acpMcpActivation(context: AcpMcpContext) {
-  return { mcpServers: context.servers, acpMcpServers: context.acpServers };
+  return {
+    mcpServers: context.servers,
+    acpMcpServers: context.acpServers,
+    httpMcpServers: context.httpServers,
+  };
 }
 
 /**
@@ -738,10 +766,11 @@ function acpSquireMcpContext(
   squireIsolation: ProviderAdapter.ProviderAdapterV2RuntimePolicy["squireIsolation"],
 ): AcpMcpContext {
   if (squireIsolation === undefined) return context;
-  if (squireIsolation === "probe") return { servers: [], acpServers: [] };
+  if (squireIsolation === "probe") return { servers: [], acpServers: [], httpServers: [] };
   return {
     servers: context.servers.filter((server) => server.name === "lecturn"),
     acpServers: context.acpServers,
+    httpServers: context.httpServers,
     ...(context.endpoint === undefined ? {} : { endpoint: context.endpoint }),
     ...(context.authorization === undefined ? {} : { authorization: context.authorization }),
   };
@@ -1086,6 +1115,12 @@ function nodeStatus(status: ProjectedToolStatus): OrchestrationV2ExecutionNode["
 
 function completedAtForStatus(status: ProjectedToolStatus, now: DateTime.Utc): DateTime.Utc | null {
   return status === "completed" || status === "failed" || status === "interrupted" ? now : null;
+}
+
+// Copilot advertises URL ids such as `https://agentclientprotocol.com/protocol/session-modes#plan`.
+function isAcpPlanModeId(id: string): boolean {
+  const name = id.slice(id.lastIndexOf("#") + 1);
+  return name === "plan" || name === "architect";
 }
 
 function selectPermissionOptionId(
@@ -1451,6 +1486,9 @@ interface SnapshotMessageState {
 const ACP_STOP_CONFIRM_TIMEOUT_MS = 10_000;
 const TOOL_UPDATE_PERSIST_EVERY = 10;
 
+// CommandOutputHub reads the last 256 KiB; retain more so its display cut stays unchanged.
+const MAX_AGENT_TERMINAL_OUTPUT_CHARS = 320 * 1024;
+
 // Agents can resend whole calls while streaming arguments.
 function shouldPersistToolUpdate(
   context: Pick<ActiveAcpTurn, "toolUpdatesSkipped">,
@@ -1488,10 +1526,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     extraServers: ReadonlyArray<EffectAcpSchema.McpServer> = [],
   ) =>
     threadId === null
-      ? Effect.succeed(acpMcpContext(undefined, self, extraServers))
+      ? Effect.succeed(acpMcpContext(undefined, self, flavor.mcpOverHttp, extraServers))
       : mcpSessions
           .read(threadId)
-          .pipe(Effect.map((session) => acpMcpContext(session, self, extraServers)));
+          .pipe(
+            Effect.map((session) => acpMcpContext(session, self, flavor.mcpOverHttp, extraServers)),
+          );
   const driver = flavor.driver;
   // Every ACP session gets the stdio bridge whenever the thread has a session,
   // so the session itself is the answer (see acpMcpContext).
@@ -2151,6 +2191,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             runtimePolicy: input.runtimePolicy,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
+            httpMcpServers: mcpContext.httpServers,
             ...(mcpContext.processEnvironment === undefined
               ? {}
               : { processEnvironment: mcpContext.processEnvironment }),
@@ -4137,20 +4178,27 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (planState.latest === null) return;
             plan = { ...planState.latest, status: "superseded" };
           } else if (update.kind === "items") {
-            const steps: ReadonlyArray<OrchestrationV2PlanStep> = update.plan.map(
-              (step, index) => ({
-                id: `acp-step-${index + 1}`,
-                text: nonEmptyText(step.step, `Step ${index + 1}`),
-                status:
-                  step.status === "inProgress"
-                    ? "running"
-                    : step.status === "completed"
-                      ? "completed"
-                      : "pending",
-              }),
+            // A cancelled entry is not outstanding work, and plan steps have no
+            // cancelled status, so drop it rather than show it as pending.
+            const steps: ReadonlyArray<OrchestrationV2PlanStep> = update.plan.flatMap(
+              (step, index) =>
+                step.status === "cancelled"
+                  ? []
+                  : [
+                      {
+                        id: `acp-step-${index + 1}`,
+                        text: nonEmptyText(step.step, `Step ${index + 1}`),
+                        status:
+                          step.status === "inProgress"
+                            ? "running"
+                            : step.status === "completed"
+                              ? "completed"
+                              : "pending",
+                      },
+                    ],
             );
             const completed =
-              steps.length > 0 && steps.every((step) => step.status === "completed");
+              update.plan.length > 0 && steps.every((step) => step.status === "completed");
             plan = {
               ...base,
               status: completed ? "completed" : "active",
@@ -4587,6 +4635,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             embeddedToolCallIds === undefined || embeddedToolCallIds.size === 0
               ? [`acp-agent-terminal:${update.terminalId}`]
               : [...embeddedToolCallIds];
+          const output = next.output.slice(-MAX_AGENT_TERMINAL_OUTPUT_CHARS);
           for (const toolCallId of projectedToolCallIds) {
             const existing = context.tools.get(toolCallId);
             const seeded: AcpToolCallState =
@@ -4607,7 +4656,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   status,
                   ...(next.command === undefined ? {} : { command: next.command }),
                 },
-                next.output,
+                output,
               ),
             );
           }
@@ -4737,10 +4786,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (yield* projectAgentTerminalUpdate(notification, context)) return;
           if (
             update.sessionUpdate === "usage_update" ||
-            update.sessionUpdate === "session_info_update" ||
-            (update.sessionUpdate === "state_update" &&
-              update.state === "idle" &&
-              update.usage != null)
+            update.sessionUpdate === "session_info_update"
           ) {
             const stateEvent = parseSessionUpdateEvent(notification).events.find(
               (event) => event._tag === "UsageUpdated" || event._tag === "SessionInfoUpdated",
@@ -4791,7 +4837,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 providerThread,
               });
             }
-            if (update.sessionUpdate !== "state_update") return;
+            return;
           }
           if (yield* followNativeChild(notification, context)) return;
           if (
@@ -7007,10 +7053,33 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               };
             });
           }
-          const optionSelections = (modelSelection.options ?? []).map((selection) =>
-            selection.value === ACP_EMPTY_OPTION_VALUE ? { ...selection, value: "" } : selection,
-          );
           const configOptions = yield* runtime.getConfigOptions;
+          // Under a policy ceiling, a mode the user picks applies only when the flavor can place
+          // it under the ceiling; an unknown mode could be the agent's own skip-approval mode.
+          const ceiling = runtimePolicy.maxRuntimeMode;
+          const isModeChoice = (id: string) =>
+            id === ACP_SESSION_MODE_OPTION_ID ||
+            configOptions.some(
+              (option) =>
+                option.id === id &&
+                (option.category === "mode" || option.category === "collaboration_mode"),
+            );
+          const withinCeiling = (selection: { readonly id: string; readonly value: unknown }) => {
+            if (ceiling === undefined || ceiling === "full-access" || !isModeChoice(selection.id)) {
+              return true;
+            }
+            const granted =
+              typeof selection.value === "string"
+                ? flavor.runtimeModeForSessionMode?.(selection.value)
+                : undefined;
+            return granted !== undefined && !isRuntimeModeAbove(granted, ceiling);
+          };
+          const optionSelections = (modelSelection.options ?? []).flatMap((selection) => {
+            if (!withinCeiling(selection)) return [];
+            return [
+              selection.value === ACP_EMPTY_OPTION_VALUE ? { ...selection, value: "" } : selection,
+            ];
+          });
           const availableConfigIds = new Set(configOptions.map((option) => option.id));
           const hasNativeConfigWithSyntheticModeId = availableConfigIds.has(
             ACP_SESSION_MODE_OPTION_ID,
@@ -7097,8 +7166,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 })),
               });
             }
-            const planMode = effectiveModeState?.availableModes.find(
-              (mode) => mode.id === "plan" || mode.id === "architect",
+            const planMode = effectiveModeState?.availableModes.find((mode) =>
+              isAcpPlanModeId(mode.id),
             );
             if (planMode !== undefined && effectiveModeState?.currentModeId !== planMode.id) {
               yield* runtime.setMode(planMode.id);
@@ -7107,9 +7176,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               const choices = option.options.flatMap((entry) =>
                 "value" in entry ? [entry.value] : entry.options.map((choice) => choice.value),
               );
-              const requested = choices.find(
-                (choice) => choice === "plan" || choice === "architect",
-              );
+              const requested = choices.find(isAcpPlanModeId);
               if (requested !== undefined && option.currentValue !== requested) {
                 yield* runtime.setConfigOption(option.id, requested);
               }
@@ -7494,8 +7561,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           });
           const instructionState = lecturnAcpInstructionState({
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasLecturnMcp:
-              squireIsolation !== "probe" && acpMcpContext(mcpSession, self).servers.length > 0,
+            hasLecturnMcp: squireIsolation !== "probe" && mcpSession !== undefined,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
             ...(appInstructions === undefined ? {} : { appInstructions }),
             ...(turnInput.squireInstructions === undefined
@@ -8014,12 +8080,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                         Result.isSuccess(error) &&
                         error.success._tag === "AcpRequestError" &&
                         error.success.code === -32800);
+                    const failure = Cause.squash(cause);
+                    if (!interrupted && flavor.restartRuntimeAfterPromptError?.(failure) === true) {
+                      yield* Ref.set(runtimeRestartRequired, true);
+                    }
                     yield* finalizeTurn(
                       context,
                       interrupted ? "interrupted" : "failed",
-                      flavor.promptFailure?.(Cause.squash(cause)) ??
+                      flavor.promptFailure?.(failure) ??
                         makeProviderFailure({
-                          cause: Cause.squash(cause),
+                          cause: failure,
                           class: "provider_error",
                         }),
                     ).pipe(

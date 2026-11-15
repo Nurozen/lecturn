@@ -10,7 +10,10 @@ import { useNavigation } from "@react-navigation/native";
 import { use, useMemo, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
-import { resolveScratchProjectScopeKey } from "@lecturn/client-runtime/state/project-grouping";
+import {
+  pickableProjectGroups,
+  resolveScratchProjectScopeKey,
+} from "@lecturn/client-runtime/state/project-grouping";
 
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { LISTED_THREAD_SHELLS_ATOM, useListedProjects } from "../../state/entities";
@@ -145,12 +148,14 @@ export function HomeRouteScreen() {
   );
   const projectFilterOptions = useMemo(
     () =>
-      buildHomeProjectScopes({
-        accountSections,
-        projects,
-        environmentId: selectedEnvironmentId,
-        projectGroupingMode: listOptions.projectGroupingMode,
-      }).map((scope) => ({
+      pickableProjectGroups(
+        buildHomeProjectScopes({
+          accountSections,
+          projects,
+          environmentId: selectedEnvironmentId,
+          projectGroupingMode: listOptions.projectGroupingMode,
+        }),
+      ).map((scope) => ({
         key: scope.key,
         label: scope.title,
       })),

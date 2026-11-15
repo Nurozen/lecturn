@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import type { ManagedPolicyLimits } from "@lecturn/contracts";
 import * as HostProcess from "@lecturn/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import { ManagedPolicyFileError } from "@lecturn/shared/managedPolicyFile";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -24,11 +26,14 @@ import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfig
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
+import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as IpcChannels from "../channels.ts";
+import * as DesktopIpc from "../DesktopIpc.ts";
 import {
   getLocalEnvironmentBootstraps,
-  getRelayTelemetryEnabled,
+  installRelayTelemetryEnabled,
   pickProjectFavicon,
   saveTextFile,
   probeRemoteEditors,
@@ -181,20 +186,53 @@ describe("getLocalEnvironmentBootstraps", () => {
   });
 });
 
-describe("getRelayTelemetryEnabled", () => {
-  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+describe("installRelayTelemetryEnabled", () => {
+  // The renderer reads this over sync IPC, so the answer must not wait on the filesystem.
+  const relayTelemetryEnabled = (
+    env: NodeJS.ProcessEnv,
+    policy?: Parameters<typeof DesktopManagedPolicy.layerTest>[0],
+  ) =>
     Effect.gen(function* () {
-      assert.isFalse(
-        yield* getRelayTelemetryEnabled.handler().pipe(
-          Effect.provideService(HostProcess.Environment, {
-            LECTURN_TELEMETRY_ENABLED: "false",
-          }),
+      const listeners = new Map<string, DesktopIpc.DesktopIpcSyncListener>();
+      const ipcMain: DesktopIpc.DesktopIpcMain = {
+        removeHandler: () => undefined,
+        handle: () => undefined,
+        removeAllListeners: (channel) => void listeners.delete(channel),
+        on: (channel, listener) => void listeners.set(channel, listener),
+      };
+      yield* installRelayTelemetryEnabled().pipe(
+        Effect.provideService(HostProcess.Environment, env),
+        Effect.provide(
+          Layer.mergeAll(DesktopIpc.layer(ipcMain), DesktopManagedPolicy.layerTest(policy)),
         ),
       );
-      assert.isTrue(
-        yield* getRelayTelemetryEnabled
-          .handler()
-          .pipe(Effect.provideService(HostProcess.Environment, {})),
+      const event = { returnValue: undefined as unknown };
+      listeners.get(IpcChannels.GET_RELAY_TELEMETRY_ENABLED_CHANNEL)?.(event as never);
+      return event.returnValue;
+    }).pipe(Effect.scoped);
+
+  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+    Effect.gen(function* () {
+      assert.isFalse(yield* relayTelemetryEnabled({ LECTURN_TELEMETRY_ENABLED: "false" }));
+      assert.isTrue(yield* relayTelemetryEnabled({}));
+    }),
+  );
+
+  it.effect("turns relay tracing off when the managed policy turns telemetry off", () =>
+    Effect.gen(function* () {
+      const policy = (limits: ManagedPolicyLimits) => ({
+        schemaVersion: 1 as const,
+        organization: "Example Corp",
+        limits,
+      });
+      assert.isFalse(yield* relayTelemetryEnabled({}, policy({ telemetry: false })));
+      assert.isTrue(yield* relayTelemetryEnabled({}, policy({ webhookTasks: false })));
+      // A policy that cannot be read fails closed.
+      assert.isFalse(
+        yield* relayTelemetryEnabled(
+          {},
+          new ManagedPolicyFileError({ path: "/test", reason: "bad JSON" }),
+        ),
       );
     }),
   );

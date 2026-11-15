@@ -7,6 +7,7 @@ import {
   initialWorkspaceTabsState,
   isWorkspaceTab,
   workspaceTabsReducer,
+  shouldRestoreNativeSearch,
   workspaceTabForNativeSlot,
   resolveWorkspaceTabOrder,
   workspaceSearchBottomClearance,
@@ -206,6 +207,18 @@ describe("workspace root navigation", () => {
     );
     expect(WORKSPACE_TABS.every(isWorkspaceTab)).toBe(true);
     expect(isWorkspaceTab("compose")).toBe(false);
+  });
+
+  it("keeps an empty search closed after iOS closes it with only a blur", () => {
+    const opened = workspaceTabsReducer(initialWorkspaceTabsState(), { type: "search" });
+    const closed = workspaceTabsReducer(opened, { type: "expand" });
+    const filtered = workspaceTabsReducer(closed, { type: "query", query: "skia" });
+
+    expect(shouldRestoreNativeSearch(closed.tabs.threads, false)).toBe(false);
+    expect(shouldRestoreNativeSearch(closed.tabs.threads, true)).toBe(true);
+    expect(shouldRestoreNativeSearch(filtered.tabs.threads, false)).toBe(true);
+    expect(shouldRestoreNativeSearch(opened.tabs.threads, false)).toBe(true);
+    expect(shouldRestoreNativeSearch(initialWorkspaceTabsState().tabs.threads, true)).toBe(false);
   });
 
   it("returns from Usage without losing list state", () => {

@@ -20,6 +20,7 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfigModule from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as AgentAwarenessRelay from "../relay/AgentAwarenessRelay.ts";
 import { CLOUD_CLI_DESIRED_LINK_SECRET } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
@@ -158,8 +159,11 @@ const provideHarness =
         ),
       ),
       Effect.provide(
-        ServerConfigModule.layerTest("/", { prefix: "lecturn-cloud-link-fork-test-" }).pipe(
-          Layer.provideMerge(NodeServices.layer),
+        Layer.merge(
+          ServerConfigModule.layerTest("/", { prefix: "lecturn-cloud-link-fork-test-" }).pipe(
+            Layer.provideMerge(NodeServices.layer),
+          ),
+          ManagedPolicy.layerTest(),
         ),
       ),
       Effect.scoped,

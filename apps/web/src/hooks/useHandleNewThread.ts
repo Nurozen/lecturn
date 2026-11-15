@@ -495,7 +495,7 @@ export function resolveDefaultNewThreadProjectRef(
   projectOrder: ReadonlyArray<string>,
 ): ScopedProjectRef | null {
   const [defaultProject] = orderItemsByPreferredIds({
-    items: projectsForProjectsMode(projects),
+    items: projectsForProjectsMode(projects).filter((project) => project.archivedAt == null),
     preferredIds: projectOrder,
     getId: getProjectOrderKey,
     getPreferenceIds: (project) => [

@@ -241,6 +241,7 @@ const startLiveApp = Effect.acquireRelease(
 /** The real runtime policy over a provider that supports every mode. */
 const layerRuntimePolicy = (workspaceRoot: string) =>
   RuntimePolicy.layerFromProjectStore.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
         getInstance: () =>
@@ -269,6 +270,8 @@ const layerRuntimePolicy = (workspaceRoot: string) =>
             createdAt: "2026-10-25T12:00:00.000Z",
             updatedAt: "2026-10-25T12:00:00.000Z",
             deletedAt: null,
+            pinnedAt: null,
+            archivedAt: null,
           }),
       }),
     ),

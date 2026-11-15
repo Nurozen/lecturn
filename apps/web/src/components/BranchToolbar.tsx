@@ -251,7 +251,7 @@ const RunContextSelector = memo(function RunContextSelector({
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         {autoEnvironmentLabel ? (
           <ScaleIcon
-            className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+            className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0"}
             aria-hidden="true"
           />
         ) : (
@@ -301,7 +301,7 @@ const RunContextSelector = memo(function RunContextSelector({
     return (
       <span
         className={cn(
-          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6 redesign:text-foreground/70 redesign:dark:text-muted-foreground",
+          "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-1.75 font-normal text-muted-foreground/70 text-sm sm:h-6 sm:text-xs redesign:text-foreground/70 redesign:dark:text-muted-foreground",
           isPanel && "max-w-full",
           isPanel && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
         )}

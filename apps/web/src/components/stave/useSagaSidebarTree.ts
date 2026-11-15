@@ -124,6 +124,8 @@ export function useSagaSidebarTree(projects: readonly SidebarProjectSnapshot[]) 
         project: member,
       })),
       memberProjectRefs: project.memberProjectRefs,
+      pinned: project.pinned,
+      archived: project.archived,
     })),
     nest ? index : [],
   );

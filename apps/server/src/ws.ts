@@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -419,33 +420,6 @@ const resolveFileManagerRevealKindForConfig = <E, R>(
   discovery: Effect.Effect<FileManagerRevealKind | undefined, E, R>,
 ) => resolveDiscoveryForConfig(discovery, () => undefined);
 
-/**
- * Discoveries resolve side by side so a loaded host costs one timeout per connect, not their sum.
- * Clients abandon and retry a connect whose config snapshot misses their 15s establishment window,
- * so serial timeouts kept a busy local server stuck "reconnecting".
- */
-export const resolveConfigDiscoveries = <Target, E1, R1, E2, R2, E3, R3>(input: {
-  readonly availableEditors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
-  readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;
-  readonly remoteOpenTargets: Effect.Effect<ReadonlyArray<Target>, E3, R3>;
-}) =>
-  Effect.all(
-    [
-      resolveAvailableEditorsForConfig(input.availableEditors),
-      resolveFileManagerRevealKindForConfig(input.fileManagerRevealKind),
-      resolveAvailableEditorsForConfig(input.remoteOpenTargets),
-    ],
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.map(([availableEditors, fileManagerRevealKind, remoteOpenTargets]) => ({
-      availableEditors,
-      fileManagerRevealKind: availableEditors.includes("file-manager")
-        ? fileManagerRevealKind
-        : undefined,
-      remoteOpenTargets,
-    })),
-  );
-
 type EditorDiscovery = Pick<
   ExternalLauncher.ExternalLauncher["Service"],
   "resolveAvailableEditors" | "resolveFileManagerRevealKind"
@@ -469,10 +443,11 @@ const resolveEditorConfig = Effect.fn("ws.resolveEditorConfig")(function* <E, R>
   };
 });
 
-export const withLateEditorConfig = <E, R>(
+export const withLateConfigDiscovery = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
+  remoteOpenTargets: RemoteOpenTargets.RemoteOpenTargets["Service"],
   // Descriptors read on a capability change; one that differs re-sends the snapshot.
   environmentChanges: Stream.Stream<ClientServerConfig["environment"], E, R> = Stream.empty,
 ) => {
@@ -482,7 +457,8 @@ export const withLateEditorConfig = <E, R>(
         editors.join() !== config.availableEditors.join() ||
         (editors.includes("file-manager") && config.shellRevealInFileManagerKind === undefined),
     ),
-    // Leave the unshared reveal probe unbounded so timeouts cannot cancel every attempt on slow hosts.
+    // Unbounded, unlike the snapshot: this exists to deliver a probe that
+    // outlasts the snapshot's timeout.
     Stream.mapEffect((editors) =>
       resolveEditorConfig(editors, launcher.resolveFileManagerRevealKind()),
     ),
@@ -497,8 +473,18 @@ export const withLateEditorConfig = <E, R>(
   const environmentResolved = environmentChanges.pipe(
     Stream.map((environment) => ({ type: "environmentResolved" as const, environment })),
   );
+  const lateRemoteOpenTargets = Stream.fromEffect(remoteOpenTargets.resolveTargets()).pipe(
+    Stream.filter(
+      (targets) => JSON.stringify(targets) !== JSON.stringify(config.remoteOpenTargets ?? []),
+    ),
+    Stream.map((targets) => ({ type: "remoteOpenTargetsResolved" as const, targets })),
+  );
 
-  return Stream.merge(liveUpdates, Stream.merge(lateEditorConfig, environmentResolved)).pipe(
+  const lateConfig = Stream.merge(
+    lateEditorConfig,
+    Stream.merge(lateRemoteOpenTargets, environmentResolved),
+  );
+  return Stream.merge(liveUpdates, lateConfig).pipe(
     Stream.mapAccum(
       (): ClientServerConfig => config,
       (current, event): readonly [ClientServerConfig, ReadonlyArray<ServerConfigStreamEvent>] => {
@@ -520,6 +506,10 @@ export const withLateEditorConfig = <E, R>(
             const next = { ...current, environment: event.environment };
             return [next, [{ version: 1, type: "snapshot", config: next }]];
           }
+          case "remoteOpenTargetsResolved": {
+            const next = { ...current, remoteOpenTargets: event.targets };
+            return [next, [{ version: 1, type: "snapshot", config: next }]];
+          }
           case "keybindingsUpdated":
             return [{ ...current, ...event.payload }, [event]];
           case "providerStatuses":
@@ -535,6 +525,31 @@ export const withLateEditorConfig = <E, R>(
   );
 };
 
+// Discoveries run side by side so the slowest one, not their sum, bounds the
+// server config snapshot. Each degrades on timeout rather than failing it.
+export const resolveOpenDiscoveryForConfig = <T, D, E1, R1, E2, R2, E3, R3, E4, R4>(discovery: {
+  readonly editors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;
+  readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;
+  readonly remoteOpenTargets: Effect.Effect<ReadonlyArray<T>, E3, R3>;
+  readonly directEndpoints: Effect.Effect<ReadonlyArray<D>, E4, R4>;
+}) =>
+  Effect.all(
+    {
+      editorConfig: resolveAvailableEditorsForConfig(discovery.editors).pipe(
+        Effect.flatMap((availableEditors) =>
+          resolveEditorConfig(
+            availableEditors,
+            resolveFileManagerRevealKindForConfig(discovery.fileManagerRevealKind),
+          ),
+        ),
+      ),
+      // Same discovery-with-timeout treatment as editors: a slow probe must
+      // not stall server.getConfig, so it degrades to an empty list.
+      remoteOpenTargets: resolveAvailableEditorsForConfig(discovery.remoteOpenTargets),
+      directEndpoints: resolveAvailableEditorsForConfig(discovery.directEndpoints),
+    },
+    { concurrency: "unbounded" },
+  ).pipe(Effect.map(({ editorConfig, ...endpoints }) => ({ ...editorConfig, ...endpoints })));
 function withoutWorkspaceSnapshots(providers: ReadonlyArray<ServerProvider>): ServerProvider[] {
   return providers.map(({ workspaceSnapshots: _workspaceSnapshots, ...provider }) => provider);
 }
@@ -1920,6 +1935,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
   const loadServerConfig = Effect.fn("ws.loadServerConfig")(function* (options: {
     readonly usageLimitsCommand: boolean;
     readonly workspaceSnapshotsOnDemand: boolean;
+    readonly deferRemoteOpenTargets: boolean;
   }) {
     const keybindingsConfig = yield* keybindings.loadConfigState;
     const currentProviders = yield* providerRegistry.getProviders;
@@ -1936,21 +1952,14 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
     const auth = yield* serverAuth.getDescriptor();
     const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
     const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
-    const [discovered, resolvedDirectEndpoints] = yield* Effect.all(
-      [
-        resolveConfigDiscoveries({
-          availableEditors: externalLauncher.resolveAvailableEditors(),
-          fileManagerRevealKind: externalLauncher.resolveFileManagerRevealKind(),
-          remoteOpenTargets: remoteOpenTargets.resolveTargets(),
-        }),
-        resolveAvailableEditorsForConfig(directEndpoints.resolve()),
-      ],
-      { concurrency: "unbounded" },
-    );
-    const editorConfig = yield* resolveEditorConfig(
-      discovered.availableEditors,
-      Effect.succeed(discovered.fileManagerRevealKind),
-    );
+    const discovery = yield* resolveOpenDiscoveryForConfig({
+      editors: externalLauncher.resolveAvailableEditors(),
+      fileManagerRevealKind: externalLauncher.resolveFileManagerRevealKind(),
+      remoteOpenTargets: options.deferRemoteOpenTargets
+        ? Effect.succeed([])
+        : remoteOpenTargets.resolveTargets(),
+      directEndpoints: directEndpoints.resolve(),
+    });
 
     return {
       environment,
@@ -1960,9 +1969,7 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       keybindings: keybindingsConfig.keybindings,
       issues: keybindingsConfig.issues,
       providers,
-      ...editorConfig,
-      remoteOpenTargets: discovered.remoteOpenTargets,
-      directEndpoints: resolvedDirectEndpoints,
+      ...discovery,
       observability: {
         logsDirectoryPath: config.logsDir,
         localTracingEnabled: true,
@@ -1992,6 +1999,11 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
         otlpLogsEnabled: config.otlpLogsUrl !== undefined,
       },
       settings,
+      // Lecturn: connected apps and embeds get no administrator policy document.
+      ...(serverSettings.managedPolicy === undefined ||
+      parseAppSubject(currentSession.subject) !== null
+        ? {}
+        : { managedPolicy: serverSettings.managedPolicy }),
       shellResumeCompletionMarker: true,
       // Lecturn: app and embed sessions cannot call getThreadFamily or getOlderSettledThreads,
       // so their shells stay whole.
@@ -2519,7 +2531,11 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
       ),
     [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
     [WS_METHODS.serverGetConfig]: (_input) =>
-      loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),
+      loadServerConfig({
+        usageLimitsCommand: false,
+        workspaceSnapshotsOnDemand: false,
+        deferRemoteOpenTargets: false,
+      }),
     [WS_METHODS.serverSearchAcpRegistry]: (input) =>
       acpRegistryCatalog
         .search(input)
@@ -3453,9 +3469,13 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           // Buffer changes through discovery and the initial snapshot's RPC ACK wait.
           const keybindingsChanges = yield* keybindings.subscribeChanges;
           const settingsChanges = yield* serverSettings.subscribeChanges;
+          const remoteTargets = yield* Effect.forkScoped(remoteOpenTargets.resolveTargets(), {
+            startImmediately: true,
+          });
           const config = yield* loadServerConfig({
             usageLimitsCommand,
             workspaceSnapshotsOnDemand,
+            deferRemoteOpenTargets: true,
           });
           const keybindingsUpdates = keybindingsChanges.pipe(
             Stream.map((event) => ({
@@ -3550,9 +3570,22 @@ const makeWsRpcHandlers = Effect.fn("ws.makeWsRpcHandlers")(function* (
           const environmentChanges = squireSwitch.changes.pipe(
             Stream.mapEffect(() => serverEnvironment.getDescriptor),
           );
+          const remoteResult = yield* Effect.sync(() => remoteTargets.pollUnsafe());
+          const initialConfig =
+            remoteResult?._tag === "Success"
+              ? { ...config, remoteOpenTargets: remoteResult.value }
+              : config;
           return Stream.concat(
-            rpcInitialItems([{ version: 1 as const, type: "snapshot" as const, config }]),
-            withLateEditorConfig(config, liveUpdates, externalLauncher, environmentChanges),
+            rpcInitialItems([
+              { version: 1 as const, type: "snapshot" as const, config: initialConfig },
+            ]),
+            withLateConfigDiscovery(
+              initialConfig,
+              liveUpdates,
+              externalLauncher,
+              { resolveTargets: () => Fiber.join(remoteTargets) },
+              environmentChanges,
+            ),
           );
         }),
       ),

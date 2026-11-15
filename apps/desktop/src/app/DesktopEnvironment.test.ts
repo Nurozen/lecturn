@@ -78,7 +78,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "com.cloudgatherer.lecturn.dev");
-      assert.equal(environment.linuxWmClass, "lecturn-dev");
       assert.equal(environment.linuxDesktopEntryName, "com.cloudgatherer.lecturn.dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),

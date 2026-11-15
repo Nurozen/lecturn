@@ -1,6 +1,14 @@
+import {
+  createChildThreadApprovalsAtom,
+  type PendingThreadRequests,
+} from "@lecturn/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@lecturn/client-runtime/state/connections";
-import { arrayElementsEqual } from "@lecturn/client-runtime/state/entities";
+import {
+  arrayElementsEqual,
+  parseThreadKey,
+  threadKey,
+} from "@lecturn/client-runtime/state/entities";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -14,13 +22,11 @@ import {
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@lecturn/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useEffect } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { withAndroidAccess, withAndroidAccessFor } from "./androidAccessCommand";
 import { serverEnvironment } from "./server";
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentShell } from "./shell";
 
 export const threadFamilies = createThreadFamilyAtoms(
@@ -79,18 +85,23 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
   serverConfigAtom: serverEnvironment.configValueAtom,
 });
-
-/** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */
-export function useThreadFamily(
-  environmentId: EnvironmentId | null,
-  rootThreadId: ThreadId | null,
-): void {
-  // oxlint-disable-next-line lecturn/no-unreasoned-state-sync -- mounts the subagent tree into the thread family registry while the caller shows it
-  useEffect(() => {
-    if (environmentId === null || rootThreadId === null) return;
-    return threadFamilies.mount(appAtomRegistry, environmentId, rootThreadId);
-  }, [environmentId, rootThreadId]);
-}
+// Lecturn: app tool approvals answer only in their own thread's app card, never from a parent.
+const childPendingRequestsAtom = Atom.family((key: string) =>
+  Atom.make((get): PendingThreadRequests | null => {
+    const requests = get(environmentThreadDetails.pendingRequestsAtom(parseThreadKey(key)));
+    if (!requests?.approvals.some((approval) => approval.connectedAppTool !== undefined)) {
+      return requests;
+    }
+    return {
+      ...requests,
+      approvals: requests.approvals.filter((approval) => approval.connectedAppTool === undefined),
+    };
+  }),
+);
+export const childThreadApprovalsAtom = createChildThreadApprovalsAtom({
+  childThreadInputsAtom: environmentThreadShells.childThreadInputsAtom,
+  pendingRequestsAtom: (ref) => childPendingRequestsAtom(threadKey(ref)),
+});
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
   Atom.withLabel("web-environment-thread:empty"),

@@ -51,6 +51,8 @@ interface CompactToolOutput {
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
   /** The result's own `_meta` shape, so compacting a compacted output finds it again. */
   _meta?: { [APP_TOOL_SUMMARY_META_KEY]: string };
+  linkedCount?: number;
+  unlinkedCount?: number;
 }
 
 /**
@@ -151,6 +153,10 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
+    for (const key of ["linkedCount", "unlinkedCount"] as const) {
+      const count = data[key];
+      if (typeof count === "number" && Number.isSafeInteger(count)) output[key] = count;
+    }
     const nestedThreadId = Predicate.isObject(data.thread)
       ? boundedId(data.thread.threadId)
       : undefined;

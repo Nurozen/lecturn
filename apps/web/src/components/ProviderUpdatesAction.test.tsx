@@ -30,6 +30,11 @@ vi.mock("~/state/environments", () => ({
   useEnvironmentProviders: () => new Map([["env-wsl", [provider()]]]),
 }));
 
+vi.mock("~/state/session", () => ({
+  useEnvironmentsWithScope: (environments: ReadonlyArray<{ environmentId: string }>) =>
+    new Set(environments.map((environment) => environment.environmentId)),
+}));
+
 vi.mock("~/state/server", () => ({
   serverEnvironment: { updateProvider: Symbol("updateProvider") },
 }));

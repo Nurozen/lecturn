@@ -265,6 +265,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
+  const planSources = new Map<string, LimitAccount>();
   const merge = (key: string, next: LimitAccount) => {
     // Hub redemption also clears its routing cooldown. A native redemption
     // resets the subscription upstream but leaves that cooldown in place.
@@ -283,6 +284,14 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         Date.parse(next.limits.checkedAt) > Date.parse(previousCredit.limits.checkedAt))
     ) {
       creditSources.set(key, next);
+    }
+    const previousPlan = planSources.get(key);
+    if (
+      next.plan &&
+      (!previousPlan ||
+        Date.parse(next.limits.checkedAt) > Date.parse(previousPlan.limits.checkedAt))
+    ) {
+      planSources.set(key, next);
     }
     const previous = accounts.get(key);
     if (!previous) {
@@ -304,7 +313,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
     accounts.set(key, {
       ...previous,
       displayName: previous.displayName ?? next.displayName,
-      plan: previous.plan ?? next.plan,
+      plan: planSources.get(key)?.plan ?? previous.plan ?? next.plan,
       accentColor: previous.accentColor ?? next.accentColor,
       environments,
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),

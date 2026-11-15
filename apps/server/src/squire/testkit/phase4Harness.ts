@@ -348,6 +348,13 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
       ? Layer.merge(SquireCommandHook.layer, layerStaveSpaceAdmission(options.staveSpaceLock))
       : SquireCommandHook.layer
   ).pipe(Layer.provideMerge(LecturnOrchestrationHooks.layer));
+  const settings = ServerSettings.layerTest({
+    defaultModelSelection: scriptedModel,
+    // Thread management refuses dispatches to an instance the settings do not enable.
+    providerInstances: {
+      [scripted]: { driver: ProviderDriverKind.make("scripted"), enabled: true },
+    },
+  });
   // Merged below, so a test can register a contribution beside the server's.
   const orchestration = ProviderReplayHarness.layerWithRegistry(
     { name: "squire-phase4" },
@@ -366,20 +373,13 @@ export const phase4Layer = (baseDir: string, options: Phase4Options = {}) => {
         ? {}
         : {
             runtimePolicy: RuntimePolicy.layerFromProjectStore.pipe(
-              Layer.provide(Layer.merge(ProjectStore.layer, instances)),
+              Layer.provide(Layer.mergeAll(ProjectStore.layer, instances, settings)),
               Layer.provide(database),
               Layer.orDie,
             ),
           }),
     },
   ).pipe(Layer.provideMerge(hooks));
-  const settings = ServerSettings.layerTest({
-    defaultModelSelection: scriptedModel,
-    // Thread management refuses dispatches to an instance the settings do not enable.
-    providerInstances: {
-      [scripted]: { driver: ProviderDriverKind.make("scripted"), enabled: true },
-    },
-  });
   // One BackgroundPolicy, below the orchestration and Squire layers that read
   // it, over the harness settings and a host that reports nothing.
   const background = BackgroundPolicy.layer.pipe(Layer.provide(hostPowerUnknown));

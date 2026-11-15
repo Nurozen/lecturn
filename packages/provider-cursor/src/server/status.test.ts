@@ -19,6 +19,10 @@ import * as CursorSdkCatalog from "./CursorSdkCatalog.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettingsSchema);
 const layerCursorSdkInstalled = CursorSdk.layerFromRequire(() => ({}));
 
+/** The shape of the SDK's CursorSdkError, which loads lazily. */
+const cursorSdkError = (message: string, fields: { code?: string; status: number }) =>
+  Object.assign(new Error(message), fields);
+
 function selectDescriptor(
   id: string,
   label: string,
@@ -253,6 +257,8 @@ describe("checkCursorProviderStatus", () => {
                 Effect.fail(
                   new CursorSdkCatalog.CursorSdkCatalogError({
                     authenticationFailure: false,
+                    status: 403,
+                    code: "plan_required",
                     // The shape of the SDK's CursorSdkError; the SDK itself loads lazily.
                     cause: Object.assign(
                       new Error(
@@ -273,6 +279,99 @@ describe("checkCursorProviderStatus", () => {
           message,
         });
       }),
+  );
+
+  it.effect.each([
+    {
+      name: "keeps models when /v1/me is blocked",
+      meFailure: cursorSdkError("[feature_unavailable] Not available for this team.", {
+        code: "feature_unavailable",
+        status: 403,
+      }),
+      expected: {
+        status: "ready",
+        auth: { status: "authenticated", type: "api-key", label: "Cursor API key" },
+        models: [{ slug: "claude-opus-4-8", isCustom: false }],
+      },
+    },
+    {
+      name: "keeps models when /v1/me returns a 403 without a code",
+      meFailure: cursorSdkError("[unknown] Forbidden", { code: "unknown", status: 403 }),
+      expected: {
+        status: "ready",
+        auth: { status: "authenticated", type: "api-key", label: "Cursor API key" },
+        models: [{ slug: "claude-opus-4-8", isCustom: false }],
+      },
+    },
+    {
+      name: "keeps the paid-plan message when /v1/me returns plan_required",
+      meFailure: cursorSdkError("[plan_required] Not available for free users.", {
+        code: "plan_required",
+        status: 403,
+      }),
+      expected: {
+        status: "error",
+        auth: { status: "unknown" },
+        message:
+          "Cursor needs a paid plan to run in Lecturn. Upgrade the account that owns CURSOR_API_KEY or use a key from a paid account.",
+      },
+    },
+    {
+      name: "fails when /v1/me has a server error",
+      meFailure: cursorSdkError("[unknown] Service unavailable", {
+        code: "unknown",
+        status: 503,
+      }),
+      expected: {
+        status: "error",
+        auth: { status: "unknown" },
+        message: "Cursor SDK catalog request failed. Check server logs for details.",
+      },
+    },
+    {
+      name: "rejects a 401 even when its code is feature_unavailable",
+      meFailure: cursorSdkError("Unauthorized", {
+        code: "feature_unavailable",
+        status: 401,
+      }),
+      expected: {
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Cursor SDK authentication failed. Check CURSOR_API_KEY.",
+      },
+    },
+    {
+      name: "fails a key that /v1/me rejects",
+      meFailure: cursorSdkError("Unauthorized", { status: 401 }),
+      expected: {
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Cursor SDK authentication failed. Check CURSOR_API_KEY.",
+      },
+    },
+  ])("$name", ({ meFailure, expected }) =>
+    Effect.gen(function* () {
+      const catalog = yield* CursorSdkCatalog.makeCursorSdkCatalog({
+        readUser: () =>
+          Effect.fail(
+            new CursorSdkCatalog.CursorSdkCatalogError({
+              authenticationFailure: meFailure.status === 401,
+              ...(meFailure.status === undefined ? {} : { status: meFailure.status }),
+              ...(meFailure.code === undefined ? {} : { code: meFailure.code }),
+              cause: meFailure,
+            }),
+          ),
+        readModels: () => Effect.succeed([sdkParameterizedModel]),
+      });
+      const provider = yield* checkCursorProviderStatus(baseCursorSettings, {
+        CURSOR_API_KEY: "enterprise-key",
+      }).pipe(
+        Effect.provideService(CursorSdkCatalog.CursorSdkCatalog, catalog),
+        Effect.provide(layerCursorSdkInstalled),
+      );
+
+      expect(provider).toMatchObject(expected);
+    }),
   );
 
   it.effect("requires a Cursor API key without probing any external Cursor binary", () =>
