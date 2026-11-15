@@ -62,6 +62,7 @@ const insertThread = (input: {
   readonly settledAt?: string | null;
   readonly relationship?: "fork" | "subagent" | null;
   readonly squire?: boolean;
+  readonly sideChat?: boolean;
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -75,6 +76,7 @@ const insertThread = (input: {
         rootThreadId: input.id,
         parentThreadId: input.relationship ? "parent" : null,
         relationshipToParent: input.relationship ?? null,
+        ...(input.sideChat ? { sideChat: true } : {}),
       },
     });
     yield* sql`INSERT INTO orchestration_v2_projection_threads
@@ -118,6 +120,13 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
       });
       // An unsettled Squire thread would hold the space open forever.
       yield* insertThread({ id: "squire", projectId: "anchor-project", squire: true });
+      // A hidden side chat of a pinned parent never settles, and nothing lists it to settle.
+      yield* insertThread({
+        id: "side-chat",
+        projectId: "anchor-project",
+        relationship: "fork",
+        sideChat: true,
+      });
       const orchestration = yield* StaveOrchestration;
       const rows = yield* orchestration.listThreadLifecycleAnchorsByProjectId(
         ProjectId.make("anchor-project"),

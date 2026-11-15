@@ -232,7 +232,6 @@ export const make = Effect.gen(function* () {
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       pullRequests: true,
       pullRequestChecks: true,
-      sideChats: true,
       inlineMessageContext: true,
       requiredWorktreeBootstrap: true,
       threadSettlement: true,
@@ -273,7 +272,8 @@ export const make = Effect.gen(function* () {
       threadDecisions: true,
       contextual: true,
       manualCloudLink: true,
-      ...(serverConfig.threadForkingEnabled ? { threadForking: true } : {}),
+      // Side chats are forks, so the same kill switch refuses them.
+      ...(serverConfig.threadForkingEnabled ? { threadForking: true, sideChats: true } : {}),
       ...(serverConfig.staveEnabled ? { stave: { protocolVersion: STAVE_PROTOCOL_VERSION } } : {}),
       serverResolvedCommandContext: true,
       threadStop: true,

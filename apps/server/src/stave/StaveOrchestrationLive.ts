@@ -149,6 +149,8 @@ const make = Effect.gen(function* () {
           AND COALESCE(json_extract(payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
           -- A Squire thread is never settled, so it would hold the space open forever.
           AND json_extract(payload_json, '$.squire') IS NULL
+          -- A side chat is hidden and may copy the parent's pin; its parent anchors the space.
+          AND json_extract(payload_json, '$.lineage.sideChat') IS NOT 1
         ORDER BY thread_id
       `.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AnchorRow))),
