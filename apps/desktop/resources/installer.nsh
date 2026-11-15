@@ -12,13 +12,12 @@
   Push $1
   ${If} $IsPowerShellAvailable == 0
     System::Call 'kernel32::SetEnvironmentVariable(t "LECTURN_INSTALL_DIR", t "$INSTDIR")'
-    nsExec::ExecToStack `"$PowerShellPath" -NoProfile -NonInteractive -C "Get-CimInstance -ClassName Win32_Process | Where-Object { $$_.ExecutablePath -and [IO.Path]::GetDirectoryName($$_.ExecutablePath) -eq $$env:LECTURN_INSTALL_DIR } | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($$_.ExecutablePath) } | Where-Object { $$_ -in 'Lecturn (Alpha)', 'Lecturn (Beta)', 'Lecturn (Nightly)' } | Select-Object -First 1 | ForEach-Object { [Console]::Write($$_) }"`
+    nsExec::ExecToStack `"$PowerShellPath" -NoProfile -NonInteractive -C "Get-CimInstance -ClassName Win32_Process | Where-Object { $$_.ExecutablePath -and [IO.Path]::GetDirectoryName($$_.ExecutablePath) -eq $$env:LECTURN_INSTALL_DIR } | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($$_.ExecutablePath) } | Where-Object { $$_ -in 'Lecturn', 'Lecturn (Nightly)' } | Select-Object -First 1 | ForEach-Object { [Console]::Write($$_) }"`
     Pop $0
     Pop $1
     System::Call 'kernel32::SetEnvironmentVariable(t "LECTURN_INSTALL_DIR", p 0)'
     ${If} $0 == 0
-      ${If} $1 == "Lecturn (Alpha)"
-      ${OrIf} $1 == "Lecturn (Beta)"
+      ${If} $1 == "Lecturn"
       ${OrIf} $1 == "Lecturn (Nightly)"
         ${LecturnStrRep} $appRunningMessage $appRunningMessage "${PRODUCT_NAME}" $1
         ${LecturnStrRep} $appClosingMessage $appClosingMessage "${PRODUCT_NAME}" $1
