@@ -14,8 +14,6 @@ const SENT_KEY = "lecturn:github-star-prompt:sent";
 const DISMISSED_KEY = "lecturn:github-star-prompt:dismissed";
 const REPOSITORY = "Nurozen/lecturn";
 const PROMPTS_BEFORE_ASKING = 5;
-// Off in Lecturn until the product decision on asking for stars lands.
-const STAR_PROMPT_ENABLED = false;
 
 let shownThisSession = false;
 
@@ -73,11 +71,8 @@ async function alreadyStarred(environmentId: EnvironmentId) {
  * Counts a sent prompt. After more than five, asks once per session for a star until dismissed,
  * unless the environment's GitHub account already starred the repo.
  */
-export async function recordPromptSent(
-  environmentId: EnvironmentId,
-  { enabled = STAR_PROMPT_ENABLED }: { readonly enabled?: boolean } = {},
-): Promise<void> {
-  if (!enabled || shownThisSession) return;
+export async function recordPromptSent(environmentId: EnvironmentId): Promise<void> {
+  if (shownThisSession) return;
   try {
     if (getLocalStorageItem(DISMISSED_KEY, Schema.Boolean)) return;
     const sent = (getLocalStorageItem(SENT_KEY, Schema.Number) ?? 0) + 1;
