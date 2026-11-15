@@ -531,3 +531,52 @@ it("loads only child approvals and retains their destination across environments
   unmount();
   registry.dispose();
 });
+
+it("never surfaces a child's app tool approvals in its parent", () => {
+  const environmentId = EnvironmentId.make("local");
+  const parent = { environmentId, threadId: ThreadId.make("parent") };
+  const children = Atom.make([
+    {
+      ...presentThreadShell(environmentId, v2ThreadShell),
+      id: ThreadId.make("child"),
+      title: "child",
+      hasPendingApprovals: true,
+    },
+  ]);
+  const providerApproval: ThreadPendingApproval = {
+    requestId: RuntimeRequestId.make("provider-approval"),
+    requestKind: "command",
+    createdAt: "2026-10-19T00:00:00Z",
+    responseCapability: "live",
+  };
+  const appApproval: ThreadPendingApproval = {
+    requestId: RuntimeRequestId.make("app-approval"),
+    requestKind: "permission",
+    createdAt: "2026-10-19T00:00:01Z",
+    responseCapability: "live",
+    connectedAppTool: {
+      appId: AppId.make("dev.rocketwright.app"),
+      appName: "RocketWright",
+      toolName: "rw_engine_simulate",
+      reason: null,
+      source: "app",
+    },
+  };
+  const requests = Atom.make<PendingThreadRequests | null>({
+    approvals: [appApproval, providerApproval],
+    userInputs: [],
+  });
+  const approvalsAtom = createChildThreadApprovalsAtom({
+    childThreadInputsAtom: () => children,
+    pendingRequestsAtom: () => requests,
+  });
+  const registry = AtomRegistry.make();
+  const unmount = registry.mount(approvalsAtom(parent));
+  expect(registry.get(approvalsAtom(parent)).map((entry) => entry.approval)).toEqual([
+    providerApproval,
+  ]);
+  registry.set(requests, { approvals: [appApproval], userInputs: [] });
+  expect(registry.get(approvalsAtom(parent))).toEqual([]);
+  unmount();
+  registry.dispose();
+});

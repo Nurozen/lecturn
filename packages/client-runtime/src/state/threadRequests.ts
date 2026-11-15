@@ -392,11 +392,10 @@ export function createChildThreadApprovalsAtom(input: {
         if (!child.hasPendingApprovals) return [];
         const thread = { environmentId: child.environmentId, threadId: child.id };
         // Only children asking for approval need a detail subscription.
-        return (get(input.pendingRequestsAtom(thread))?.approvals ?? []).map((approval) => ({
-          thread,
-          title: child.title,
-          approval,
-        }));
+        // Lecturn: app tool approvals answer only in their own thread's app card, never from a parent.
+        return (get(input.pendingRequestsAtom(thread))?.approvals ?? []).flatMap((approval) =>
+          approval.connectedAppTool === undefined ? [{ thread, title: child.title, approval }] : [],
+        );
       });
       if (
         next.length === previous.length &&

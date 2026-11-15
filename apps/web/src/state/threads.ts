@@ -1,14 +1,7 @@
-import {
-  createChildThreadApprovalsAtom,
-  type PendingThreadRequests,
-} from "@lecturn/client-runtime/state/thread-requests";
+import { createChildThreadApprovalsAtom } from "@lecturn/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@lecturn/client-runtime/state/connections";
-import {
-  arrayElementsEqual,
-  parseThreadKey,
-  threadKey,
-} from "@lecturn/client-runtime/state/entities";
+import { arrayElementsEqual } from "@lecturn/client-runtime/state/entities";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -85,22 +78,9 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
   serverConfigAtom: serverEnvironment.configValueAtom,
 });
-// Lecturn: app tool approvals answer only in their own thread's app card, never from a parent.
-const childPendingRequestsAtom = Atom.family((key: string) =>
-  Atom.make((get): PendingThreadRequests | null => {
-    const requests = get(environmentThreadDetails.pendingRequestsAtom(parseThreadKey(key)));
-    if (!requests?.approvals.some((approval) => approval.connectedAppTool !== undefined)) {
-      return requests;
-    }
-    return {
-      ...requests,
-      approvals: requests.approvals.filter((approval) => approval.connectedAppTool === undefined),
-    };
-  }),
-);
 export const childThreadApprovalsAtom = createChildThreadApprovalsAtom({
   childThreadInputsAtom: environmentThreadShells.childThreadInputsAtom,
-  pendingRequestsAtom: (ref) => childPendingRequestsAtom(threadKey(ref)),
+  pendingRequestsAtom: environmentThreadDetails.pendingRequestsAtom,
 });
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
