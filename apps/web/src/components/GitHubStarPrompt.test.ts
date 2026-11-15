@@ -40,22 +40,10 @@ function setup({ sent = 0, writable = true, alreadyStarred = false } = {}) {
 async function startSession() {
   vi.resetModules();
   const session = await import("./GitHubStarPrompt");
-  return {
-    send: () => session.recordPromptSent(environmentId, { enabled: true }),
-    sendWithDefaults: () => session.recordPromptSent(environmentId),
-  };
+  return { send: () => session.recordPromptSent(environmentId) };
 }
 
 describe("recordPromptSent", () => {
-  it("stays off by default and leaves the sent count alone", async () => {
-    const store = setup({ sent: 5 });
-    const session = await startSession();
-    for (let sent = 0; sent < 3; sent++) await session.sendWithDefaults();
-    expect(add).not.toHaveBeenCalled();
-    expect(store.get("lecturn:github-star-prompt:sent")).toBe("5");
-    vi.unstubAllGlobals();
-  });
-
   it("asks after five prompts, once per session, and never again once closed", async () => {
     setup();
     let session = await startSession();
