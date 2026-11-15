@@ -142,7 +142,7 @@ export interface StaveOrchestrationShape {
   readonly listThreadLifecycleAnchorsByProjectId: (
     projectId: ProjectId,
   ) => Effect.Effect<ReadonlyArray<StaveThreadLifecycleAnchor>, StaveOrchestrationError>;
-  /** Side chats are not anchors, but one with an active or queued run still uses the worktree. */
+  /** Side chats are not anchors, but one with a live run (not a held queue) still uses the worktree. */
   readonly hasLiveSideChatRunByProjectId: (
     projectId: ProjectId,
   ) => Effect.Effect<boolean, StaveOrchestrationError>;

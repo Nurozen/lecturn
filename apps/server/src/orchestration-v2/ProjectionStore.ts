@@ -1657,6 +1657,21 @@ function isSilentRunForShell(
   );
 }
 
+/**
+ * SQL for a run that keeps its thread live: active, or queued outside a held queue.
+ * A held queue (stopped or recovered) is parked work, not activity.
+ */
+export const liveRunCondition = (sql: SqlClient.SqlClient, alias: string) => {
+  const run = sql.literal(alias);
+  return sql`(
+    ${run}.status IN ('preparing', 'starting', 'running', 'waiting')
+    OR (${run}.status = 'queued'
+      AND CASE WHEN json_valid(${run}.payload_json)
+        THEN json_extract(${run}.payload_json, '$.queueHeld') IS NOT 1
+        ELSE 1 END)
+  )`;
+};
+
 function isInterruptibleRunForShell(run: OrchestrationV2ThreadProjection["runs"][number]): boolean {
   return run.status === "preparing" || run.status === "starting" || run.status === "running";
 }
@@ -4063,16 +4078,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       THEN json_array_length(payload_json, '$.pendingBackgroundTasks') > 0
                       ELSE 0 END
                 )
-                SELECT thread_id FROM orchestration_v2_projection_runs
-                WHERE status IN ('preparing', 'starting', 'running', 'waiting')
-                UNION
                 -- A held queue already went through recovery; rereading it on
                 -- every boot costs a projection read per held thread.
-                SELECT thread_id FROM orchestration_v2_projection_runs
-                WHERE status = 'queued'
-                  AND CASE WHEN json_valid(payload_json)
-                    THEN json_extract(payload_json, '$.queueHeld') IS NOT 1
-                    ELSE 1 END
+                SELECT thread_id FROM orchestration_v2_projection_runs AS run
+                WHERE ${liveRunCondition(sql, "run")}
                 UNION
                 SELECT thread_id FROM orchestration_v2_projection_runtime_requests
                 WHERE status = 'pending'

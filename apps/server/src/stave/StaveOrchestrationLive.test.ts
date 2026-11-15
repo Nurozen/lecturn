@@ -144,7 +144,7 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
     }),
   );
 
-  it.effect("reports only side chats with an active or queued run", () =>
+  it.effect("reports only side chats with a live run, not a held queue", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const projectId = "side-chat-project";
@@ -170,6 +170,10 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
         yield* sql`UPDATE orchestration_v2_projection_runs SET status = ${status} WHERE run_id = 'live-side-run'`;
         assert.isTrue(yield* live, status);
       }
+      // A held queue (after stop or recovery) is parked, so it must not block archive.
+      yield* sql`UPDATE orchestration_v2_projection_runs
+        SET status = 'queued', payload_json = '{"queueHeld":true}' WHERE run_id = 'live-side-run'`;
+      assert.isFalse(yield* live);
     }),
   );
 

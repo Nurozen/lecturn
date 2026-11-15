@@ -22,6 +22,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
+import { liveRunCondition } from "../orchestration-v2/ProjectionStore.ts";
 import { OrchestrationEventStore } from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import {
@@ -168,7 +169,7 @@ const make = Effect.gen(function* () {
         WHERE thread.project_id = ${projectId}
           AND thread.deleted_at IS NULL
           AND json_extract(thread.payload_json, '$.lineage.sideChat') IS 1
-          AND run.status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
+          AND ${liveRunCondition(sql, "run")}
       ) AS live
     `.pipe(
       Effect.map((rows) => rows[0]?.live === 1),

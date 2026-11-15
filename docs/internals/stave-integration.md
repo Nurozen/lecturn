@@ -841,7 +841,7 @@ cleanup before the CLI starts.
 For live spaces, `StaveLifecyclePolicy.resolveArchiveDeadline` considers every thread row,
 including archived and deleted rows as inactive timestamp anchors. No threads, or any active
 thread, means no archive schedule. Side chats are never anchors, so their pins and settle state
-do not hold the space. Any side chat with an active or queued run pauses the sweep for that space
+do not hold the space. Any side chat with a live run (a held queue is not live) pauses the sweep for that space
 without resetting it (Keep and the deadline survive). If archive validation sees one, it defers:
 the row is reconciled but not marked refused, so the next sweep after the run archives normally. A schedule uses the later of the thread anchor and immutable
 `scheduledAt`, plus the configured grace. Ordinary lease updates cannot move that deadline.

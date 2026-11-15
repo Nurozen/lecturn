@@ -3979,9 +3979,12 @@ it.effect("requires an explicit reviewed cleanup verb and the recorded incarnati
   ),
 );
 
-it.effect(
-  "automatic saga revalidates every participant before quiescence and again before CLI",
-  () =>
+it.effect.each([
+  { deferred: false, disposition: "refused", refusalCode: "space_transitioning" },
+  { deferred: true, disposition: "live", refusalCode: null },
+] as const)(
+  "automatic saga revalidates every participant before quiescence and again before CLI (deferred: $deferred)",
+  ({ deferred, disposition, refusalCode }) =>
     scenario(
       (roots) =>
         Effect.gen(function* () {
@@ -4024,19 +4027,29 @@ it.effect(
               (id) =>
                 Effect.suspend(() => {
                   validated.push(id);
-                  return id === "b" && validated.filter((value) => value === "b").length === 2
-                    ? new StaveRefusalError({
+                  if (id !== "b" || validated.filter((value) => value === "b").length !== 2)
+                    return Effect.void;
+                  return deferred
+                    ? deferLifecycle("A side chat is running")
+                    : new StaveRefusalError({
                         code: "space_transitioning",
                         message: "Member became active",
                         details: null,
-                      })
-                    : Effect.void;
+                      });
                 }),
             ),
           );
           expect(error.code).toBe("space_transitioning");
           expect(validated.filter((id) => id === "b")).toHaveLength(2);
           expect(fixture.history).not.toContain("cli");
+          // A deferral reconciles every member without recording a refusal.
+          expect(fixture.rows.size).toBeGreaterThan(1);
+          for (const row of fixture.rows.values())
+            expect([row.projectId, row.disposition, row.refusalCode]).toEqual([
+              row.projectId,
+              disposition,
+              refusalCode,
+            ]);
         }),
     ),
 );
