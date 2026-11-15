@@ -21,6 +21,7 @@ import {
   squireLeadActionText,
   squireProviderOptions,
   squireScopeThreadChecked,
+  squireScopeThreadChoices,
   squireScopeToggleContainer,
   squireScopeToggleThread,
   squireScopeTree,
@@ -246,6 +247,32 @@ describe("companion palette", () => {
 describe("scope tree", () => {
   const project = [{ kind: "project" as const, targetId: projectId }];
   const inProject = [{ kind: "project" as const, targetId: projectId }];
+
+  it("offers only listed threads, newest first: no Squire threads, subagents or side chats", () => {
+    const shell = (id: string, updatedAt: string, extra: object = {}) => ({
+      id,
+      updatedAt,
+      squire: null as unknown,
+      lineage: { relationshipToParent: null } as {
+        relationshipToParent: "fork" | "subagent" | null;
+        sideChat?: boolean;
+      },
+      ...extra,
+    });
+    const shells = [
+      shell("old", "2026-10-25T00:00:00.000Z"),
+      shell("new", "2026-10-25T02:00:00.000Z"),
+      shell("squire", "2026-10-25T03:00:00.000Z", { squire: { role: "home" } }),
+      shell("subagent", "2026-10-25T03:00:00.000Z", {
+        lineage: { relationshipToParent: "subagent" },
+      }),
+      shell("side-chat", "2026-10-25T03:00:00.000Z", {
+        lineage: { relationshipToParent: "fork", sideChat: true },
+      }),
+    ];
+    expect(squireScopeThreadChoices(shells, 40).map((entry) => entry.id)).toEqual(["new", "old"]);
+    expect(squireScopeThreadChoices(shells, 1).map((entry) => entry.id)).toEqual(["new"]);
+  });
 
   it("records an exclusion when a thread inside a granted project is unchecked", () => {
     const excluded = squireScopeToggleThread(project, threadA, inProject);

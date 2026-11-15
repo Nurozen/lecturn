@@ -3103,8 +3103,9 @@ export default function ChatView(props: ChatViewProps) {
   const isSubagentThread =
     activeThread?.lineage.relationshipToParent === "subagent" || delegatedFrom !== null;
   // Side chats do not nest or start from subagents, and older servers would fork a listed thread.
-  // Lecturn: views without the right panel (a Squire's home) and app threads offer none.
-  const sideChatsExcluded = !allows("right-panel") || activeProject?.appBinding !== undefined;
+  // Lecturn: views without the right panel (a Squire's home or an embed) and app threads offer none.
+  const sideChatsExcluded =
+    !allows("right-panel") || embedPresentation !== null || activeProject?.appBinding !== undefined;
   const sideChatsOffered =
     !embedded &&
     !sideChatsExcluded &&
@@ -3133,17 +3134,19 @@ export default function ChatView(props: ChatViewProps) {
           ? "Side chats are not available in this thread."
           : serverConfig === null
             ? "Side chats are not ready yet. Try again in a moment."
-            : serverConfig.environment.capabilities.sideChats !== true
-              ? "Update this environment's Lecturn server to use side chats."
-              : sideChatsOffered && !isServerThread
-                ? "Side chats start after the first message."
-                : sideChat.available &&
-                    orchestrationV2WorktreePending(
-                      activeThread?.worktreePath ?? null,
-                      serverProjection?.runs ?? [],
-                    )
-                  ? "Available once the thread's worktree is set up."
-                  : null;
+            : !environmentSupportsForking
+              ? "Side chats need thread forking, which is off on this environment."
+              : serverConfig.environment.capabilities.sideChats !== true
+                ? "Update this environment's Lecturn server to use side chats."
+                : sideChatsOffered && !isServerThread
+                  ? "Side chats start after the first message."
+                  : sideChat.available &&
+                      orchestrationV2WorktreePending(
+                        activeThread?.worktreePath ?? null,
+                        serverProjection?.runs ?? [],
+                      )
+                    ? "Available once the thread's worktree is set up."
+                    : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
   const {

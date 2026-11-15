@@ -784,7 +784,7 @@ describe("runningThreadCount", () => {
     ).toBe(1);
   });
 
-  it("skips threads waiting on the user, subagents, Squire threads, and archived ones", () => {
+  it("skips threads waiting on the user, subagents, side chats, Squire threads, and archived ones", () => {
     const { home } = squireThreads();
     expect(
       runningThreadCount([
@@ -800,6 +800,14 @@ describe("runningThreadCount", () => {
             ...v2ThreadShell.lineage,
             parentThreadId: v2ThreadShell.id,
             relationshipToParent: "subagent",
+          },
+        }),
+        running("side-chat", {
+          lineage: {
+            ...v2ThreadShell.lineage,
+            parentThreadId: v2ThreadShell.id,
+            relationshipToParent: "fork",
+            sideChat: true,
           },
         }),
         { ...home, status: "running" },

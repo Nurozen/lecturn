@@ -1,10 +1,11 @@
 import { deriveEmbedTurnState } from "@lecturn/client-runtime/embed/guest";
 import { scopeProjectRef, scopeThreadRef } from "@lecturn/client-runtime/environment";
-import type {
-  ConnectedAppThreadContinuedIn,
-  EnvironmentId,
-  ProjectId,
-  ThreadId,
+import {
+  isListedThreadLineage,
+  type ConnectedAppThreadContinuedIn,
+  type EnvironmentId,
+  type ProjectId,
+  type ThreadId,
 } from "@lecturn/contracts";
 import { appLinkFromPath, appLinkPath } from "@lecturn/shared/appLinks";
 import { useNavigate } from "@tanstack/react-router";
@@ -123,7 +124,12 @@ export function EmbedView({
   const projectRef = scopeProjectRef(environmentId, projectId);
   const projectRefs = [projectRef];
   const liveThreads = useThreadShellsForProjectRefs(projectRefs)
-    .filter((thread) => thread.archivedAt === null && thread.deletedAt === null)
+    .filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        thread.deletedAt === null &&
+        isListedThreadLineage(thread.lineage),
+    )
     .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   // A host may open the project without naming a thread, and the embed has no draft composer to
   // fall back to, so it shows the project's most recent live thread.

@@ -207,14 +207,14 @@ export function isListedThread(
 }
 
 /**
- * Top-level threads with a run in flight right now. Squire threads and subagents are left out,
- * and so is a run stopped on the user, since that thread is not busy.
+ * Top-level threads with a run in flight right now. Squire threads, subagents and side chats are
+ * left out, and so is a run stopped on the user, since that thread is not busy.
  */
 export function runningThreadCount(threads: ReadonlyArray<OrchestrationV2ThreadShell>): number {
   let count = 0;
   for (const thread of threads) {
     if (thread.archivedAt !== null || thread.deletedAt !== null) continue;
-    if (thread.lineage.relationshipToParent === "subagent" || thread.squire !== undefined) continue;
+    if (!isListedThreadLineage(thread.lineage) || thread.squire !== undefined) continue;
     if (thread.pendingRuntimeRequest !== null) continue;
     // Older servers omit the activity run, so the latest run's status stands in.
     const status =
