@@ -1572,8 +1572,8 @@ from upstream's side.
   `threadForking`.
 - **Side chat client gates.** Embeds offer none (`embedPresentation`) and their switcher lists
   only `isListedThreadLineage` threads; so do the Squire scope picker and `runningThreadCount`.
-- **GitHub star prompt (#27832).** Kept but off: `recordPromptSent` returns unless enabled
-  (`STAR_PROMPT_ENABLED = false`) pending a product decision. The server starred RPC stays.
+- **GitHub star prompt (#27832).** On since fork PR #204 (product decision 2026-11-15); it
+  points at `Nurozen/lecturn`, never the upstream repo. The server starred RPC stays.
 - **Server migrations.** Upstream 74 (`ExcludeAttachmentPlaceholdersFromSearch`) and 75
   (`SubagentDeliveryState`) run as fork 93 and 94; files keep upstream's numbers. 94 has a
   column-exists wrapper (its ALTER and index lack IF NOT EXISTS); 74 recreates triggers, so it
