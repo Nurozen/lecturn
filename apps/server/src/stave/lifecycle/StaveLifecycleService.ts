@@ -507,8 +507,11 @@ export const make = Effect.gen(function* () {
       row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
       if (yield* repo.isScheduleResetRequested(project.id)) return;
     }
+    const inputs = yield* archiveInputs(project.id);
+    // A side-chat run defers the schedule without resetting it, so Keep and the deadline survive.
+    if (inputs.sideChatRunning) return;
     const decision = resolveArchiveDeadline({
-      ...(yield* archiveInputs(project.id)),
+      ...inputs,
       row,
       graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
       now,

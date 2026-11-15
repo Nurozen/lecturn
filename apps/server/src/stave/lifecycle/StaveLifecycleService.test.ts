@@ -788,6 +788,23 @@ describe("StaveLifecycleService", () => {
       assert.equal((yield* h.row).scheduledAt, "2026-09-09T00:00:00.000Z");
     }),
   );
+  test(
+    "a side-chat run defers the schedule without clearing Keep",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.sideChatRunning, true);
+      yield* h.service.sweep;
+      yield* h.patch({ disposition: "kept", anchorAt: NOW, scheduledAt: NOW });
+      const kept = yield* h.row;
+      yield* h.service.sweep;
+      yield* Ref.set(h.sideChatRunning, false);
+      yield* h.service.sweep;
+      const row = yield* h.row;
+      assert.equal(row.disposition, "kept");
+      assert.equal(row.scheduledAt, kept.scheduledAt);
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+    }),
+  );
   test.each([
     { legacyAnchor: false, label: "activity" },
     { legacyAnchor: true, label: "legacy" },
