@@ -157,6 +157,11 @@ describe("archive deadlines", () => {
     expect(deadline([{ ...thread, unsettledAt: NOW }])).toBeNull();
     expect(deadline([{ ...thread, unsettledAt: OLD }])).toBeNull();
   });
+  it("waits for a running side chat even at zero grace", () => {
+    const input = { anchors: [thread], row: null, now: NOW, graceDays: 0 };
+    expect(resolveArchiveDeadline({ ...input, sideChatRunning: true })).toBeNull();
+    expect(resolveArchiveDeadline({ ...input, sideChatRunning: false })).not.toBeNull();
+  });
   it("treats archived and deleted threads as inactive even when pinned active", () => {
     expect(
       deadline([{ ...thread, archivedAt: NOW, settledAt: null, settledOverride: "active" }])

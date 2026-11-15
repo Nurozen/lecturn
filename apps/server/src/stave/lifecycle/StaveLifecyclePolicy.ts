@@ -87,12 +87,14 @@ export interface ArchiveSchedule {
 /** Lifecycle stamps identify activity episodes; provider/session metadata does not. */
 export function resolveArchiveDeadline(input: {
   readonly anchors: ReadonlyArray<StaveThreadLifecycleAnchor>;
+  /** A side chat with an active or queued run; side chats are never anchors themselves. */
+  readonly sideChatRunning?: boolean;
   readonly row: StaveLifecycleRow | null;
   readonly graceDays: number;
   readonly now: string;
 }): ArchiveSchedule | null {
   const { anchors, row, graceDays, now } = input;
-  if (anchors.length === 0) return null;
+  if (anchors.length === 0 || input.sideChatRunning === true) return null;
   for (const thread of anchors) {
     if (thread.archivedAt !== null || thread.deletedAt !== null) continue;
     if (thread.settledOverride === "active") return null;

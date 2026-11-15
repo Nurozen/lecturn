@@ -157,6 +157,24 @@ const make = Effect.gen(function* () {
         Effect.mapError(fail("listThreadLifecycleAnchorsByProjectId")),
       );
 
+  const hasLiveSideChatRunByProjectId: StaveOrchestrationShape["hasLiveSideChatRunByProjectId"] = (
+    projectId,
+  ) =>
+    sql<{ readonly live: number }>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM orchestration_v2_projection_threads AS thread
+        JOIN orchestration_v2_projection_runs AS run ON run.thread_id = thread.thread_id
+        WHERE thread.project_id = ${projectId}
+          AND thread.deleted_at IS NULL
+          AND json_extract(thread.payload_json, '$.lineage.sideChat') IS 1
+          AND run.status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
+      ) AS live
+    `.pipe(
+      Effect.map((rows) => rows[0]?.live === 1),
+      Effect.mapError(fail("hasLiveSideChatRunByProjectId")),
+    );
+
   const getInferenceTurnPairs: StaveOrchestrationShape["getInferenceTurnPairs"] = (input) =>
     sql<{ question: string; response: string | null }>`
       SELECT
@@ -347,6 +365,7 @@ const make = Effect.gen(function* () {
     }),
     getThreadShellById,
     listThreadLifecycleAnchorsByProjectId,
+    hasLiveSideChatRunByProjectId,
     getInferenceTurnPairs,
     dispatch,
     listSessions,

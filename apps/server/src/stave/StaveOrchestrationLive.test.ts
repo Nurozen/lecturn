@@ -144,6 +144,32 @@ it.layer(layer)("StaveOrchestrationLive reads", (it) => {
     }),
   );
 
+  it.effect("reports only side chats with an active or queued run", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = "side-chat-project";
+      const thread = (id: string, sideChat: boolean, deletedAt: string | null = null) =>
+        insertThread({ id, projectId, relationship: "fork", sideChat, deletedAt, settledAt: NOW });
+      const run = (threadId: string, status: string) =>
+        sql`INSERT INTO orchestration_v2_projection_runs
+          (run_id, thread_id, ordinal, provider, provider_thread_id, status, requested_at, completed_at, payload_json)
+          VALUES (${`${threadId}-run`}, ${threadId}, 1, 'codex', NULL, ${status}, ${NOW}, NULL, '{}')`;
+      const live = (yield* StaveOrchestration).hasLiveSideChatRunByProjectId(
+        ProjectId.make(projectId),
+      );
+      yield* thread("idle-side", true);
+      yield* run("idle-side", "completed");
+      yield* thread("running-fork", false);
+      yield* run("running-fork", "running");
+      yield* thread("deleted-side", true, NOW);
+      yield* run("deleted-side", "running");
+      assert.isFalse(yield* live);
+      yield* thread("queued-side", true);
+      yield* run("queued-side", "queued");
+      assert.isTrue(yield* live);
+    }),
+  );
+
   it.effect("pairs the last three completed user turns before a boundary message", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

@@ -184,6 +184,11 @@ export const make = Effect.gen(function* () {
   const nowIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const refusal = (message: string) =>
     new StaveRefusalError({ code: "space_transitioning", message, details: null });
+  const archiveInputs = (projectId: StaveLifecycleRow["projectId"]) =>
+    Effect.all({
+      anchors: snapshots.listThreadLifecycleAnchorsByProjectId(projectId),
+      sideChatRunning: snapshots.hasLiveSideChatRunByProjectId(projectId),
+    });
   const enabled = Effect.gen(function* () {
     if (!config.staveEnabled) return false;
     const current = yield* settings.getSettings;
@@ -262,9 +267,8 @@ export const make = Effect.gen(function* () {
         !["pending_archive", "archiving"].includes(row.value.disposition)
       )
         return yield* refusal("A saga member has no eligible archive schedule.");
-      const anchors = yield* snapshots.listThreadLifecycleAnchorsByProjectId(projectId);
       const decision = resolveArchiveDeadline({
-        anchors,
+        ...(yield* archiveInputs(projectId)),
         row: row.value,
         graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
         now: yield* nowIso,
@@ -367,14 +371,14 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError((error) => refusal(error.message))))
       )
         return yield* refusal("The project binding or archive schedule changed.");
-      const anchors = yield* snapshots
-        .listThreadLifecycleAnchorsByProjectId(row.projectId)
-        .pipe(Effect.mapError((error) => refusal(error.message)));
+      const inputs = yield* archiveInputs(row.projectId).pipe(
+        Effect.mapError((error) => refusal(error.message)),
+      );
       const fresh = yield* repo
         .getByProjectId(row.projectId)
         .pipe(Effect.mapError((error) => refusal(error.message)));
       const decision = resolveArchiveDeadline({
-        anchors,
+        ...inputs,
         row: Option.getOrNull(fresh),
         graceDays: mode === "archive" ? 0 : latest.stave.lifecycle.archiveGraceDays,
         now: yield* nowIso,
@@ -503,9 +507,8 @@ export const make = Effect.gen(function* () {
       row = Option.getOrThrow(yield* repo.getByProjectId(project.id));
       if (yield* repo.isScheduleResetRequested(project.id)) return;
     }
-    const anchors = yield* snapshots.listThreadLifecycleAnchorsByProjectId(project.id);
     const decision = resolveArchiveDeadline({
-      anchors,
+      ...(yield* archiveInputs(project.id)),
       row,
       graceDays: policy.onAllThreadsSettled === "archive" ? 0 : policy.archiveGraceDays,
       now,

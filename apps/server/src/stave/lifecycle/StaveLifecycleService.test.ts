@@ -116,6 +116,7 @@ const harness = Effect.fn(function* (
   const storageCalls = yield* Ref.make<ReadonlyArray<string>>([]);
   const metadataCommands = yield* Ref.make<ReadonlyArray<string>>([]);
   const anchors = yield* Ref.make<ReadonlyArray<StaveThreadLifecycleAnchor>>([ANCHOR]);
+  const sideChatRunning = yield* Ref.make(false);
   const projects = yield* Ref.make<ReadonlyArray<OrchestrationProjectShell>>(
     options.deleted
       ? []
@@ -227,6 +228,7 @@ const harness = Effect.fn(function* (
           Effect.map((value) => Option.fromNullishOr(value.find((project) => project.id === id))),
         ),
       listThreadLifecycleAnchorsByProjectId: () => Ref.get(anchors),
+      hasLiveSideChatRunByProjectId: () => Ref.get(sideChatRunning),
       dispatch: (command) =>
         Ref.update(metadataCommands, (all) => [...all, command.type]).pipe(
           Effect.as({ sequence: 43 }),
@@ -279,6 +281,7 @@ const harness = Effect.fn(function* (
     storageCalls,
     metadataCommands,
     anchors,
+    sideChatRunning,
     beforeValidate,
     binaryAvailable,
     reconciliation,
@@ -751,6 +754,19 @@ describe("StaveLifecycleService", () => {
     "archive mode acts immediately without Force",
     Effect.gen(function* () {
       const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* h.service.sweep;
+      assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
+    }),
+  );
+  test(
+    "archive mode waits for a running side chat but not an idle one",
+    Effect.gen(function* () {
+      const h = yield* harness({ policy: { onAllThreadsSettled: "archive" } });
+      yield* Ref.set(h.sideChatRunning, true);
+      yield* h.service.sweep;
+      assert.isFalse((yield* Ref.get(h.calls)).some((call) => call.startsWith("disk:")));
+      assert.isNull((yield* h.row).archiveDeadlineAt);
+      yield* Ref.set(h.sideChatRunning, false);
       yield* h.service.sweep;
       assert.include(yield* Ref.get(h.calls), "disk:archive:false:false");
     }),
