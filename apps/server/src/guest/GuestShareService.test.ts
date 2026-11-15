@@ -858,6 +858,72 @@ it.effect("pages the guest back through turns older than the stream's snapshot",
   }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
 
+it.effect("withholds link requests and linked-machine targets from earlier turns", () =>
+  Effect.gen(function* () {
+    const { guestShares, credential } = yield* shareThread;
+    const { token: session } = yield* guestShares.redeem({ credential, name: "Sam" });
+    const link = yield* writeLinkedMachineRecords("history");
+    const runId = yield* ownerRun;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    yield* eventSink.write({
+      events: Array.from({ length: 30 }, (_, index) => ({
+        id: EventId.make(`event:later-ask-${index}`),
+        type: "turn-item.updated" as const,
+        threadId,
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: instanceId,
+        occurredAt: now,
+        payload: {
+          threadId,
+          runId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          id: TurnItemId.make(`item:later-ask-${index}`),
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: index + 3,
+          title: null,
+          status: "completed" as const,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          messageId: MessageId.make(`item:later-ask-${index}`),
+          type: "user_message" as const,
+          text: `Ask ${index}`,
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+          inputIntent: "turn_start" as const,
+          attachments: [],
+        },
+      })),
+    });
+
+    const [, opening] = Array.from(
+      yield* Stream.runCollect(Stream.take(yield* guestShares.stream(session), 2)),
+    );
+    if (opening?.type !== "thread" || opening.item.kind !== "snapshot") {
+      return assert.fail("Expected the thread snapshot second.");
+    }
+    let cursor = opening.item.historyCursor ?? null;
+    assert.isNotNull(cursor);
+    const pages: Array<OrchestrationV2ThreadHistoryPage> = [];
+    while (cursor !== null) {
+      const page: OrchestrationV2ThreadHistoryPage = yield* guestShares.history(session, cursor);
+      pages.push(page);
+      cursor = page.hasMoreHistory ? page.nextCursor : null;
+    }
+    const wire = JSON.stringify(pages);
+    // The task row arrives, so an empty page cannot pass for a filtered one.
+    assert.include(wire, "item:task-history");
+    for (const leak of ["link_request", "remoteChild", "environment-vps", "Hetzner VPS", "vps."]) {
+      assert.notInclude(wire, leak);
+    }
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.item(session, link))));
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);
+
 it.effect("ends a running command's output once the owner stops sharing", () =>
   Effect.gen(function* () {
     const { orchestrator, guestShares, credential } = yield* shareThread;

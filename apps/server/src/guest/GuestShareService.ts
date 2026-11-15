@@ -707,11 +707,16 @@ const make = Effect.gen(function* () {
     const page = yield* orchestrator
       .getThreadHistoryPage(thread.id, cursor)
       .pipe(Effect.mapError(() => unavailable));
+    // Older turns pass the same guest filter as the live stream.
+    const items = page.items.flatMap((row) => {
+      const item = guestTurnItem(row.item);
+      return item === null ? [] : [item === row.item ? row : { ...row, item }];
+    });
     rememberSent(
       share.id,
-      page.items.map((row) => row.item),
+      items.map((row) => row.item),
     );
-    return page;
+    return { ...page, items };
   });
 
   const commandOutput = Effect.fn("GuestShareService.commandOutput")(function* (
