@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
+  AppId,
   type ApplicationStoredEvent,
   CheckpointId,
   CheckpointRef,
@@ -35,6 +36,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -807,6 +809,52 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
         assert.isNotNull((yield* orchestrator.getThreadProjection(parentId)).thread.deletedAt);
         assert.isNotNull((yield* orchestrator.getThreadProjection(sideChatId)).thread.deletedAt);
       }).pipe(Effect.ensuring(Effect.sync(() => lockSpy.mockRestore())));
+    }),
+  );
+
+  it.effect("refuses a side chat of a thread in a Lecturn App project", () =>
+    Effect.gen(function* () {
+      const projects = yield* ProjectService.ProjectService;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make("runtime-side-chat-app-project");
+      const parentId = ThreadId.make("runtime-side-chat-app-parent");
+      const sideChatId = ThreadId.make("runtime-side-chat-app-child");
+      yield* projects.create({
+        commandId: CommandId.make("runtime-side-chat-app-project"),
+        projectId,
+        title: "App project",
+        workspaceRoot: "/work/side-chat-app",
+        appBinding: { appId: AppId.make("dev.side-chat"), workspaceRoot: "/work/side-chat-app" },
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("runtime-side-chat-app-create"),
+        createdBy: "user",
+        creationSource: "web",
+        threadId: parentId,
+        projectId,
+        title: "App thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const rejected = yield* orchestrator
+        .dispatch({
+          type: "thread.fork",
+          commandId: CommandId.make("runtime-side-chat-app-fork"),
+          sourceThreadId: parentId,
+          targetThreadId: sideChatId,
+          sourcePoint: { type: "latest_stable" },
+          sideChat: true,
+          createdBy: "user",
+          creationSource: "web",
+        })
+        .pipe(Effect.flip);
+      assert.include(String(rejected.cause), "Lecturn App project cannot start side chats");
+      const sideChat = yield* orchestrator.getThreadProjection(sideChatId).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(sideChat));
     }),
   );
 });

@@ -4415,6 +4415,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.sourceThreadId} was deleted.`,
       });
     }
+    // Lecturn: app rails and app bundles cannot tell a side chat from a real thread.
+    if (command.sideChat === true) {
+      const project = yield* projects
+        .get(sourceProjection.thread.projectId)
+        .pipe(mapDispatchError(command));
+      if (Option.isSome(project) && project.value.appBinding !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Threads in a Lecturn App project cannot start side chats.",
+        });
+      }
+    }
     // The fork would copy no worktree path and run in the project checkout.
     if (
       command.sideChat === true &&
