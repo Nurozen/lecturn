@@ -1565,6 +1565,13 @@ from upstream's side.
   none in Squire home views or app-bound projects; mobile shows `ThreadSideChatsRow` only when
   `allows("agents")`. Inside a side chat, fork and turn diff are off. A side chat's first send
   seeds its title from the message (`resolveTurnTitleSeed`), as upstream.
+- **Side chat server gates.** The orchestrator refuses a side chat whose source is in an
+  app-bound project. Guest "Load earlier turns" pages pass `guestTurnItem`, like the stream.
+  Stave lifecycle anchors skip side chats (a copied pin would hold the space open). A parent
+  delete sends a `deleted` notice per cascaded side chat. `sideChats` is advertised only with
+  `threadForking`.
+- **Side chat client gates.** Embeds offer none (`embedPresentation`) and their switcher lists
+  only `isListedThreadLineage` threads; so do the Squire scope picker and `runningThreadCount`.
 - **GitHub star prompt (#27832).** Kept but off: `recordPromptSent` returns unless enabled
   (`STAR_PROMPT_ENABLED = false`) pending a product decision. The server starred RPC stays.
 - **Server migrations.** Upstream 74 (`ExcludeAttachmentPlaceholdersFromSearch`) and 75
