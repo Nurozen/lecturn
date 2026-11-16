@@ -38,6 +38,7 @@ import {
   type SidebarSection,
   resolveSidebarDropVerb,
   groupSidebarThreadsByProject,
+  arrangeSidebarProjectTree,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
 } from "./Sidebar.logic";
@@ -1677,6 +1678,76 @@ describe("sidebarFolderExpansionKeys", () => {
     expect(resolveProjectExpanded({}, keys)).toBe(true);
     expect(resolveProjectExpanded({ [cwdKey]: false }, keys)).toBe(false);
     expect(resolveProjectExpanded({ [keys[0]!]: true, [cwdKey]: false }, keys)).toBe(true);
+  });
+});
+
+describe("arrangeSidebarProjectTree", () => {
+  type Node = {
+    readonly key: string;
+    readonly group: {
+      readonly pinned: boolean;
+      readonly archived: boolean;
+      readonly memberProjectRefs: ReadonlyArray<{ environmentId: string; projectId: string }>;
+    };
+    readonly children: ReadonlyArray<Node>;
+  };
+  const node = (
+    key: string,
+    flags: { pinned?: boolean; archived?: boolean } = {},
+    children: Node[] = [],
+  ): Node => ({
+    key,
+    group: {
+      pinned: flags.pinned ?? false,
+      archived: flags.archived ?? false,
+      memberProjectRefs: [{ environmentId: localEnvironmentId, projectId: key }],
+    },
+    children,
+  });
+  const thread = (projectId: string) => ({ environmentId: localEnvironmentId, projectId });
+  const keys = (nodes: ReadonlyArray<Node>): unknown[] =>
+    nodes.map((entry) =>
+      entry.children.length ? { [entry.key]: keys(entry.children) } : entry.key,
+    );
+
+  it("hides an archived project with no listed threads", () => {
+    const tree = [node("penguins"), node("antarctic", { archived: true }), node("empty")];
+    expect(keys(arrangeSidebarProjectTree(tree, [thread("penguins")]))).toEqual([
+      "penguins",
+      "empty",
+    ]);
+  });
+
+  it("lists an archived project with a thread below the rest, even when most recent", () => {
+    const tree = [node("antarctic", { archived: true }), node("penguins"), node("colony")];
+    expect(keys(arrangeSidebarProjectTree(tree, [thread("antarctic")]))).toEqual([
+      "penguins",
+      "colony",
+      "antarctic",
+    ]);
+  });
+
+  it("puts pinned projects first and keeps the rest in order", () => {
+    const tree = [
+      node("recent"),
+      node("older"),
+      node("pinned", { pinned: true }),
+      node("pinned-archived", { pinned: true, archived: true }),
+    ];
+    expect(
+      keys(arrangeSidebarProjectTree(tree, [thread("recent"), thread("pinned-archived")])),
+    ).toEqual(["pinned", "recent", "older", "pinned-archived"]);
+  });
+
+  it("drops idle archived saga members and keeps an archived saga for listed ones", () => {
+    const tree = [
+      node("saga", { archived: true }, [
+        node("member-idle", { archived: true }),
+        node("member-live"),
+      ]),
+      node("idle-saga", { archived: true }, [node("idle-member", { archived: true })]),
+    ];
+    expect(keys(arrangeSidebarProjectTree(tree, []))).toEqual([{ saga: ["member-live"] }]);
   });
 });
 

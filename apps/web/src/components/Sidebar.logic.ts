@@ -1075,6 +1075,44 @@ export function groupSidebarThreadsByProject<
   return folders.filter((folder) => folder.threads.length > 0 || keepEmpty(folder.group));
 }
 
+/**
+ * Nested sidebar folders in upstream's project order: pinned first, archived last.
+ * An archived project keeps its folder only while it lists a thread, or a member
+ * that does. Saga members keep the saga's order.
+ */
+export function arrangeSidebarProjectTree<
+  TNode extends {
+    readonly group: {
+      readonly pinned: boolean;
+      readonly archived: boolean;
+      readonly memberProjectRefs: ReadonlyArray<{
+        readonly environmentId: string;
+        readonly projectId: string;
+      }>;
+    };
+    readonly children: ReadonlyArray<TNode>;
+  },
+>(
+  roots: ReadonlyArray<TNode>,
+  listedThreads: ReadonlyArray<{ readonly environmentId: string; readonly projectId: string }>,
+): TNode[] {
+  const listedProjectKeys = new Set(
+    listedThreads.map((thread) => `${thread.environmentId}:${thread.projectId}`),
+  );
+  const prune = (nodes: ReadonlyArray<TNode>): TNode[] =>
+    nodes.flatMap((node) => {
+      const children = prune(node.children);
+      const listed =
+        !node.group.archived ||
+        node.group.memberProjectRefs.some((ref) =>
+          listedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+        );
+      return listed || children.length > 0 ? [{ ...node, children }] : [];
+    });
+  const rank = (node: TNode) => (node.group.archived ? 2 : node.group.pinned ? 0 : 1);
+  return prune(roots).toSorted((left, right) => rank(left) - rank(right));
+}
+
 export type SidebarV2TopStatusKind =
   | "approval"
   | "done"

@@ -214,6 +214,7 @@ import {
   sortInboxThreadsByReturn,
   sortPinnedThreadsForSidebar,
   sortSidebarV2ProjectGroups,
+  arrangeSidebarProjectTree,
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
   useSnoozeWakeClock,
@@ -1287,12 +1288,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   })();
 
   const scopedSagaTree = (() => {
-    if (!scopedProjectKeys) return sagaTree;
+    // Pinned folders lead; an archived one stays, last, only while it lists threads.
+    const arrangedSagaTree = arrangeSidebarProjectTree(sagaTree, visibleThreads);
+    if (!scopedProjectKeys) return arrangedSagaTree;
     const matches = (node: (typeof sagaTree)[number]) =>
       node.group.memberProjectRefs.some((ref) =>
         scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
       );
-    return sagaTree.flatMap((node) => {
+    return arrangedSagaTree.flatMap((node) => {
       const children = node.children.filter(matches);
       return matches(node) || children.length ? [{ ...node, children }] : [];
     });
