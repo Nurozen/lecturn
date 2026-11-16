@@ -3001,6 +3001,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   extensionsBundled = false,
 ) {
   const buildConfig: Record<string, unknown> = {
+    afterPack: (yield* Path.Path).join(yield* RepoRoot, "scripts/prepare-server-compile-cache.cjs"),
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
     artifactName: "Lecturn-${version}-${arch}.${ext}",

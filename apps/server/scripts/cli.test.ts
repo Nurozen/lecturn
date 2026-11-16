@@ -154,6 +154,7 @@ it("declares only runtime externals in a pack manifest, so a clean install never
     "@cursor/sdk",
     "@ff-labs/fff-node",
     "@napi-rs/keyring",
+    "ffi-rs",
     "node-pty",
     "playwright-core",
     "undici",

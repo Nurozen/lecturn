@@ -5,7 +5,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-export type CursorSdkModule = typeof import("@cursor/sdk") & typeof import("@cursor/sdk/sqlite");
+export type CursorSdkModule = typeof import("@cursor/sdk");
+export type CursorSqliteModule = typeof import("@cursor/sdk/sqlite");
 
 export const CURSOR_SDK_NOT_INSTALLED_MESSAGE =
   "Cursor SDK (`@cursor/sdk`) is not installed with this Lecturn server.";
@@ -32,17 +33,21 @@ function isCursorSdkMissing(cause: unknown): boolean {
   );
 }
 
-function makeLoad(
+/** Loads `id` once; only text generation needs the SQLite store, so it loads separately. */
+function makeLoad<A>(
   require: (id: string) => unknown,
-): Effect.Effect<CursorSdkModule, CursorSdkNotInstalledError> {
-  let sdk: CursorSdkModule | undefined;
+  id: "@cursor/sdk" | "@cursor/sdk/sqlite",
+  measure: string,
+): Effect.Effect<A, CursorSdkNotInstalledError> {
+  let loaded: A | undefined;
   return Effect.suspend(() => {
     try {
-      sdk ??= {
-        ...(require("@cursor/sdk") as typeof import("@cursor/sdk")),
-        ...(require("@cursor/sdk/sqlite") as typeof import("@cursor/sdk/sqlite")),
-      };
-      return Effect.succeed(sdk);
+      if (loaded === undefined) {
+        const start = performance.now();
+        loaded = require(id) as A;
+        if (process.env.LECTURN_STARTUP_PROFILE_DIR) performance.measure(measure, { start });
+      }
+      return Effect.succeed(loaded);
     } catch (cause) {
       return isCursorSdkMissing(cause)
         ? Effect.fail(new CursorSdkNotInstalledError({ cause }))
@@ -110,6 +115,7 @@ export class CursorSdk extends Context.Service<
   CursorSdk,
   {
     readonly load: Effect.Effect<CursorSdkModule, CursorSdkNotInstalledError>;
+    readonly loadSqlite: Effect.Effect<CursorSqliteModule, CursorSdkNotInstalledError>;
   }
 >()("@lecturn/provider-cursor/server/CursorSdk") {}
 
@@ -125,7 +131,14 @@ export const layerFromRequire = (require: (id: string) => unknown) =>
         Effect.sync(() => {
           process.off("unhandledRejection", onUnhandledRejection);
         }),
-    ).pipe(Effect.as(CursorSdk.of({ load: makeLoad(require) }))),
+    ).pipe(
+      Effect.as(
+        CursorSdk.of({
+          load: makeLoad(require, "@cursor/sdk", "provider.cursor.importSdk"),
+          loadSqlite: makeLoad(require, "@cursor/sdk/sqlite", "provider.cursor.importSqliteStore"),
+        }),
+      ),
+    ),
   );
 
 // createRequire loads the disk-backed SDK and adjacent chunks even from a Node SEA executable.

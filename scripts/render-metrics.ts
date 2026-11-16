@@ -37,10 +37,8 @@ export type RenderMetrics = Readonly<Record<string, ScenarioReport>>;
 
 const root = NodePath.resolve(import.meta.dirname, "..");
 
-function runOnce(): RenderMetrics {
-  const directory = NodeFS.mkdtempSync(
-    NodePath.join(NodeOS.homedir(), ".cache", "lecturn-renders-"),
-  );
+export function runOnce(): RenderMetrics {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "lecturn-renders-"));
   try {
     const result = NodeChildProcess.spawnSync("vp", ["test", "run", "--project", "renders"], {
       cwd: NodePath.join(root, "apps/web"),

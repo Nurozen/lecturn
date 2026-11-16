@@ -20,6 +20,7 @@ import {
   type ThreadListingCapabilitiesByEnvironment,
 } from "@lecturn/client-runtime/state/thread-shell";
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@lecturn/shared/paletteSearch";
+import type { EnvironmentConnectionPhase } from "@lecturn/client-runtime/connection";
 import {
   isListedThreadLineage,
   type ContextMenuItem,
@@ -188,6 +189,29 @@ export function resolveSidebarThreadSection(input: {
   if (input.settled) return "settled";
   if (input.pinned) return "pinned";
   return "active";
+}
+
+// Keep cached placement on the first connection attempt, matching mobile's threadRouteIsHydrating.
+export function isSidebarEnvironmentDisconnected(
+  phase: EnvironmentConnectionPhase,
+  shellIsLive: boolean,
+): boolean {
+  return phase !== "connecting" && (phase !== "connected" || !shellIsLive);
+}
+
+export function belongsInSidebarWorkingShelf<T extends { readonly environmentId: EnvironmentId }>(
+  thread: T,
+  input: {
+    readonly enabled: boolean;
+    readonly disconnectedEnvironmentIds: ReadonlySet<EnvironmentId>;
+    readonly isWorking: (thread: T) => boolean;
+  },
+): boolean {
+  return (
+    input.enabled &&
+    !input.disconnectedEnvironmentIds.has(thread.environmentId) &&
+    input.isWorking(thread)
+  );
 }
 
 const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
@@ -813,11 +837,13 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
   return nodeClosest(parent, "a[href]") !== null;
 }
 
+/** The "New thread in" picker opens unless there is one open project or none; then the current context decides. */
 export function shouldCreateNewThreadInCurrentProject(
   shiftKey: boolean,
+  openProjectGroupCount: number,
   projectGroupCount: number,
 ): boolean {
-  return shiftKey || projectGroupCount <= 1;
+  return shiftKey || openProjectGroupCount === 1 || projectGroupCount === 0;
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {
@@ -1020,7 +1046,7 @@ export function sidebarFolderExpansionKeys(group: {
 
 /**
  * Boring sidebar folders. Folders follow `groups` order and threads keep their
- * input order. A project with no threads gets a folder only with `keepEmpty`.
+ * input order. A project with no threads gets a folder only when `keepEmpty` says so.
  * A thread whose project is in no group has no folder and is left out.
  */
 export function groupSidebarThreadsByProject<
@@ -1034,7 +1060,7 @@ export function groupSidebarThreadsByProject<
 >(
   groups: readonly TGroup[],
   threads: readonly TThread[],
-  keepEmpty: boolean,
+  keepEmpty: (group: TGroup) => boolean,
 ): Array<{ group: TGroup; threads: TThread[] }> {
   const folders = groups.map((group) => ({ group, threads: [] as TThread[] }));
   const folderByProject = new Map<string, (typeof folders)[number]>();
@@ -1046,7 +1072,82 @@ export function groupSidebarThreadsByProject<
   for (const thread of threads) {
     folderByProject.get(`${thread.environmentId}:${thread.projectId}`)?.threads.push(thread);
   }
-  return keepEmpty ? folders : folders.filter((folder) => folder.threads.length > 0);
+  return folders.filter((folder) => folder.threads.length > 0 || keepEmpty(folder.group));
+}
+
+type SidebarProjectTreeNode<TNode> = {
+  readonly group: {
+    readonly pinned: boolean;
+    readonly archived: boolean;
+    readonly memberProjectRefs: ReadonlyArray<{
+      readonly environmentId: string;
+      readonly projectId: string;
+    }>;
+  };
+  readonly children: ReadonlyArray<TNode>;
+};
+type SidebarProjectTreeThread = { readonly environmentId: string; readonly projectId: string };
+
+/**
+ * Nested sidebar folders in upstream's project order at every level: pinned,
+ * open, then archived, stable within each. An archived project keeps its folder
+ * only while it, or a member, holds one of `liveThreads` (settled rows do not count).
+ */
+export function arrangeSidebarProjectTree<TNode extends SidebarProjectTreeNode<TNode>>(
+  roots: ReadonlyArray<TNode>,
+  liveThreads: ReadonlyArray<SidebarProjectTreeThread>,
+): TNode[] {
+  const liveProjectKeys = new Set(
+    liveThreads.map((thread) => `${thread.environmentId}:${thread.projectId}`),
+  );
+  const rank = (node: TNode) => (node.group.archived ? 2 : node.group.pinned ? 0 : 1);
+  const arrange = (nodes: ReadonlyArray<TNode>): TNode[] =>
+    nodes
+      .flatMap((node) => {
+        const children = arrange(node.children);
+        const kept =
+          !node.group.archived ||
+          node.group.memberProjectRefs.some((ref) =>
+            liveProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+          );
+        return kept || children.length > 0 ? [{ ...node, children }] : [];
+      })
+      .toSorted((left, right) => rank(left) - rank(right));
+  return arrange(roots);
+}
+
+/**
+ * The nested sidebar tree the list and its segments render: arranged by
+ * `arrangeSidebarProjectTree` over the non-settled rows, then narrowed to the
+ * project scope. Settled rows are taken only to say they do not keep a folder.
+ */
+export function scopeSidebarProjectTree<TNode extends SidebarProjectTreeNode<TNode>>(
+  tree: ReadonlyArray<TNode>,
+  input: {
+    readonly pinnedThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly activeThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly workingThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly snoozedThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly settledThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly scopedProjectKeys: ReadonlySet<string> | null;
+  },
+): TNode[] {
+  const { scopedProjectKeys } = input;
+  const arranged = arrangeSidebarProjectTree(tree, [
+    ...input.pinnedThreads,
+    ...input.activeThreads,
+    ...input.workingThreads,
+    ...input.snoozedThreads,
+  ]);
+  if (!scopedProjectKeys) return arranged;
+  const matches = (node: TNode) =>
+    node.group.memberProjectRefs.some((ref) =>
+      scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+    );
+  return arranged.flatMap((node) => {
+    const children = node.children.filter(matches);
+    return matches(node) || children.length ? [{ ...node, children }] : [];
+  });
 }
 
 export type SidebarV2TopStatusKind =

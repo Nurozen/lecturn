@@ -42,6 +42,7 @@ import * as ProviderAdapter from "@lecturn/provider-core/server/ProviderAdapter"
 import * as RuntimePolicy from "../RuntimePolicy.ts";
 import { acpAppInstructions } from "@lecturn/provider-acp/server/appInstructions";
 import * as AcpSessionRuntime from "@lecturn/provider-acp/server/AcpSessionRuntime";
+import * as ServerSettings from "../../serverSettings.ts";
 import { acpPermissionDisposition } from "@lecturn/provider-acp/server/clientPolicy";
 import { acpCompletedTurnShouldTerminalizeTool } from "@lecturn/provider-acp/server/adapter";
 import {
@@ -370,6 +371,7 @@ describe("Grok launch permission mode", () => {
       }).pipe(
         Effect.provide(
           RuntimePolicy.layerFromProjectStore.pipe(
+            Layer.provide(ServerSettings.layerTest()),
             Layer.provide(
               Layer.mock(ProjectStore.ProjectStoreV2)({
                 get: () => Effect.die("the thread has a worktree"),

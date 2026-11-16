@@ -58,6 +58,11 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * Squire provider.
    */
   squireIsolation: Schema.optional(Schema.Literals(["home", "probe"])),
+  /**
+   * The administrator's ceiling, when a managed policy sets one. `runtimeMode` is already under
+   * it; adapters use it to refuse native mode choices a user makes beside Lecturn's own.
+   */
+  maxRuntimeMode: Schema.optional(RuntimeMode),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

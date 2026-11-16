@@ -146,6 +146,7 @@ const layerProjection = layerProjectionFor(thread);
  */
 const layerRuntimePolicyFor = (supportedRuntimeModes?: ReadonlyArray<RuntimeMode>) =>
   RuntimePolicy.layerFromProjectStore.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(
       Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
         getInstance: () =>
@@ -174,6 +175,8 @@ const layerRuntimePolicyFor = (supportedRuntimeModes?: ReadonlyArray<RuntimeMode
             createdAt: "2026-10-25T12:00:00.000Z",
             updatedAt: "2026-10-25T12:00:00.000Z",
             deletedAt: null,
+            pinnedAt: null,
+            archivedAt: null,
           }),
       }),
     ),

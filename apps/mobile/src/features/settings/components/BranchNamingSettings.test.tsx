@@ -47,7 +47,7 @@ function render(
         mode={mode}
         prefix={saved.prefix ?? "lecturn"}
         instructions={saved.instructions ?? "Use issue IDs."}
-        disabled={disabled}
+        disabled={{ mode: disabled, prefix: disabled, instructions: disabled }}
         onChange={onChange}
       />,
     ),

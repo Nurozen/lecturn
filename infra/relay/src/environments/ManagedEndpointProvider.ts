@@ -1469,18 +1469,14 @@ export const make = Effect.gen(function* () {
               return Exit.succeed(false);
             }
             // A timed-out deletion may have succeeded; confirm Cloudflare state before rolling back the claim.
-            const deleted = yield* deleteTunnel.pipe(
-              Effect.as(true),
-              Effect.catchIf(
-                (error) => isManagedEndpointTunnelInUse(error.cause),
-                () => Effect.succeed(false),
-              ),
+            yield* deleteTunnel.pipe(
               Effect.catchTags({
                 ManagedEndpointDeprovisioningFailed: (failure) =>
-                  confirmTunnelGone(failure).pipe(Effect.as(true)),
+                  isManagedEndpointTunnelInUse(failure.cause)
+                    ? Effect.fail(failure)
+                    : confirmTunnelGone(failure),
               }),
             );
-            if (!deleted) return Exit.succeed(false);
             // The tunnel is gone. Commit its claim and released marker even if
             // DNS cleanup fails; rethrow that failure after both locks release.
             return yield* Effect.exit(
@@ -1510,6 +1506,11 @@ export const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.catchTags({
+            // Return false only after the refused deletion rolls back the release marker.
+            ManagedEndpointDeprovisioningFailed: (failure) =>
+              isManagedEndpointTunnelInUse(failure.cause)
+                ? Effect.succeedSome(Exit.succeed(false))
+                : Effect.fail(failure),
             ManagedEndpointAllocationPersistenceError: (cause) =>
               Effect.fail(
                 new ManagedEndpointDeprovisioningFailed({

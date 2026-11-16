@@ -35,7 +35,12 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../apps/server/src/mcp/McpInvocationContext.ts";
 import { advertisedJsonSchema } from "../../apps/server/src/mcp/advertisedJsonSchema.ts";
-import { EnvironmentId, ORCHESTRATOR_MCP_RUNNING_TASK_NEXT, ThreadId } from "@lecturn/contracts";
+import {
+  EnvironmentId,
+  ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
+  PullRequestState,
+  ThreadId,
+} from "@lecturn/contracts";
 import { projectComposerContextForProvider } from "@lecturn/shared/composerContextReferences";
 import { formatThreadLink } from "@lecturn/shared/threadLinks";
 import { buildCodexAdditionalContext } from "../../apps/server/src/provider/CodexDeveloperInstructions.ts";
@@ -169,6 +174,8 @@ const McpToolUseExpect = Schema.Struct({
   textMustNot: Schema.optional(Schema.Array(Schema.String)),
   /** Each entry matches a PR URL linked at the end, as `args` values match. */
   linked: Schema.optional(Schema.Array(Schema.String)),
+  /** The PR numbers linked at the end, exactly. */
+  linkedNumbers: Schema.optional(Schema.Array(Schema.Number)),
   /** Device manager checks: child briefs, simulator UI over the shell, failures, recordings. */
   device: Schema.optional(DeviceExpect),
 });
@@ -213,6 +220,12 @@ const McpToolUseWorld = Schema.StructWithRest(
     deviceInvalidCapture: Schema.optional(Schema.Boolean),
     /** Devices another thread's agent-device session holds, by device id: that thread's id. */
     deviceOwners: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    /** PRs already linked to the thread, with the state Lecturn last saw. */
+    linkedPullRequests: Schema.optional(
+      Schema.Array(
+        Schema.Struct({ number: Schema.Number, state: PullRequestState, title: Schema.String }),
+      ),
+    ),
   }),
   Rest,
 );
@@ -355,12 +368,15 @@ export const normalizeToolName = (name: string) => {
     ? bare.slice(prefix.length)
     : (CODEX_NAMES[bare] ?? bare.slice(bare.lastIndexOf("_") + 1));
 };
-export const normalizeToolInput = (name: string, input: unknown) =>
-  normalizeToolName(name) === "Bash" && isRecord(input)
+export const normalizeToolInput = (name: string, input: unknown) => {
+  const decode = lecturnInputDecoders.get(normalizeToolName(name));
+  if (decode !== undefined) return Option.getOrElse(decode(input), () => input);
+  return normalizeToolName(name) === "Bash" && isRecord(input)
     ? { ...input, command: input.command ?? input.cmd }
     : typeof input === "string" && normalizeToolName(name) === "Edit"
       ? { patch: input }
       : input;
+};
 
 // McpHttpServer advertises each tool's JSON schema, and Claude Code passes the MCP name,
 // description, and schema through unchanged.
@@ -377,6 +393,15 @@ const lecturnSourceTools: ReadonlyArray<Tool.Any> = [
   DeviceToolkit,
   HtmlToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
+// McpHttpServer decodes arguments with each tool's JSON codec, which drops undeclared keys.
+const lecturnInputDecoders = new Map(
+  lecturnSourceTools.map((tool) => [
+    tool.name,
+    Schema.decodeUnknownOption(
+      Schema.toCodecJson(tool.parametersSchema as Schema.Codec<unknown, unknown>),
+    ),
+  ]),
+);
 const lecturnTools: ReadonlyArray<ApiTool> = lecturnSourceTools.map((tool) => ({
   name: `${LECTURN_PREFIX}${tool.name}`,
   description: Tool.getDescription(tool) ?? "",
@@ -740,11 +765,22 @@ export const makeSample = (testCase: McpToolUseCase, base: Base): Sample => {
   const prior = testCase.setup.priorTurns ?? [];
   const priorCalls = prior.flatMap((turn) => turn.toolCalls ?? []);
   const repo = testCase.setup.world?.repo ?? "acme/app";
-  const urls = priorCalls.flatMap((call) =>
-    ["link_pull_request", "watch_pull_request"].includes(call.tool) && isRecord(call.input)
-      ? [pullRequest(repo, call.input).url]
-      : [],
-  );
+  const urls = [
+    ...(testCase.setup.world?.linkedPullRequests ?? []).map(
+      ({ number }) => pullRequest(repo, { number }).url,
+    ),
+    ...priorCalls.flatMap((call) =>
+      ["link_pull_request", "watch_pull_request"].includes(call.tool) && isRecord(call.input)
+        ? [pullRequest(repo, call.input).url]
+        : call.tool === "link_pull_requests" &&
+            isRecord(call.input) &&
+            Array.isArray(call.input.urls)
+          ? call.input.urls
+              .filter((url) => PULL_REQUEST_URL.test(valueText(url)))
+              .map((url) => pullRequest(repo, { url }).url)
+          : [],
+    ),
+  ];
   const taskNumbers = [...valueText(prior).matchAll(/task-(\d+)/g)].map((match) =>
     Number(match[1]),
   );
@@ -949,6 +985,8 @@ const DEFAULT_THREAD = {
 const HTML_RENDERED =
   "Shown to the reader above your reply. Don't mention or describe the page; reply with only what it doesn't already say.";
 
+const PULL_REQUEST_URL = /\/pull\/\d+\/?$/;
+
 /** Pull request identity from a `url` or `repository` plus `number` input, like Lecturn's results. */
 const pullRequest = (repo: string, input: Readonly<Record<string, unknown>>) => {
   const url = typeof input.url === "string" ? input.url : "";
@@ -961,6 +999,15 @@ const pullRequest = (repo: string, input: Readonly<Record<string, unknown>>) => 
     number,
     url: url || `https://github.com/${repository}/pull/${number}`,
   };
+};
+
+/** A linked PR as `list_thread_pull_requests` shows it. Links made in the sample are open. */
+const linkedEntry = (sample: Sample, url: string) => {
+  const pr = pullRequest(sample.repo, { url });
+  const seeded = sample.testCase.setup.world?.linkedPullRequests?.find(
+    ({ number }) => number === pr.number && pr.repository === sample.repo,
+  );
+  return { ...pr, state: seeded?.state ?? "open", title: seeded?.title ?? null };
 };
 
 /** A believable Lecturn result for a tool the case does not mock. */
@@ -1006,6 +1053,27 @@ const lecturnDefault = (sample: Sample, name: string, input: Readonly<Record<str
       sample.linked.add(pr().url);
       return { ...pr(), alreadyLinked };
     }
+    case "link_pull_requests": {
+      const urls = Array.isArray(input.urls) ? input.urls.map(valueText) : [];
+      const invalidUrls = urls.filter((url) => !PULL_REQUEST_URL.test(url));
+      const targets = [...new Set(urls.filter((url) => PULL_REQUEST_URL.test(url)))].map((url) =>
+        pullRequest(sample.repo, { url }),
+      );
+      const fresh = targets.filter(({ url }) => !sample.linked.has(url));
+      for (const { url } of targets) sample.linked.add(url);
+      const byRepository = (prs: ReadonlyArray<ReturnType<typeof pullRequest>>) =>
+        [...Map.groupBy(prs, (pr) => pr.repository).values()].map((group) => ({
+          host: "github.com",
+          repository: group[0]!.repository,
+          numbers: group.map((pr) => pr.number),
+        }));
+      return {
+        linked: byRepository(fresh),
+        alreadyLinked: byRepository(targets.filter((pr) => !fresh.includes(pr))),
+        linkedCount: targets.length,
+        ...(invalidUrls.length > 0 ? { invalidUrls } : {}),
+      };
+    }
     case "request_secret": {
       // Lecturn names both a ref and a file with 32 hex characters, and keeps files in its secrets dir.
       const id = "5f0c9e2a7b4d4183a6e1c8d2b9f07a64";
@@ -1017,6 +1085,24 @@ const lecturnDefault = (sample: Sample, name: string, input: Readonly<Record<str
     }
     case "unlink_pull_request":
       return { ...pr(), wasLinked: sample.linked.delete(pr().url) };
+    case "unlink_pull_requests": {
+      const states = Array.isArray(input.states) ? input.states : [];
+      const unlinked = [...sample.linked]
+        .map((url) => linkedEntry(sample, url))
+        .filter((entry) => states.includes(entry.state));
+      for (const { url } of unlinked) sample.linked.delete(url);
+      const groups = Map.groupBy(unlinked, (entry) => `${entry.repository}/${entry.state}`);
+      return {
+        unlinked: [...groups.values()].map((entries) => ({
+          host: "github.com",
+          repository: entries[0]!.repository,
+          state: entries[0]!.state,
+          numbers: entries.map((entry) => entry.number),
+        })),
+        unlinkedCount: unlinked.length,
+        remaining: sample.linked.size,
+      };
+    }
     case "watch_pull_request":
       sample.linked.add(pr().url);
       return { ...pr(), watching: true, wasWatching: false };
@@ -1025,10 +1111,9 @@ const lecturnDefault = (sample: Sample, name: string, input: Readonly<Record<str
     case "list_thread_pull_requests":
       return {
         pullRequests: [...sample.linked].map((url) => ({
-          ...pullRequest(sample.repo, { url }),
+          ...linkedEntry(sample, url),
           source: "agent",
           watching: false,
-          state: "open",
         })),
         chains: [],
       };
@@ -1098,6 +1183,7 @@ const withProductFields = (name: string, value: unknown, child: boolean): unknow
     case "lecturn_thread_search":
       return listed("matches");
     case "link_pull_request":
+    case "link_pull_requests":
       return child ? { ...value, next: CHILD_PULL_REQUEST_REPORT_NEXT } : value;
     default:
       return value;
@@ -1414,6 +1500,11 @@ export const gradeSample = (expect: McpToolUseCase["expect"], run: SampleRun) =>
   for (const p of expect.textMustNot ?? []) add(`textMustNot /${p}/`, !test(p, run.text));
   const isLinked = (url: string) => (run.linked ?? []).some((at) => matches(url, at));
   for (const url of expect.linked ?? []) add(`linked ${url}`, isLinked(url));
+  if (expect.linkedNumbers !== undefined) {
+    const numbers = (run.linked ?? []).map((url) => Number(/(\d+)\/?$/.exec(url)?.[1]));
+    const exact = valueText(numbers.toSorted((a, b) => a - b));
+    add("linkedNumbers", exact === valueText(expect.linkedNumbers.toSorted((a, b) => a - b)));
+  }
   checks.push(...gradeDevice(expect.device, run));
   return checks;
 };

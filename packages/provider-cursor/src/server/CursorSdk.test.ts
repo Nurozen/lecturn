@@ -84,6 +84,20 @@ describe("CursorSdk.load", () => {
       expect(Exit.isFailure(broken) && Cause.hasDies(broken.cause)).toBe(true);
     }),
   );
+
+  it.effect("loads each module once and leaves the SQLite store unloaded until asked", () => {
+    const require = vi.fn((id: string) => ({ id }));
+    return Effect.gen(function* () {
+      const cursorSdk = yield* CursorSdk.CursorSdk;
+      expect(require).not.toHaveBeenCalled();
+      const [first, second] = yield* Effect.all([cursorSdk.load, cursorSdk.load]);
+      expect(first).toBe(second);
+      expect(require.mock.calls).toEqual([["@cursor/sdk"]]);
+      yield* cursorSdk.loadSqlite;
+      yield* cursorSdk.loadSqlite;
+      expect(require.mock.calls).toEqual([["@cursor/sdk"], ["@cursor/sdk/sqlite"]]);
+    }).pipe(Effect.provide(CursorSdk.layerFromRequire(require)));
+  });
 });
 
 // Shaped like the SDK's minified class: the constructor is not named after the error.

@@ -288,6 +288,7 @@ describe("Lecturn fork ledger upgrade to orchestration V2", () => {
           [92, "ActiveTurnItemIndexes"],
           [93, "ExcludeAttachmentPlaceholdersFromSearch"],
           [94, "SubagentDeliveryState"],
+          [95, "ProjectionProjectsPinArchive"],
         ]);
         for (const table of [
           "orchestration_v2_events",

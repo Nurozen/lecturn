@@ -50,6 +50,8 @@ export function buildPhysicalSagaProjectGroups<T extends EnvironmentProject>(
         representative: member.project,
         members: [member],
         memberProjectRefs: [scopeProjectRef(member.project.environmentId, member.project.id)],
+        pinned: member.project.pinnedAt != null,
+        archived: member.project.archivedAt != null,
       }));
     if (ordinary.length > 0)
       split.push({
@@ -58,6 +60,8 @@ export function buildPhysicalSagaProjectGroups<T extends EnvironmentProject>(
         representative: ordinary[0]!.project,
         members: [...ordinary],
         memberProjectRefs: [...ordinaryRefs],
+        pinned: ordinary.some(({ project }) => project.pinnedAt != null),
+        archived: ordinary.every(({ project }) => project.archivedAt != null),
       });
     return split;
   });

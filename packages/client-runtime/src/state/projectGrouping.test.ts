@@ -7,6 +7,7 @@ import {
   buildProjectGroups,
   buildSagaProjectTree,
   deriveLogicalProjectKeyFromSettings,
+  pickableProjectGroups,
   derivePhysicalProjectKey,
   resolveScratchProjectScopeKey,
   sortProjectsByGroupOrder,
@@ -553,6 +554,31 @@ describe("buildSagaProjectTree", () => {
     recursive[0]!.status.members.unshift(member("saga"));
     const tree = buildSagaProjectTree(groups, recursive);
     expect(tree.find((node) => node.group.representative.id === "saga")?.children).toHaveLength(2);
+  });
+});
+
+describe("project pins and archives", () => {
+  const at = "2026-07-02T00:00:00.000Z";
+  const remote = EnvironmentId.make("remote");
+  const group = (...projects: EnvironmentProject[]) =>
+    buildProjectGroups({ projects, settings: settings("repository") })[0]!;
+
+  it("keeps a project visible while its machines disagree", () => {
+    const local = makeProject("local", "/work/lecturn");
+    const other = makeProject("remote", "/work/lecturn", { environmentId: remote });
+    const partial = group({ ...local, pinnedAt: at, archivedAt: at }, other);
+    expect(partial).toMatchObject({ pinned: true, archived: false });
+    expect(group({ ...local, archivedAt: at }, { ...other, archivedAt: at }).archived).toBe(true);
+  });
+
+  it("offers pinned projects first and leaves archived ones out", () => {
+    const pickable = pickableProjectGroups([
+      { key: "a", pinned: false, archived: false },
+      { key: "b", pinned: true, archived: true },
+      { key: "c", pinned: true, archived: false },
+      { key: "d", pinned: false, archived: true },
+    ]);
+    expect(pickable.map((entry) => entry.key)).toEqual(["c", "a"]);
   });
 });
 

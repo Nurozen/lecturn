@@ -1030,6 +1030,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   // Closing here, not just masking, keeps the menu from reopening when the button returns.
   if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
+  const jumpHintLabel = snoozeMenuOpen ? null : props.jumpLabel;
   const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
     const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
     if (!url) return;
@@ -1552,7 +1553,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             {multiline ? metaLine : null}
-            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+            {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
@@ -1772,7 +1773,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               {metaLineBody}
             </div>
           </div>
-          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          {jumpHintLabel ? <JumpHintBadge label={jumpHintLabel} /> : null}
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>

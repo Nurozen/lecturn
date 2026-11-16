@@ -16,6 +16,7 @@ import UpstreamPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
 import UpstreamWaitingLinkRequestIndex from "./Migrations/072_WaitingLinkRequestIndex.ts";
 import UpstreamExcludeAttachmentPlaceholdersFromSearch from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
 import UpstreamSubagentDeliveryState from "./Migrations/075_SubagentDeliveryState.ts";
+import UpstreamProjectionProjectsPinArchive from "./Migrations/076_ProjectionProjectsPinArchive.ts";
 import Squire from "./Migrations/082_Squire.ts";
 
 // Lecturn's ledger runs upstream's V2 migrations (published from 55) from 70.
@@ -210,6 +211,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -241,6 +243,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
       assert.deepStrictEqual(yield* sql`SELECT delivery_id FROM scheduled_task_webhook_pending`, [
         { delivery_id: "delivery-1" },
@@ -265,6 +268,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
       yield* insertSearchMessage("after-upgrade");
 
@@ -298,6 +302,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
 
       assert.deepStrictEqual(yield* searchedMessageIds, ["under-upstream-id"]);
@@ -321,6 +326,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -336,7 +342,25 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
       ]);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the project pin and archive columns a database built under upstream's id", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 94 });
+      // Upstream published this as migration 76.
+      yield* UpstreamProjectionProjectsPinArchive;
+
+      assert.deepStrictEqual(yield* runMigrations(), [[95, "ProjectionProjectsPinArchive"]]);
+      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_projects)`;
+      assert.deepStrictEqual(
+        columns.map((column) => column.name).filter((name) => /^(pinned|archived)_at$/.test(name)),
+        ["pinned_at", "archived_at"],
+      );
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -379,6 +403,7 @@ describe("runMigrations", () => {
         [92, "ActiveTurnItemIndexes"],
         [93, "ExcludeAttachmentPlaceholdersFromSearch"],
         [94, "SubagentDeliveryState"],
+        [95, "ProjectionProjectsPinArchive"],
         [82, "Squire"],
       ]);
       assert.equal(yield* squireTableCount, 13);

@@ -6,12 +6,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
+  shouldCreateNewThreadInCurrentProject,
   archiveSelectedThreadEntries,
   deleteSelectedThreadEntries,
   filterSidebarV2VisibleThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
+  belongsInSidebarWorkingShelf,
+  isSidebarEnvironmentDisconnected,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   resolveProjectStatusIndicator,
@@ -35,6 +38,8 @@ import {
   type SidebarSection,
   resolveSidebarDropVerb,
   groupSidebarThreadsByProject,
+  arrangeSidebarProjectTree,
+  scopeSidebarProjectTree,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
 } from "./Sidebar.logic";
@@ -735,6 +740,7 @@ describe("getFallbackThreadIdAfterDelete", () => {
     expect(fallbackThreadId).toBe(ThreadId.make("thread-next"));
   });
 });
+
 describe("sortProjectsForSidebar", () => {
   it("sorts projects by the most recent user message across their threads", () => {
     const projects = [
@@ -1121,6 +1127,38 @@ describe("Working shelf (beta)", () => {
         hasActionableProposedPlan: true,
       }),
     ).toBe(false);
+  });
+
+  it.each([
+    ["connected", true, false],
+    ["connected", false, true],
+    ["connecting", false, false],
+    ["reconnecting", false, true],
+    ["offline", false, true],
+    ["error", false, true],
+    ["unsupported", false, true],
+    ["available", false, true],
+  ] as const)(
+    "lists threads outside the shelf on a %s environment: %s",
+    (phase, shellIsLive, disconnected) => {
+      expect(isSidebarEnvironmentDisconnected(phase, shellIsLive)).toBe(disconnected);
+    },
+  );
+
+  it("lists a running thread outside the shelf while its environment is disconnected", () => {
+    const thread = { ...idle, runtime, environmentId: localEnvironmentId };
+    const shelve = (disconnected: ReadonlyArray<EnvironmentId>, enabled = true) =>
+      belongsInSidebarWorkingShelf(thread, {
+        enabled,
+        disconnectedEnvironmentIds: new Set(disconnected),
+        isWorking: isSidebarThreadWorking,
+      });
+
+    expect(shelve([])).toBe(true);
+    expect(shelve([localEnvironmentId])).toBe(false);
+    expect(shelve([])).toBe(true);
+    expect(shelve([EnvironmentId.make("environment-other")])).toBe(true);
+    expect(shelve([], false)).toBe(false);
   });
 
   describe("sortInboxThreadsByReturn", () => {
@@ -1644,6 +1682,128 @@ describe("sidebarFolderExpansionKeys", () => {
   });
 });
 
+describe("arrangeSidebarProjectTree", () => {
+  type Node = {
+    readonly key: string;
+    readonly group: {
+      readonly pinned: boolean;
+      readonly archived: boolean;
+      readonly memberProjectRefs: ReadonlyArray<{ environmentId: string; projectId: string }>;
+    };
+    readonly children: ReadonlyArray<Node>;
+  };
+  const node = (
+    key: string,
+    flags: { pinned?: boolean; archived?: boolean } = {},
+    children: Node[] = [],
+  ): Node => ({
+    key,
+    group: {
+      pinned: flags.pinned ?? false,
+      archived: flags.archived ?? false,
+      memberProjectRefs: [{ environmentId: localEnvironmentId, projectId: key }],
+    },
+    children,
+  });
+  const thread = (projectId: string) => ({ environmentId: localEnvironmentId, projectId });
+  const keys = (nodes: ReadonlyArray<Node>): unknown[] =>
+    nodes.map((entry) =>
+      entry.children.length ? { [entry.key]: keys(entry.children) } : entry.key,
+    );
+  type ScopeInput = Parameters<typeof scopeSidebarProjectTree<Node>>[1];
+  const noThreads: ScopeInput = {
+    pinnedThreads: [],
+    activeThreads: [],
+    workingThreads: [],
+    snoozedThreads: [],
+    settledThreads: [],
+    scopedProjectKeys: null,
+  };
+  const scope = (tree: ReadonlyArray<Node>, threads: Partial<ScopeInput> = {}) =>
+    keys(scopeSidebarProjectTree(tree, { ...noThreads, ...threads }));
+
+  it("hides an archived project whose only threads are settled", () => {
+    const tree = [node("penguins"), node("antarctic", { archived: true }), node("empty")];
+    expect(scope(tree, { settledThreads: [thread("antarctic"), thread("penguins")] })).toEqual([
+      "penguins",
+      "empty",
+    ]);
+  });
+
+  it("hides an archived project with only older settled history, which has no shell", () => {
+    // Older settled threads past the shell cut are counts, never rows, so nothing keeps the folder.
+    expect(scope([node("antarctic", { archived: true }), node("penguins")])).toEqual(["penguins"]);
+  });
+
+  it("keeps an archived project with a non-settled thread, below the rest", () => {
+    const tree = [node("antarctic", { archived: true }), node("penguins"), node("colony")];
+    const lists = ["pinnedThreads", "activeThreads", "workingThreads", "snoozedThreads"] as const;
+    for (const list of lists) {
+      expect(scope(tree, { [list]: [thread("antarctic")] })).toEqual([
+        "penguins",
+        "colony",
+        "antarctic",
+      ]);
+    }
+  });
+
+  it("puts pinned projects first at the root and inside a saga, stable within each rank", () => {
+    const tree = [
+      node("recent"),
+      node("saga", {}, [node("first"), node("second"), node("member-pinned", { pinned: true })]),
+      node("pinned", { pinned: true }),
+      node("pinned-archived", { pinned: true, archived: true }),
+    ];
+    expect(scope(tree, { activeThreads: [thread("pinned-archived")] })).toEqual([
+      "pinned",
+      "recent",
+      { saga: ["member-pinned", "first", "second"] },
+      "pinned-archived",
+    ]);
+  });
+
+  it("sorts a live archived saga member last and drops idle archived members", () => {
+    const tree = [
+      node("saga", {}, [
+        node("member-archived", { archived: true }),
+        node("member-idle", { archived: true }),
+        node("member-open"),
+      ]),
+      node("idle-saga", { archived: true }, [node("idle-member", { archived: true })]),
+      node("archived-saga", { archived: true }, [node("live-member")]),
+    ];
+    expect(
+      scope(tree, {
+        activeThreads: [thread("member-archived")],
+        settledThreads: [thread("member-idle"), thread("idle-member")],
+      }),
+    ).toEqual([{ saga: ["member-open", "member-archived"] }, { "archived-saga": ["live-member"] }]);
+  });
+
+  it("narrows to the project scope after arranging", () => {
+    const tree = [
+      node("open"),
+      node("archived", { archived: true }),
+      node("saga", {}, [node("in-scope"), node("out-of-scope")]),
+      node("pinned", { pinned: true }),
+    ];
+    const scopedProjectKeys = new Set(
+      ["archived", "in-scope", "pinned", "open"].map((key) => `${localEnvironmentId}:${key}`),
+    );
+    expect(scope(tree, { activeThreads: [thread("archived")], scopedProjectKeys })).toEqual([
+      "pinned",
+      "open",
+      { saga: ["in-scope"] },
+      "archived",
+    ]);
+    expect(arrangeSidebarProjectTree(tree, []).map((entry) => entry.key)).toEqual([
+      "pinned",
+      "open",
+      "saga",
+    ]);
+  });
+});
+
 describe("groupSidebarThreadsByProject", () => {
   it("puts each thread in its project's folder and drops empty projects unless kept", () => {
     const remoteEnvironmentId = EnvironmentId.make("environment-remote");
@@ -1667,6 +1827,12 @@ describe("groupSidebarThreadsByProject", () => {
         projectKey: "fleet",
         memberProjectRefs: [{ environmentId: localEnvironmentId, projectId: fleet }],
       },
+      {
+        projectKey: "notes",
+        memberProjectRefs: [
+          { environmentId: localEnvironmentId, projectId: ProjectId.make("notes") },
+        ],
+      },
     ];
 
     const threads = [
@@ -1674,17 +1840,23 @@ describe("groupSidebarThreadsByProject", () => {
       thread("orphan", localEnvironmentId, ProjectId.make("deleted")),
       thread("b", remoteEnvironmentId, lecturnRemote),
     ];
-    const summarize = (keepEmpty: boolean) =>
+    const summarize = (keepEmpty: (group: (typeof groups)[number]) => boolean) =>
       groupSidebarThreadsByProject(groups, threads, keepEmpty).map((folder) => ({
         projectKey: folder.group.projectKey,
         threads: folder.threads.map((entry) => entry.id),
       }));
 
-    expect(summarize(true)).toEqual([
+    expect(summarize(() => true)).toEqual([
+      { projectKey: "lecturn", threads: ["a", "b"] },
+      { projectKey: "fleet", threads: [] },
+      { projectKey: "notes", threads: [] },
+    ]);
+    expect(summarize(() => false)).toEqual([{ projectKey: "lecturn", threads: ["a", "b"] }]);
+    // A pinned project keeps its empty folder while other empty projects drop out.
+    expect(summarize((group) => group.projectKey === "fleet")).toEqual([
       { projectKey: "lecturn", threads: ["a", "b"] },
       { projectKey: "fleet", threads: [] },
     ]);
-    expect(summarize(false)).toEqual([{ projectKey: "lecturn", threads: ["a", "b"] }]);
   });
 });
 
@@ -1722,5 +1894,15 @@ describe("resolveSidebarFolderDot", () => {
     expect(resolveSidebarFolderDot([idle, working])).toBe("working");
     expect(resolveSidebarFolderDot([working, unread])).toBe("unread");
     expect(resolveSidebarFolderDot([unread, limited])).toBe("attention");
+  });
+});
+
+describe("shouldCreateNewThreadInCurrentProject", () => {
+  it("opens the picker when several projects are open, or only archived ones exist", () => {
+    expect(shouldCreateNewThreadInCurrentProject(false, 2, 3)).toBe(false);
+    expect(shouldCreateNewThreadInCurrentProject(false, 0, 2)).toBe(false);
+    expect(shouldCreateNewThreadInCurrentProject(false, 1, 3)).toBe(true);
+    expect(shouldCreateNewThreadInCurrentProject(false, 0, 0)).toBe(true);
+    expect(shouldCreateNewThreadInCurrentProject(true, 2, 2)).toBe(true);
   });
 });

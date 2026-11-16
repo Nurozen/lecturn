@@ -126,6 +126,9 @@ import Migration0092 from "./Migrations/073_ActiveTurnItemIndexes.ts";
 // (McpAppModelContext, ThreadSnapshotWindowIndexes), so they run here as 93 and 94.
 import Migration0093 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
 import Migration0094 from "./Migrations/075_SubagentDeliveryState.ts";
+// Upstream published this as 76, which Lecturn's ledger already used
+// (PullRequestReviewGuides), so it runs here as 95.
+import Migration0095 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
 
 // Upstream published a different migration 49. Its ledger skips Lecturn's
 // lifecycle schema, which must exist before pending migration 50 can run.
@@ -251,6 +254,15 @@ const SubagentDeliveryStateCompatibility = Effect.gen(function* () {
   }>`PRAGMA table_info(orchestration_v2_projection_subagents)`;
   if (columns.some((column) => column.name === "completion_delivery_state")) return;
   yield* Migration0094;
+});
+
+// Upstream 76 adds columns without IF NOT EXISTS. A database that already ran
+// it under upstream's id keeps them, so only add them when missing.
+const ProjectionProjectsPinArchiveCompatibility = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_projects)`;
+  if (columns.some((column) => column.name === "pinned_at")) return;
+  yield* Migration0095;
 });
 
 /**
@@ -386,6 +398,8 @@ const migrationEntries = [
   // Upstream 74 and 75.
   [93, "ExcludeAttachmentPlaceholdersFromSearch", Migration0093],
   [94, "SubagentDeliveryState", SubagentDeliveryStateCompatibility],
+  // Upstream 76.
+  [95, "ProjectionProjectsPinArchive", ProjectionProjectsPinArchiveCompatibility],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

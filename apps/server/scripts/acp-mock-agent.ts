@@ -31,6 +31,10 @@ const COPILOT_MODE_URL = "https://agentclientprotocol.com/protocol/session-modes
  */
 const copilotStreamAfterCancel =
   copilotProfile && process.env.LECTURN_ACP_COPILOT_STREAM_AFTER_CANCEL === "1";
+// URL-shaped mode ids alone, without the rest of the Copilot profile.
+const copilotModesProfile = copilotProfile || process.env.LECTURN_ACP_COPILOT_MODES === "1";
+const copilotModeId = (name: string) => `${COPILOT_MODE_URL}#${name}`;
+const modeOptionCategory = process.env.LECTURN_ACP_MODE_OPTION_CATEGORY ?? "mode";
 const emitToolCalls = process.env.LECTURN_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.LECTURN_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
@@ -73,8 +77,10 @@ const failSetModeConfigOption = process.env.LECTURN_ACP_FAIL_SET_MODE_CONFIG_OPT
 const emitEmptyDefaultAgentOption = process.env.LECTURN_ACP_EMIT_EMPTY_DEFAULT_AGENT_OPTION === "1";
 const promptResponseText = process.env.LECTURN_ACP_PROMPT_RESPONSE_TEXT;
 const promptDelayMs = Number(process.env.LECTURN_ACP_PROMPT_DELAY_MS ?? "0");
+const terminalOutputBytes = Number(process.env.LECTURN_ACP_EMIT_TERMINAL_OUTPUT_BYTES ?? "0");
 const supportsSessionLifecycle = process.env.LECTURN_ACP_SESSION_LIFECYCLE === "1";
 const supportsAcpMcp = process.env.LECTURN_ACP_MCP_ACP === "1";
+const supportsHttpMcp = process.env.LECTURN_ACP_MCP_HTTP === "1";
 const supportsV2Management = process.env.LECTURN_ACP_V2_MANAGEMENT === "1";
 const advertisedAuthMethodId = process.env.LECTURN_ACP_AUTH_METHOD_ID?.trim();
 const initializeAuthMethodId =
@@ -99,8 +105,8 @@ const sessionId = "mock-session-1";
 
 let currentModeId = antigravityProfile
   ? "default"
-  : copilotProfile
-    ? `${COPILOT_MODE_URL}#agent`
+  : copilotModesProfile
+    ? copilotModeId("agent")
     : "ask";
 let currentAllowAll = "off";
 let currentModelId = antigravityProfile ? "gemini-test-low" : "default";
@@ -314,7 +320,7 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
     {
       configId: "mode",
       name: "Mode",
-      category: "mode",
+      category: modeOptionCategory,
       type: "select" as const,
       currentValue: currentModeId,
       options: availableModes.map((mode) => ({
@@ -373,11 +379,11 @@ const antigravityModels = [
   { modelId: "gemini-test-high", name: "Gemini Test High" },
 ] satisfies ReadonlyArray<AcpCompat.ModelInfo>;
 
-const availableModes: ReadonlyArray<AcpCompat.SessionMode> = copilotProfile
+const availableModes: ReadonlyArray<AcpCompat.SessionMode> = copilotModesProfile
   ? [
-      { id: `${COPILOT_MODE_URL}#agent`, name: "Agent" },
-      { id: `${COPILOT_MODE_URL}#plan`, name: "Plan" },
-      { id: `${COPILOT_MODE_URL}#autopilot`, name: "Autopilot" },
+      { id: copilotModeId("agent"), name: "Agent" },
+      { id: copilotModeId("plan"), name: "Plan" },
+      { id: copilotModeId("autopilot"), name: "Autopilot" },
     ]
   : antigravityProfile
     ? [
@@ -571,7 +577,14 @@ const program = Effect.gen(function* () {
           session: {
             ...(supportsSessionLifecycle ? { fork: {}, additionalDirectories: {} } : {}),
             ...(supportsV2Management ? { delete: {} } : {}),
-            ...(supportsAcpMcp ? { mcp: { acp: {} } } : {}),
+            ...(supportsAcpMcp || supportsHttpMcp
+              ? {
+                  mcp: {
+                    ...(supportsAcpMcp ? { acp: {} } : {}),
+                    ...(supportsHttpMcp ? { http: {} } : {}),
+                  },
+                }
+              : {}),
           },
           ...(supportsV2Management ? { providers: {} } : {}),
         },
@@ -1111,6 +1124,36 @@ const program = Effect.gen(function* () {
         return yield* finishPrompt(requestedSessionId, "end_turn");
       }
 
+      if (terminalOutputBytes > 0) {
+        const terminalId = "long-output";
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "terminal_update", terminalId, command: "print long output" },
+        });
+        // 4 KiB chunks of 64-char numbered lines, like a long build log.
+        for (let line = 0; line * 64 < terminalOutputBytes; line += 64) {
+          let chunk = "";
+          for (let i = line + 1; i <= line + 64; i++) {
+            chunk += `${String(i).padStart(8, "0")} ${"x".repeat(54)}\n`;
+          }
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "terminal_output_chunk",
+              terminalId,
+              data: Buffer.from(chunk)
+                .subarray(0, terminalOutputBytes - line * 64)
+                .toString("base64"),
+            },
+          });
+        }
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "terminal_update", terminalId, exitStatus: { exitCode: 0 } },
+        });
+        return yield* finishPrompt(requestedSessionId, "end_turn");
+      }
+
       if (emitNotice) {
         // A notice in fx 0.0.14's shape for a skipped skill, between two chunks of one message.
         const chunk = (text: string) =>
@@ -1183,6 +1226,18 @@ const program = Effect.gen(function* () {
               type: "items",
               planId: "plan-b",
               entries: [{ content: "Ship B", priority: "high", status: "in_progress" }],
+            },
+          },
+          {
+            sessionUpdate: "plan_update",
+            plan: {
+              type: "items",
+              planId: "plan-c",
+              entries: [
+                { content: "Write the fix", priority: "high", status: "completed" },
+                { content: "Try another approach", priority: "low", status: "cancelled" },
+                { content: "Add a test", priority: "medium", status: "completed" },
+              ],
             },
           },
           { sessionUpdate: "plan_removed", planId: "plan-a" },

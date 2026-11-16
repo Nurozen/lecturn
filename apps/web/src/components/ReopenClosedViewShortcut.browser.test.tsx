@@ -278,6 +278,14 @@ describe("root reopen shortcut", () => {
       expect.objectContaining({ command: "sidebar.toggle" }),
       expect.objectContaining({ command: "sidebar.toggleApps" }),
       expect.objectContaining({ command: "rightPanel.toggle" }),
+      expect.objectContaining({ command: "preview.focusUrl" }),
     ]);
+  });
+  it("forwards address-bar focus from a focused desktop page", async () => {
+    setup();
+    await using _shortcut = await renderShortcut();
+    expect(state.setShortcuts).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ command: "preview.focusUrl" })]),
+    );
   });
 });

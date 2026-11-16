@@ -1,5 +1,12 @@
+import type { EnvironmentConnectionPhase } from "@lecturn/client-runtime/connection";
+import { availableScratchWorkspaceRoot } from "@lecturn/client-runtime/operations/projects";
 import type { EnvironmentProject } from "@lecturn/client-runtime/state/shell";
-import { repositoryGroupingKeyOf, type EnvironmentId, type ProjectId } from "@lecturn/contracts";
+import {
+  repositoryGroupingKeyOf,
+  type EnvironmentId,
+  type ProjectId,
+  type ServerConfig,
+} from "@lecturn/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { listedProjects } from "../../state/listed-entities";
@@ -57,6 +64,33 @@ export function filterProjectScopes(
           project.workspaceRoot.toLowerCase().includes(query),
       ),
   );
+}
+
+// Cached configuration reserves the row; connection readiness only gates activation.
+export function resolveNewTaskScratchOption(input: {
+  readonly environments: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly connectionState: EnvironmentConnectionPhase;
+  }>;
+  readonly serverConfigs: ReadonlyMap<EnvironmentId, Pick<ServerConfig, "scratchWorkspaceRoot">>;
+  readonly selectedEnvironmentId: EnvironmentId | null;
+}) {
+  const offering = input.environments.filter(
+    (environment) =>
+      (input.serverConfigs.get(environment.environmentId)?.scratchWorkspaceRoot ?? null) !== null,
+  );
+  const ready = offering.filter(
+    (environment) =>
+      availableScratchWorkspaceRoot(
+        environment.connectionState,
+        input.serverConfigs.get(environment.environmentId),
+      ) !== null,
+  );
+  const candidates = ready.length > 0 ? ready : offering;
+  const environment =
+    candidates.find((candidate) => candidate.environmentId === input.selectedEnvironmentId) ??
+    candidates[0];
+  return environment ? { environmentId: environment.environmentId, ready: ready.length > 0 } : null;
 }
 
 export function resolveEnvironmentProjectMatch(
@@ -143,12 +177,14 @@ export function newTaskDestination(options: {
     projects.find(
       (project) => project.environmentId === ref.environmentId && project.id === ref.projectId,
     );
+  // A remembered project that was archived since opens the picker; the current one still wins.
+  // A remembered app workspace or archived space is not a default for a new task either.
+  const last = find(listedProjects(options.projects), options.lastProject);
   const project =
     options.useLastProject === false
       ? undefined
       : (find(options.projects, options.currentProject) ??
-        // A remembered app workspace or archived space is not a default for a new task.
-        find(listedProjects(options.projects), options.lastProject));
+        (last?.archivedAt == null ? last : undefined));
   return project
     ? {
         draft: {

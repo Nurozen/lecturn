@@ -26,6 +26,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Lecturn: present only on projects owned by a connected app.
   appBinding: Schema.optionalKey(AppBinding),
   scripts: Schema.Array(ProjectScript),
+  // Pinned projects lead project pickers; archived ones leave them. Optional so older servers decode.
+  pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

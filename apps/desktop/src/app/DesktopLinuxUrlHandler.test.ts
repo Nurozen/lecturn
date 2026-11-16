@@ -35,7 +35,6 @@ const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {
     isDevelopment: false,
     displayName: "Lecturn (Alpha)",
     linuxDesktopEntryName: "com.cloudgatherer.lecturn.desktop",
-    linuxWmClass: "lecturn",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
     desktopLauncherPath: Option.none(),
     appImagePath: Option.some("/home/alice/Applications/Lecturn.AppImage"),

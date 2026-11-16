@@ -37,6 +37,7 @@ import { projectMutationOperation } from "../project/ProjectMutation.ts";
 import * as LecturnProjectFileLoader from "../project/LecturnProjectFileLoader.ts";
 import * as StaveWorkspaceReader from "../stave/StaveWorkspaceReader.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import {
   clearPersistedServerRuntimeState,
   readPersistedServerRuntimeState,
@@ -213,7 +214,11 @@ const layerProjectCliRuntime = RuntimeLayer.layerProjectService.pipe(
     ),
   ),
   Layer.provideMerge(WorkspacePaths.layer),
-  Layer.provideMerge(ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provideMerge(
+    ServerSettings.layer.pipe(
+      Layer.provide(Layer.merge(ServerSecretStore.layer, ManagedPolicy.layer)),
+    ),
+  ),
   Layer.provideMerge(SqlitePersistence.layerConfig),
 );
 

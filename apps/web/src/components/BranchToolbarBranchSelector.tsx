@@ -769,7 +769,7 @@ export function BranchToolbarBranchSelector({
             <ComposerContextLabel displayMode={displayMode}>
               <MiddleTruncate
                 value={staveRepoName !== null ? `Git: ${staveRepoName}` : triggerLabel}
-                variant={displayMode === "panel" ? "cap-aligned" : "default"}
+                variant="cap-aligned"
                 className="w-full"
               />
             </ComposerContextLabel>

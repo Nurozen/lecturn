@@ -19,6 +19,7 @@ import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import {
   type AppSidecarParentProbe,
   awaitAppSidecarParentExit,
@@ -46,6 +47,7 @@ const appSidecar: AppSidecarBootstrap = {
 const layerAuth = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuth.layer.pipe(
     Layer.provideMerge(SqlitePersistence.layerMemory),
+    Layer.provide(ManagedPolicy.layerTest()),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(

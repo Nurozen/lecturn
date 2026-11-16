@@ -19,7 +19,6 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   showInteractionModeToggle: boolean;
-  traitsMenuContent?: ReactNode;
   contextualControl?: ReactNode;
   showPermissions?: boolean;
   size?: "sm" | "xs";
@@ -46,28 +45,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             size={size}
             className="shrink-0"
             aria-label="More composer controls"
-            data-composer-shortcut={
-              [
-                props.showPermissions !== false ? "composer.mode" : null,
-                props.traitsMenuContent ? "composer.effort" : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
+            data-composer-shortcut={props.showPermissions !== false ? "composer.mode" : undefined}
           />
         }
       >
         <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            {props.showInteractionModeToggle || props.showPermissions !== false ? (
-              <MenuDivider />
-            ) : null}
-          </>
-        ) : null}
         {props.showInteractionModeToggle ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
@@ -93,9 +77,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         )}
         {props.contextualControl ? (
           <>
-            {props.showPermissions !== false ||
-            props.showInteractionModeToggle ||
-            props.traitsMenuContent ? (
+            {props.showPermissions !== false || props.showInteractionModeToggle ? (
               <MenuDivider />
             ) : null}
             <div className="px-1 py-1">{props.contextualControl}</div>

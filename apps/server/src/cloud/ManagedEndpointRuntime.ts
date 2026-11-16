@@ -20,6 +20,8 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ManagedLimits from "../policy/managedLimits.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as DeviceReservation from "./DeviceRelayReservation.ts";
 import type { DeviceRelayLease } from "./deviceRelayLease.ts";
 import { CLOUD_ENDPOINT_RUNTIME_CONFIG, CLOUD_LINKED_USER_ID } from "./config.ts";
@@ -119,6 +121,12 @@ const ConnectorConfigBody = Schema.Struct({
 // immediately. Keep that evidence across registrations and connector restarts.
 const QUIC_STALLS_BEFORE_HTTP2 = 30;
 const QUIC_STALL_WINDOW_MS = 5 * 60_000;
+// Retry QUIC on a later startup after transient failures or network changes; reuse never renews this hint.
+const HTTP2_FALLBACK_TTL_MS = 24 * 60 * 60_000;
+const HTTP2_FALLBACK_STATE = "cloud-endpoint-http2-fallback";
+const Http2Fallback = Schema.fromJsonString(Schema.Struct({ fellBackAt: Schema.Number }));
+const decodeHttp2Fallback = Schema.decodeUnknownOption(Http2Fallback);
+const encodeHttp2Fallback = Schema.encodeSync(Http2Fallback);
 // A failed background install of the pinned relay client is retried no sooner
 // than this, so a crash-looping connector or an offline host does not redownload
 // on every reconcile.
@@ -204,6 +212,8 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const relayClient = yield* RelayClient.RelayClient;
   const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
+  // Without Lecturn Connect no connector ever runs, whoever asks for one.
+  const connectAllowed = ManagedLimits.allowsConnect(yield* ManagedPolicy.ManagedPolicy);
   const activeRef = yield* Ref.make<ActiveConnector | null>(null);
   const desiredConfigRef = yield* Ref.make<RelayManagedEndpointRuntimeConfig | null>(null);
   const recoveryRequests = yield* Queue.sliding<RelayManagedEndpointRuntimeConfig>(1);
@@ -220,7 +230,18 @@ export const make = Effect.gen(function* () {
   const notReadyChecksBeforeRestartRef = yield* Ref.make(CONNECTOR_NOT_READY_CHECKS_BEFORE_RESTART);
   // An explicit cloudflared transport in the environment is the user's choice.
   const transportChosenByUser = process.env.TUNNEL_TRANSPORT_PROTOCOL !== undefined;
-  const http2Ref = yield* Ref.make(false);
+  const previousFallback = transportChosenByUser
+    ? Option.none()
+    : yield* secrets.get(HTTP2_FALLBACK_STATE).pipe(
+        Effect.map(Option.flatMap((bytes) => decodeHttp2Fallback(new TextDecoder().decode(bytes)))),
+        Effect.orElseSucceed(() => Option.none()),
+      );
+  const now = yield* Clock.currentTimeMillis;
+  const http2Ref = yield* Ref.make(
+    Option.isSome(previousFallback) &&
+      now >= previousFallback.value.fellBackAt &&
+      now - previousFallback.value.fellBackAt < HTTP2_FALLBACK_TTL_MS,
+  );
   const quicStallsRef = yield* Ref.make<ReadonlyArray<number>>([]);
   let reconcileConfig: CloudManagedEndpointRuntime["Service"]["applyConfig"];
 
@@ -473,6 +494,16 @@ export const make = Effect.gen(function* () {
     const desiredConfig = yield* Ref.get(desiredConfigRef);
     if ((yield* Ref.get(http2Ref)) || active !== connector || !desiredConfig) return;
     yield* Ref.set(http2Ref, true);
+    yield* secrets
+      .set(
+        HTTP2_FALLBACK_STATE,
+        new TextEncoder().encode(
+          encodeHttp2Fallback({ fellBackAt: yield* Clock.currentTimeMillis }),
+        ),
+      )
+      .pipe(
+        Effect.catch(() => Effect.logWarning("Could not persist the relay client HTTP/2 fallback")),
+      );
     yield* Effect.logWarning("Relay client keeps losing QUIC connections; switching to HTTP/2", {
       pid: Number(connector.child.pid),
       tunnelId: connector.config.tunnelId,
@@ -730,10 +761,14 @@ export const make = Effect.gen(function* () {
   });
 
   const applyConfig = Effect.fn("CloudManagedEndpointRuntime.applyConfig")(
-    (config: RelayManagedEndpointRuntimeConfig | null, options?: { readonly published: boolean }) =>
+    (
+      requested: RelayManagedEndpointRuntimeConfig | null,
+      options?: { readonly published: boolean },
+    ) =>
       reconcileSemaphore.withPermits(1)(
         Effect.gen(function* () {
-          const published = options?.published ?? config !== null;
+          const config = connectAllowed ? requested : null;
+          const published = connectAllowed && (options?.published ?? config !== null);
           const newlyClaimed = published && !deviceLease;
           if (published && !deviceLease) {
             const result = yield* Effect.result(reservation.acquire);

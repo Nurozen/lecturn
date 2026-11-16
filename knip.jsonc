@@ -38,7 +38,12 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      "ignoreDependencies": ["@effect/platform-node-shared", "@lecturn/web", "@napi-rs/keyring"],
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "@lecturn/web",
+        "@napi-rs/keyring",
+        "ffi-rs",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
@@ -50,6 +55,7 @@
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
         "src/boot.ts!",
         "src/compileCache.ts!",
+        "src/serverCompileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -136,7 +142,8 @@
       // setup-worktree.ts runs directly from the lecturn.json setup action,
       // smoke-pack-install.ts runs by hand against a built vendoring kit,
       // verify-windows-desktop-artifact.ts checks a Windows payload built on another host,
-      // electron-builder loads the macOS signer (sign-macos.ts) by path, mobile-e2e.ts runs
+      // electron-builder loads the macOS signer (sign-macos.ts) and the server compile-cache
+      // afterPack hook by path, mobile-e2e.ts runs
       // agent-device's CLI by path, mobile-behavior.ts spawns its runner by path.
       // smoke-desktop-app.ts (the desktop launch check) runs by
       // hand until it has a fixture database from a Lecturn build.
@@ -150,6 +157,7 @@
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
+        "prepare-server-compile-cache.cjs",
         "setup-worktree.ts",
         "sign-macos.ts",
         "smoke-desktop-app.ts",
