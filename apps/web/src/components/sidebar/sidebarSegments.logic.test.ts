@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { ThreadStatusPill } from "../Sidebar.logic";
+import { scopeSidebarProjectTree, type ThreadStatusPill } from "../Sidebar.logic";
 import {
   buildSegmentEnvironmentFilters,
   buildSidebarSegments,
@@ -269,6 +269,58 @@ describe("buildSidebarSegmentViews", () => {
       expect(ids(expanded.rendered)).toEqual(["work-1", "work-2", "work-5"]);
       expect(segment!.hiddenSettledCount).toBe(2);
     }
+  });
+
+  it("keeps the Sidebar's arranged nested order in each segment", () => {
+    interface FlaggedNode {
+      readonly group: TestNode["group"] & { readonly pinned: boolean; readonly archived: boolean };
+      readonly children: ReadonlyArray<FlaggedNode>;
+    }
+    const flagged = (
+      key: string,
+      environmentId: string,
+      flags: { pinned?: boolean; archived?: boolean } = {},
+    ): FlaggedNode => ({
+      group: {
+        key,
+        pinned: flags.pinned ?? false,
+        archived: flags.archived ?? false,
+        memberProjectRefs: [{ environmentId, projectId: key }],
+      },
+      children: [],
+    });
+    const live = thread("live", "relay-home", "home-archived");
+    const settled = thread("settled", "relay-work", "work-archived");
+    const scopedSagaTree = scopeSidebarProjectTree(
+      [
+        flagged("work-archived", "relay-work", { archived: true }),
+        flagged("home-archived", "relay-home", { archived: true }),
+        flagged("work-open", "relay-work"),
+        flagged("home-open", "relay-home"),
+        flagged("work-pinned", "relay-work", { pinned: true }),
+      ],
+      {
+        pinnedThreads: [],
+        activeThreads: [live],
+        workingThreads: [],
+        snoozedThreads: [],
+        settledThreads: [settled],
+        scopedProjectKeys: null,
+      },
+    );
+    const result = views({
+      nestSagaProjects: true,
+      activeThreads: [live],
+      settledThreads: [settled],
+      nestedSettledThreads: [settled],
+      scopedSagaTree,
+    });
+    expect(result.map((segment) => segment.scopedSagaTree.map((entry) => entry.group.key))).toEqual(
+      [
+        ["work-pinned", "work-open"],
+        ["home-open", "home-archived"],
+      ],
+    );
   });
 
   it("gives each segment its own project tree in hierarchy mode", () => {

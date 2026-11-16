@@ -214,7 +214,7 @@ import {
   sortInboxThreadsByReturn,
   sortPinnedThreadsForSidebar,
   sortSidebarV2ProjectGroups,
-  arrangeSidebarProjectTree,
+  scopeSidebarProjectTree,
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
   useSnoozeWakeClock,
@@ -1287,19 +1287,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   })();
 
-  const scopedSagaTree = (() => {
-    // Pinned folders lead; an archived one stays, last, only while it lists threads.
-    const arrangedSagaTree = arrangeSidebarProjectTree(sagaTree, visibleThreads);
-    if (!scopedProjectKeys) return arrangedSagaTree;
-    const matches = (node: (typeof sagaTree)[number]) =>
-      node.group.memberProjectRefs.some((ref) =>
-        scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
-      );
-    return arrangedSagaTree.flatMap((node) => {
-      const children = node.children.filter(matches);
-      return matches(node) || children.length ? [{ ...node, children }] : [];
-    });
-  })();
+  // Pinned folders lead; an archived one stays, last, only while it has a non-settled row.
+  const scopedSagaTree = scopeSidebarProjectTree(sagaTree, {
+    pinnedThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+    scopedProjectKeys,
+  });
   // A segment or nested project lists each settled row against its own environment's frontier.
   const segmentOf = (environmentId: EnvironmentId) =>
     sidebarSegmentation === null

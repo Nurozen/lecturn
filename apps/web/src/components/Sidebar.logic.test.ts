@@ -39,6 +39,7 @@ import {
   resolveSidebarDropVerb,
   groupSidebarThreadsByProject,
   arrangeSidebarProjectTree,
+  scopeSidebarProjectTree,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
 } from "./Sidebar.logic";
@@ -1709,45 +1710,97 @@ describe("arrangeSidebarProjectTree", () => {
     nodes.map((entry) =>
       entry.children.length ? { [entry.key]: keys(entry.children) } : entry.key,
     );
+  type ScopeInput = Parameters<typeof scopeSidebarProjectTree<Node>>[1];
+  const noThreads: ScopeInput = {
+    pinnedThreads: [],
+    activeThreads: [],
+    workingThreads: [],
+    snoozedThreads: [],
+    settledThreads: [],
+    scopedProjectKeys: null,
+  };
+  const scope = (tree: ReadonlyArray<Node>, threads: Partial<ScopeInput> = {}) =>
+    keys(scopeSidebarProjectTree(tree, { ...noThreads, ...threads }));
 
-  it("hides an archived project with no listed threads", () => {
+  it("hides an archived project whose only threads are settled", () => {
     const tree = [node("penguins"), node("antarctic", { archived: true }), node("empty")];
-    expect(keys(arrangeSidebarProjectTree(tree, [thread("penguins")]))).toEqual([
+    expect(scope(tree, { settledThreads: [thread("antarctic"), thread("penguins")] })).toEqual([
       "penguins",
       "empty",
     ]);
   });
 
-  it("lists an archived project with a thread below the rest, even when most recent", () => {
-    const tree = [node("antarctic", { archived: true }), node("penguins"), node("colony")];
-    expect(keys(arrangeSidebarProjectTree(tree, [thread("antarctic")]))).toEqual([
-      "penguins",
-      "colony",
-      "antarctic",
-    ]);
+  it("hides an archived project with only older settled history, which has no shell", () => {
+    // Older settled threads past the shell cut are counts, never rows, so nothing keeps the folder.
+    expect(scope([node("antarctic", { archived: true }), node("penguins")])).toEqual(["penguins"]);
   });
 
-  it("puts pinned projects first and keeps the rest in order", () => {
+  it("keeps an archived project with a non-settled thread, below the rest", () => {
+    const tree = [node("antarctic", { archived: true }), node("penguins"), node("colony")];
+    const lists = ["pinnedThreads", "activeThreads", "workingThreads", "snoozedThreads"] as const;
+    for (const list of lists) {
+      expect(scope(tree, { [list]: [thread("antarctic")] })).toEqual([
+        "penguins",
+        "colony",
+        "antarctic",
+      ]);
+    }
+  });
+
+  it("puts pinned projects first at the root and inside a saga, stable within each rank", () => {
     const tree = [
       node("recent"),
-      node("older"),
+      node("saga", {}, [node("first"), node("second"), node("member-pinned", { pinned: true })]),
       node("pinned", { pinned: true }),
       node("pinned-archived", { pinned: true, archived: true }),
     ];
-    expect(
-      keys(arrangeSidebarProjectTree(tree, [thread("recent"), thread("pinned-archived")])),
-    ).toEqual(["pinned", "recent", "older", "pinned-archived"]);
+    expect(scope(tree, { activeThreads: [thread("pinned-archived")] })).toEqual([
+      "pinned",
+      "recent",
+      { saga: ["member-pinned", "first", "second"] },
+      "pinned-archived",
+    ]);
   });
 
-  it("drops idle archived saga members and keeps an archived saga for listed ones", () => {
+  it("sorts a live archived saga member last and drops idle archived members", () => {
     const tree = [
-      node("saga", { archived: true }, [
+      node("saga", {}, [
+        node("member-archived", { archived: true }),
         node("member-idle", { archived: true }),
-        node("member-live"),
+        node("member-open"),
       ]),
       node("idle-saga", { archived: true }, [node("idle-member", { archived: true })]),
+      node("archived-saga", { archived: true }, [node("live-member")]),
     ];
-    expect(keys(arrangeSidebarProjectTree(tree, []))).toEqual([{ saga: ["member-live"] }]);
+    expect(
+      scope(tree, {
+        activeThreads: [thread("member-archived")],
+        settledThreads: [thread("member-idle"), thread("idle-member")],
+      }),
+    ).toEqual([{ saga: ["member-open", "member-archived"] }, { "archived-saga": ["live-member"] }]);
+  });
+
+  it("narrows to the project scope after arranging", () => {
+    const tree = [
+      node("open"),
+      node("archived", { archived: true }),
+      node("saga", {}, [node("in-scope"), node("out-of-scope")]),
+      node("pinned", { pinned: true }),
+    ];
+    const scopedProjectKeys = new Set(
+      ["archived", "in-scope", "pinned", "open"].map((key) => `${localEnvironmentId}:${key}`),
+    );
+    expect(scope(tree, { activeThreads: [thread("archived")], scopedProjectKeys })).toEqual([
+      "pinned",
+      "open",
+      { saga: ["in-scope"] },
+      "archived",
+    ]);
+    expect(arrangeSidebarProjectTree(tree, []).map((entry) => entry.key)).toEqual([
+      "pinned",
+      "open",
+      "saga",
+    ]);
   });
 });
 

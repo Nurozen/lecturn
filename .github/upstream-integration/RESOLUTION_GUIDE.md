@@ -1602,6 +1602,8 @@ from upstream's side.
   back to all, folder sorts last). Fork `ProjectGroup` adapters (`homeListItems`,
   `homeThreadList`, `sagaWorkbench`, `useSagaSidebarTree`) set `pinned`/`archived` with
   some/every over member projects. Sidebar jump hints stay the fork `JumpHintBadge`.
+- **Nested sidebar archive (D13).** `scopeSidebarProjectTree` ranks pinned, open, archived at
+  every level; an archived folder stays only for a non-settled row (settled history hides).
 - **Managed policy (#27197).** Names use Lecturn identity (`LECTURN_DEV_MANAGED_POLICY_PATH`,
   `/etc/lecturn`, `com.cloudgatherer.lecturn`). The policy-off `CloudLink` also refuses fork
   link methods (`reconcileDesiredLink`, manual links; `syncManagedEndpointOrigin` false);

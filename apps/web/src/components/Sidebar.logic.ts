@@ -1075,42 +1075,79 @@ export function groupSidebarThreadsByProject<
   return folders.filter((folder) => folder.threads.length > 0 || keepEmpty(folder.group));
 }
 
+type SidebarProjectTreeNode<TNode> = {
+  readonly group: {
+    readonly pinned: boolean;
+    readonly archived: boolean;
+    readonly memberProjectRefs: ReadonlyArray<{
+      readonly environmentId: string;
+      readonly projectId: string;
+    }>;
+  };
+  readonly children: ReadonlyArray<TNode>;
+};
+type SidebarProjectTreeThread = { readonly environmentId: string; readonly projectId: string };
+
 /**
- * Nested sidebar folders in upstream's project order: pinned first, archived last.
- * An archived project keeps its folder only while it lists a thread, or a member
- * that does. Saga members keep the saga's order.
+ * Nested sidebar folders in upstream's project order at every level: pinned,
+ * open, then archived, stable within each. An archived project keeps its folder
+ * only while it, or a member, holds one of `liveThreads` (settled rows do not count).
  */
-export function arrangeSidebarProjectTree<
-  TNode extends {
-    readonly group: {
-      readonly pinned: boolean;
-      readonly archived: boolean;
-      readonly memberProjectRefs: ReadonlyArray<{
-        readonly environmentId: string;
-        readonly projectId: string;
-      }>;
-    };
-    readonly children: ReadonlyArray<TNode>;
-  },
->(
+export function arrangeSidebarProjectTree<TNode extends SidebarProjectTreeNode<TNode>>(
   roots: ReadonlyArray<TNode>,
-  listedThreads: ReadonlyArray<{ readonly environmentId: string; readonly projectId: string }>,
+  liveThreads: ReadonlyArray<SidebarProjectTreeThread>,
 ): TNode[] {
-  const listedProjectKeys = new Set(
-    listedThreads.map((thread) => `${thread.environmentId}:${thread.projectId}`),
+  const liveProjectKeys = new Set(
+    liveThreads.map((thread) => `${thread.environmentId}:${thread.projectId}`),
   );
-  const prune = (nodes: ReadonlyArray<TNode>): TNode[] =>
-    nodes.flatMap((node) => {
-      const children = prune(node.children);
-      const listed =
-        !node.group.archived ||
-        node.group.memberProjectRefs.some((ref) =>
-          listedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
-        );
-      return listed || children.length > 0 ? [{ ...node, children }] : [];
-    });
   const rank = (node: TNode) => (node.group.archived ? 2 : node.group.pinned ? 0 : 1);
-  return prune(roots).toSorted((left, right) => rank(left) - rank(right));
+  const arrange = (nodes: ReadonlyArray<TNode>): TNode[] =>
+    nodes
+      .flatMap((node) => {
+        const children = arrange(node.children);
+        const kept =
+          !node.group.archived ||
+          node.group.memberProjectRefs.some((ref) =>
+            liveProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+          );
+        return kept || children.length > 0 ? [{ ...node, children }] : [];
+      })
+      .toSorted((left, right) => rank(left) - rank(right));
+  return arrange(roots);
+}
+
+/**
+ * The nested sidebar tree the list and its segments render: arranged by
+ * `arrangeSidebarProjectTree` over the non-settled rows, then narrowed to the
+ * project scope. Settled rows are taken only to say they do not keep a folder.
+ */
+export function scopeSidebarProjectTree<TNode extends SidebarProjectTreeNode<TNode>>(
+  tree: ReadonlyArray<TNode>,
+  input: {
+    readonly pinnedThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly activeThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly workingThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly snoozedThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly settledThreads: ReadonlyArray<SidebarProjectTreeThread>;
+    readonly scopedProjectKeys: ReadonlySet<string> | null;
+  },
+): TNode[] {
+  const { scopedProjectKeys } = input;
+  const arranged = arrangeSidebarProjectTree(tree, [
+    ...input.pinnedThreads,
+    ...input.activeThreads,
+    ...input.workingThreads,
+    ...input.snoozedThreads,
+  ]);
+  if (!scopedProjectKeys) return arranged;
+  const matches = (node: TNode) =>
+    node.group.memberProjectRefs.some((ref) =>
+      scopedProjectKeys.has(`${ref.environmentId}:${ref.projectId}`),
+    );
+  return arranged.flatMap((node) => {
+    const children = node.children.filter(matches);
+    return matches(node) || children.length ? [{ ...node, children }] : [];
+  });
 }
 
 export type SidebarV2TopStatusKind =
