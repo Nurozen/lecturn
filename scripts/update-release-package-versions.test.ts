@@ -59,6 +59,32 @@ const readReleaseVersions = Effect.fn("readReleaseVersions")(function* (rootDir:
 });
 
 it.layer(ScriptTestLayer)("update-release-package-versions", (it) => {
+  it.effect("release workflow finalize job formats and commits every release package", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workflow = yield* fs.readFileString(
+        path.join(import.meta.dirname, "..", ".github/workflows/release.yml"),
+      );
+      const fmtLine = workflow.split("\n").find((line) => line.includes("run: vp fmt ")) ?? "";
+      const filesLine = workflow.split("\n").find((line) => line.includes("files=(")) ?? "";
+
+      for (const relativePath of releasePackageFiles) {
+        assert.include(fmtLine.split(" "), relativePath, `vp fmt list misses ${relativePath}`);
+        assert.include(
+          filesLine.replace(/^.*files=\(|\).*$/g, "").split(" "),
+          relativePath,
+          `files=(...) misses ${relativePath}`,
+        );
+        assert.include(
+          workflow,
+          `':!${relativePath}'`,
+          `existing-branch check misses ${relativePath}`,
+        );
+      }
+    }),
+  );
+
   it.effect("updates all release package versions under the provided root", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

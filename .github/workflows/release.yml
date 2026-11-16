@@ -1368,7 +1368,7 @@ jobs:
 
       - name: Format package.json files
         if: steps.update_versions.outputs.changed == 'true'
-        run: vp fmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
+        run: vp fmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json packages/embed/package.json
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
@@ -1382,7 +1382,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          files=(apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml)
+          files=(apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json packages/embed/package.json pnpm-lock.yaml)
           if git diff --quiet -- "${files[@]}"; then
             echo "No version changes to commit."
             exit 0
@@ -1401,7 +1401,8 @@ jobs:
             # exactly these generated files and their expected contents.
             unexpected=$(git diff --name-only HEAD...FETCH_HEAD -- . \
               ':!apps/server/package.json' ':!apps/desktop/package.json' \
-              ':!apps/web/package.json' ':!packages/contracts/package.json' ':!pnpm-lock.yaml')
+              ':!apps/web/package.json' ':!packages/contracts/package.json' \
+              ':!packages/embed/package.json' ':!pnpm-lock.yaml')
             if [[ -n "$unexpected" ]] || ! git diff --cached --quiet FETCH_HEAD -- "${files[@]}"; then
               echo "Existing $branch differs from this version bump; inspect its pull request before retrying." >&2
               exit 1
