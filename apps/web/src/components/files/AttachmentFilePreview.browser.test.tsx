@@ -22,6 +22,13 @@ vi.mock(import("./ReadOnlySourcePreview"), () => ({
     <pre data-word-wrap={String(wordWrap)}>{text}</pre>
   ),
 }));
+// PDF.js starts a worker per document. Vite serves its 1.3 MB module with a 6.8 MB inline source
+// map, which took most of a 15 s PDF test on loaded CI runners; a blob of the raw file is the same
+// code without the dev-server cost (as in PdfViewer.browser.test.tsx).
+vi.mock(import("pdfjs-dist/build/pdf.worker.min.mjs?url"), async () => {
+  const { default: source } = await import("pdfjs-dist/build/pdf.worker.min.mjs?raw");
+  return { default: URL.createObjectURL(new Blob([source], { type: "text/javascript" })) };
+});
 
 // The Word engine compiles about 30 MB of WebAssembly in a fresh worker per document, which took
 // 10-17 s per test on loaded CI runners. These tests cover fetching, preparation and remounts, so
@@ -52,6 +59,8 @@ import { MermaidFilePreview } from "./MermaidFilePreview";
 import JSZip from "jszip";
 import { boundedZip } from "@lecturn/client-runtime/zip/bounded-zip";
 import BinaryViewer from "./BinaryViewer";
+// Loads the lazy PDF.js viewer chunk with the file, not inside the first PDF test's budget.
+import "./PdfViewer";
 import { decodeImagePreview } from "./decodeImagePreview";
 import type { BinaryWorkerResult } from "./binaryPreviewProtocol";
 import type { TextPreviewResult } from "./largeTextProtocol";
@@ -2587,10 +2596,7 @@ it("keeps workspace PDF scroll and zoom after reloads", async () => {
   await screen.getByRole("button", { name: "Next page", exact: true }).click();
   await vi.waitFor(() => expect(screen.container.textContent).toContain("2 / 3 pages"));
   await screen.rerender(preview(urls.original, "one", "/repo/another.pdf"));
-  // A new path loads a fresh PDF document, which can outlast the 1 s default on CI.
-  await expect
-    .element(screen.getByText("1 / 3 pages", { exact: true }), { timeout: 10_000 })
-    .toBeVisible();
+  await expect.element(screen.getByText("1 / 3 pages", { exact: true })).toBeVisible();
   await vi.waitFor(() => {
     expect(screen.container.textContent).toContain("Fit width");
     expect(region().scrollTop).toBe(0);

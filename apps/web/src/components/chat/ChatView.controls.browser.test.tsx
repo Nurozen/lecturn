@@ -752,6 +752,9 @@ describe("chat surface background", () => {
     fixture.threadStatus = "synchronizing";
     // Earlier tests opened this thread; a remembered timeline would stand in for the placeholder.
     resetHeldThreadTimeline();
+    // A sync still running 400 ms after mount shows its status line, which replaces the
+    // placeholder; a slow runner can pass that before the first check, so the clock holds still.
+    using _now = vi.spyOn(Date, "now").mockReturnValue(Date.now());
     await using _screen = await mount();
     const pane = () =>
       timelinePlaceholder()?.parentElement?.closest<HTMLElement>("[data-timeline-loading]");
